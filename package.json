@@ -1,7 +1,7 @@
 {
   "name": "@wangxt0223/codex-switcher",
-  "version": "0.4.1",
-  "description": "Profile-based account switcher for Codex CLI and Codex App using isolated CODEX_HOME directories.",
+  "version": "0.6.5",
+  "description": "Env + account switcher for Codex CLI and Codex App with shared env data and per-account auth.",
   "license": "MIT",
   "author": "wangxt",
   "homepage": "https://github.com/wangxt/codex-switcher",
@@ -13,7 +13,8 @@
     "codex",
     "codex-cli",
     "account-switch",
-    "profile",
+    "env",
+    "account",
     "codex-home"
   ],
   "bin": {

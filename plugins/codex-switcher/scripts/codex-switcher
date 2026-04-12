@@ -1,8 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+resolve_script_dir() {
+  local src="${BASH_SOURCE[0]}"
+  local dir
+  while [[ -h "$src" ]]; do
+    dir="$(cd -P "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"
+    [[ "$src" == /* ]] || src="$dir/$src"
+  done
+  cd -P "$(dirname "$src")" && pwd
+}
+
+SCRIPT_DIR="$(resolve_script_dir)"
+
 STATE_DIR="${CODEX_SWITCHER_STATE_DIR:-$HOME/.codex-switcher}"
-PROFILES_DIR="${CODEX_SWITCHER_PROFILES_DIR:-$HOME/.codex-profiles}"
+ENVS_DIR="${CODEX_SWITCHER_ENVS_DIR:-$HOME/.codex-envs}"
+ACCOUNTS_DIR="${CODEX_SWITCHER_ACCOUNTS_DIR:-$STATE_DIR/env-accounts}"
+DEFAULT_HOME="${CODEX_SWITCHER_DEFAULT_HOME:-$HOME/.codex}"
+DEFAULT_ENV_NAME="default"
+DEFAULT_ACCOUNT_NAME="default"
+
 APP_LOG="${CODEX_SWITCHER_APP_LOG:-$STATE_DIR/app.log}"
 SWITCH_LOG="${CODEX_SWITCHER_SWITCH_LOG:-$STATE_DIR/switcher.log}"
 APP_PID_FILE="$STATE_DIR/app.pid"
@@ -10,27 +28,46 @@ LOCK_DIR="$STATE_DIR/.lock"
 LOCK_WAIT_SECONDS="${CODEX_SWITCHER_LOCK_WAIT_SECONDS:-10}"
 
 SCRIPT_NAME="${CODEX_SWITCHER_INVOKED_AS:-$(basename "$0")}"
+USAGE_API_ENDPOINT="https://chatgpt.com/backend-api/wham/usage"
+USAGE_PROXY_FILE="$STATE_DIR/usage_proxy"
+DISABLE_SYSTEM_PROXY_DETECT="${CODEX_SWITCHER_DISABLE_SYSTEM_PROXY_DETECT:-false}"
 
 usage() {
   cat <<'USAGE'
 Usage:
-  codex-sw add <profile>
-  codex-sw remove <profile> [--force]
+  codex-sw env list
+  codex-sw env create <env> [--empty|--from-default|--from-env <src>]
+  codex-sw env use <env> [--target cli|app|both]
+  codex-sw env remove <env> [--force]
+  codex-sw env current [cli|app]
+  codex-sw env path [env]
+
+  codex-sw account list [--env <env>]
+  codex-sw account add <account> [--env <env>]
+  codex-sw account remove <account> [--env <env>] [--force]
+  codex-sw account login <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync]
+  codex-sw account use <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync]
+  codex-sw account logout [account] [--env <env>] [--target cli|app|both]
+  codex-sw account current [cli|app]
+
+  codex-sw proxy [<host:port>|off|test]
+
   codex-sw list
-  codex-sw import-default <profile> [--with-auth] [--force]
-  codex-sw use <profile> [--sync|--no-sync]
-  codex-sw switch <profile> [--sync|--no-sync]
-  codex-sw current [cli|app]
   codex-sw status
-
+  codex-sw current [cli|app]
   codex-sw exec -- <codex args...>
-  codex-sw login [profile] [--sync|--no-sync]
-  codex-sw logout [profile]
-  codex-sw env [profile]
+  codex-sw login [account] [--sync|--no-sync]
+  codex-sw logout [account]
 
-  codex-sw app open [profile] [-- <app args...>]
-  codex-sw app use <profile> [-- <app args...>]
-  codex-sw app logout [profile]
+  codex-sw use <account> [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]
+  codex-sw switch <account> [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]
+  codex-sw add <account>
+  codex-sw remove <account> [--force]
+  codex-sw import-default <env> [--with-auth] [--force]
+
+  codex-sw app open [account] [-- <app args...>]
+  codex-sw app use <account> [-- <app args...>]
+  codex-sw app logout [account]
   codex-sw app status
   codex-sw app stop
   codex-sw app current
@@ -38,28 +75,20 @@ Usage:
   codex-sw init [--shell zsh|bash] [--dry-run]
   codex-sw upgrade [--dry-run]
   codex-sw recover [--dry-run]
+  codex-sw version
   codex-sw check
   codex-sw doctor [--fix]
 
 Compatibility:
   codex-switcher <same-commands>
 
-Sync behavior:
-  --sync     enable overwrite sync (excluding auth.json)
-             - login --sync: ~/.codex -> target profile
-             - use/switch --sync: current CLI profile -> target profile
-  --no-sync  disable sync explicitly (default)
-
-Environment overrides:
-  CODEX_SWITCHER_STATE_DIR
-  CODEX_SWITCHER_PROFILES_DIR
-  CODEX_SWITCHER_APP_BIN
-  CODEX_SWITCHER_APP_LOG
-  CODEX_SWITCHER_SWITCH_LOG
-  CODEX_SWITCHER_LOCK_WAIT_SECONDS
-  CODEX_SWITCHER_DEFAULT_HOME
-  CODEX_SWITCHER_UPGRADE_REGISTRY
-  CODEX_SWITCHER_NPM_PACKAGE
+Notes:
+  - Built-in env "default" always maps to ~/.codex (or CODEX_SWITCHER_DEFAULT_HOME).
+  - Same-env account switch only swaps auth.json and does not sync shared data.
+  - `proxy` only affects usage API calls used by `list`.
+  - If manual proxy is not set, usage API proxy is auto-detected from env/system proxy settings.
+  - `list` prints: ENV / HOME / ACCOUNT / EMAIL / PLAN / 5H USAGE / WEEKLY USAGE / SOURCE.
+  - Usage metrics are API-first and automatically fallback to local sessions; source is shown as (api|local).
 USAGE
 }
 
@@ -74,6 +103,17 @@ warn() {
 
 now_utc() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
+}
+
+switcher_version() {
+  local package_json version
+  package_json="$(cd "$SCRIPT_DIR/../../.." && pwd)/package.json"
+
+  if [[ -f "$package_json" ]]; then
+    version="$(sed -nE 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$package_json" | head -n 1)"
+  fi
+
+  echo "${version:-unknown}"
 }
 
 redact() {
@@ -92,8 +132,9 @@ log_event() {
 }
 
 ensure_dirs() {
-  mkdir -p "$STATE_DIR" "$PROFILES_DIR"
-  chmod 700 "$STATE_DIR" "$PROFILES_DIR" 2>/dev/null || true
+  mkdir -p "$STATE_DIR" "$ENVS_DIR" "$ACCOUNTS_DIR"
+  mkdir -p "$DEFAULT_HOME"
+  chmod 700 "$STATE_DIR" "$ENVS_DIR" "$ACCOUNTS_DIR" "$DEFAULT_HOME" 2>/dev/null || true
 }
 
 perm_of() {
@@ -105,77 +146,223 @@ perm_of() {
   fi
 }
 
-validate_profile_name_noexit() {
+validate_name_noexit() {
   local name="${1:-}"
   [[ -n "$name" ]] || return 1
   [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || return 1
   return 0
 }
 
-validate_profile_name() {
+validate_env_name_noexit() {
   local name="${1:-}"
-  validate_profile_name_noexit "$name" || err "invalid profile '$name' (allowed: A-Z a-z 0-9 . _ -)"
+  [[ "$name" == "$DEFAULT_ENV_NAME" ]] && return 0
+  validate_name_noexit "$name"
 }
 
-default_profile_for() {
-  local target="$1"
-  if [[ "$target" == "cli" ]]; then
-    echo "default"
+validate_env_name() {
+  local name="${1:-}"
+  validate_env_name_noexit "$name" || err "invalid env '$name' (allowed: A-Z a-z 0-9 . _ -, plus reserved: default)"
+}
+
+validate_account_name() {
+  local name="${1:-}"
+  validate_name_noexit "$name" || err "invalid account '$name' (allowed: A-Z a-z 0-9 . _ -)"
+}
+
+env_root_path() {
+  local env="$1"
+  echo "$ENVS_DIR/$env"
+}
+
+env_home_path() {
+  local env="$1"
+  if [[ "$env" == "$DEFAULT_ENV_NAME" ]]; then
+    echo "$DEFAULT_HOME"
   else
-    echo "app-default"
+    echo "$ENVS_DIR/$env/home"
   fi
 }
 
-profile_path() {
-  local name="$1"
-  echo "$PROFILES_DIR/$name"
+account_dir_path() {
+  local env="$1"
+  local account="$2"
+  echo "$ACCOUNTS_DIR/$env/$account"
 }
 
-ensure_profile() {
-  local name="$1"
-  local p
-  p="$(profile_path "$name")"
-  mkdir -p "$p"
-  chmod 700 "$p" 2>/dev/null || true
+account_auth_path() {
+  local env="$1"
+  local account="$2"
+  echo "$(account_dir_path "$env" "$account")/auth.json"
 }
 
-require_profile_exists() {
-  local name="$1"
-  local p
-  p="$(profile_path "$name")"
-  [[ -d "$p" ]] || err "profile '$name' not found. run: $SCRIPT_NAME add $name"
-}
-
-current_file() {
+current_env_file() {
   local target="$1"
-  echo "$STATE_DIR/current_${target}"
+  echo "$STATE_DIR/current_${target}_env"
 }
 
-set_current() {
+current_account_file() {
   local target="$1"
-  local profile="$2"
+  echo "$STATE_DIR/current_${target}_account"
+}
+
+normalize_usage_proxy_value() {
+  local raw="${1:-}"
+  local value
+  value="$(echo "$raw" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  [[ -n "$value" ]] || return 1
+  [[ "$value" != *[[:space:]]* ]] || return 1
+  case "$value" in
+    http://*|https://*|socks5://*)
+      echo "$value"
+      ;;
+    *)
+      echo "http://$value"
+      ;;
+  esac
+}
+
+read_usage_proxy() {
+  local value
+  [[ -f "$USAGE_PROXY_FILE" ]] || return 1
+  value="$(head -n 1 "$USAGE_PROXY_FILE" 2>/dev/null || true)"
+  normalize_usage_proxy_value "$value"
+}
+
+detect_usage_proxy_from_env() {
+  local key raw normalized
+  for key in CODEX_SWITCHER_USAGE_PROXY HTTPS_PROXY https_proxy HTTP_PROXY http_proxy ALL_PROXY all_proxy; do
+    raw="${!key:-}"
+    [[ -n "$raw" ]] || continue
+    normalized="$(normalize_usage_proxy_value "$raw" || true)"
+    [[ -n "$normalized" ]] || continue
+    echo "$normalized"
+    return 0
+  done
+  return 1
+}
+
+detect_usage_proxy_from_system_macos() {
+  [[ "$DISABLE_SYSTEM_PROXY_DETECT" != "true" ]] || return 1
+  [[ "$(uname -s 2>/dev/null || true)" == "Darwin" ]] || return 1
+  command -v scutil >/dev/null 2>&1 || return 1
+
+  local dump host port enabled normalized
+  dump="$(scutil --proxy 2>/dev/null || true)"
+  [[ -n "$dump" ]] || return 1
+
+  host="$(echo "$dump" | sed -nE 's/^[[:space:]]*HTTPSProxy[[:space:]]*:[[:space:]]*(.+)$/\1/p' | head -n 1)"
+  port="$(echo "$dump" | sed -nE 's/^[[:space:]]*HTTPSPort[[:space:]]*:[[:space:]]*([0-9]+)$/\1/p' | head -n 1)"
+  enabled="$(echo "$dump" | sed -nE 's/^[[:space:]]*HTTPSEnable[[:space:]]*:[[:space:]]*([01])$/\1/p' | head -n 1)"
+  if [[ "$enabled" == "1" && -n "$host" && -n "$port" ]]; then
+    normalized="$(normalize_usage_proxy_value "http://$host:$port" || true)"
+    [[ -n "$normalized" ]] && echo "$normalized" && return 0
+  fi
+
+  host="$(echo "$dump" | sed -nE 's/^[[:space:]]*HTTPProxy[[:space:]]*:[[:space:]]*(.+)$/\1/p' | head -n 1)"
+  port="$(echo "$dump" | sed -nE 's/^[[:space:]]*HTTPPort[[:space:]]*:[[:space:]]*([0-9]+)$/\1/p' | head -n 1)"
+  enabled="$(echo "$dump" | sed -nE 's/^[[:space:]]*HTTPEnable[[:space:]]*:[[:space:]]*([01])$/\1/p' | head -n 1)"
+  if [[ "$enabled" == "1" && -n "$host" && -n "$port" ]]; then
+    normalized="$(normalize_usage_proxy_value "http://$host:$port" || true)"
+    [[ -n "$normalized" ]] && echo "$normalized" && return 0
+  fi
+
+  host="$(echo "$dump" | sed -nE 's/^[[:space:]]*SOCKSProxy[[:space:]]*:[[:space:]]*(.+)$/\1/p' | head -n 1)"
+  port="$(echo "$dump" | sed -nE 's/^[[:space:]]*SOCKSPort[[:space:]]*:[[:space:]]*([0-9]+)$/\1/p' | head -n 1)"
+  enabled="$(echo "$dump" | sed -nE 's/^[[:space:]]*SOCKSEnable[[:space:]]*:[[:space:]]*([01])$/\1/p' | head -n 1)"
+  if [[ "$enabled" == "1" && -n "$host" && -n "$port" ]]; then
+    normalized="$(normalize_usage_proxy_value "socks5://$host:$port" || true)"
+    [[ -n "$normalized" ]] && echo "$normalized" && return 0
+  fi
+
+  return 1
+}
+
+resolve_usage_proxy_with_source() {
+  local value
+
+  value="$(read_usage_proxy || true)"
+  if [[ -n "$value" ]]; then
+    printf 'manual\t%s\n' "$value"
+    return 0
+  fi
+
+  value="$(detect_usage_proxy_from_env || true)"
+  if [[ -n "$value" ]]; then
+    printf 'auto-env\t%s\n' "$value"
+    return 0
+  fi
+
+  value="$(detect_usage_proxy_from_system_macos || true)"
+  if [[ -n "$value" ]]; then
+    printf 'auto-system\t%s\n' "$value"
+    return 0
+  fi
+
+  return 1
+}
+
+set_usage_proxy() {
+  local value="$1"
   local file tmp
-  file="$(current_file "$target")"
+  file="$USAGE_PROXY_FILE"
   tmp="${file}.tmp"
-  printf '%s\n' "$profile" > "$tmp"
+  printf '%s\n' "$value" > "$tmp"
   chmod 600 "$tmp" 2>/dev/null || true
   mv "$tmp" "$file"
 }
 
-read_current() {
+clear_usage_proxy() {
+  rm -f -- "$USAGE_PROXY_FILE"
+}
+
+display_path_for_output() {
+  local path="$1"
+  if [[ "$path" == "$HOME" ]]; then
+    echo "~"
+    return
+  fi
+  if [[ "$path" == "$HOME/"* ]]; then
+    echo "~/${path#$HOME/}"
+    return
+  fi
+  echo "$path"
+}
+
+set_current_env() {
   local target="$1"
-  local file value default
-  file="$(current_file "$target")"
-  default="$(default_profile_for "$target")"
+  local env="$2"
+  local file tmp
+  file="$(current_env_file "$target")"
+  tmp="${file}.tmp"
+  printf '%s\n' "$env" > "$tmp"
+  chmod 600 "$tmp" 2>/dev/null || true
+  mv "$tmp" "$file"
+}
+
+set_current_account() {
+  local target="$1"
+  local account="$2"
+  local file tmp
+  file="$(current_account_file "$target")"
+  tmp="${file}.tmp"
+  printf '%s\n' "$account" > "$tmp"
+  chmod 600 "$tmp" 2>/dev/null || true
+  mv "$tmp" "$file"
+}
+
+read_current_env() {
+  local target="$1"
+  local file value
+  file="$(current_env_file "$target")"
 
   if [[ ! -f "$file" ]]; then
-    echo "$default"
+    echo "$DEFAULT_ENV_NAME"
     return 1
   fi
 
   value="$(head -n 1 "$file" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-  if ! validate_profile_name_noexit "$value"; then
-    echo "$default"
+  if ! validate_env_name_noexit "$value"; then
+    echo "$DEFAULT_ENV_NAME"
     return 2
   fi
 
@@ -183,32 +370,170 @@ read_current() {
   return 0
 }
 
-first_profile_name() {
-  local first
-  first="$(find "$PROFILES_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort | head -n 1)"
-  if [[ -n "$first" ]]; then
-    echo "$first"
+read_current_account() {
+  local target="$1"
+  local file value
+  file="$(current_account_file "$target")"
+
+  if [[ ! -f "$file" ]]; then
+    echo "$DEFAULT_ACCOUNT_NAME"
+    return 1
+  fi
+
+  value="$(head -n 1 "$file" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  if ! validate_name_noexit "$value"; then
+    echo "$DEFAULT_ACCOUNT_NAME"
+    return 2
+  fi
+
+  echo "$value"
+  return 0
+}
+
+ensure_env_home() {
+  local env="$1"
+  local home
+  validate_env_name "$env"
+  home="$(env_home_path "$env")"
+  mkdir -p "$home"
+  if [[ "$env" != "$DEFAULT_ENV_NAME" ]]; then
+    mkdir -p "$(env_root_path "$env")"
+  fi
+  chmod 700 "$home" 2>/dev/null || true
+}
+
+env_exists() {
+  local env="$1"
+  if [[ "$env" == "$DEFAULT_ENV_NAME" ]]; then
     return 0
+  fi
+  [[ -d "$(env_home_path "$env")" ]]
+}
+
+require_env_exists() {
+  local env="$1"
+  validate_env_name "$env"
+  if [[ "$env" == "$DEFAULT_ENV_NAME" ]]; then
+    ensure_env_home "$env"
+    return 0
+  fi
+  [[ -d "$(env_home_path "$env")" ]] || err "env '$env' not found. run: $SCRIPT_NAME env create $env"
+}
+
+ensure_account_slot() {
+  local env="$1"
+  local account="$2"
+  validate_env_name "$env"
+  validate_account_name "$account"
+  mkdir -p "$(account_dir_path "$env" "$account")"
+  chmod 700 "$(account_dir_path "$env" "$account")" 2>/dev/null || true
+}
+
+account_has_auth() {
+  local env="$1"
+  local account="$2"
+  local auth_file home_auth
+  auth_file="$(account_auth_path "$env" "$account")"
+  if [[ -f "$auth_file" ]]; then
+    return 0
+  fi
+  if [[ "$account" == "$DEFAULT_ACCOUNT_NAME" ]]; then
+    home_auth="$(env_home_path "$env")/auth.json"
+    [[ -f "$home_auth" ]] && return 0
   fi
   return 1
 }
 
-resolve_app_bin() {
-  if [[ -n "${CODEX_SWITCHER_APP_BIN:-}" ]]; then
-    [[ -x "$CODEX_SWITCHER_APP_BIN" ]] || err "CODEX_SWITCHER_APP_BIN is not executable: $CODEX_SWITCHER_APP_BIN"
-    echo "$CODEX_SWITCHER_APP_BIN"
-    return
+list_env_names() {
+  echo "$DEFAULT_ENV_NAME"
+  if [[ -d "$ENVS_DIR" ]]; then
+    find "$ENVS_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort | while IFS= read -r env; do
+      validate_env_name_noexit "$env" || continue
+      [[ "$env" == "$DEFAULT_ENV_NAME" ]] && continue
+      [[ -d "$(env_home_path "$env")" ]] || continue
+      echo "$env"
+    done
+  fi
+}
+
+list_accounts_for_env() {
+  local env="$1"
+  local dir auth_file any
+  dir="$ACCOUNTS_DIR/$env"
+  any=0
+
+  if [[ -d "$dir" ]]; then
+    while IFS= read -r account; do
+      validate_name_noexit "$account" || continue
+      auth_file="$(account_auth_path "$env" "$account")"
+      if [[ -f "$auth_file" ]]; then
+        any=1
+        echo "$account"
+      fi
+    done < <(find "$dir" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort)
   fi
 
-  if [[ -x "/Applications/Codex.app/Contents/MacOS/Codex" ]]; then
-    echo "/Applications/Codex.app/Contents/MacOS/Codex"
-    return
+  if [[ "$any" -eq 0 ]] && [[ "$env" == "$DEFAULT_ENV_NAME" ]] && [[ -f "$(env_home_path "$env")/auth.json" ]]; then
+    echo "$DEFAULT_ACCOUNT_NAME"
   fi
-  if [[ -x "$HOME/Applications/Codex.app/Contents/MacOS/Codex" ]]; then
-    echo "$HOME/Applications/Codex.app/Contents/MacOS/Codex"
-    return
+}
+
+copy_auth_file() {
+  local src="$1"
+  local dst="$2"
+  local tmp
+  tmp="${dst}.tmp"
+  cp "$src" "$tmp"
+  chmod 600 "$tmp" 2>/dev/null || true
+  mv "$tmp" "$dst"
+}
+
+save_env_auth_to_account() {
+  local env="$1"
+  local account="$2"
+  local home_auth dst
+  home_auth="$(env_home_path "$env")/auth.json"
+  [[ -f "$home_auth" ]] || return 1
+  ensure_account_slot "$env" "$account"
+  dst="$(account_auth_path "$env" "$account")"
+  copy_auth_file "$home_auth" "$dst"
+}
+
+clear_env_auth() {
+  local env="$1"
+  rm -f -- "$(env_home_path "$env")/auth.json"
+}
+
+install_account_auth_to_env() {
+  local env="$1"
+  local account="$2"
+  local src dst
+  src="$(account_auth_path "$env" "$account")"
+  dst="$(env_home_path "$env")/auth.json"
+  if [[ -f "$src" ]]; then
+    copy_auth_file "$src" "$dst"
+    return 0
   fi
-  err "Codex.app binary not found. set CODEX_SWITCHER_APP_BIN manually"
+  if [[ "$account" == "$DEFAULT_ACCOUNT_NAME" ]] && [[ -f "$dst" ]]; then
+    return 0
+  fi
+  rm -f -- "$dst"
+}
+
+sync_overwrite_excluding_auth() {
+  local src="$1"
+  local dst="$2"
+
+  [[ -d "$src" ]] || err "sync source not found: $src"
+  mkdir -p "$dst"
+
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --checksum --delete --exclude 'auth.json' "$src/" "$dst/"
+  else
+    find "$dst" -mindepth 1 -maxdepth 1 ! -name 'auth.json' -exec rm -rf -- {} + 2>/dev/null || true
+    (cd "$src" && tar cf - --exclude ./auth.json .) | (cd "$dst" && tar xpf -)
+  fi
+  chmod 700 "$dst" 2>/dev/null || true
 }
 
 acquire_lock() {
@@ -259,29 +584,83 @@ with_lock() {
   trap - EXIT INT TERM
 }
 
-run_codex_for_profile() {
-  local profile="$1"
+with_targets() {
+  local target="$1"
   shift
-  require_profile_exists "$profile"
-  CODEX_HOME="$(profile_path "$profile")" command codex "$@"
+  local fn="$1"
+  shift
+  case "$target" in
+    cli|app)
+      "$fn" "$target" "$@"
+      ;;
+    both)
+      "$fn" cli "$@"
+      "$fn" app "$@"
+      ;;
+    *)
+      err "invalid target '$target' (use cli|app|both)"
+      ;;
+  esac
 }
 
-login_state_for_profile() {
-  local profile="$1"
-  local p rc
-  p="$(profile_path "$profile")"
-  if [[ ! -d "$p" ]]; then
-    echo "missing-profile"
-    return
+target_home_path() {
+  local target="$1"
+  local env
+  env="$(read_current_env "$target" || true)"
+  env_home_path "$env"
+}
+
+ensure_target_auth_installed() {
+  local target="$1"
+  local env account
+  env="$(read_current_env "$target" || true)"
+  account="$(read_current_account "$target" || true)"
+  ensure_env_home "$env"
+  if account_has_auth "$env" "$account"; then
+    install_account_auth_to_env "$env" "$account"
+  else
+    clear_env_auth "$env"
   fi
+}
+
+run_codex_for_target() {
+  local target="$1"
+  shift
+  ensure_target_auth_installed "$target"
+  CODEX_HOME="$(target_home_path "$target")" command codex "$@"
+}
+
+login_state_for_target() {
+  local target="$1"
+  local rc home
+  ensure_target_auth_installed "$target"
+  home="$(target_home_path "$target")"
 
   rc=0
-  CODEX_HOME="$p" command codex login status >/dev/null 2>&1 || rc=$?
+  CODEX_HOME="$home" command codex login status >/dev/null 2>&1 || rc=$?
   if [[ "$rc" -eq 0 ]]; then
     echo "logged-in"
   else
     echo "not-logged-in"
   fi
+}
+
+resolve_app_bin() {
+  if [[ -n "${CODEX_SWITCHER_APP_BIN:-}" ]]; then
+    [[ -x "$CODEX_SWITCHER_APP_BIN" ]] || err "CODEX_SWITCHER_APP_BIN is not executable: $CODEX_SWITCHER_APP_BIN"
+    echo "$CODEX_SWITCHER_APP_BIN"
+    return
+  fi
+
+  if [[ -x "/Applications/Codex.app/Contents/MacOS/Codex" ]]; then
+    echo "/Applications/Codex.app/Contents/MacOS/Codex"
+    return
+  fi
+  if [[ -x "$HOME/Applications/Codex.app/Contents/MacOS/Codex" ]]; then
+    echo "$HOME/Applications/Codex.app/Contents/MacOS/Codex"
+    return
+  fi
+  err "Codex.app binary not found. set CODEX_SWITCHER_APP_BIN manually"
 }
 
 kill_tree() {
@@ -330,211 +709,616 @@ app_stop_managed() {
   echo "Stopped managed app process"
 }
 
-prompt_confirm_remove() {
-  local profile="$1"
-  if [[ ! -t 0 ]]; then
-    err "non-interactive terminal; rerun with --force"
+metrics_script_path() {
+  echo "$SCRIPT_DIR/profile-metrics.py"
+}
+
+collect_profile_metrics_tsv() {
+  local account="$1"
+  local auth_file="$2"
+  local data_path="$3"
+  local usage_proxy="${4:-}"
+  local script_path
+  script_path="$(metrics_script_path)"
+  [[ -f "$script_path" ]] || return 1
+  if [[ -n "$usage_proxy" ]]; then
+    python3 "$script_path" --account-name "$account" --auth-file "$auth_file" --data-path "$data_path" --usage-proxy "$usage_proxy" 2>/dev/null
+  else
+    python3 "$script_path" --account-name "$account" --auth-file "$auth_file" --data-path "$data_path" 2>/dev/null
   fi
-  local answer
-  printf "Remove profile '%s'? This deletes %s [y/N]: " "$profile" "$(profile_path "$profile")" >&2
-  read -r answer
-  case "$answer" in
-    y|Y|yes|YES)
-      return 0
+}
+
+cmd_env_list() {
+  local cli_env app_env env marks
+  cli_env="$(read_current_env cli || true)"
+  app_env="$(read_current_env app || true)"
+  list_env_names | sort -u | while IFS= read -r env; do
+    marks=""
+    [[ "$env" == "$cli_env" ]] && marks="${marks} [cli-current]"
+    [[ "$env" == "$app_env" ]] && marks="${marks} [app-current]"
+    echo "- $env$marks"
+  done
+}
+
+cmd_env_create() {
+  local env="$1"
+  local mode="$2"
+  local src_env="${3:-}"
+  local home src
+
+  validate_env_name "$env"
+  [[ "$env" != "$DEFAULT_ENV_NAME" ]] || err "cannot create reserved env '$DEFAULT_ENV_NAME'"
+  if env_exists "$env"; then
+    err "env '$env' already exists"
+  fi
+
+  home="$(env_home_path "$env")"
+  mkdir -p "$home"
+  chmod 700 "$home" 2>/dev/null || true
+
+  case "$mode" in
+    empty)
+      :
+      ;;
+    from-default)
+      sync_overwrite_excluding_auth "$DEFAULT_HOME" "$home"
+      ;;
+    from-env)
+      validate_env_name "$src_env"
+      require_env_exists "$src_env"
+      src="$(env_home_path "$src_env")"
+      sync_overwrite_excluding_auth "$src" "$home"
       ;;
     *)
-      echo "Cancelled"
+      err "unknown env create mode: $mode"
+      ;;
+  esac
+
+  log_event INFO "env_create env=$env mode=$mode src=$src_env"
+  echo "Created env: $env"
+}
+
+_cmd_env_use_target() {
+  local target="$1"
+  local env="$2"
+  local account
+
+  account="$(read_current_account "$target" || true)"
+  set_current_env "$target" "$env"
+  if account_has_auth "$env" "$account"; then
+    set_current_account "$target" "$account"
+    install_account_auth_to_env "$env" "$account"
+  else
+    set_current_account "$target" "$DEFAULT_ACCOUNT_NAME"
+    if account_has_auth "$env" "$DEFAULT_ACCOUNT_NAME"; then
+      install_account_auth_to_env "$env" "$DEFAULT_ACCOUNT_NAME"
+    else
+      clear_env_auth "$env"
+    fi
+  fi
+}
+
+cmd_env_use() {
+  local env="$1"
+  local target="$2"
+
+  require_env_exists "$env"
+  with_targets "$target" _cmd_env_use_target "$env"
+  log_event INFO "env_use env=$env target=$target"
+  echo "Switched $target env to: $env"
+}
+
+cmd_env_remove() {
+  local env="$1"
+  local force="$2"
+  local cli_env app_env
+
+  validate_env_name "$env"
+  [[ "$env" != "$DEFAULT_ENV_NAME" ]] || err "cannot remove reserved env '$DEFAULT_ENV_NAME'"
+  env_exists "$env" || err "env '$env' not found"
+
+  cli_env="$(read_current_env cli || true)"
+  app_env="$(read_current_env app || true)"
+
+  if [[ "$env" == "$cli_env" && "$force" != "true" ]]; then
+    err "env '$env' is current CLI env; use --force to remove"
+  fi
+  if [[ "$env" == "$app_env" && "$force" != "true" ]]; then
+    err "env '$env' is current App env; use --force to remove"
+  fi
+
+  if [[ "$env" == "$app_env" ]]; then
+    app_stop_managed >/dev/null
+    set_current_env app "$DEFAULT_ENV_NAME"
+    set_current_account app "$DEFAULT_ACCOUNT_NAME"
+    ensure_target_auth_installed app
+  fi
+  if [[ "$env" == "$cli_env" ]]; then
+    set_current_env cli "$DEFAULT_ENV_NAME"
+    set_current_account cli "$DEFAULT_ACCOUNT_NAME"
+    ensure_target_auth_installed cli
+  fi
+
+  rm -rf -- "$(env_root_path "$env")" "$ACCOUNTS_DIR/$env"
+  log_event INFO "env_remove env=$env force=$force"
+  echo "Removed env: $env"
+}
+
+cmd_env_current() {
+  local target="${1:-all}"
+  case "$target" in
+    cli)
+      read_current_env cli || true
+      ;;
+    app)
+      read_current_env app || true
+      ;;
+    all)
+      echo "cli: $(read_current_env cli || true)"
+      echo "app: $(read_current_env app || true)"
+      ;;
+    *)
+      err "invalid target '$target' (use cli|app)"
+      ;;
+  esac
+}
+
+cmd_env_path() {
+  local env="${1:-$(read_current_env cli || true)}"
+  validate_env_name "$env"
+  require_env_exists "$env"
+  echo "export CODEX_HOME='$(env_home_path "$env")'"
+}
+
+cmd_account_add() {
+  local account="$1"
+  local env="$2"
+  validate_account_name "$account"
+  require_env_exists "$env"
+  ensure_account_slot "$env" "$account"
+  log_event INFO "account_add env=$env account=$account"
+  echo "Added account slot: $env/$account"
+}
+
+cmd_account_remove() {
+  local account="$1"
+  local env="$2"
+  local force="$3"
+  local cli_env app_env cli_account app_account
+
+  validate_account_name "$account"
+  validate_env_name "$env"
+
+  if [[ ! -d "$(account_dir_path "$env" "$account")" ]] && ! account_has_auth "$env" "$account"; then
+    err "account '$account' not found in env '$env'"
+  fi
+
+  cli_env="$(read_current_env cli || true)"
+  app_env="$(read_current_env app || true)"
+  cli_account="$(read_current_account cli || true)"
+  app_account="$(read_current_account app || true)"
+
+  if [[ "$env" == "$cli_env" && "$account" == "$cli_account" && "$force" != "true" ]]; then
+    err "account '$account' is current CLI account in env '$env'; use --force to remove"
+  fi
+  if [[ "$env" == "$app_env" && "$account" == "$app_account" && "$force" != "true" ]]; then
+    err "account '$account' is current App account in env '$env'; use --force to remove"
+  fi
+
+  rm -rf -- "$(account_dir_path "$env" "$account")"
+  if [[ "$account" == "$DEFAULT_ACCOUNT_NAME" ]]; then
+    rm -f -- "$(env_home_path "$env")/auth.json"
+  fi
+
+  if [[ "$env" == "$cli_env" && "$account" == "$cli_account" ]]; then
+    set_current_account cli "$DEFAULT_ACCOUNT_NAME"
+    ensure_target_auth_installed cli
+  fi
+  if [[ "$env" == "$app_env" && "$account" == "$app_account" ]]; then
+    set_current_account app "$DEFAULT_ACCOUNT_NAME"
+    ensure_target_auth_installed app
+  fi
+
+  log_event INFO "account_remove env=$env account=$account force=$force"
+  echo "Removed account slot: $env/$account"
+}
+
+cmd_account_list() {
+  local env="$1"
+  local cli_env app_env cli_account app_account found account marks
+  require_env_exists "$env"
+
+  cli_env="$(read_current_env cli || true)"
+  app_env="$(read_current_env app || true)"
+  cli_account="$(read_current_account cli || true)"
+  app_account="$(read_current_account app || true)"
+  found=0
+
+  while IFS= read -r account; do
+    found=1
+    marks=""
+    [[ "$env" == "$cli_env" && "$account" == "$cli_account" ]] && marks="${marks} [cli-current]"
+    [[ "$env" == "$app_env" && "$account" == "$app_account" ]] && marks="${marks} [app-current]"
+    echo "- $account$marks"
+  done < <(list_accounts_for_env "$env")
+
+  if [[ "$found" -eq 0 ]]; then
+    echo "No accounts in env '$env'. Use: $SCRIPT_NAME account login <account> --env $env"
+  fi
+}
+
+_cmd_account_set_target() {
+  local target="$1"
+  local env="$2"
+  local account="$3"
+  set_current_env "$target" "$env"
+  set_current_account "$target" "$account"
+  install_account_auth_to_env "$env" "$account"
+}
+
+cmd_account_login() {
+  local account="$1"
+  local env="$2"
+  local target="$3"
+  local sync_mode="$4"
+  local home
+
+  validate_account_name "$account"
+  require_env_exists "$env"
+  ensure_env_home "$env"
+  home="$(env_home_path "$env")"
+
+  if [[ "$sync_mode" == "true" && "$env" != "$DEFAULT_ENV_NAME" ]]; then
+    sync_overwrite_excluding_auth "$DEFAULT_HOME" "$home"
+  fi
+
+  CODEX_HOME="$home" command codex login
+  save_env_auth_to_account "$env" "$account" || err "login did not produce auth.json in $home"
+
+  with_targets "$target" _cmd_account_set_target "$env" "$account"
+
+  log_event INFO "account_login env=$env account=$account target=$target sync=$sync_mode"
+  echo "Logged in account: $env/$account"
+}
+
+cmd_account_use() {
+  local account="$1"
+  local env="$2"
+  local target="$3"
+  local sync_mode="$4"
+
+  validate_account_name "$account"
+  require_env_exists "$env"
+  account_has_auth "$env" "$account" || err "account '$account' in env '$env' has no auth.json. run: $SCRIPT_NAME account login $account --env $env"
+
+  if [[ "$sync_mode" == "true" ]]; then
+    warn "same-env account switch only replaces auth.json; --sync is ignored"
+  fi
+
+  with_targets "$target" _cmd_account_set_target "$env" "$account"
+  log_event INFO "account_use env=$env account=$account target=$target"
+  echo "Switched $target account to: $env/$account"
+}
+
+cmd_account_logout() {
+  local account="$1"
+  local env="$2"
+  local target="$3"
+  local cli_env app_env cli_account app_account
+
+  validate_env_name "$env"
+  if [[ -z "$account" ]]; then
+    if [[ "$target" == "both" ]]; then
+      account="$(read_current_account cli || true)"
+    else
+      account="$(read_current_account "$target" || true)"
+    fi
+  fi
+  validate_account_name "$account"
+  require_env_exists "$env"
+
+  rm -f -- "$(account_auth_path "$env" "$account")"
+
+  cli_env="$(read_current_env cli || true)"
+  app_env="$(read_current_env app || true)"
+  cli_account="$(read_current_account cli || true)"
+  app_account="$(read_current_account app || true)"
+
+  if [[ "$env" == "$cli_env" && "$account" == "$cli_account" ]]; then
+    set_current_account cli "$DEFAULT_ACCOUNT_NAME"
+    ensure_target_auth_installed cli
+  fi
+  if [[ "$env" == "$app_env" && "$account" == "$app_account" ]]; then
+    set_current_account app "$DEFAULT_ACCOUNT_NAME"
+    ensure_target_auth_installed app
+  fi
+
+  if [[ "$account" == "$DEFAULT_ACCOUNT_NAME" ]]; then
+    rm -f -- "$(env_home_path "$env")/auth.json"
+  fi
+
+  log_event INFO "account_logout env=$env account=$account target=$target"
+  echo "Logged out account: $env/$account"
+}
+
+cmd_account_current() {
+  local target="${1:-all}"
+  case "$target" in
+    cli)
+      echo "$(read_current_env cli || true)/$(read_current_account cli || true)"
+      ;;
+    app)
+      echo "$(read_current_env app || true)/$(read_current_account app || true)"
+      ;;
+    all)
+      echo "cli: $(read_current_env cli || true)/$(read_current_account cli || true)"
+      echo "app: $(read_current_env app || true)/$(read_current_account app || true)"
+      ;;
+    *)
+      err "invalid target '$target' (use cli|app)"
+      ;;
+  esac
+}
+
+cmd_proxy_show() {
+  local info source value
+  info="$(resolve_usage_proxy_with_source || true)"
+  if [[ -z "$info" ]]; then
+    echo "usage_api_proxy: off"
+    return 0
+  fi
+  IFS=$'\t' read -r source value <<< "$info"
+  case "$source" in
+    manual)
+      echo "usage_api_proxy: $value (manual)"
+      ;;
+    auto-env)
+      echo "usage_api_proxy: $value (auto:env)"
+      ;;
+    auto-system)
+      echo "usage_api_proxy: $value (auto:system)"
+      ;;
+    *)
+      echo "usage_api_proxy: $value"
+      ;;
+  esac
+}
+
+cmd_proxy_set() {
+  local raw="$1"
+  local normalized
+  normalized="$(normalize_usage_proxy_value "$raw")" || err "invalid proxy '$raw' (expected host:port or scheme://host:port)"
+  set_usage_proxy "$normalized"
+  log_event INFO "usage_proxy_set value=$normalized"
+  echo "Set usage API proxy: $normalized"
+}
+
+cmd_proxy_off() {
+  clear_usage_proxy
+  log_event INFO "usage_proxy_off"
+  echo "Manual usage API proxy disabled"
+}
+
+cmd_proxy_test() {
+  local proxy env_name account auth_file token body_file http_code body_preview info source
+  info="$(resolve_usage_proxy_with_source || true)"
+  [[ -n "$info" ]] || err "usage API proxy is off and no auto proxy detected. run: $SCRIPT_NAME proxy <host:port>"
+  IFS=$'\t' read -r source proxy <<< "$info"
+
+  env_name="$(read_current_env cli || true)"
+  account="$(read_current_account cli || true)"
+  auth_file="$(account_auth_path "$env_name" "$account")"
+  [[ -f "$auth_file" ]] || auth_file="$(env_home_path "$env_name")/auth.json"
+  [[ -f "$auth_file" ]] || err "auth.json not found for current CLI env/account: $env_name/$account"
+
+  token="$(python3 - "$auth_file" <<'PY'
+import json, sys
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    token = ((data.get("tokens") or {}).get("access_token") or "").strip()
+    print(token)
+except Exception:
+    print("")
+PY
+)"
+  [[ -n "$token" ]] || err "access_token missing in $auth_file"
+
+  body_file="$(mktemp /tmp/codex-sw-proxy-test.XXXXXX)"
+  http_code="$(HTTPS_PROXY="$proxy" HTTP_PROXY="$proxy" curl -sS -o "$body_file" -w '%{http_code}' \
+    -H "Authorization: Bearer $token" \
+    -H "Accept: application/json" \
+    -H "User-Agent: Mozilla/5.0" \
+    "$USAGE_API_ENDPOINT" || true)"
+  body_preview="$(head -c 160 "$body_file" 2>/dev/null || true)"
+  rm -f -- "$body_file"
+
+  if [[ "$http_code" == "200" ]]; then
+    echo "usage_api_proxy_test: ok (http=200, source=$source, proxy=$proxy, env/account=$env_name/$account)"
+    return 0
+  fi
+
+  echo "usage_api_proxy_test: failed (http=${http_code:-000}, source=$source, proxy=$proxy, env/account=$env_name/$account)" >&2
+  [[ -n "$body_preview" ]] && echo "response_preview: $body_preview" >&2
+  return 1
+}
+
+cmd_list() {
+  local cli_env app_env cli_account app_account
+  local env account marks auth_file home home_display metrics
+  local email plan usage_5h usage_weekly source
+  local _last_activity=""
+  local usage_proxy="" usage_info=""
+
+  cli_env="$(read_current_env cli || true)"
+  app_env="$(read_current_env app || true)"
+  cli_account="$(read_current_account cli || true)"
+  app_account="$(read_current_account app || true)"
+  usage_info="$(resolve_usage_proxy_with_source || true)"
+  if [[ -n "$usage_info" ]]; then
+    IFS=$'\t' read -r _ usage_proxy <<< "$usage_info"
+  fi
+
+  printf '%-12s %-28s %-30s %-38s %-10s %-20s %-20s %s\n' "ENV" "HOME" "ACCOUNT" "EMAIL" "PLAN" "5H USAGE" "WEEKLY USAGE" "SOURCE"
+  while IFS= read -r env; do
+    home="$(env_home_path "$env")"
+    home_display="$(display_path_for_output "$home")"
+    ensure_env_home "$env"
+    local found=0
+    while IFS= read -r account; do
+      found=1
+      email=""
+      plan=""
+      usage_5h=""
+      usage_weekly=""
+      source=""
+      marks=""
+      [[ "$env" == "$cli_env" && "$account" == "$cli_account" ]] && marks="${marks} [cli-current]"
+      [[ "$env" == "$app_env" && "$account" == "$app_account" ]] && marks="${marks} [app-current]"
+      auth_file="$(account_auth_path "$env" "$account")"
+      [[ -f "$auth_file" ]] || auth_file="$home/auth.json"
+
+      metrics="$(collect_profile_metrics_tsv "$account" "$auth_file" "$home" "$usage_proxy" || true)"
+      if [[ -n "$metrics" ]]; then
+        IFS=$'\t' read -r email plan usage_5h usage_weekly _last_activity source <<< "$metrics"
+      fi
+      email="${email:-($account)-}"
+      plan="${plan:-unknown}"
+      usage_5h="${usage_5h:--}"
+      usage_weekly="${usage_weekly:--}"
+      source="${source:-local}"
+      [[ "$source" == "api" || "$source" == "local" ]] || source="local"
+
+      printf '%-12s %-28s %-30s %-38s %-10s %-20s %-20s %s\n' "$env" "$home_display" "$account$marks" "$email" "$plan" "$usage_5h" "$usage_weekly" "$source"
+    done < <(list_accounts_for_env "$env")
+
+    if [[ "$found" -eq 0 ]]; then
+      email=""
+      plan=""
+      usage_5h=""
+      usage_weekly=""
+      source=""
+      metrics="$(collect_profile_metrics_tsv "-" "$home/auth.json" "$home" "$usage_proxy" || true)"
+      if [[ -n "$metrics" ]]; then
+        IFS=$'\t' read -r email plan usage_5h usage_weekly _last_activity source <<< "$metrics"
+      fi
+      email="${email:--}"
+      plan="${plan:-unknown}"
+      usage_5h="${usage_5h:--}"
+      usage_weekly="${usage_weekly:--}"
+      source="${source:-local}"
+      [[ "$source" == "api" || "$source" == "local" ]] || source="local"
+      printf '%-12s %-28s %-30s %-38s %-10s %-20s %-20s %s\n' "$env" "$home_display" "-" "$email" "$plan" "$usage_5h" "$usage_weekly" "$source"
+    fi
+  done < <(list_env_names | sort -u)
+}
+
+cmd_add() {
+  local account="$1"
+  local env
+  env="$(read_current_env cli || true)"
+  cmd_account_add "$account" "$env"
+}
+
+cmd_remove() {
+  local account="$1"
+  local force="$2"
+  local env
+  env="$(read_current_env cli || true)"
+  cmd_account_remove "$account" "$env" "$force"
+}
+
+cmd_import_default() {
+  local env="$1"
+  local with_auth="$2"
+  local force="$3"
+
+  validate_env_name "$env"
+  [[ "$env" != "$DEFAULT_ENV_NAME" ]] || err "cannot import into reserved env '$DEFAULT_ENV_NAME'"
+
+  if env_exists "$env"; then
+    if [[ "$force" != "true" ]]; then
+      err "env '$env' already exists. use --force to overwrite"
+    fi
+    rm -rf -- "$(env_root_path "$env")" "$ACCOUNTS_DIR/$env"
+  fi
+
+  cmd_env_create "$env" "from-default" ""
+  if [[ "$with_auth" == "true" && -f "$DEFAULT_HOME/auth.json" ]]; then
+    ensure_account_slot "$env" "$DEFAULT_ACCOUNT_NAME"
+    copy_auth_file "$DEFAULT_HOME/auth.json" "$(account_auth_path "$env" "$DEFAULT_ACCOUNT_NAME")"
+  fi
+
+  log_event INFO "import_default_as_env env=$env with_auth=$with_auth force=$force"
+  echo "Imported default data to env: $env"
+}
+
+cmd_use_compat() {
+  local account="$1"
+  local sync_mode="${2:-false}"
+  local env
+  env="$(read_current_env cli || true)"
+  cmd_account_use "$account" "$env" "cli" "$sync_mode"
+}
+
+cmd_switch_compat() {
+  cmd_use_compat "$1" "${2:-false}"
+}
+
+should_launch_codex() {
+  local mode="$1"
+  case "$mode" in
+    true)
+      return 0
+      ;;
+    false)
+      return 1
+      ;;
+    auto)
+      [[ -t 0 && -t 1 ]]
+      ;;
+    *)
       return 1
       ;;
   esac
 }
 
-cmd_add() {
-  local profile="$1"
-  validate_profile_name "$profile"
-  ensure_profile "$profile"
-  log_event INFO "profile_add profile=$profile"
-  echo "Added profile: $profile"
-}
+cmd_use_and_maybe_launch() {
+  local mode_cmd="$1"
+  local account="$2"
+  local sync_mode="${3:-false}"
+  local launch_mode="${4:-auto}"
+  shift 4 || true
 
-cmd_remove() {
-  local profile="$1"
-  local force="${2:-false}"
-  local cli_cur app_cur
+  with_lock "$mode_cmd" "$account" "$sync_mode"
 
-  validate_profile_name "$profile"
-  require_profile_exists "$profile"
-
-  cli_cur="$(read_current cli || true)"
-  app_cur="$(read_current app || true)"
-
-  if [[ "$profile" == "$cli_cur" && "$force" != "true" ]]; then
-    err "profile '$profile' is current CLI profile; use --force to remove"
-  fi
-  if [[ "$profile" == "$app_cur" && "$force" != "true" ]]; then
-    err "profile '$profile' is current App profile; use --force to remove"
+  echo "Switched CLI account to: $(read_current_env cli || true)/$(read_current_account cli || true)"
+  if should_launch_codex "$launch_mode"; then
+    echo "Launching codex with env/account: $(read_current_env cli || true)/$(read_current_account cli || true)"
+    run_codex_for_target cli "$@"
+    return
   fi
 
-  if [[ "$force" != "true" ]]; then
-    prompt_confirm_remove "$profile" || return 0
+  if [[ "$launch_mode" == "auto" ]]; then
+    echo "Auto launch skipped (non-interactive shell). Use --launch to force start."
   fi
-
-  if [[ "$profile" == "$app_cur" ]]; then
-    app_stop_managed >/dev/null
-    set_current app "$(default_profile_for app)"
-  fi
-  if [[ "$profile" == "$cli_cur" ]]; then
-    set_current cli "$(default_profile_for cli)"
-  fi
-
-  rm -rf -- "$(profile_path "$profile")"
-  log_event INFO "profile_remove profile=$profile force=$force"
-  echo "Removed profile: $profile"
-}
-
-cmd_list() {
-  local cli_cur app_cur
-  cli_cur="$(read_current cli || true)"
-  app_cur="$(read_current app || true)"
-
-  if ! find "$PROFILES_DIR" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
-    echo "No profiles yet. Use: $SCRIPT_NAME add <profile>"
-    return 0
-  fi
-
-  find "$PROFILES_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort | while IFS= read -r name; do
-    local marks
-    marks=""
-    [[ "$name" == "$cli_cur" ]] && marks="${marks} [cli-current]"
-    [[ "$name" == "$app_cur" ]] && marks="${marks} [app-current]"
-    echo "- $name$marks"
-  done
-}
-
-cmd_import_default() {
-  local profile="$1"
-  local with_auth="$2"
-  local force="$3"
-  local src dst
-
-  src="${CODEX_SWITCHER_DEFAULT_HOME:-$HOME/.codex}"
-  validate_profile_name "$profile"
-  [[ -d "$src" ]] || err "default codex home not found: $src"
-  ensure_profile "$profile"
-  dst="$(profile_path "$profile")"
-
-  if [[ "$force" == "true" ]]; then
-    find "$dst" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
-  else
-    if find "$dst" -mindepth 1 -maxdepth 1 | grep -q .; then
-      err "profile '$profile' is not empty. use --force to overwrite"
-    fi
-  fi
-
-  if command -v rsync >/dev/null 2>&1; then
-    if [[ "$with_auth" == "true" ]]; then
-      rsync -a "$src/" "$dst/"
-    else
-      rsync -a --exclude 'auth.json' "$src/" "$dst/"
-    fi
-  else
-    if [[ "$with_auth" == "true" ]]; then
-      (cd "$src" && tar cf - .) | (cd "$dst" && tar xpf -)
-    else
-      (cd "$src" && tar cf - --exclude ./auth.json .) | (cd "$dst" && tar xpf -)
-    fi
-  fi
-
-  chmod 700 "$dst" 2>/dev/null || true
-  log_event INFO "import_default profile=$profile src=$src with_auth=$with_auth force=$force"
-  echo "Imported default data to profile: $profile"
-  if [[ "$with_auth" != "true" ]]; then
-    echo "Auth not imported. Run: $SCRIPT_NAME login $profile"
-  fi
-}
-
-sync_overwrite_excluding_auth() {
-  local src="$1"
-  local dst="$2"
-
-  [[ -d "$src" ]] || err "sync source not found: $src"
-  mkdir -p "$dst"
-
-  if command -v rsync >/dev/null 2>&1; then
-    rsync -a --checksum --delete --exclude 'auth.json' "$src/" "$dst/"
-  else
-    find "$dst" -mindepth 1 -maxdepth 1 ! -name 'auth.json' -exec rm -rf -- {} + 2>/dev/null || true
-    (cd "$src" && tar cf - --exclude ./auth.json .) | (cd "$dst" && tar xpf -)
-  fi
-  chmod 700 "$dst" 2>/dev/null || true
-}
-
-sync_default_to_profile() {
-  local profile="$1"
-  local src dst
-  src="${CODEX_SWITCHER_DEFAULT_HOME:-$HOME/.codex}"
-  dst="$(profile_path "$profile")"
-  [[ -d "$src" ]] || err "default codex home not found: $src"
-  ensure_profile "$profile"
-  sync_overwrite_excluding_auth "$src" "$dst"
-  log_event INFO "sync_default profile=$profile src=$src"
-  echo "Synced default data to profile: $profile (auth.json excluded)"
-}
-
-sync_profile_to_profile() {
-  local from_profile="$1"
-  local to_profile="$2"
-  local src dst
-
-  if [[ "$from_profile" == "$to_profile" ]]; then
-    return 0
-  fi
-
-  src="$(profile_path "$from_profile")"
-  dst="$(profile_path "$to_profile")"
-  require_profile_exists "$from_profile"
-  ensure_profile "$to_profile"
-  sync_overwrite_excluding_auth "$src" "$dst"
-  log_event INFO "sync_profile from=$from_profile to=$to_profile"
-  echo "Synced profile data: $from_profile -> $to_profile (auth.json excluded)"
-}
-
-cmd_use() {
-  local profile="$1"
-  local sync_mode="${2:-false}"
-  local from_profile
-  validate_profile_name "$profile"
-
-  if [[ "$sync_mode" == "true" ]]; then
-    from_profile="$(read_current cli || true)"
-    validate_profile_name "$from_profile"
-    sync_profile_to_profile "$from_profile" "$profile"
-  fi
-
-  ensure_profile "$profile"
-  set_current cli "$profile"
-  log_event INFO "cli_use profile=$profile sync=$sync_mode"
-  echo "Switched CLI profile to: $profile"
   echo "Run in current shell if needed:"
-  echo "  export CODEX_HOME='$(profile_path "$profile")'"
-}
-
-cmd_switch() {
-  cmd_use "$1" "${2:-false}"
+  echo "  export CODEX_HOME='$(target_home_path cli)'"
 }
 
 cmd_current() {
   local target="${1:-all}"
   case "$target" in
     cli)
-      read_current cli || true
+      echo "$(read_current_env cli || true)/$(read_current_account cli || true)"
       ;;
     app)
-      read_current app || true
+      echo "$(read_current_env app || true)/$(read_current_account app || true)"
       ;;
     all)
-      echo "cli: $(read_current cli || true)"
-      echo "app: $(read_current app || true)"
+      echo "cli: $(read_current_env cli || true)/$(read_current_account cli || true)"
+      echo "app: $(read_current_env app || true)/$(read_current_account app || true)"
       ;;
     *)
       err "invalid target '$target' (use cli|app)"
@@ -543,30 +1327,30 @@ cmd_current() {
 }
 
 cmd_status() {
-  local cli_profile app_profile
-  local cli_ptr_state app_ptr_state
-  local cli_state app_state
-  local exit_code
+  local cli_env app_env cli_account app_account
+  local cli_ptr_state app_ptr_state cli_acc_state app_acc_state
+  local cli_state app_state exit_code
 
-  cli_profile="$(read_current cli)" || cli_ptr_state=$?
-  app_profile="$(read_current app)" || app_ptr_state=$?
+  cli_env="$(read_current_env cli)" || cli_ptr_state=$?
+  app_env="$(read_current_env app)" || app_ptr_state=$?
+  cli_account="$(read_current_account cli)" || cli_acc_state=$?
+  app_account="$(read_current_account app)" || app_acc_state=$?
   cli_ptr_state="${cli_ptr_state:-0}"
   app_ptr_state="${app_ptr_state:-0}"
+  cli_acc_state="${cli_acc_state:-0}"
+  app_acc_state="${app_acc_state:-0}"
 
-  cli_state="$(login_state_for_profile "$cli_profile")"
-  app_state="$(login_state_for_profile "$app_profile")"
+  cli_state="$(login_state_for_target cli)"
+  app_state="$(login_state_for_target app)"
 
-  echo "cli_current: $cli_profile"
-  echo "app_current: $app_profile"
-  echo "cli($cli_profile): $cli_state"
-  echo "app($app_profile): $app_state"
+  echo "cli_current: $cli_env/$cli_account"
+  echo "app_current: $app_env/$app_account"
+  echo "cli($cli_env/$cli_account): $cli_state"
+  echo "app($app_env/$app_account): $app_state"
 
   exit_code=0
-  if [[ "$cli_ptr_state" -eq 2 || "$app_ptr_state" -eq 2 ]]; then
+  if [[ "$cli_ptr_state" -eq 2 || "$app_ptr_state" -eq 2 || "$cli_acc_state" -eq 2 || "$app_acc_state" -eq 2 ]]; then
     echo "hint: pointer file corrupted, run: $SCRIPT_NAME recover" >&2
-    exit_code=2
-  elif [[ "$cli_state" == "missing-profile" || "$app_state" == "missing-profile" ]]; then
-    echo "hint: missing profile directory, run: $SCRIPT_NAME recover" >&2
     exit_code=2
   elif [[ "$cli_state" != "logged-in" || "$app_state" != "logged-in" ]]; then
     exit_code=1
@@ -581,85 +1365,76 @@ cmd_exec() {
     shift
   fi
   [[ "$#" -gt 0 ]] || err "missing codex args after --"
-
-  local profile
-  profile="$(read_current cli || true)"
-  ensure_profile "$profile"
-  CODEX_HOME="$(profile_path "$profile")" command codex "$@"
+  run_codex_for_target cli "$@"
 }
 
 cmd_login() {
-  local profile="${1:-$(read_current cli || true)}"
+  local account="${1:-$(read_current_account cli || true)}"
   local sync_mode="${2:-false}"
-  validate_profile_name "$profile"
-  ensure_profile "$profile"
-  if [[ "$sync_mode" == "true" ]]; then
-    sync_default_to_profile "$profile"
-  fi
-  log_event INFO "cli_login profile=$profile sync=$sync_mode"
-  run_codex_for_profile "$profile" login
+  local env
+  env="$(read_current_env cli || true)"
+  cmd_account_login "$account" "$env" "cli" "$sync_mode"
 }
 
 cmd_logout() {
-  local profile="${1:-$(read_current cli || true)}"
-  validate_profile_name "$profile"
-  ensure_profile "$profile"
-  log_event INFO "cli_logout profile=$profile"
-  run_codex_for_profile "$profile" logout
-}
-
-cmd_env() {
-  local profile="${1:-$(read_current cli || true)}"
-  validate_profile_name "$profile"
-  ensure_profile "$profile"
-  echo "export CODEX_HOME='$(profile_path "$profile")'"
+  local account="${1:-}"
+  local env
+  env="$(read_current_env cli || true)"
+  cmd_account_logout "$account" "$env" "cli"
 }
 
 cmd_app_open() {
-  local profile="$1"
-  shift
-  local app_bin pid login_state
+  local account="${1:-}"
+  shift || true
+  local env app_bin pid login_state use_account
 
-  validate_profile_name "$profile"
-  require_profile_exists "$profile"
-  login_state="$(login_state_for_profile "$profile")"
+  env="$(read_current_env app || true)"
+  use_account="${account:-$(read_current_account app || true)}"
+  validate_account_name "$use_account"
+  require_env_exists "$env"
+  account_has_auth "$env" "$use_account" || err "account '$use_account' not logged in under env '$env'. run: $SCRIPT_NAME account login $use_account --env $env --target app"
+
+  set_current_env app "$env"
+  set_current_account app "$use_account"
+  ensure_target_auth_installed app
+
+  login_state="$(login_state_for_target app)"
   if [[ "$login_state" != "logged-in" ]]; then
-    err "profile '$profile' is not logged in. run: $SCRIPT_NAME login $profile"
+    err "account '$use_account' in env '$env' is not logged in"
   fi
   app_bin="$(resolve_app_bin)"
 
   app_stop_managed >/dev/null
 
   mkdir -p "$(dirname "$APP_LOG")"
-  nohup env CODEX_HOME="$(profile_path "$profile")" CODEX_SWITCHER_MANAGED=1 CODEX_SWITCHER_PROFILE="$profile" "$app_bin" "$@" >>"$APP_LOG" 2>&1 &
+  nohup env CODEX_HOME="$(target_home_path app)" CODEX_SWITCHER_MANAGED=1 CODEX_SWITCHER_ENV="$env" CODEX_SWITCHER_ACCOUNT="$use_account" "$app_bin" "$@" >>"$APP_LOG" 2>&1 &
   pid="$!"
   printf '%s\n' "$pid" > "$APP_PID_FILE"
   chmod 600 "$APP_PID_FILE" 2>/dev/null || true
 
-  set_current app "$profile"
-  log_event INFO "app_open profile=$profile pid=$pid args=$*"
-  echo "Opened Codex App with profile: $profile"
+  log_event INFO "app_open env=$env account=$use_account pid=$pid args=$*"
+  echo "Opened Codex App with: $env/$use_account"
   echo "App log: $APP_LOG"
 }
 
 cmd_app_use() {
-  local profile="$1"
-  shift
-  cmd_app_open "$profile" "$@"
+  local account="$1"
+  shift || true
+  cmd_app_open "$account" "$@"
 }
 
 cmd_app_logout() {
-  local profile="${1:-$(read_current app || true)}"
-  validate_profile_name "$profile"
-  ensure_profile "$profile"
-  log_event INFO "app_logout profile=$profile"
-  run_codex_for_profile "$profile" logout
+  local account="${1:-}"
+  local env
+  env="$(read_current_env app || true)"
+  cmd_account_logout "$account" "$env" "app"
 }
 
 cmd_app_status() {
-  local profile
-  profile="$(read_current app || true)"
-  echo "app_current: $profile"
+  local env account
+  env="$(read_current_env app || true)"
+  account="$(read_current_account app || true)"
+  echo "app_current: $env/$account"
   if app_is_running; then
     echo "app_process: running(pid=$(cat "$APP_PID_FILE"))"
     return 0
@@ -710,7 +1485,7 @@ cmd_init() {
       ;;
   esac
 
-  script_abs="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  script_abs="$SCRIPT_DIR/codex-switcher"
   target_link="$HOME/.local/bin/codex-sw"
   block_start="# >>> codex-sw init >>>"
   block_end="# <<< codex-sw init <<<"
@@ -763,44 +1538,34 @@ cmd_upgrade() {
 
 cmd_recover() {
   local dry_run="${1:-false}"
-  local cli_profile app_profile cli_ptr_state app_ptr_state first
+  local target env account
 
-  cli_profile="$(read_current cli)" || cli_ptr_state=$?
-  app_profile="$(read_current app)" || app_ptr_state=$?
-  cli_ptr_state="${cli_ptr_state:-0}"
-  app_ptr_state="${app_ptr_state:-0}"
-
-  if [[ ! -d "$(profile_path "$cli_profile")" ]]; then
-    if first="$(first_profile_name)"; then
-      cli_profile="$first"
-    else
-      cli_profile="$(default_profile_for cli)"
-      ensure_profile "$cli_profile"
+  for target in cli app; do
+    env="$(read_current_env "$target" || true)"
+    account="$(read_current_account "$target" || true)"
+    validate_env_name_noexit "$env" || env="$DEFAULT_ENV_NAME"
+    if [[ "$env" != "$DEFAULT_ENV_NAME" ]] && [[ ! -d "$(env_home_path "$env")" ]]; then
+      env="$DEFAULT_ENV_NAME"
     fi
-    cli_ptr_state=3
-  fi
-
-  if [[ ! -d "$(profile_path "$app_profile")" ]]; then
-    if [[ -d "$(profile_path "$cli_profile")" ]]; then
-      app_profile="$cli_profile"
-    elif first="$(first_profile_name)"; then
-      app_profile="$first"
-    else
-      app_profile="$(default_profile_for app)"
-      ensure_profile "$app_profile"
+    validate_name_noexit "$account" || account="$DEFAULT_ACCOUNT_NAME"
+    if ! account_has_auth "$env" "$account"; then
+      account="$DEFAULT_ACCOUNT_NAME"
     fi
-    app_ptr_state=3
-  fi
+
+    if [[ "$dry_run" != "true" ]]; then
+      set_current_env "$target" "$env"
+      set_current_account "$target" "$account"
+      ensure_target_auth_installed "$target"
+    fi
+
+    echo "recover($target): $env/$account"
+  done
 
   if [[ "$dry_run" == "true" ]]; then
-    echo "recover(dry-run): cli=$cli_profile app=$app_profile"
     return 0
   fi
 
-  set_current cli "$cli_profile"
-  set_current app "$app_profile"
-  log_event INFO "recover cli=$cli_profile app=$app_profile"
-  echo "Recovered pointers: cli=$cli_profile app=$app_profile"
+  log_event INFO "recover cli=$(read_current_env cli || true)/$(read_current_account cli || true) app=$(read_current_env app || true)/$(read_current_account app || true)"
 }
 
 scan_logs_for_secrets() {
@@ -819,39 +1584,57 @@ scan_logs_for_secrets() {
 cmd_check() {
   command -v codex >/dev/null 2>&1 || err "codex command not found in PATH"
   resolve_app_bin >/dev/null
-
   ensure_dirs
-  local pstate
-  read_current cli >/dev/null || pstate=$?
-  if [[ "${pstate:-0}" -eq 2 ]]; then
-    err "current_cli pointer corrupted; run: $SCRIPT_NAME recover"
+
+  local pstate=0
+  read_current_env cli >/dev/null || pstate=$?
+  if [[ "$pstate" -eq 2 ]]; then
+    err "current_cli_env pointer corrupted; run: $SCRIPT_NAME recover"
   fi
   pstate=0
-  read_current app >/dev/null || pstate=$?
+  read_current_env app >/dev/null || pstate=$?
   if [[ "$pstate" -eq 2 ]]; then
-    err "current_app pointer corrupted; run: $SCRIPT_NAME recover"
+    err "current_app_env pointer corrupted; run: $SCRIPT_NAME recover"
+  fi
+  pstate=0
+  read_current_account cli >/dev/null || pstate=$?
+  if [[ "$pstate" -eq 2 ]]; then
+    err "current_cli_account pointer corrupted; run: $SCRIPT_NAME recover"
+  fi
+  pstate=0
+  read_current_account app >/dev/null || pstate=$?
+  if [[ "$pstate" -eq 2 ]]; then
+    err "current_app_account pointer corrupted; run: $SCRIPT_NAME recover"
   fi
 
   if ! scan_logs_for_secrets; then
     err "log redaction check failed"
   fi
 
+  echo "version: $(switcher_version)"
   echo "check: ok"
+}
+
+cmd_version() {
+  echo "$(switcher_version)"
 }
 
 cmd_doctor() {
   local fix="${1:-false}"
   local issues=0
-  local state_perm profiles_perm
+  local state_perm envs_perm accounts_perm
 
   ensure_dirs
   state_perm="$(perm_of "$STATE_DIR")"
-  profiles_perm="$(perm_of "$PROFILES_DIR")"
+  envs_perm="$(perm_of "$ENVS_DIR")"
+  accounts_perm="$(perm_of "$ACCOUNTS_DIR")"
 
   echo "state_dir: $STATE_DIR (perm=$state_perm)"
-  echo "profiles_dir: $PROFILES_DIR (perm=$profiles_perm)"
-  echo "cli_current: $(read_current cli || true)"
-  echo "app_current: $(read_current app || true)"
+  echo "envs_dir: $ENVS_DIR (perm=$envs_perm)"
+  echo "accounts_dir: $ACCOUNTS_DIR (perm=$accounts_perm)"
+  echo "default_home: $DEFAULT_HOME (perm=$(perm_of "$DEFAULT_HOME"))"
+  echo "cli_current: $(read_current_env cli || true)/$(read_current_account cli || true)"
+  echo "app_current: $(read_current_env app || true)/$(read_current_account app || true)"
 
   if ! command -v codex >/dev/null 2>&1; then
     echo "- codex in PATH: missing"
@@ -867,20 +1650,9 @@ cmd_doctor() {
     issues=1
   fi
 
-  if [[ "$state_perm" != "700" ]]; then
-    echo "- state dir permission not 700"
+  if [[ "$state_perm" != "700" || "$envs_perm" != "700" || "$accounts_perm" != "700" ]]; then
     issues=1
-    if [[ "$fix" == "true" ]]; then
-      chmod 700 "$STATE_DIR" || true
-    fi
-  fi
-
-  if [[ "$profiles_perm" != "700" ]]; then
-    echo "- profiles dir permission not 700"
-    issues=1
-    if [[ "$fix" == "true" ]]; then
-      chmod 700 "$PROFILES_DIR" || true
-    fi
+    echo "- directory permissions are not strict 700"
   fi
 
   if ! scan_logs_for_secrets; then
@@ -889,23 +1661,9 @@ cmd_doctor() {
     echo "- redaction check: ok"
   fi
 
-  local pstate=0
-  read_current cli >/dev/null || pstate=$?
-  if [[ "$pstate" -eq 2 ]]; then
-    echo "- current_cli pointer corrupted"
-    issues=1
-  fi
-  pstate=0
-  read_current app >/dev/null || pstate=$?
-  if [[ "$pstate" -eq 2 ]]; then
-    echo "- current_app pointer corrupted"
-    issues=1
-  fi
-
   if [[ "$fix" == "true" ]]; then
+    chmod 700 "$STATE_DIR" "$ENVS_DIR" "$ACCOUNTS_DIR" "$DEFAULT_HOME" 2>/dev/null || true
     with_lock cmd_recover false
-    chmod 700 "$STATE_DIR" "$PROFILES_DIR" 2>/dev/null || true
-    find "$PROFILES_DIR" -mindepth 1 -maxdepth 1 -type d -exec chmod 700 {} \; 2>/dev/null || true
     issues=0
     if ! scan_logs_for_secrets; then
       issues=1
@@ -936,12 +1694,282 @@ main() {
   shift || true
 
   case "$cmd" in
+    env)
+      local sub="${1:-}"
+      if [[ -z "$sub" ]]; then
+        usage
+        exit 1
+      fi
+      shift || true
+      case "$sub" in
+        list)
+          [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME env list"
+          cmd_env_list
+          ;;
+        create)
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME env create <env> [--empty|--from-default|--from-env <src>]"
+          local env="$1"
+          shift
+          local mode="from-default"
+          local src_env=""
+          while [[ "$#" -gt 0 ]]; do
+            case "$1" in
+              --empty)
+                mode="empty"
+                ;;
+              --from-default)
+                mode="from-default"
+                ;;
+              --from-env)
+                shift
+                [[ "$#" -gt 0 ]] || err "missing source env after --from-env"
+                mode="from-env"
+                src_env="$1"
+                ;;
+              *)
+                err "unknown option: $1"
+                ;;
+            esac
+            shift
+          done
+          with_lock cmd_env_create "$env" "$mode" "$src_env"
+          ;;
+        use)
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME env use <env> [--target cli|app|both]"
+          local env="$1"
+          shift
+          local target="cli"
+          while [[ "$#" -gt 0 ]]; do
+            case "$1" in
+              --target)
+                shift
+                [[ "$#" -gt 0 ]] || err "missing value after --target"
+                target="$1"
+                ;;
+              *)
+                err "unknown option: $1"
+                ;;
+            esac
+            shift
+          done
+          with_lock cmd_env_use "$env" "$target"
+          ;;
+        remove)
+          [[ "$#" -ge 1 && "$#" -le 2 ]] || err "usage: $SCRIPT_NAME env remove <env> [--force]"
+          local env="$1"
+          local force="false"
+          if [[ "${2:-}" == "--force" ]]; then
+            force="true"
+          elif [[ -n "${2:-}" ]]; then
+            err "unknown option: ${2:-}"
+          fi
+          with_lock cmd_env_remove "$env" "$force"
+          ;;
+        current)
+          [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME env current [cli|app]"
+          cmd_env_current "${1:-all}"
+          ;;
+        path)
+          [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME env path [env]"
+          cmd_env_path "${1:-}"
+          ;;
+        *)
+          err "unknown env subcommand: $sub"
+          ;;
+      esac
+      ;;
+    account)
+      local sub="${1:-}"
+      [[ -n "$sub" ]] || err "usage: $SCRIPT_NAME account <list|add|remove|login|use|logout|current> ..."
+      shift || true
+      case "$sub" in
+        list)
+          local env="$(read_current_env cli || true)"
+          while [[ "$#" -gt 0 ]]; do
+            case "$1" in
+              --env)
+                shift
+                [[ "$#" -gt 0 ]] || err "missing env after --env"
+                env="$1"
+                ;;
+              *)
+                err "unknown option: $1"
+                ;;
+            esac
+            shift
+          done
+          cmd_account_list "$env"
+          ;;
+        add)
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME account add <account> [--env <env>]"
+          local account="$1"
+          shift
+          local env="$(read_current_env cli || true)"
+          while [[ "$#" -gt 0 ]]; do
+            case "$1" in
+              --env)
+                shift
+                [[ "$#" -gt 0 ]] || err "missing env after --env"
+                env="$1"
+                ;;
+              *)
+                err "unknown option: $1"
+                ;;
+            esac
+            shift
+          done
+          with_lock cmd_account_add "$account" "$env"
+          ;;
+        remove)
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME account remove <account> [--env <env>] [--force]"
+          local account="$1"
+          shift
+          local env="$(read_current_env cli || true)"
+          local force="false"
+          while [[ "$#" -gt 0 ]]; do
+            case "$1" in
+              --env)
+                shift
+                [[ "$#" -gt 0 ]] || err "missing env after --env"
+                env="$1"
+                ;;
+              --force)
+                force="true"
+                ;;
+              *)
+                err "unknown option: $1"
+                ;;
+            esac
+            shift
+          done
+          with_lock cmd_account_remove "$account" "$env" "$force"
+          ;;
+        login)
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME account login <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync]"
+          local account="$1"
+          shift
+          local env="$(read_current_env cli || true)"
+          local target="cli"
+          local sync_mode="false"
+          while [[ "$#" -gt 0 ]]; do
+            case "$1" in
+              --env)
+                shift
+                [[ "$#" -gt 0 ]] || err "missing env after --env"
+                env="$1"
+                ;;
+              --target)
+                shift
+                [[ "$#" -gt 0 ]] || err "missing target after --target"
+                target="$1"
+                ;;
+              --sync)
+                sync_mode="true"
+                ;;
+              --no-sync)
+                sync_mode="false"
+                ;;
+              *)
+                err "unknown option: $1"
+                ;;
+            esac
+            shift
+          done
+          with_lock cmd_account_login "$account" "$env" "$target" "$sync_mode"
+          ;;
+        use)
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME account use <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync]"
+          local account="$1"
+          shift
+          local env="$(read_current_env cli || true)"
+          local target="cli"
+          local sync_mode="false"
+          while [[ "$#" -gt 0 ]]; do
+            case "$1" in
+              --env)
+                shift
+                [[ "$#" -gt 0 ]] || err "missing env after --env"
+                env="$1"
+                ;;
+              --target)
+                shift
+                [[ "$#" -gt 0 ]] || err "missing target after --target"
+                target="$1"
+                ;;
+              --sync)
+                sync_mode="true"
+                ;;
+              --no-sync)
+                sync_mode="false"
+                ;;
+              *)
+                err "unknown option: $1"
+                ;;
+            esac
+            shift
+          done
+          with_lock cmd_account_use "$account" "$env" "$target" "$sync_mode"
+          ;;
+        logout)
+          local account=""
+          local env="$(read_current_env cli || true)"
+          local target="cli"
+          if [[ "$#" -gt 0 && "${1:-}" != --* ]]; then
+            account="$1"
+            shift
+          fi
+          while [[ "$#" -gt 0 ]]; do
+            case "$1" in
+              --env)
+                shift
+                [[ "$#" -gt 0 ]] || err "missing env after --env"
+                env="$1"
+                ;;
+              --target)
+                shift
+                [[ "$#" -gt 0 ]] || err "missing target after --target"
+                target="$1"
+                ;;
+              *)
+                err "unknown option: $1"
+                ;;
+            esac
+            shift
+          done
+          with_lock cmd_account_logout "$account" "$env" "$target"
+          ;;
+        current)
+          [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME account current [cli|app]"
+          cmd_account_current "${1:-all}"
+          ;;
+        *)
+          err "unknown account subcommand: $sub"
+          ;;
+      esac
+      ;;
+    proxy)
+      [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME proxy [<host:port>|off|test]"
+      case "${1:-}" in
+        "")
+          cmd_proxy_show
+          ;;
+        off)
+          with_lock cmd_proxy_off
+          ;;
+        test)
+          cmd_proxy_test
+          ;;
+        *)
+          with_lock cmd_proxy_set "$1"
+          ;;
+      esac
+      ;;
     add)
-      [[ "$#" -eq 1 ]] || err "usage: $SCRIPT_NAME add <profile>"
+      [[ "$#" -eq 1 ]] || err "usage: $SCRIPT_NAME add <account>"
       with_lock cmd_add "$1"
       ;;
     remove)
-      [[ "$#" -ge 1 && "$#" -le 2 ]] || err "usage: $SCRIPT_NAME remove <profile> [--force]"
+      [[ "$#" -ge 1 && "$#" -le 2 ]] || err "usage: $SCRIPT_NAME remove <account> [--force]"
       local force="false"
       if [[ "${2:-}" == "--force" ]]; then
         force="true"
@@ -955,8 +1983,8 @@ main() {
       cmd_list
       ;;
     import-default)
-      [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME import-default <profile> [--with-auth] [--force]"
-      local profile="$1"
+      [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME import-default <env> [--with-auth] [--force]"
+      local env="$1"
       local with_auth="false"
       local force="false"
       shift
@@ -974,33 +2002,91 @@ main() {
         esac
         shift
       done
-      with_lock cmd_import_default "$profile" "$with_auth" "$force"
+      with_lock cmd_import_default "$env" "$with_auth" "$force"
       ;;
     use)
-      [[ "$#" -ge 1 && "$#" -le 2 ]] || err "usage: $SCRIPT_NAME use <profile> [--sync|--no-sync]"
-      local profile="$1"
+      [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME use <account> [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]"
+      local account="$1"
+      shift
       local sync="false"
-      if [[ "${2:-}" == "--sync" ]]; then
-        sync="true"
-      elif [[ "${2:-}" == "--no-sync" || -z "${2:-}" ]]; then
-        :
-      else
-        err "unknown option: ${2:-}"
+      local launch="auto"
+      local codex_args=()
+      while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+          --sync)
+            sync="true"
+            ;;
+          --no-sync)
+            sync="false"
+            ;;
+          --launch)
+            launch="true"
+            ;;
+          --no-launch)
+            launch="false"
+            ;;
+          --)
+            shift
+            codex_args=("$@")
+            break
+            ;;
+          *)
+            err "unknown option: $1"
+            ;;
+        esac
+        shift
+      done
+      if [[ "${#codex_args[@]}" -gt 0 ]]; then
+        [[ "$launch" != "false" ]] || err "cannot pass codex args with --no-launch"
+        launch="true"
       fi
-      with_lock cmd_use "$profile" "$sync"
+      if [[ "${#codex_args[@]}" -gt 0 ]]; then
+        cmd_use_and_maybe_launch cmd_use_compat "$account" "$sync" "$launch" "${codex_args[@]}"
+      else
+        cmd_use_and_maybe_launch cmd_use_compat "$account" "$sync" "$launch"
+      fi
       ;;
     switch)
-      [[ "$#" -ge 1 && "$#" -le 2 ]] || err "usage: $SCRIPT_NAME switch <profile> [--sync|--no-sync]"
-      local profile="$1"
+      [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME switch <account> [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]"
+      local account="$1"
+      shift
       local sync="false"
-      if [[ "${2:-}" == "--sync" ]]; then
-        sync="true"
-      elif [[ "${2:-}" == "--no-sync" || -z "${2:-}" ]]; then
-        :
-      else
-        err "unknown option: ${2:-}"
+      local launch="auto"
+      local codex_args=()
+      while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+          --sync)
+            sync="true"
+            ;;
+          --no-sync)
+            sync="false"
+            ;;
+          --launch)
+            launch="true"
+            ;;
+          --no-launch)
+            launch="false"
+            ;;
+          --)
+            shift
+            codex_args=("$@")
+            break
+            ;;
+          *)
+            err "unknown option: $1"
+            ;;
+        esac
+        shift
+      done
+      if [[ "${#codex_args[@]}" -gt 0 ]]; then
+        [[ "$launch" != "false" ]] || err "cannot pass codex args with --no-launch"
+        launch="true"
       fi
-      with_lock cmd_switch "$profile" "$sync"
+      if [[ "${#codex_args[@]}" -gt 0 ]]; then
+        cmd_use_and_maybe_launch cmd_switch_compat "$account" "$sync" "$launch" "${codex_args[@]}"
+      else
+        cmd_use_and_maybe_launch cmd_switch_compat "$account" "$sync" "$launch"
+      fi
       ;;
     current)
       [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME current [cli|app]"
@@ -1014,8 +2100,8 @@ main() {
       cmd_exec "$@"
       ;;
     login)
-      [[ "$#" -le 2 ]] || err "usage: $SCRIPT_NAME login [profile] [--sync|--no-sync]"
-      local profile=""
+      [[ "$#" -le 2 ]] || err "usage: $SCRIPT_NAME login [account] [--sync|--no-sync]"
+      local account=""
       local sync="false"
       local arg
       for arg in "$@"; do
@@ -1027,23 +2113,19 @@ main() {
             sync="false"
             ;;
           *)
-            if [[ -z "$profile" ]]; then
-              profile="$arg"
+            if [[ -z "$account" ]]; then
+              account="$arg"
             else
               err "unknown option: $arg"
             fi
             ;;
         esac
       done
-      with_lock cmd_login "${profile:-}" "$sync"
+      with_lock cmd_login "${account:-}" "$sync"
       ;;
     logout)
-      [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME logout [profile]"
+      [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME logout [account]"
       with_lock cmd_logout "${1:-}"
-      ;;
-    env)
-      [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME env [profile]"
-      cmd_env "${1:-}"
       ;;
     app)
       local sub="${1:-}"
@@ -1051,20 +2133,23 @@ main() {
       shift || true
       case "$sub" in
         open)
-          local profile="${1:-$(read_current app || true)}"
-          if [[ "$#" -gt 0 ]]; then shift; fi
+          local account=""
+          if [[ "$#" -gt 0 && "${1:-}" != "--" ]]; then
+            account="$1"
+            shift
+          fi
           if [[ "${1:-}" == "--" ]]; then shift; fi
-          with_lock cmd_app_open "$profile" "$@"
+          with_lock cmd_app_open "$account" "$@"
           ;;
         use)
-          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME app use <profile> [-- <app args...>]"
-          local profile="$1"
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME app use <account> [-- <app args...>]"
+          local account="$1"
           shift
           if [[ "${1:-}" == "--" ]]; then shift; fi
-          with_lock cmd_app_use "$profile" "$@"
+          with_lock cmd_app_use "$account" "$@"
           ;;
         logout)
-          [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME app logout [profile]"
+          [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME app logout [account]"
           with_lock cmd_app_logout "${1:-}"
           ;;
         status)
@@ -1077,7 +2162,7 @@ main() {
           ;;
         current)
           [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME app current"
-          cmd_current app
+          echo "$(read_current_env app || true)/$(read_current_account app || true)"
           ;;
         *)
           err "unknown app subcommand: $sub"
@@ -1106,6 +2191,10 @@ main() {
         err "unknown option: ${1:-}"
       fi
       with_lock cmd_recover "$dry"
+      ;;
+    version)
+      [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME version"
+      cmd_version
       ;;
     check)
       [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME check"

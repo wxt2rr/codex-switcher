@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.6.5 - 2026-04-12
+
+- Removed `LAST ACTIVITY` from `list` default output columns.
+- `list` now prints: `ENV / HOME / ACCOUNT / EMAIL / PLAN / 5H USAGE / WEEKLY USAGE / SOURCE`.
+- Updated command help text, Chinese/English README docs, and smoke-test assertions for the new column layout.
+
+## 0.6.4 - 2026-04-12
+
+- Updated `list` output columns to include `HOME` and a dedicated `SOURCE` column (`api`/`local`).
+- Changed `LAST ACTIVITY` to absolute `MM-DD HH:MM` format and aligned weekly reset display to the same date+time style.
+- Improved last-activity fallback behavior: when API omits activity timestamp, fallback to local session-derived time.
+- Updated Chinese/English README and plugin docs for the latest `list` output schema.
+- Updated smoke tests for `HOME`/`SOURCE` columns and absolute-time assertions.
+- Removed accidental package self-dependency from `package.json`.
+
+## 0.6.3 - 2026-04-12
+
+- Changed `list` email rendering to show plain email only (removed `(account)` prefix).
+- Reworked root Chinese/English README command reference into full command tables based on current capabilities.
+- Updated smoke-test assertions for the new email column format.
+
+## 0.6.2 - 2026-04-12
+
+- Added usage-API proxy auto-detection (manual proxy > env proxy > macOS system proxy).
+- Added `proxy` source display: `(manual)`, `(auto:env)`, `(auto:system)`, or `off`.
+- Kept proxy scope limited to usage API calls used by `list`/`proxy test`.
+- Added smoke-test coverage for env-proxy auto-detection and isolated proxy behavior.
+
+## 0.6.1 - 2026-04-12
+
+- Fixed symlink invocation path resolution for `codex-sw` / `codex-switcher`, so global npm installs can always find bundled scripts.
+- Fixed `list` row field reuse bug that could leak previous row values into later rows.
+- Improved usage API request compatibility by adding `ChatGPT-Account-Id` and browser-like headers, while keeping local sessions fallback.
+- Added smoke-test coverage for symlink launch path behavior.
+
+## 0.6.0 - 2026-04-12
+
+- Refactored core model from profile-based switching to `env + account` with built-in `default=~/.codex`.
+- Added env/account command groups: `env {list|create|use|remove|current|path}` and `account {list|add|remove|login|use|logout|current}`.
+- Added per-env account auth slots at `~/.codex-switcher/env-accounts/<env>/<account>/auth.json`.
+- Same-env account switch now swaps `auth.json` only and ignores `--sync`.
+- `list` now shows usage columns with API-first fetch and local sessions fallback, and appends source marker `(api|local)`.
+- Updated Chinese/English README and plugin docs to match the new env/account flow.
+- Updated upgrade and manual checklist docs to remove legacy profile terminology.
+
+## 0.5.1 - 2026-04-12
+
+- Added `version: <semver>` output in `codex-sw check` for quick runtime version verification.
+- Added smoke-test assertion to verify `check` includes the version line.
+
+## 0.5.0 - 2026-04-12
+
+- Added automatic Codex CLI launch behavior for `use/switch` in interactive shells (`--launch=auto`).
+- Added explicit `--launch` / `--no-launch` controls for `use/switch`.
+- Added support for `use/switch -- <codex args...>` to switch profile and run Codex command in one step.
+- Improved non-interactive UX with explicit auto-launch skip hint.
+- Added smoke-test coverage for launch/no-launch behavior and argument conflict handling.
+- Updated Chinese/English docs to describe launch semantics and new command forms.
+
 ## 0.4.1 - 2026-04-12
 
 - Refined README wording for a more conversational background/auth mechanism explanation.

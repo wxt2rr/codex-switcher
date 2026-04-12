@@ -2,111 +2,95 @@
 
 中文 | [English](README.en.md)
 
-为 Codex CLI 与 Codex App 提供基于 profile 的账号切换能力。
+为 Codex CLI 与 Codex App 提供基于 **env + account** 的账号切换能力。
 
 ## 核心设计
 
-- 一个 profile 对应一个独立 `CODEX_HOME`：`~/.codex-profiles/<profile>`
-- CLI 命令在当前 CLI profile 下执行
-- App 在当前 App profile 下重启
-- 当前指针存储在 `~/.codex-switcher/current_cli` 与 `~/.codex-switcher/current_app`
+- 内置默认 env：`default`，对应 `~/.codex`（可由 `CODEX_SWITCHER_DEFAULT_HOME` 覆盖）。
+- 自定义 env 数据目录：`~/.codex-envs/<env>/home`（共享 history/sessions/config 等数据）。
+- 账号凭证目录：`~/.codex-switcher/env-accounts/<env>/<account>/auth.json`（每账号独立 auth）。
+- 同一 env 下切账号只替换 `auth.json`，不做 sync。
+- 当前指针：
+  - `~/.codex-switcher/current_cli_env`
+  - `~/.codex-switcher/current_cli_account`
+  - `~/.codex-switcher/current_app_env`
+  - `~/.codex-switcher/current_app_account`
 
 ## 命令
 
 ```bash
-codex-switcher add <profile>
-codex-switcher remove <profile> [--force]
+codex-switcher env list
+codex-switcher env create <env> [--empty|--from-default|--from-env <src>]
+codex-switcher env use <env> [--target cli|app|both]
+codex-switcher env remove <env> [--force]
+codex-switcher env current [cli|app]
+codex-switcher env path [env]
+
+codex-switcher account list [--env <env>]
+codex-switcher account add <account> [--env <env>]
+codex-switcher account remove <account> [--env <env>] [--force]
+codex-switcher account login <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync]
+codex-switcher account use <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync]
+codex-switcher account logout [account] [--env <env>] [--target cli|app|both]
+codex-switcher account current [cli|app]
+
+codex-switcher proxy [<host:port>|off|test]
+
 codex-switcher list
-codex-switcher import-default <profile> [--with-auth] [--force]
-codex-switcher use <profile> [--sync|--no-sync]
-codex-switcher switch <profile> [--sync|--no-sync]
-codex-switcher current [cli|app]
 codex-switcher status
-
+codex-switcher current [cli|app]
 codex-switcher exec -- <codex args...>
-codex-switcher login [profile] [--sync|--no-sync]
-codex-switcher logout [profile]
-codex-switcher env [profile]
+codex-switcher login [account] [--sync|--no-sync]
+codex-switcher logout [account]
 
-codex-switcher app open [profile]
-codex-switcher app use <profile>
-codex-switcher app logout [profile]
+codex-switcher app open [account] [-- <app args...>]
+codex-switcher app use <account> [-- <app args...>]
+codex-switcher app logout [account]
 codex-switcher app status
 codex-switcher app stop
+codex-switcher app current
 
-codex-switcher init [--shell zsh|bash]
-codex-switcher upgrade [--dry-run]
-codex-switcher recover
-codex-switcher check
-codex-switcher doctor [--fix]
+codex-switcher version
 ```
 
 ## 典型流程
 
 ```bash
-codex-switcher add work
-codex-switcher add personal
+# 1) 默认 env(default=~/.codex) 下登录两个账号
+codex-switcher account login personal --env default
+codex-switcher account login work --env default
 
-codex-switcher use work --sync
-codex-switcher login --sync
-codex-switcher exec -- login status
+# 2) 同 env 切账号（仅替换 auth.json）
+codex-switcher account use personal --env default
+codex-switcher account use work --env default
 
-codex-switcher switch personal --sync
-codex-switcher app use personal
+# 3) 新建业务 env，并在该 env 下登录/切换账号
+codex-switcher env create project-a --empty
+codex-switcher account login corp --env project-a
+codex-switcher account use corp --env project-a
 ```
 
-## 迁移已有数据
+## list 输出
 
-如果你原本在 `~/.codex` 下使用 Codex，可先导入到某个 profile：
+`codex-switcher list` 默认输出：
 
-```bash
-codex-switcher import-default work
-```
+`ENV / HOME / ACCOUNT / EMAIL / PLAN / 5H USAGE / WEEKLY USAGE / SOURCE`
 
-默认会迁移记录/项目等数据，但不包含 `auth.json`。
-如需连登录态一起导入：
+其中用量数据策略为：
 
-```bash
-codex-switcher import-default work --with-auth
-```
+- 默认优先 API（`chatgpt.com/backend-api/wham/usage`）
+- API 失败自动回退本地 `sessions/*.jsonl`
+- `5H USAGE` / `WEEKLY USAGE` 的重置时间统一为 `MM-DD HH:MM`（例如 `89% (04-19 11:45)`）
+- `SOURCE` 独立显示 `api` 或 `local`
+- 可通过 `codex-switcher proxy 127.0.0.1:7899` 为该用量 API 单独配置代理（仅影响 `list`）
+- 未手动设置时会自动检测环境变量/系统代理并用于用量 API 请求
 
-## 同步行为
+## 兼容命令
 
-- `login --sync`：从默认 `~/.codex` 覆盖同步到目标 profile，排除 `auth.json`。
-- `use/switch --sync`：从当前 CLI profile 覆盖同步到目标 profile，排除 `auth.json`。
-- `--no-sync`：显式关闭同步（默认行为）。
-
-示例：
-
-```bash
-codex-switcher login work --sync
-codex-switcher switch personal --sync
-codex-switcher use work --no-sync
-```
-
-## 升级
-
-```bash
-codex-switcher upgrade
-```
-
-## 说明
-
-- macOS 下 Codex App 是单实例；切换 App profile 需要重启。
-- `codex-switcher app stop` 仅停止由 `codex-switcher` 启动并跟踪的 App 进程。
-- `codex-switcher app open/use <profile>` 要求该 profile 已存在且已登录。
-- `--sync` 为覆盖策略（不是合并）：源目录覆盖目标目录，`auth.json` 除外。
-- `codex-switcher status` 返回码：
-  - `0`：当前 CLI/App profile 均已登录
-  - `1`：至少一个当前 profile 未登录
-  - `2`：指针或 profile 完整性异常（可执行 `codex-switcher recover`）
+`add/remove/use/switch/login/logout/import-default` 仍保留兼容入口，内部映射到新模型。
 
 ## 验证
 
 ```bash
 ./plugins/codex-switcher/scripts/test-switcher.sh
 ```
-
-## 兼容命令
-
-`codex-sw` 作为兼容入口保留，行为与 `codex-switcher` 一致。

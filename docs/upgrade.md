@@ -23,7 +23,7 @@ codex-sw check
 
 ## Recovery
 
-If pointers are corrupted or profile directories are missing:
+If pointers are corrupted, or env/account data directories are missing:
 
 ```bash
 codex-sw recover

@@ -2,111 +2,95 @@
 
 [中文](README.md) | English
 
-Profile-based account switcher for Codex CLI and Codex App.
+`codex-switcher` now uses an **env + account** model for Codex CLI / Codex App switching.
 
-## Core idea
+## Core Model
 
-- One profile = one isolated `CODEX_HOME` directory: `~/.codex-profiles/<profile>`
-- CLI commands run under selected CLI profile
-- App is restarted under selected App profile
-- Current pointers are stored in `~/.codex-switcher/current_cli` and `~/.codex-switcher/current_app`
+- Built-in default env: `default`, mapped to `~/.codex` (override via `CODEX_SWITCHER_DEFAULT_HOME`).
+- Custom env data root: `~/.codex-envs/<env>/home` (shared history/sessions/config data).
+- Account auth root: `~/.codex-switcher/env-accounts/<env>/<account>/auth.json`.
+- Switching accounts in the same env only swaps `auth.json`; no sync is needed.
+- Current pointers:
+  - `~/.codex-switcher/current_cli_env`
+  - `~/.codex-switcher/current_cli_account`
+  - `~/.codex-switcher/current_app_env`
+  - `~/.codex-switcher/current_app_account`
 
 ## Commands
 
 ```bash
-codex-switcher add <profile>
-codex-switcher remove <profile> [--force]
+codex-switcher env list
+codex-switcher env create <env> [--empty|--from-default|--from-env <src>]
+codex-switcher env use <env> [--target cli|app|both]
+codex-switcher env remove <env> [--force]
+codex-switcher env current [cli|app]
+codex-switcher env path [env]
+
+codex-switcher account list [--env <env>]
+codex-switcher account add <account> [--env <env>]
+codex-switcher account remove <account> [--env <env>] [--force]
+codex-switcher account login <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync]
+codex-switcher account use <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync]
+codex-switcher account logout [account] [--env <env>] [--target cli|app|both]
+codex-switcher account current [cli|app]
+
+codex-switcher proxy [<host:port>|off|test]
+
 codex-switcher list
-codex-switcher import-default <profile> [--with-auth] [--force]
-codex-switcher use <profile> [--sync|--no-sync]
-codex-switcher switch <profile> [--sync|--no-sync]
-codex-switcher current [cli|app]
 codex-switcher status
-
+codex-switcher current [cli|app]
 codex-switcher exec -- <codex args...>
-codex-switcher login [profile] [--sync|--no-sync]
-codex-switcher logout [profile]
-codex-switcher env [profile]
+codex-switcher login [account] [--sync|--no-sync]
+codex-switcher logout [account]
 
-codex-switcher app open [profile]
-codex-switcher app use <profile>
-codex-switcher app logout [profile]
+codex-switcher app open [account] [-- <app args...>]
+codex-switcher app use <account> [-- <app args...>]
+codex-switcher app logout [account]
 codex-switcher app status
 codex-switcher app stop
+codex-switcher app current
 
-codex-switcher init [--shell zsh|bash]
-codex-switcher upgrade [--dry-run]
-codex-switcher recover
-codex-switcher check
-codex-switcher doctor [--fix]
+codex-switcher version
 ```
 
-## Typical flow
+## Typical Flow
 
 ```bash
-codex-switcher add work
-codex-switcher add personal
+# 1) Login two accounts under default env (default=~/.codex)
+codex-switcher account login personal --env default
+codex-switcher account login work --env default
 
-codex-switcher use work --sync
-codex-switcher login --sync
-codex-switcher exec -- login status
+# 2) Same-env account switch (auth.json swap only)
+codex-switcher account use personal --env default
+codex-switcher account use work --env default
 
-codex-switcher switch personal --sync
-codex-switcher app use personal
+# 3) Create a dedicated env and switch accounts there
+codex-switcher env create project-a --empty
+codex-switcher account login corp --env project-a
+codex-switcher account use corp --env project-a
 ```
 
-## Migrate Existing App/CLI Data
+## list Output
 
-If your existing data is in `~/.codex`, import it into a profile first:
+`codex-switcher list` prints:
 
-```bash
-codex-switcher import-default work
-```
+`ENV / HOME / ACCOUNT / EMAIL / PLAN / 5H USAGE / WEEKLY USAGE / SOURCE`
 
-This copies records/projects/history but excludes `auth.json` by default.
-If you want to carry login state too:
+Usage data strategy:
 
-```bash
-codex-switcher import-default work --with-auth
-```
+- API first (`chatgpt.com/backend-api/wham/usage`)
+- Auto fallback to local `sessions/*.jsonl` on API failure
+- `5H USAGE` / `WEEKLY USAGE` reset time is unified to `MM-DD HH:MM` (example: `89% (04-19 11:45)`)
+- `SOURCE` is shown as a dedicated column (`api` or `local`)
+- You can configure a dedicated proxy for this usage API via `codex-switcher proxy 127.0.0.1:7899` (only affects `list`)
+- If no manual proxy is configured, env/system proxy settings are auto-detected for usage API requests
 
-## Sync Behavior
+## Compatibility Commands
 
-- `login --sync`: overwrite sync from default `~/.codex` to target profile, excluding `auth.json`.
-- `use/switch --sync`: overwrite sync from current CLI profile to target profile, excluding `auth.json`.
-- `--no-sync`: explicit no-sync mode (default behavior).
-
-Examples:
-
-```bash
-codex-switcher login work --sync
-codex-switcher switch personal --sync
-codex-switcher use work --no-sync
-```
-
-## Upgrade
-
-```bash
-codex-switcher upgrade
-```
-
-## Notes
-
-- Codex App is single-instance on macOS; switching App profile requires restart.
-- `codex-switcher app stop` only stops app instances started and tracked by `codex-switcher`.
-- `codex-switcher app open/use <profile>` requires that profile already exists and is logged in.
-- `--sync` uses overwrite strategy (not merge): source overwrites target for all files except `auth.json`.
-- `codex-switcher status` exit codes:
-  - `0`: both current profiles logged in
-  - `1`: at least one current profile not logged in
-  - `2`: pointer/profile integrity issue (run `codex-switcher recover`)
+Legacy commands (`add/remove/use/switch/login/logout/import-default`) are kept and mapped to the new model.
 
 ## Validation
 
 ```bash
 ./plugins/codex-switcher/scripts/test-switcher.sh
 ```
-
-## Compatibility command
-
-`codex-sw` is kept as a compatibility entrypoint and maps to the same implementation.
