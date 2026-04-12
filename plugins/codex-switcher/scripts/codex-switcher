@@ -1,0 +1,1133 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+STATE_DIR="${CODEX_SWITCHER_STATE_DIR:-$HOME/.codex-switcher}"
+PROFILES_DIR="${CODEX_SWITCHER_PROFILES_DIR:-$HOME/.codex-profiles}"
+APP_LOG="${CODEX_SWITCHER_APP_LOG:-$STATE_DIR/app.log}"
+SWITCH_LOG="${CODEX_SWITCHER_SWITCH_LOG:-$STATE_DIR/switcher.log}"
+APP_PID_FILE="$STATE_DIR/app.pid"
+LOCK_DIR="$STATE_DIR/.lock"
+LOCK_WAIT_SECONDS="${CODEX_SWITCHER_LOCK_WAIT_SECONDS:-10}"
+
+SCRIPT_NAME="${CODEX_SWITCHER_INVOKED_AS:-$(basename "$0")}"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  codex-sw add <profile>
+  codex-sw remove <profile> [--force]
+  codex-sw list
+  codex-sw import-default <profile> [--with-auth] [--force]
+  codex-sw use <profile> [--sync|--no-sync]
+  codex-sw switch <profile> [--sync|--no-sync]
+  codex-sw current [cli|app]
+  codex-sw status
+
+  codex-sw exec -- <codex args...>
+  codex-sw login [profile] [--sync|--no-sync]
+  codex-sw logout [profile]
+  codex-sw env [profile]
+
+  codex-sw app open [profile] [-- <app args...>]
+  codex-sw app use <profile> [-- <app args...>]
+  codex-sw app logout [profile]
+  codex-sw app status
+  codex-sw app stop
+  codex-sw app current
+
+  codex-sw init [--shell zsh|bash] [--dry-run]
+  codex-sw upgrade [--dry-run]
+  codex-sw recover [--dry-run]
+  codex-sw check
+  codex-sw doctor [--fix]
+
+Compatibility:
+  codex-switcher <same-commands>
+
+Sync behavior:
+  --sync     enable overwrite sync (excluding auth.json)
+             - login --sync: ~/.codex -> target profile
+             - use/switch --sync: current CLI profile -> target profile
+  --no-sync  disable sync explicitly (default)
+
+Environment overrides:
+  CODEX_SWITCHER_STATE_DIR
+  CODEX_SWITCHER_PROFILES_DIR
+  CODEX_SWITCHER_APP_BIN
+  CODEX_SWITCHER_APP_LOG
+  CODEX_SWITCHER_SWITCH_LOG
+  CODEX_SWITCHER_LOCK_WAIT_SECONDS
+  CODEX_SWITCHER_DEFAULT_HOME
+  CODEX_SWITCHER_UPGRADE_REGISTRY
+  CODEX_SWITCHER_NPM_PACKAGE
+USAGE
+}
+
+err() {
+  echo "Error: $*" >&2
+  exit 1
+}
+
+warn() {
+  echo "Warning: $*" >&2
+}
+
+now_utc() {
+  date -u +"%Y-%m-%dT%H:%M:%SZ"
+}
+
+redact() {
+  sed -E \
+    -e 's/sk-[A-Za-z0-9_-]{8,}/sk-***REDACTED***/g' \
+    -e 's/(access_token|refresh_token|id_token)=([^[:space:]]+)/\1=REDACTED/g'
+}
+
+log_event() {
+  local level="$1"
+  shift
+  local message="$*"
+  mkdir -p "$STATE_DIR"
+  chmod 700 "$STATE_DIR" 2>/dev/null || true
+  printf '%s [%s] %s\n' "$(now_utc)" "$level" "$message" | redact >> "$SWITCH_LOG"
+}
+
+ensure_dirs() {
+  mkdir -p "$STATE_DIR" "$PROFILES_DIR"
+  chmod 700 "$STATE_DIR" "$PROFILES_DIR" 2>/dev/null || true
+}
+
+perm_of() {
+  local path="$1"
+  if stat -f '%Lp' "$path" >/dev/null 2>&1; then
+    stat -f '%Lp' "$path"
+  else
+    stat -c '%a' "$path"
+  fi
+}
+
+validate_profile_name_noexit() {
+  local name="${1:-}"
+  [[ -n "$name" ]] || return 1
+  [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || return 1
+  return 0
+}
+
+validate_profile_name() {
+  local name="${1:-}"
+  validate_profile_name_noexit "$name" || err "invalid profile '$name' (allowed: A-Z a-z 0-9 . _ -)"
+}
+
+default_profile_for() {
+  local target="$1"
+  if [[ "$target" == "cli" ]]; then
+    echo "default"
+  else
+    echo "app-default"
+  fi
+}
+
+profile_path() {
+  local name="$1"
+  echo "$PROFILES_DIR/$name"
+}
+
+ensure_profile() {
+  local name="$1"
+  local p
+  p="$(profile_path "$name")"
+  mkdir -p "$p"
+  chmod 700 "$p" 2>/dev/null || true
+}
+
+require_profile_exists() {
+  local name="$1"
+  local p
+  p="$(profile_path "$name")"
+  [[ -d "$p" ]] || err "profile '$name' not found. run: $SCRIPT_NAME add $name"
+}
+
+current_file() {
+  local target="$1"
+  echo "$STATE_DIR/current_${target}"
+}
+
+set_current() {
+  local target="$1"
+  local profile="$2"
+  local file tmp
+  file="$(current_file "$target")"
+  tmp="${file}.tmp"
+  printf '%s\n' "$profile" > "$tmp"
+  chmod 600 "$tmp" 2>/dev/null || true
+  mv "$tmp" "$file"
+}
+
+read_current() {
+  local target="$1"
+  local file value default
+  file="$(current_file "$target")"
+  default="$(default_profile_for "$target")"
+
+  if [[ ! -f "$file" ]]; then
+    echo "$default"
+    return 1
+  fi
+
+  value="$(head -n 1 "$file" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  if ! validate_profile_name_noexit "$value"; then
+    echo "$default"
+    return 2
+  fi
+
+  echo "$value"
+  return 0
+}
+
+first_profile_name() {
+  local first
+  first="$(find "$PROFILES_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort | head -n 1)"
+  if [[ -n "$first" ]]; then
+    echo "$first"
+    return 0
+  fi
+  return 1
+}
+
+resolve_app_bin() {
+  if [[ -n "${CODEX_SWITCHER_APP_BIN:-}" ]]; then
+    [[ -x "$CODEX_SWITCHER_APP_BIN" ]] || err "CODEX_SWITCHER_APP_BIN is not executable: $CODEX_SWITCHER_APP_BIN"
+    echo "$CODEX_SWITCHER_APP_BIN"
+    return
+  fi
+
+  if [[ -x "/Applications/Codex.app/Contents/MacOS/Codex" ]]; then
+    echo "/Applications/Codex.app/Contents/MacOS/Codex"
+    return
+  fi
+  if [[ -x "$HOME/Applications/Codex.app/Contents/MacOS/Codex" ]]; then
+    echo "$HOME/Applications/Codex.app/Contents/MacOS/Codex"
+    return
+  fi
+  err "Codex.app binary not found. set CODEX_SWITCHER_APP_BIN manually"
+}
+
+acquire_lock() {
+  ensure_dirs
+  local start now lock_pid
+  start="$(date +%s)"
+
+  while true; do
+    if mkdir "$LOCK_DIR" 2>/dev/null; then
+      printf '%s\n' "$$" > "$LOCK_DIR/pid"
+      chmod 700 "$LOCK_DIR" 2>/dev/null || true
+      trap 'release_lock' EXIT INT TERM
+      return 0
+    fi
+
+    lock_pid=""
+    if [[ -f "$LOCK_DIR/pid" ]]; then
+      lock_pid="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
+    fi
+
+    if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" >/dev/null 2>&1; then
+      rm -rf "$LOCK_DIR" >/dev/null 2>&1 || true
+      continue
+    fi
+
+    now="$(date +%s)"
+    if (( now - start >= LOCK_WAIT_SECONDS )); then
+      err "failed to acquire lock within ${LOCK_WAIT_SECONDS}s"
+    fi
+    sleep 0.1
+  done
+}
+
+release_lock() {
+  if [[ -d "$LOCK_DIR" ]] && [[ -f "$LOCK_DIR/pid" ]]; then
+    local lock_pid
+    lock_pid="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
+    if [[ "$lock_pid" == "$$" ]]; then
+      rm -rf "$LOCK_DIR" >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
+with_lock() {
+  acquire_lock
+  "$@"
+  release_lock
+  trap - EXIT INT TERM
+}
+
+run_codex_for_profile() {
+  local profile="$1"
+  shift
+  require_profile_exists "$profile"
+  CODEX_HOME="$(profile_path "$profile")" command codex "$@"
+}
+
+login_state_for_profile() {
+  local profile="$1"
+  local p rc
+  p="$(profile_path "$profile")"
+  if [[ ! -d "$p" ]]; then
+    echo "missing-profile"
+    return
+  fi
+
+  rc=0
+  CODEX_HOME="$p" command codex login status >/dev/null 2>&1 || rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    echo "logged-in"
+  else
+    echo "not-logged-in"
+  fi
+}
+
+kill_tree() {
+  local pid="$1"
+  local child
+  if [[ -z "$pid" ]]; then
+    return 0
+  fi
+  for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+    kill_tree "$child"
+  done
+  kill "$pid" >/dev/null 2>&1 || true
+}
+
+app_is_running() {
+  if [[ ! -f "$APP_PID_FILE" ]]; then
+    return 1
+  fi
+  local pid
+  pid="$(cat "$APP_PID_FILE" 2>/dev/null || true)"
+  [[ -n "$pid" ]] || return 1
+  kill -0 "$pid" >/dev/null 2>&1
+}
+
+app_stop_managed() {
+  if [[ ! -f "$APP_PID_FILE" ]]; then
+    echo "No managed app process to stop"
+    return 0
+  fi
+
+  local pid
+  pid="$(cat "$APP_PID_FILE" 2>/dev/null || true)"
+  if [[ -z "$pid" ]]; then
+    rm -f "$APP_PID_FILE"
+    echo "No managed app process to stop"
+    return 0
+  fi
+
+  if kill -0 "$pid" >/dev/null 2>&1; then
+    log_event INFO "app_stop pid=$pid"
+    kill_tree "$pid"
+    sleep 0.3
+  fi
+
+  rm -f "$APP_PID_FILE"
+  echo "Stopped managed app process"
+}
+
+prompt_confirm_remove() {
+  local profile="$1"
+  if [[ ! -t 0 ]]; then
+    err "non-interactive terminal; rerun with --force"
+  fi
+  local answer
+  printf "Remove profile '%s'? This deletes %s [y/N]: " "$profile" "$(profile_path "$profile")" >&2
+  read -r answer
+  case "$answer" in
+    y|Y|yes|YES)
+      return 0
+      ;;
+    *)
+      echo "Cancelled"
+      return 1
+      ;;
+  esac
+}
+
+cmd_add() {
+  local profile="$1"
+  validate_profile_name "$profile"
+  ensure_profile "$profile"
+  log_event INFO "profile_add profile=$profile"
+  echo "Added profile: $profile"
+}
+
+cmd_remove() {
+  local profile="$1"
+  local force="${2:-false}"
+  local cli_cur app_cur
+
+  validate_profile_name "$profile"
+  require_profile_exists "$profile"
+
+  cli_cur="$(read_current cli || true)"
+  app_cur="$(read_current app || true)"
+
+  if [[ "$profile" == "$cli_cur" && "$force" != "true" ]]; then
+    err "profile '$profile' is current CLI profile; use --force to remove"
+  fi
+  if [[ "$profile" == "$app_cur" && "$force" != "true" ]]; then
+    err "profile '$profile' is current App profile; use --force to remove"
+  fi
+
+  if [[ "$force" != "true" ]]; then
+    prompt_confirm_remove "$profile" || return 0
+  fi
+
+  if [[ "$profile" == "$app_cur" ]]; then
+    app_stop_managed >/dev/null
+    set_current app "$(default_profile_for app)"
+  fi
+  if [[ "$profile" == "$cli_cur" ]]; then
+    set_current cli "$(default_profile_for cli)"
+  fi
+
+  rm -rf -- "$(profile_path "$profile")"
+  log_event INFO "profile_remove profile=$profile force=$force"
+  echo "Removed profile: $profile"
+}
+
+cmd_list() {
+  local cli_cur app_cur
+  cli_cur="$(read_current cli || true)"
+  app_cur="$(read_current app || true)"
+
+  if ! find "$PROFILES_DIR" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+    echo "No profiles yet. Use: $SCRIPT_NAME add <profile>"
+    return 0
+  fi
+
+  find "$PROFILES_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort | while IFS= read -r name; do
+    local marks
+    marks=""
+    [[ "$name" == "$cli_cur" ]] && marks="${marks} [cli-current]"
+    [[ "$name" == "$app_cur" ]] && marks="${marks} [app-current]"
+    echo "- $name$marks"
+  done
+}
+
+cmd_import_default() {
+  local profile="$1"
+  local with_auth="$2"
+  local force="$3"
+  local src dst
+
+  src="${CODEX_SWITCHER_DEFAULT_HOME:-$HOME/.codex}"
+  validate_profile_name "$profile"
+  [[ -d "$src" ]] || err "default codex home not found: $src"
+  ensure_profile "$profile"
+  dst="$(profile_path "$profile")"
+
+  if [[ "$force" == "true" ]]; then
+    find "$dst" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
+  else
+    if find "$dst" -mindepth 1 -maxdepth 1 | grep -q .; then
+      err "profile '$profile' is not empty. use --force to overwrite"
+    fi
+  fi
+
+  if command -v rsync >/dev/null 2>&1; then
+    if [[ "$with_auth" == "true" ]]; then
+      rsync -a "$src/" "$dst/"
+    else
+      rsync -a --exclude 'auth.json' "$src/" "$dst/"
+    fi
+  else
+    if [[ "$with_auth" == "true" ]]; then
+      (cd "$src" && tar cf - .) | (cd "$dst" && tar xpf -)
+    else
+      (cd "$src" && tar cf - --exclude ./auth.json .) | (cd "$dst" && tar xpf -)
+    fi
+  fi
+
+  chmod 700 "$dst" 2>/dev/null || true
+  log_event INFO "import_default profile=$profile src=$src with_auth=$with_auth force=$force"
+  echo "Imported default data to profile: $profile"
+  if [[ "$with_auth" != "true" ]]; then
+    echo "Auth not imported. Run: $SCRIPT_NAME login $profile"
+  fi
+}
+
+sync_overwrite_excluding_auth() {
+  local src="$1"
+  local dst="$2"
+
+  [[ -d "$src" ]] || err "sync source not found: $src"
+  mkdir -p "$dst"
+
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --checksum --delete --exclude 'auth.json' "$src/" "$dst/"
+  else
+    find "$dst" -mindepth 1 -maxdepth 1 ! -name 'auth.json' -exec rm -rf -- {} + 2>/dev/null || true
+    (cd "$src" && tar cf - --exclude ./auth.json .) | (cd "$dst" && tar xpf -)
+  fi
+  chmod 700 "$dst" 2>/dev/null || true
+}
+
+sync_default_to_profile() {
+  local profile="$1"
+  local src dst
+  src="${CODEX_SWITCHER_DEFAULT_HOME:-$HOME/.codex}"
+  dst="$(profile_path "$profile")"
+  [[ -d "$src" ]] || err "default codex home not found: $src"
+  ensure_profile "$profile"
+  sync_overwrite_excluding_auth "$src" "$dst"
+  log_event INFO "sync_default profile=$profile src=$src"
+  echo "Synced default data to profile: $profile (auth.json excluded)"
+}
+
+sync_profile_to_profile() {
+  local from_profile="$1"
+  local to_profile="$2"
+  local src dst
+
+  if [[ "$from_profile" == "$to_profile" ]]; then
+    return 0
+  fi
+
+  src="$(profile_path "$from_profile")"
+  dst="$(profile_path "$to_profile")"
+  require_profile_exists "$from_profile"
+  ensure_profile "$to_profile"
+  sync_overwrite_excluding_auth "$src" "$dst"
+  log_event INFO "sync_profile from=$from_profile to=$to_profile"
+  echo "Synced profile data: $from_profile -> $to_profile (auth.json excluded)"
+}
+
+cmd_use() {
+  local profile="$1"
+  local sync_mode="${2:-false}"
+  local from_profile
+  validate_profile_name "$profile"
+
+  if [[ "$sync_mode" == "true" ]]; then
+    from_profile="$(read_current cli || true)"
+    validate_profile_name "$from_profile"
+    sync_profile_to_profile "$from_profile" "$profile"
+  fi
+
+  ensure_profile "$profile"
+  set_current cli "$profile"
+  log_event INFO "cli_use profile=$profile sync=$sync_mode"
+  echo "Switched CLI profile to: $profile"
+  echo "Run in current shell if needed:"
+  echo "  export CODEX_HOME='$(profile_path "$profile")'"
+}
+
+cmd_switch() {
+  cmd_use "$1" "${2:-false}"
+}
+
+cmd_current() {
+  local target="${1:-all}"
+  case "$target" in
+    cli)
+      read_current cli || true
+      ;;
+    app)
+      read_current app || true
+      ;;
+    all)
+      echo "cli: $(read_current cli || true)"
+      echo "app: $(read_current app || true)"
+      ;;
+    *)
+      err "invalid target '$target' (use cli|app)"
+      ;;
+  esac
+}
+
+cmd_status() {
+  local cli_profile app_profile
+  local cli_ptr_state app_ptr_state
+  local cli_state app_state
+  local exit_code
+
+  cli_profile="$(read_current cli)" || cli_ptr_state=$?
+  app_profile="$(read_current app)" || app_ptr_state=$?
+  cli_ptr_state="${cli_ptr_state:-0}"
+  app_ptr_state="${app_ptr_state:-0}"
+
+  cli_state="$(login_state_for_profile "$cli_profile")"
+  app_state="$(login_state_for_profile "$app_profile")"
+
+  echo "cli_current: $cli_profile"
+  echo "app_current: $app_profile"
+  echo "cli($cli_profile): $cli_state"
+  echo "app($app_profile): $app_state"
+
+  exit_code=0
+  if [[ "$cli_ptr_state" -eq 2 || "$app_ptr_state" -eq 2 ]]; then
+    echo "hint: pointer file corrupted, run: $SCRIPT_NAME recover" >&2
+    exit_code=2
+  elif [[ "$cli_state" == "missing-profile" || "$app_state" == "missing-profile" ]]; then
+    echo "hint: missing profile directory, run: $SCRIPT_NAME recover" >&2
+    exit_code=2
+  elif [[ "$cli_state" != "logged-in" || "$app_state" != "logged-in" ]]; then
+    exit_code=1
+  fi
+
+  return "$exit_code"
+}
+
+cmd_exec() {
+  [[ "$#" -gt 0 ]] || err "missing codex args. example: $SCRIPT_NAME exec -- login status"
+  if [[ "$1" == "--" ]]; then
+    shift
+  fi
+  [[ "$#" -gt 0 ]] || err "missing codex args after --"
+
+  local profile
+  profile="$(read_current cli || true)"
+  ensure_profile "$profile"
+  CODEX_HOME="$(profile_path "$profile")" command codex "$@"
+}
+
+cmd_login() {
+  local profile="${1:-$(read_current cli || true)}"
+  local sync_mode="${2:-false}"
+  validate_profile_name "$profile"
+  ensure_profile "$profile"
+  if [[ "$sync_mode" == "true" ]]; then
+    sync_default_to_profile "$profile"
+  fi
+  log_event INFO "cli_login profile=$profile sync=$sync_mode"
+  run_codex_for_profile "$profile" login
+}
+
+cmd_logout() {
+  local profile="${1:-$(read_current cli || true)}"
+  validate_profile_name "$profile"
+  ensure_profile "$profile"
+  log_event INFO "cli_logout profile=$profile"
+  run_codex_for_profile "$profile" logout
+}
+
+cmd_env() {
+  local profile="${1:-$(read_current cli || true)}"
+  validate_profile_name "$profile"
+  ensure_profile "$profile"
+  echo "export CODEX_HOME='$(profile_path "$profile")'"
+}
+
+cmd_app_open() {
+  local profile="$1"
+  shift
+  local app_bin pid login_state
+
+  validate_profile_name "$profile"
+  require_profile_exists "$profile"
+  login_state="$(login_state_for_profile "$profile")"
+  if [[ "$login_state" != "logged-in" ]]; then
+    err "profile '$profile' is not logged in. run: $SCRIPT_NAME login $profile"
+  fi
+  app_bin="$(resolve_app_bin)"
+
+  app_stop_managed >/dev/null
+
+  mkdir -p "$(dirname "$APP_LOG")"
+  nohup env CODEX_HOME="$(profile_path "$profile")" CODEX_SWITCHER_MANAGED=1 CODEX_SWITCHER_PROFILE="$profile" "$app_bin" "$@" >>"$APP_LOG" 2>&1 &
+  pid="$!"
+  printf '%s\n' "$pid" > "$APP_PID_FILE"
+  chmod 600 "$APP_PID_FILE" 2>/dev/null || true
+
+  set_current app "$profile"
+  log_event INFO "app_open profile=$profile pid=$pid args=$*"
+  echo "Opened Codex App with profile: $profile"
+  echo "App log: $APP_LOG"
+}
+
+cmd_app_use() {
+  local profile="$1"
+  shift
+  cmd_app_open "$profile" "$@"
+}
+
+cmd_app_logout() {
+  local profile="${1:-$(read_current app || true)}"
+  validate_profile_name "$profile"
+  ensure_profile "$profile"
+  log_event INFO "app_logout profile=$profile"
+  run_codex_for_profile "$profile" logout
+}
+
+cmd_app_status() {
+  local profile
+  profile="$(read_current app || true)"
+  echo "app_current: $profile"
+  if app_is_running; then
+    echo "app_process: running(pid=$(cat "$APP_PID_FILE"))"
+    return 0
+  fi
+  echo "app_process: not-running"
+  return 1
+}
+
+cmd_app_stop() {
+  app_stop_managed
+  log_event INFO "app_stop"
+}
+
+cmd_init() {
+  local shell_name=""
+  local dry_run="false"
+  local script_abs target_link rc_file block_start block_end
+
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --shell)
+        shift
+        [[ "$#" -gt 0 ]] || err "missing shell after --shell"
+        shell_name="$1"
+        ;;
+      --dry-run)
+        dry_run="true"
+        ;;
+      *)
+        err "unknown init option: $1"
+        ;;
+    esac
+    shift
+  done
+
+  if [[ -z "$shell_name" ]]; then
+    shell_name="$(basename "${SHELL:-zsh}")"
+  fi
+  case "$shell_name" in
+    zsh)
+      rc_file="$HOME/.zshrc"
+      ;;
+    bash)
+      rc_file="$HOME/.bashrc"
+      ;;
+    *)
+      err "unsupported shell '$shell_name' (use zsh or bash)"
+      ;;
+  esac
+
+  script_abs="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  target_link="$HOME/.local/bin/codex-sw"
+  block_start="# >>> codex-sw init >>>"
+  block_end="# <<< codex-sw init <<<"
+
+  if [[ "$dry_run" == "true" ]]; then
+    echo "[dry-run] mkdir -p $HOME/.local/bin"
+    echo "[dry-run] ln -sf $script_abs $target_link"
+    echo "[dry-run] ensure PATH block in $rc_file"
+    return 0
+  fi
+
+  mkdir -p "$HOME/.local/bin"
+  ln -sf "$script_abs" "$target_link"
+
+  if [[ ! -f "$rc_file" ]]; then
+    touch "$rc_file"
+  fi
+
+  if ! grep -qF "$block_start" "$rc_file"; then
+    cat >> "$rc_file" <<RC
+$block_start
+export PATH="\$HOME/.local/bin:\$PATH"
+$block_end
+RC
+  fi
+
+  log_event INFO "init shell=$shell_name rc_file=$rc_file"
+  echo "Initialized codex-sw for $shell_name"
+  echo "Run: source $rc_file"
+}
+
+cmd_upgrade() {
+  local dry_run="${1:-false}"
+  local registry npm_package cmdline
+
+  command -v npm >/dev/null 2>&1 || err "npm command not found; cannot upgrade. install npm first"
+  registry="${CODEX_SWITCHER_UPGRADE_REGISTRY:-https://registry.npmjs.org/}"
+  npm_package="${CODEX_SWITCHER_NPM_PACKAGE:-@wangxt0223/codex-switcher}"
+  cmdline=(npm i -g "${npm_package}@latest" --registry "$registry")
+
+  if [[ "$dry_run" == "true" ]]; then
+    echo "[dry-run] ${cmdline[*]}"
+    return 0
+  fi
+
+  log_event INFO "upgrade package=$npm_package registry=$registry"
+  "${cmdline[@]}"
+  echo "Upgraded codex-sw to latest."
+}
+
+cmd_recover() {
+  local dry_run="${1:-false}"
+  local cli_profile app_profile cli_ptr_state app_ptr_state first
+
+  cli_profile="$(read_current cli)" || cli_ptr_state=$?
+  app_profile="$(read_current app)" || app_ptr_state=$?
+  cli_ptr_state="${cli_ptr_state:-0}"
+  app_ptr_state="${app_ptr_state:-0}"
+
+  if [[ ! -d "$(profile_path "$cli_profile")" ]]; then
+    if first="$(first_profile_name)"; then
+      cli_profile="$first"
+    else
+      cli_profile="$(default_profile_for cli)"
+      ensure_profile "$cli_profile"
+    fi
+    cli_ptr_state=3
+  fi
+
+  if [[ ! -d "$(profile_path "$app_profile")" ]]; then
+    if [[ -d "$(profile_path "$cli_profile")" ]]; then
+      app_profile="$cli_profile"
+    elif first="$(first_profile_name)"; then
+      app_profile="$first"
+    else
+      app_profile="$(default_profile_for app)"
+      ensure_profile "$app_profile"
+    fi
+    app_ptr_state=3
+  fi
+
+  if [[ "$dry_run" == "true" ]]; then
+    echo "recover(dry-run): cli=$cli_profile app=$app_profile"
+    return 0
+  fi
+
+  set_current cli "$cli_profile"
+  set_current app "$app_profile"
+  log_event INFO "recover cli=$cli_profile app=$app_profile"
+  echo "Recovered pointers: cli=$cli_profile app=$app_profile"
+}
+
+scan_logs_for_secrets() {
+  local found=0
+  if [[ -f "$SWITCH_LOG" ]] && grep -E 'sk-[A-Za-z0-9_-]{8,}|(access_token|refresh_token|id_token)=' "$SWITCH_LOG" >/dev/null 2>&1; then
+    echo "redaction_check: failed ($SWITCH_LOG contains potential secrets)" >&2
+    found=1
+  fi
+  if [[ -f "$APP_LOG" ]] && grep -E 'sk-[A-Za-z0-9_-]{8,}|(access_token|refresh_token|id_token)=' "$APP_LOG" >/dev/null 2>&1; then
+    echo "redaction_check: failed ($APP_LOG contains potential secrets)" >&2
+    found=1
+  fi
+  return "$found"
+}
+
+cmd_check() {
+  command -v codex >/dev/null 2>&1 || err "codex command not found in PATH"
+  resolve_app_bin >/dev/null
+
+  ensure_dirs
+  local pstate
+  read_current cli >/dev/null || pstate=$?
+  if [[ "${pstate:-0}" -eq 2 ]]; then
+    err "current_cli pointer corrupted; run: $SCRIPT_NAME recover"
+  fi
+  pstate=0
+  read_current app >/dev/null || pstate=$?
+  if [[ "$pstate" -eq 2 ]]; then
+    err "current_app pointer corrupted; run: $SCRIPT_NAME recover"
+  fi
+
+  if ! scan_logs_for_secrets; then
+    err "log redaction check failed"
+  fi
+
+  echo "check: ok"
+}
+
+cmd_doctor() {
+  local fix="${1:-false}"
+  local issues=0
+  local state_perm profiles_perm
+
+  ensure_dirs
+  state_perm="$(perm_of "$STATE_DIR")"
+  profiles_perm="$(perm_of "$PROFILES_DIR")"
+
+  echo "state_dir: $STATE_DIR (perm=$state_perm)"
+  echo "profiles_dir: $PROFILES_DIR (perm=$profiles_perm)"
+  echo "cli_current: $(read_current cli || true)"
+  echo "app_current: $(read_current app || true)"
+
+  if ! command -v codex >/dev/null 2>&1; then
+    echo "- codex in PATH: missing"
+    issues=1
+  else
+    echo "- codex in PATH: ok"
+  fi
+
+  if resolve_app_bin >/dev/null 2>&1; then
+    echo "- codex app binary: ok ($(resolve_app_bin))"
+  else
+    echo "- codex app binary: missing"
+    issues=1
+  fi
+
+  if [[ "$state_perm" != "700" ]]; then
+    echo "- state dir permission not 700"
+    issues=1
+    if [[ "$fix" == "true" ]]; then
+      chmod 700 "$STATE_DIR" || true
+    fi
+  fi
+
+  if [[ "$profiles_perm" != "700" ]]; then
+    echo "- profiles dir permission not 700"
+    issues=1
+    if [[ "$fix" == "true" ]]; then
+      chmod 700 "$PROFILES_DIR" || true
+    fi
+  fi
+
+  if ! scan_logs_for_secrets; then
+    issues=1
+  else
+    echo "- redaction check: ok"
+  fi
+
+  local pstate=0
+  read_current cli >/dev/null || pstate=$?
+  if [[ "$pstate" -eq 2 ]]; then
+    echo "- current_cli pointer corrupted"
+    issues=1
+  fi
+  pstate=0
+  read_current app >/dev/null || pstate=$?
+  if [[ "$pstate" -eq 2 ]]; then
+    echo "- current_app pointer corrupted"
+    issues=1
+  fi
+
+  if [[ "$fix" == "true" ]]; then
+    with_lock cmd_recover false
+    chmod 700 "$STATE_DIR" "$PROFILES_DIR" 2>/dev/null || true
+    find "$PROFILES_DIR" -mindepth 1 -maxdepth 1 -type d -exec chmod 700 {} \; 2>/dev/null || true
+    issues=0
+    if ! scan_logs_for_secrets; then
+      issues=1
+    fi
+    echo "doctor --fix: completed"
+  fi
+
+  if [[ "$issues" -eq 0 ]]; then
+    echo "doctor: ok"
+    return 0
+  fi
+
+  echo "doctor: issues found"
+  if [[ "$fix" != "true" ]]; then
+    echo "Run: $SCRIPT_NAME doctor --fix"
+  fi
+  return 1
+}
+
+main() {
+  ensure_dirs
+
+  local cmd="${1:-}"
+  [[ -n "$cmd" ]] || {
+    usage
+    exit 0
+  }
+  shift || true
+
+  case "$cmd" in
+    add)
+      [[ "$#" -eq 1 ]] || err "usage: $SCRIPT_NAME add <profile>"
+      with_lock cmd_add "$1"
+      ;;
+    remove)
+      [[ "$#" -ge 1 && "$#" -le 2 ]] || err "usage: $SCRIPT_NAME remove <profile> [--force]"
+      local force="false"
+      if [[ "${2:-}" == "--force" ]]; then
+        force="true"
+      elif [[ -n "${2:-}" ]]; then
+        err "unknown option: ${2:-}"
+      fi
+      with_lock cmd_remove "$1" "$force"
+      ;;
+    list)
+      [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME list"
+      cmd_list
+      ;;
+    import-default)
+      [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME import-default <profile> [--with-auth] [--force]"
+      local profile="$1"
+      local with_auth="false"
+      local force="false"
+      shift
+      while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+          --with-auth)
+            with_auth="true"
+            ;;
+          --force)
+            force="true"
+            ;;
+          *)
+            err "unknown option: $1"
+            ;;
+        esac
+        shift
+      done
+      with_lock cmd_import_default "$profile" "$with_auth" "$force"
+      ;;
+    use)
+      [[ "$#" -ge 1 && "$#" -le 2 ]] || err "usage: $SCRIPT_NAME use <profile> [--sync|--no-sync]"
+      local profile="$1"
+      local sync="false"
+      if [[ "${2:-}" == "--sync" ]]; then
+        sync="true"
+      elif [[ "${2:-}" == "--no-sync" || -z "${2:-}" ]]; then
+        :
+      else
+        err "unknown option: ${2:-}"
+      fi
+      with_lock cmd_use "$profile" "$sync"
+      ;;
+    switch)
+      [[ "$#" -ge 1 && "$#" -le 2 ]] || err "usage: $SCRIPT_NAME switch <profile> [--sync|--no-sync]"
+      local profile="$1"
+      local sync="false"
+      if [[ "${2:-}" == "--sync" ]]; then
+        sync="true"
+      elif [[ "${2:-}" == "--no-sync" || -z "${2:-}" ]]; then
+        :
+      else
+        err "unknown option: ${2:-}"
+      fi
+      with_lock cmd_switch "$profile" "$sync"
+      ;;
+    current)
+      [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME current [cli|app]"
+      cmd_current "${1:-all}"
+      ;;
+    status)
+      [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME status"
+      cmd_status
+      ;;
+    exec)
+      cmd_exec "$@"
+      ;;
+    login)
+      [[ "$#" -le 2 ]] || err "usage: $SCRIPT_NAME login [profile] [--sync|--no-sync]"
+      local profile=""
+      local sync="false"
+      local arg
+      for arg in "$@"; do
+        case "$arg" in
+          --sync)
+            sync="true"
+            ;;
+          --no-sync)
+            sync="false"
+            ;;
+          *)
+            if [[ -z "$profile" ]]; then
+              profile="$arg"
+            else
+              err "unknown option: $arg"
+            fi
+            ;;
+        esac
+      done
+      with_lock cmd_login "${profile:-}" "$sync"
+      ;;
+    logout)
+      [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME logout [profile]"
+      with_lock cmd_logout "${1:-}"
+      ;;
+    env)
+      [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME env [profile]"
+      cmd_env "${1:-}"
+      ;;
+    app)
+      local sub="${1:-}"
+      [[ -n "$sub" ]] || err "usage: $SCRIPT_NAME app <open|use|logout|status|stop|current> ..."
+      shift || true
+      case "$sub" in
+        open)
+          local profile="${1:-$(read_current app || true)}"
+          if [[ "$#" -gt 0 ]]; then shift; fi
+          if [[ "${1:-}" == "--" ]]; then shift; fi
+          with_lock cmd_app_open "$profile" "$@"
+          ;;
+        use)
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME app use <profile> [-- <app args...>]"
+          local profile="$1"
+          shift
+          if [[ "${1:-}" == "--" ]]; then shift; fi
+          with_lock cmd_app_use "$profile" "$@"
+          ;;
+        logout)
+          [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME app logout [profile]"
+          with_lock cmd_app_logout "${1:-}"
+          ;;
+        status)
+          [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME app status"
+          cmd_app_status
+          ;;
+        stop)
+          [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME app stop"
+          with_lock cmd_app_stop
+          ;;
+        current)
+          [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME app current"
+          cmd_current app
+          ;;
+        *)
+          err "unknown app subcommand: $sub"
+          ;;
+      esac
+      ;;
+    init)
+      cmd_init "$@"
+      ;;
+    upgrade)
+      [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME upgrade [--dry-run]"
+      local dry="false"
+      if [[ "${1:-}" == "--dry-run" ]]; then
+        dry="true"
+      elif [[ -n "${1:-}" ]]; then
+        err "unknown option: ${1:-}"
+      fi
+      cmd_upgrade "$dry"
+      ;;
+    recover)
+      [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME recover [--dry-run]"
+      local dry="false"
+      if [[ "${1:-}" == "--dry-run" ]]; then
+        dry="true"
+      elif [[ -n "${1:-}" ]]; then
+        err "unknown option: ${1:-}"
+      fi
+      with_lock cmd_recover "$dry"
+      ;;
+    check)
+      [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME check"
+      cmd_check
+      ;;
+    doctor)
+      [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME doctor [--fix]"
+      local fix="false"
+      if [[ "${1:-}" == "--fix" ]]; then
+        fix="true"
+      elif [[ -n "${1:-}" ]]; then
+        err "unknown option: ${1:-}"
+      fi
+      cmd_doctor "$fix"
+      ;;
+    help|-h|--help)
+      usage
+      ;;
+    *)
+      err "unknown command: $cmd"
+      ;;
+  esac
+}
+
+main "$@"

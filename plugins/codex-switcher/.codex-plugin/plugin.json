@@ -1,0 +1,48 @@
+{
+  "name": "codex-switcher",
+  "version": "0.4.1",
+  "description": "Profile-based account switcher for Codex CLI and Codex App without modifying upstream source.",
+  "author": {
+    "name": "wangxt",
+    "email": "noreply@example.com",
+    "url": "https://github.com/wangxt"
+  },
+  "homepage": "https://github.com/wangxt/codex-switcher",
+  "repository": "https://github.com/wangxt/codex-switcher",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "account-switching",
+    "profiles",
+    "codex-home"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks.json",
+  "mcpServers": "./.mcp.json",
+  "apps": "./.app.json",
+  "interface": {
+    "displayName": "Codex Switcher",
+    "shortDescription": "Manage Codex App/CLI accounts via CODEX_HOME profiles.",
+    "longDescription": "Use isolated profile directories for Codex CLI and restart Codex App into a selected profile without patching Codex source code.",
+    "developerName": "wangxt",
+    "category": "Productivity",
+    "capabilities": [
+      "Shell Automation",
+      "Account Profile Switching"
+    ],
+    "websiteURL": "https://github.com/wangxt/codex-switcher",
+    "privacyPolicyURL": "https://openai.com/policies/row-privacy-policy/",
+    "termsOfServiceURL": "https://openai.com/policies/row-terms-of-use/",
+    "defaultPrompt": [
+      "Create a new Codex profile for my work account.",
+      "Switch Codex CLI to the personal profile.",
+      "Restart Codex App with the selected account profile."
+    ],
+    "brandColor": "#2563EB",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png",
+    "screenshots": [
+      "./assets/screenshot1.png"
+    ]
+  }
+}

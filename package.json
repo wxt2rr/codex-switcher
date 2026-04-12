@@ -1,0 +1,46 @@
+{
+  "name": "@wangxt0223/codex-switcher",
+  "version": "0.4.1",
+  "description": "Profile-based account switcher for Codex CLI and Codex App using isolated CODEX_HOME directories.",
+  "license": "MIT",
+  "author": "wangxt",
+  "homepage": "https://github.com/wangxt/codex-switcher",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wangxt/codex-switcher.git"
+  },
+  "keywords": [
+    "codex",
+    "codex-cli",
+    "account-switch",
+    "profile",
+    "codex-home"
+  ],
+  "bin": {
+    "codex-sw": "plugins/codex-switcher/scripts/codex-sw",
+    "codex-switcher": "plugins/codex-switcher/scripts/codex-switcher"
+  },
+  "files": [
+    "plugins/codex-switcher/**",
+    "docs/**",
+    "scripts/install.sh",
+    "scripts/uninstall.sh",
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "lint": "bash -n plugins/codex-switcher/scripts/codex-switcher && bash -n plugins/codex-switcher/scripts/codex-sw",
+    "test": "plugins/codex-switcher/scripts/test-switcher.sh",
+    "check": "npm run lint && npm run test",
+    "prepublishOnly": "npm run check",
+    "release:npm": "./scripts/publish-npm.sh"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}
