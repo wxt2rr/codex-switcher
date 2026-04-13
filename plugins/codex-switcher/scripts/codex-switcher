@@ -42,13 +42,13 @@ Usage:
   codex-sw env current [cli|app]
   codex-sw env path [env]
 
-  codex-sw account list [--env <env>]
-  codex-sw account add <account> [--env <env>]
-  codex-sw account remove <account> [--env <env>] [--force]
-  codex-sw account login <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync]
-  codex-sw account use <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync]
-  codex-sw account logout [account] [--env <env>] [--target cli|app|both]
-  codex-sw account current [cli|app]
+  codex-sw ac list [--env <env>]
+  codex-sw ac add <account> [--env <env>]
+  codex-sw ac remove <account> [--env <env>] [--force]
+  codex-sw ac login <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync]
+  codex-sw ac use <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]
+  codex-sw ac logout [account] [--env <env>] [--target cli|app|both]
+  codex-sw ac current [cli|app]
 
   codex-sw proxy [<host:port>|off|test]
 
@@ -56,13 +56,6 @@ Usage:
   codex-sw status
   codex-sw current [cli|app]
   codex-sw exec -- <codex args...>
-  codex-sw login [account] [--sync|--no-sync]
-  codex-sw logout [account]
-
-  codex-sw use <account> [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]
-  codex-sw switch <account> [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]
-  codex-sw add <account>
-  codex-sw remove <account> [--force]
   codex-sw import-default <env> [--with-auth] [--force]
 
   codex-sw app open [account] [-- <app args...>]
@@ -83,6 +76,7 @@ Compatibility:
   codex-switcher <same-commands>
 
 Notes:
+  - `ac` and `account` are equivalent command groups.
   - Built-in env "default" always maps to ~/.codex (or CODEX_SWITCHER_DEFAULT_HOME).
   - Same-env account switch only swaps auth.json and does not sync shared data.
   - `proxy` only affects usage API calls used by `list`.
@@ -943,7 +937,7 @@ cmd_account_list() {
   done < <(list_accounts_for_env "$env")
 
   if [[ "$found" -eq 0 ]]; then
-    echo "No accounts in env '$env'. Use: $SCRIPT_NAME account login <account> --env $env"
+    echo "No accounts in env '$env'. Use: $SCRIPT_NAME ac login <account> --env $env"
   fi
 }
 
@@ -989,7 +983,7 @@ cmd_account_use() {
 
   validate_account_name "$account"
   require_env_exists "$env"
-  account_has_auth "$env" "$account" || err "account '$account' in env '$env' has no auth.json. run: $SCRIPT_NAME account login $account --env $env"
+  account_has_auth "$env" "$account" || err "account '$account' in env '$env' has no auth.json. run: $SCRIPT_NAME ac login $account --env $env"
 
   if [[ "$sync_mode" == "true" ]]; then
     warn "same-env account switch only replaces auth.json; --sync is ignored"
@@ -1214,21 +1208,6 @@ cmd_list() {
   done < <(list_env_names | sort -u)
 }
 
-cmd_add() {
-  local account="$1"
-  local env
-  env="$(read_current_env cli || true)"
-  cmd_account_add "$account" "$env"
-}
-
-cmd_remove() {
-  local account="$1"
-  local force="$2"
-  local env
-  env="$(read_current_env cli || true)"
-  cmd_account_remove "$account" "$env" "$force"
-}
-
 cmd_import_default() {
   local env="$1"
   local with_auth="$2"
@@ -1254,18 +1233,6 @@ cmd_import_default() {
   echo "Imported default data to env: $env"
 }
 
-cmd_use_compat() {
-  local account="$1"
-  local sync_mode="${2:-false}"
-  local env
-  env="$(read_current_env cli || true)"
-  cmd_account_use "$account" "$env" "cli" "$sync_mode"
-}
-
-cmd_switch_compat() {
-  cmd_use_compat "$1" "${2:-false}"
-}
-
 should_launch_codex() {
   local mode="$1"
   case "$mode" in
@@ -1284,16 +1251,25 @@ should_launch_codex() {
   esac
 }
 
-cmd_use_and_maybe_launch() {
-  local mode_cmd="$1"
-  local account="$2"
-  local sync_mode="${3:-false}"
-  local launch_mode="${4:-auto}"
-  shift 4 || true
+target_includes_cli() {
+  local target="$1"
+  [[ "$target" == "cli" || "$target" == "both" ]]
+}
 
-  with_lock "$mode_cmd" "$account" "$sync_mode"
+cmd_account_use_and_maybe_launch() {
+  local account="$1"
+  local env="$2"
+  local target="$3"
+  local sync_mode="${4:-false}"
+  local launch_mode="${5:-auto}"
+  shift 5 || true
 
-  echo "Switched CLI account to: $(read_current_env cli || true)/$(read_current_account cli || true)"
+  with_lock cmd_account_use "$account" "$env" "$target" "$sync_mode"
+
+  if ! target_includes_cli "$target"; then
+    return 0
+  fi
+
   if should_launch_codex "$launch_mode"; then
     echo "Launching codex with env/account: $(read_current_env cli || true)/$(read_current_account cli || true)"
     run_codex_for_target cli "$@"
@@ -1368,21 +1344,6 @@ cmd_exec() {
   run_codex_for_target cli "$@"
 }
 
-cmd_login() {
-  local account="${1:-$(read_current_account cli || true)}"
-  local sync_mode="${2:-false}"
-  local env
-  env="$(read_current_env cli || true)"
-  cmd_account_login "$account" "$env" "cli" "$sync_mode"
-}
-
-cmd_logout() {
-  local account="${1:-}"
-  local env
-  env="$(read_current_env cli || true)"
-  cmd_account_logout "$account" "$env" "cli"
-}
-
 cmd_app_open() {
   local account="${1:-}"
   shift || true
@@ -1392,7 +1353,7 @@ cmd_app_open() {
   use_account="${account:-$(read_current_account app || true)}"
   validate_account_name "$use_account"
   require_env_exists "$env"
-  account_has_auth "$env" "$use_account" || err "account '$use_account' not logged in under env '$env'. run: $SCRIPT_NAME account login $use_account --env $env --target app"
+  account_has_auth "$env" "$use_account" || err "account '$use_account' not logged in under env '$env'. run: $SCRIPT_NAME ac login $use_account --env $env --target app"
 
   set_current_env app "$env"
   set_current_account app "$use_account"
@@ -1778,9 +1739,9 @@ main() {
           ;;
       esac
       ;;
-    account)
+    account|ac)
       local sub="${1:-}"
-      [[ -n "$sub" ]] || err "usage: $SCRIPT_NAME account <list|add|remove|login|use|logout|current> ..."
+      [[ -n "$sub" ]] || err "usage: $SCRIPT_NAME ac <list|add|remove|login|use|logout|current> ..."
       shift || true
       case "$sub" in
         list)
@@ -1801,7 +1762,7 @@ main() {
           cmd_account_list "$env"
           ;;
         add)
-          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME account add <account> [--env <env>]"
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME ac add <account> [--env <env>]"
           local account="$1"
           shift
           local env="$(read_current_env cli || true)"
@@ -1821,7 +1782,7 @@ main() {
           with_lock cmd_account_add "$account" "$env"
           ;;
         remove)
-          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME account remove <account> [--env <env>] [--force]"
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME ac remove <account> [--env <env>] [--force]"
           local account="$1"
           shift
           local env="$(read_current_env cli || true)"
@@ -1845,7 +1806,7 @@ main() {
           with_lock cmd_account_remove "$account" "$env" "$force"
           ;;
         login)
-          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME account login <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync]"
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME ac login <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync]"
           local account="$1"
           shift
           local env="$(read_current_env cli || true)"
@@ -1878,12 +1839,14 @@ main() {
           with_lock cmd_account_login "$account" "$env" "$target" "$sync_mode"
           ;;
         use)
-          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME account use <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync]"
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME ac use <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]"
           local account="$1"
           shift
           local env="$(read_current_env cli || true)"
           local target="cli"
           local sync_mode="false"
+          local launch="auto"
+          local codex_args=()
           while [[ "$#" -gt 0 ]]; do
             case "$1" in
               --env)
@@ -1902,13 +1865,36 @@ main() {
               --no-sync)
                 sync_mode="false"
                 ;;
+              --launch)
+                launch="true"
+                ;;
+              --no-launch)
+                launch="false"
+                ;;
+              --)
+                shift
+                codex_args=("$@")
+                break
+                ;;
               *)
                 err "unknown option: $1"
                 ;;
             esac
             shift
           done
-          with_lock cmd_account_use "$account" "$env" "$target" "$sync_mode"
+          if [[ "$target" == "app" ]]; then
+            [[ "$launch" != "true" ]] || err "--launch requires --target cli|both"
+            [[ "${#codex_args[@]}" -eq 0 ]] || err "cannot pass codex args with --target app"
+          fi
+          if [[ "${#codex_args[@]}" -gt 0 ]]; then
+            [[ "$launch" != "false" ]] || err "cannot pass codex args with --no-launch"
+            launch="true"
+          fi
+          if [[ "${#codex_args[@]}" -gt 0 ]]; then
+            cmd_account_use_and_maybe_launch "$account" "$env" "$target" "$sync_mode" "$launch" "${codex_args[@]}"
+          else
+            cmd_account_use_and_maybe_launch "$account" "$env" "$target" "$sync_mode" "$launch"
+          fi
           ;;
         logout)
           local account=""
@@ -1939,7 +1925,7 @@ main() {
           with_lock cmd_account_logout "$account" "$env" "$target"
           ;;
         current)
-          [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME account current [cli|app]"
+          [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME ac current [cli|app]"
           cmd_account_current "${1:-all}"
           ;;
         *)
@@ -1963,20 +1949,6 @@ main() {
           with_lock cmd_proxy_set "$1"
           ;;
       esac
-      ;;
-    add)
-      [[ "$#" -eq 1 ]] || err "usage: $SCRIPT_NAME add <account>"
-      with_lock cmd_add "$1"
-      ;;
-    remove)
-      [[ "$#" -ge 1 && "$#" -le 2 ]] || err "usage: $SCRIPT_NAME remove <account> [--force]"
-      local force="false"
-      if [[ "${2:-}" == "--force" ]]; then
-        force="true"
-      elif [[ -n "${2:-}" ]]; then
-        err "unknown option: ${2:-}"
-      fi
-      with_lock cmd_remove "$1" "$force"
       ;;
     list)
       [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME list"
@@ -2004,90 +1976,6 @@ main() {
       done
       with_lock cmd_import_default "$env" "$with_auth" "$force"
       ;;
-    use)
-      [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME use <account> [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]"
-      local account="$1"
-      shift
-      local sync="false"
-      local launch="auto"
-      local codex_args=()
-      while [[ "$#" -gt 0 ]]; do
-        case "$1" in
-          --sync)
-            sync="true"
-            ;;
-          --no-sync)
-            sync="false"
-            ;;
-          --launch)
-            launch="true"
-            ;;
-          --no-launch)
-            launch="false"
-            ;;
-          --)
-            shift
-            codex_args=("$@")
-            break
-            ;;
-          *)
-            err "unknown option: $1"
-            ;;
-        esac
-        shift
-      done
-      if [[ "${#codex_args[@]}" -gt 0 ]]; then
-        [[ "$launch" != "false" ]] || err "cannot pass codex args with --no-launch"
-        launch="true"
-      fi
-      if [[ "${#codex_args[@]}" -gt 0 ]]; then
-        cmd_use_and_maybe_launch cmd_use_compat "$account" "$sync" "$launch" "${codex_args[@]}"
-      else
-        cmd_use_and_maybe_launch cmd_use_compat "$account" "$sync" "$launch"
-      fi
-      ;;
-    switch)
-      [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME switch <account> [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]"
-      local account="$1"
-      shift
-      local sync="false"
-      local launch="auto"
-      local codex_args=()
-      while [[ "$#" -gt 0 ]]; do
-        case "$1" in
-          --sync)
-            sync="true"
-            ;;
-          --no-sync)
-            sync="false"
-            ;;
-          --launch)
-            launch="true"
-            ;;
-          --no-launch)
-            launch="false"
-            ;;
-          --)
-            shift
-            codex_args=("$@")
-            break
-            ;;
-          *)
-            err "unknown option: $1"
-            ;;
-        esac
-        shift
-      done
-      if [[ "${#codex_args[@]}" -gt 0 ]]; then
-        [[ "$launch" != "false" ]] || err "cannot pass codex args with --no-launch"
-        launch="true"
-      fi
-      if [[ "${#codex_args[@]}" -gt 0 ]]; then
-        cmd_use_and_maybe_launch cmd_switch_compat "$account" "$sync" "$launch" "${codex_args[@]}"
-      else
-        cmd_use_and_maybe_launch cmd_switch_compat "$account" "$sync" "$launch"
-      fi
-      ;;
     current)
       [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME current [cli|app]"
       cmd_current "${1:-all}"
@@ -2098,34 +1986,6 @@ main() {
       ;;
     exec)
       cmd_exec "$@"
-      ;;
-    login)
-      [[ "$#" -le 2 ]] || err "usage: $SCRIPT_NAME login [account] [--sync|--no-sync]"
-      local account=""
-      local sync="false"
-      local arg
-      for arg in "$@"; do
-        case "$arg" in
-          --sync)
-            sync="true"
-            ;;
-          --no-sync)
-            sync="false"
-            ;;
-          *)
-            if [[ -z "$account" ]]; then
-              account="$arg"
-            else
-              err "unknown option: $arg"
-            fi
-            ;;
-        esac
-      done
-      with_lock cmd_login "${account:-}" "$sync"
-      ;;
-    logout)
-      [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME logout [account]"
-      with_lock cmd_logout "${1:-}"
       ;;
     app)
       local sub="${1:-}"

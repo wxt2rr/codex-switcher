@@ -26,13 +26,13 @@ codex-switcher env remove <env> [--force]
 codex-switcher env current [cli|app]
 codex-switcher env path [env]
 
-codex-switcher account list [--env <env>]
-codex-switcher account add <account> [--env <env>]
-codex-switcher account remove <account> [--env <env>] [--force]
-codex-switcher account login <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync]
-codex-switcher account use <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync]
-codex-switcher account logout [account] [--env <env>] [--target cli|app|both]
-codex-switcher account current [cli|app]
+codex-switcher ac list [--env <env>]
+codex-switcher ac add <account> [--env <env>]
+codex-switcher ac remove <account> [--env <env>] [--force]
+codex-switcher ac login <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync]
+codex-switcher ac use <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]
+codex-switcher ac logout [account] [--env <env>] [--target cli|app|both]
+codex-switcher ac current [cli|app]
 
 codex-switcher proxy [<host:port>|off|test]
 
@@ -40,8 +40,6 @@ codex-switcher list
 codex-switcher status
 codex-switcher current [cli|app]
 codex-switcher exec -- <codex args...>
-codex-switcher login [account] [--sync|--no-sync]
-codex-switcher logout [account]
 
 codex-switcher app open [account] [-- <app args...>]
 codex-switcher app use <account> [-- <app args...>]
@@ -57,17 +55,17 @@ codex-switcher version
 
 ```bash
 # 1) 默认 env(default=~/.codex) 下登录两个账号
-codex-switcher account login personal --env default
-codex-switcher account login work --env default
+codex-switcher ac login personal --env default
+codex-switcher ac login work --env default
 
 # 2) 同 env 切账号（仅替换 auth.json）
-codex-switcher account use personal --env default
-codex-switcher account use work --env default
+codex-switcher ac use personal --env default
+codex-switcher ac use work --env default
 
 # 3) 新建业务 env，并在该 env 下登录/切换账号
 codex-switcher env create project-a --empty
-codex-switcher account login corp --env project-a
-codex-switcher account use corp --env project-a
+codex-switcher ac login corp --env project-a
+codex-switcher ac use corp --env project-a
 ```
 
 ## list 输出
@@ -85,9 +83,9 @@ codex-switcher account use corp --env project-a
 - 可通过 `codex-switcher proxy 127.0.0.1:7899` 为该用量 API 单独配置代理（仅影响 `list`）
 - 未手动设置时会自动检测环境变量/系统代理并用于用量 API 请求
 
-## 兼容命令
+## 命令兼容性
 
-`add/remove/use/switch/login/logout/import-default` 仍保留兼容入口，内部映射到新模型。
+`ac` 与 `account` 是等价入口。历史一级命令 `login/logout/add/remove/use/switch` 已移除，请使用分组命令 `env` 与 `ac(account)`。
 
 ## 验证
 

@@ -40,27 +40,32 @@ codex-switcher check
 ## 快速开始
 
 ```bash
-codex-switcher account login personal --env default
-codex-switcher account login work --env default
-codex-switcher account use personal --env default
+codex-switcher ac login personal --env default
+codex-switcher ac login work --env default
+codex-switcher ac use personal --env default
 
 codex-switcher env create project-a --empty
-codex-switcher account login corp --env project-a
-codex-switcher account use corp --env project-a
+codex-switcher ac login corp --env project-a
+codex-switcher ac use corp --env project-a
 ```
 
 ## 同步选项
 
 - 同一 env 下切账号：只替换 `auth.json`，不进行共享数据同步。
 - `account login --sync`（跨 env 场景）：可将默认 env 数据同步到目标 env（不含 `auth.json`）。
-- 兼容命令 `use/switch` 默认 `--launch=auto`：交互终端中切换后会自动启动 `codex` CLI。
-- `use/switch --launch`：切换后立即启动 `codex` CLI。
-- `use/switch --no-launch`：仅切换账号指针，不启动 `codex` CLI。
-- `use/switch -- <codex args...>`：切换后直接执行 `codex` 参数（隐式启用 launch）。
+- `ac use`（`account use`）默认 `--launch=auto`：交互终端中切换后会自动启动 `codex` CLI。
+- `ac use --launch`：切换后立即启动 `codex` CLI。
+- `ac use --no-launch`：仅切换账号指针，不启动 `codex` CLI。
+- `ac use -- <codex args...>`：切换后直接执行 `codex` 参数（隐式启用 launch）。
+
+## 命令迁移
+
+- 账号相关一级命令已移除：`codex-sw login/logout/add/remove/use/switch` 不再支持。
+- 请使用最新分组命令：`codex-sw env ...` 与 `codex-sw ac ...`（`ac` 与 `account` 等价）。
 
 ## 命令参考
 
-以下以 `codex-sw` 为例（`codex-switcher` 为等价兼容命令）：
+以下以 `codex-sw` 为例（`codex-switcher` 为等价兼容命令；`ac` 与 `account` 等价）：
 
 | 分类 | 命令 | 说明 |
 | --- | --- | --- |
@@ -70,25 +75,19 @@ codex-switcher account use corp --env project-a
 | Env 管理 | `codex-sw env remove <env> [--force]` | 删除 env（必要时强制） |
 | Env 管理 | `codex-sw env current [cli\|app]` | 查看当前 env 指针 |
 | Env 管理 | `codex-sw env path [env]` | 输出 env 对应 `CODEX_HOME` 导出语句 |
-| 账号管理 | `codex-sw account list [--env <env>]` | 列出 env 下账号并标记当前账号 |
-| 账号管理 | `codex-sw account add <account> [--env <env>]` | 创建账号槽位（不登录） |
-| 账号管理 | `codex-sw account remove <account> [--env <env>] [--force]` | 删除账号槽位 |
-| 账号管理 | `codex-sw account login <account> [--env <env>] [--target cli\|app\|both] [--sync\|--no-sync]` | 在目标 env 登录并保存账号 `auth.json` |
-| 账号管理 | `codex-sw account use <account> [--env <env>] [--target cli\|app\|both] [--sync\|--no-sync]` | 切换到目标账号 |
-| 账号管理 | `codex-sw account logout [account] [--env <env>] [--target cli\|app\|both]` | 注销账号（删除对应 auth） |
-| 账号管理 | `codex-sw account current [cli\|app]` | 查看当前 env/account 指针 |
+| 账号管理 | `codex-sw ac list [--env <env>]` | 列出 env 下账号并标记当前账号 |
+| 账号管理 | `codex-sw ac add <account> [--env <env>]` | 创建账号槽位（不登录） |
+| 账号管理 | `codex-sw ac remove <account> [--env <env>] [--force]` | 删除账号槽位 |
+| 账号管理 | `codex-sw ac login <account> [--env <env>] [--target cli\|app\|both] [--sync\|--no-sync]` | 在目标 env 登录并保存账号 `auth.json` |
+| 账号管理 | `codex-sw ac use <account> [--env <env>] [--target cli\|app\|both] [--sync\|--no-sync] [--launch\|--no-launch] [-- <codex args...>]` | 切换到目标账号，并可自动启动 `codex` CLI |
+| 账号管理 | `codex-sw ac logout [account] [--env <env>] [--target cli\|app\|both]` | 注销账号（删除对应 auth） |
+| 账号管理 | `codex-sw ac current [cli\|app]` | 查看当前 env/account 指针 |
 | 用量代理 | `codex-sw proxy [<host:port>\|off\|test]` | 设置/关闭/测试“用量 API”代理（仅影响 `list`） |
 | 查询执行 | `codex-sw list` | 展示 `ENV/HOME/ACCOUNT/EMAIL/PLAN/5H/WEEKLY/SOURCE` |
 | 查询执行 | `codex-sw status` | 检查 CLI/App 当前登录状态 |
 | 查询执行 | `codex-sw current [cli\|app]` | 查看当前 env/account |
 | 查询执行 | `codex-sw exec -- <codex args...>` | 在当前 CLI env/account 下执行 `codex` |
-| 兼容命令 | `codex-sw login [account] [--sync\|--no-sync]` | 登录当前 CLI 账号（兼容入口） |
-| 兼容命令 | `codex-sw logout [account]` | 注销当前 CLI 账号（兼容入口） |
-| 兼容命令 | `codex-sw use <account> [--sync\|--no-sync] [--launch\|--no-launch] [-- <codex args...>]` | 切换 CLI 账号（兼容入口） |
-| 兼容命令 | `codex-sw switch <account> [--sync\|--no-sync] [--launch\|--no-launch] [-- <codex args...>]` | `use` 的等价命令 |
-| 兼容命令 | `codex-sw add <account>` | `account add` 的兼容入口 |
-| 兼容命令 | `codex-sw remove <account> [--force]` | `account remove` 的兼容入口 |
-| 兼容命令 | `codex-sw import-default <env> [--with-auth] [--force]` | 从默认 env 导入数据到指定 env |
+| 数据导入 | `codex-sw import-default <env> [--with-auth] [--force]` | 从默认 env 导入数据到指定 env |
 | App 管理 | `codex-sw app open [account] [-- <app args...>]` | 以指定账号打开 Codex App |
 | App 管理 | `codex-sw app use <account> [-- <app args...>]` | 切换 App 到指定账号（内部等价于 open） |
 | App 管理 | `codex-sw app logout [account]` | 注销 App 当前账号 |

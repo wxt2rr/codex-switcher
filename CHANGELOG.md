@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.6 - 2026-04-13
+
+- Removed legacy account-related top-level commands: `login/logout/add/remove/use/switch`.
+- Added `ac` as first-class short alias for `account` (`ac` and `account` are equivalent groups).
+- Extended `ac/account use` with launch behavior parity (`--launch|--no-launch|-- <codex args...>`, default `auto`).
+- Updated Chinese/English README docs and manual checklist to use latest `env + account(ac)` command style.
+- Added smoke-test assertions to ensure legacy top-level commands fail with `unknown command`.
+
 ## 0.6.5 - 2026-04-12
 
 - Removed `LAST ACTIVITY` from `list` default output columns.

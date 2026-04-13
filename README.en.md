@@ -43,27 +43,34 @@ codex-switcher check
 ## Quick start
 
 ```bash
-codex-switcher account login personal --env default
-codex-switcher account login work --env default
-codex-switcher account use personal --env default
+codex-switcher ac login personal --env default
+codex-switcher ac login work --env default
+codex-switcher ac use personal --env default
 
 codex-switcher env create project-a --empty
-codex-switcher account login corp --env project-a
-codex-switcher account use corp --env project-a
+codex-switcher ac login corp --env project-a
+codex-switcher ac use corp --env project-a
 ```
 
 ## Sync options
 
 - Same-env account switch only replaces `auth.json`; no shared data sync is needed.
 - `account login --sync` (cross-env setup) can sync default-env data into target env (excluding `auth.json`).
-- `use/switch` defaults to `--launch=auto`: on an interactive terminal, `codex` starts automatically after switch.
-- `use/switch --launch`: launch `codex` CLI immediately after switching.
-- `use/switch --no-launch`: switch account pointer only, without launching `codex`.
-- `use/switch -- <codex args...>`: run `codex` with args right after switch (implies launch).
+- `ac use` (`account use`) defaults to `--launch=auto`: on an interactive terminal, `codex` starts automatically after switch.
+- `ac use --launch`: launch `codex` CLI immediately after switching.
+- `ac use --no-launch`: switch account pointer only, without launching `codex`.
+- `ac use -- <codex args...>`: run `codex` with args right after switch (implies launch).
+
+## Command Migration
+
+- Legacy account-related top-level commands were removed:
+  `codex-sw login/logout/add/remove/use/switch`.
+- Use grouped commands instead:
+  `codex-sw env ...` and `codex-sw ac ...` (`ac` and `account` are equivalent).
 
 ## Command reference
 
-Commands below use `codex-sw` (all are equivalent under `codex-switcher`):
+Commands below use `codex-sw` (`codex-switcher` is equivalent; `ac` and `account` are equivalent):
 
 | Category | Command | Description |
 | --- | --- | --- |
@@ -73,25 +80,19 @@ Commands below use `codex-sw` (all are equivalent under `codex-switcher`):
 | Env | `codex-sw env remove <env> [--force]` | Remove env |
 | Env | `codex-sw env current [cli\|app]` | Show current env pointer |
 | Env | `codex-sw env path [env]` | Print exportable `CODEX_HOME` path |
-| Account | `codex-sw account list [--env <env>]` | List accounts in env with current markers |
-| Account | `codex-sw account add <account> [--env <env>]` | Add account slot |
-| Account | `codex-sw account remove <account> [--env <env>] [--force]` | Remove account slot |
-| Account | `codex-sw account login <account> [--env <env>] [--target cli\|app\|both] [--sync\|--no-sync]` | Login account and persist auth |
-| Account | `codex-sw account use <account> [--env <env>] [--target cli\|app\|both] [--sync\|--no-sync]` | Switch to account |
-| Account | `codex-sw account logout [account] [--env <env>] [--target cli\|app\|both]` | Logout account |
-| Account | `codex-sw account current [cli\|app]` | Show current env/account pointer |
+| Account | `codex-sw ac list [--env <env>]` | List accounts in env with current markers |
+| Account | `codex-sw ac add <account> [--env <env>]` | Add account slot |
+| Account | `codex-sw ac remove <account> [--env <env>] [--force]` | Remove account slot |
+| Account | `codex-sw ac login <account> [--env <env>] [--target cli\|app\|both] [--sync\|--no-sync]` | Login account and persist auth |
+| Account | `codex-sw ac use <account> [--env <env>] [--target cli\|app\|both] [--sync\|--no-sync] [--launch\|--no-launch] [-- <codex args...>]` | Switch to account and optionally auto-launch `codex` CLI |
+| Account | `codex-sw ac logout [account] [--env <env>] [--target cli\|app\|both]` | Logout account |
+| Account | `codex-sw ac current [cli\|app]` | Show current env/account pointer |
 | Usage proxy | `codex-sw proxy [<host:port>\|off\|test]` | Configure/test usage API proxy (only affects `list`) |
 | Query/Run | `codex-sw list` | Show `ENV/HOME/ACCOUNT/EMAIL/PLAN/5H/WEEKLY/SOURCE` |
 | Query/Run | `codex-sw status` | Show login status for current CLI/App pointers |
 | Query/Run | `codex-sw current [cli\|app]` | Show current env/account |
 | Query/Run | `codex-sw exec -- <codex args...>` | Run `codex` under current CLI env/account |
-| Compat | `codex-sw login [account] [--sync\|--no-sync]` | Compatibility alias for CLI login |
-| Compat | `codex-sw logout [account]` | Compatibility alias for CLI logout |
-| Compat | `codex-sw use <account> [--sync\|--no-sync] [--launch\|--no-launch] [-- <codex args...>]` | Compatibility alias for CLI switch |
-| Compat | `codex-sw switch <account> [--sync\|--no-sync] [--launch\|--no-launch] [-- <codex args...>]` | Same as `use` |
-| Compat | `codex-sw add <account>` | Compatibility alias for `account add` |
-| Compat | `codex-sw remove <account> [--force]` | Compatibility alias for `account remove` |
-| Compat | `codex-sw import-default <env> [--with-auth] [--force]` | Import default env data into target env |
+| Import | `codex-sw import-default <env> [--with-auth] [--force]` | Import default env data into target env |
 | App | `codex-sw app open [account] [-- <app args...>]` | Open Codex App under account |
 | App | `codex-sw app use <account> [-- <app args...>]` | Switch App account (alias of open) |
 | App | `codex-sw app logout [account]` | Logout App account |

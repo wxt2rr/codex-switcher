@@ -5,12 +5,12 @@ Run this checklist on a macOS machine with Codex.app installed.
 ## Setup
 
 - [ ] `codex-sw check` returns `check: ok`
-- [ ] `codex-sw account add work --env default` and `codex-sw account add personal --env default` succeed
+- [ ] `codex-sw ac add work --env default` and `codex-sw ac add personal --env default` succeed
 
 ## CLI isolation
 
-- [ ] `codex-sw account use work --env default && codex-sw login`
-- [ ] `codex-sw account use personal --env default && codex-sw login`
+- [ ] `codex-sw ac login work --env default`
+- [ ] `codex-sw ac login personal --env default`
 - [ ] `codex-sw status` shows both accounts logged in when selected as current env/account
 
 ## App switching

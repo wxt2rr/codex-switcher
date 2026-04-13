@@ -167,8 +167,40 @@ grep -q "token-corp" "$ENVS/project/home/auth.json"
 grep -q "token-dev" "$ENVS/project/home/auth.json"
 grep -q '{"shared":"project"}' "$ENVS/project/home/shared.json"
 
-"$SW" use corp --no-launch
-[[ "$("$SW" current cli)" == "project/corp" ]]
+"$SW" ac use corp --env project --no-launch
+[[ "$("$SW" ac current cli)" == "project/corp" ]]
+
+before_launch_count="$(wc -l < "$CODEX_SWITCHER_TEST_CODEX_LOG")"
+"$SW" account use dev --env project --launch
+after_launch_count="$(wc -l < "$CODEX_SWITCHER_TEST_CODEX_LOG")"
+[[ "$after_launch_count" -eq $((before_launch_count + 1)) ]]
+
+set +e
+"$SW" use corp --no-launch >/tmp/codex_sw_legacy_use.out 2>/tmp/codex_sw_legacy_use.err
+legacy_use_rc=$?
+"$SW" switch corp --no-launch >/tmp/codex_sw_legacy_switch.out 2>/tmp/codex_sw_legacy_switch.err
+legacy_switch_rc=$?
+"$SW" login >/tmp/codex_sw_legacy_login.out 2>/tmp/codex_sw_legacy_login.err
+legacy_login_rc=$?
+"$SW" logout >/tmp/codex_sw_legacy_logout.out 2>/tmp/codex_sw_legacy_logout.err
+legacy_logout_rc=$?
+"$SW" add legacy >/tmp/codex_sw_legacy_add.out 2>/tmp/codex_sw_legacy_add.err
+legacy_add_rc=$?
+"$SW" remove legacy >/tmp/codex_sw_legacy_remove.out 2>/tmp/codex_sw_legacy_remove.err
+legacy_remove_rc=$?
+set -e
+[[ "$legacy_use_rc" -ne 0 ]]
+[[ "$legacy_switch_rc" -ne 0 ]]
+[[ "$legacy_login_rc" -ne 0 ]]
+[[ "$legacy_logout_rc" -ne 0 ]]
+[[ "$legacy_add_rc" -ne 0 ]]
+[[ "$legacy_remove_rc" -ne 0 ]]
+grep -q "unknown command: use" /tmp/codex_sw_legacy_use.err
+grep -q "unknown command: switch" /tmp/codex_sw_legacy_switch.err
+grep -q "unknown command: login" /tmp/codex_sw_legacy_login.err
+grep -q "unknown command: logout" /tmp/codex_sw_legacy_logout.err
+grep -q "unknown command: add" /tmp/codex_sw_legacy_add.err
+grep -q "unknown command: remove" /tmp/codex_sw_legacy_remove.err
 
 "$SW" account use work --env default --target app
 "$SW" app use work
