@@ -2,8 +2,7 @@
 
 中文 | [English](README.en.md)
 
-`codex-switcher` 是一个面向 Codex CLI 与 Codex App 的轻量账号切换工具。
-它基于 `env + account` 模型管理账号：`env` 共享数据目录，`account` 管理独立 `auth.json`。
+`codex-switcher` 用于管理 Codex CLI / Codex App 的 `env + account` 切换。
 
 ## 项目背景
 
@@ -11,101 +10,81 @@
 后来公司从 Cursor 切到 Codex 后，我就得在同一台电脑上同时用个人账号和公司账号，很快就遇到冲突：登录态会互相覆盖，切换也不顺手。
 
 为了搞清楚原因，我看了下 Codex 的本地数据机制，发现思路其实很直接：只要把不同账号对应的本地目录隔离开，就能稳定切换。  
-基于这个思路，我用 Codex 写了 `codex-switcher`，专门用来管理、切换和隔离我所有的 Codex 账号，现在日常在个人/公司账号之间切换方便很多。
+基于这个思路，我用 Codex 写了 `codex-switcher`，专门用来管理、切换和隔离我所有的 Codex 账号。
 
 ## Codex 本地认证机制（简述）
 
-简单说就是：Codex 会把“账号登录态 + 会话历史 + 一些本地状态”都放在 `CODEX_HOME` 这个目录里（默认一般是 `~/.codex`）。  
-如果两个账号共用同一个目录，就很容易出现你登我下、我登你下，或者历史数据串在一起的问题。
+Codex 会把“账号登录态 + 会话历史 + 一些本地状态”都放在 `CODEX_HOME` 这个目录里（默认一般是 `~/.codex`）。  
+如果多个账号共用同一个目录，就容易出现登录态互相覆盖、会话数据混用的问题。
 
-`codex-switcher` 做的事情其实不复杂：把“共享数据”和“账号凭证”解耦。  
-默认 `env=default` 对应 `~/.codex`，同一 env 下切换账号只替换 `auth.json`，不动共享数据目录里的其它文件。
+`codex-switcher` 的核心做法是把“共享数据”和“账号凭证”拆开管理：  
+同一 env 下切换账号只替换 `auth.json`，不改动该 env 下其它共享数据文件。
 
 ## 安装
 
-### 方式 A：npm 全局安装
+### npm 全局安装
 
 ```bash
 npm i -g @wangxt0223/codex-switcher
-codex-switcher check
+codex-sw check
 ```
 
-### 方式 B：源码安装
+### 源码安装
 
 ```bash
 ./scripts/install.sh
-codex-switcher check
+codex-sw check
 ```
 
 ## 快速开始
 
 ```bash
-codex-switcher ac login personal --env default
-codex-switcher ac login work --env default
-codex-switcher ac use personal --env default
+# 在 default env 登录两个账号
+codex-sw ac login personal --env default
+codex-sw ac login work --env default
 
-codex-switcher env create project-a --empty
-codex-switcher ac login corp --env project-a
-codex-switcher ac use corp --env project-a
+# 切换 CLI 账号并启动 codex
+codex-sw ac use personal -t cli --launch
+
+# 切换 App 账号并启动 App
+codex-sw ac use work -t app --launch
+
+# 新建 env 并登录账号
+codex-sw env new project-a --empty
+codex-sw ac login corp --env project-a
+codex-sw ac use corp --env project-a -t both
 ```
 
-## 同步选项
+## 核心命令
 
-- 同一 env 下切账号：只替换 `auth.json`，不进行共享数据同步。
-- `account login --sync`（跨 env 场景）：可将默认 env 数据同步到目标 env（不含 `auth.json`）。
-- `ac use`（`account use`）默认 `--launch=auto`：交互终端中切换后会自动启动 `codex` CLI。
-- `ac use --launch`：切换后立即启动 `codex` CLI。
-- `ac use --no-launch`：仅切换账号指针，不启动 `codex` CLI。
-- `ac use -- <codex args...>`：切换后直接执行 `codex` 参数（隐式启用 launch）。
+| 命令 | 说明 |
+| --- | --- |
+| `codex-sw env ls` | 列出环境 |
+| `codex-sw env new <env> [--empty\|--from <src-env\|default>]` | 创建环境 |
+| `codex-sw env use <env> [-t cli\|app\|both]` | 切换环境 |
+| `codex-sw ac ls [--env <env>]` | 查看账号总览与用量（同 `ops list`） |
+| `codex-sw ac login <account> [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync]` | 登录账号 |
+| `codex-sw ac use <account> [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--launch\|--no-launch] [-- <codex args...>]` | 切换账号 |
+| `codex-sw ac logout [account] [--env <env>] [-t cli\|app\|both]` | 注销账号 |
+| `codex-sw whoami [-t cli\|app\|both]` | 查看当前 env/account |
+| `codex-sw status` | 查看当前登录状态 |
+| `codex-sw version` | 查看版本 |
+| `codex-sw check` | 健康检查 |
+| `codex-sw upgrade [--dry-run]` | 升级工具 |
+| `codex-sw --help` | 查看核心命令帮助 |
+| `codex-sw --help-all` | 查看完整命令帮助 |
 
-## 命令迁移
+## 运维命令
 
-- 账号相关一级命令已移除：`codex-sw login/logout/add/remove/use/switch` 不再支持。
-- 请使用最新分组命令：`codex-sw env ...` 与 `codex-sw ac ...`（`ac` 与 `account` 等价）。
-
-## 命令参考
-
-以下以 `codex-sw` 为例（`codex-switcher` 为等价兼容命令；`ac` 与 `account` 等价）：
-
-| 分类 | 命令 | 说明 |
-| --- | --- | --- |
-| Env 管理 | `codex-sw env list` | 列出所有 env，并标记 CLI/App 当前 env |
-| Env 管理 | `codex-sw env create <env> [--empty\|--from-default\|--from-env <src>]` | 创建 env（空目录或从已有 env 同步数据） |
-| Env 管理 | `codex-sw env use <env> [--target cli\|app\|both]` | 切换 CLI/App 使用的 env |
-| Env 管理 | `codex-sw env remove <env> [--force]` | 删除 env（必要时强制） |
-| Env 管理 | `codex-sw env current [cli\|app]` | 查看当前 env 指针 |
-| Env 管理 | `codex-sw env path [env]` | 输出 env 对应 `CODEX_HOME` 导出语句 |
-| 账号管理 | `codex-sw ac list [--env <env>]` | 列出 env 下账号并标记当前账号 |
-| 账号管理 | `codex-sw ac add <account> [--env <env>]` | 创建账号槽位（不登录） |
-| 账号管理 | `codex-sw ac remove <account> [--env <env>] [--force]` | 删除账号槽位 |
-| 账号管理 | `codex-sw ac login <account> [--env <env>] [--target cli\|app\|both] [--sync\|--no-sync]` | 在目标 env 登录并保存账号 `auth.json` |
-| 账号管理 | `codex-sw ac use <account> [--env <env>] [--target cli\|app\|both] [--sync\|--no-sync] [--launch\|--no-launch] [-- <codex args...>]` | 切换到目标账号，并可自动启动 `codex` CLI |
-| 账号管理 | `codex-sw ac logout [account] [--env <env>] [--target cli\|app\|both]` | 注销账号（删除对应 auth） |
-| 账号管理 | `codex-sw ac current [cli\|app]` | 查看当前 env/account 指针 |
-| 用量代理 | `codex-sw proxy [<host:port>\|off\|test]` | 设置/关闭/测试“用量 API”代理（仅影响 `list`） |
-| 查询执行 | `codex-sw list` | 展示 `ENV/HOME/ACCOUNT/EMAIL/PLAN/5H/WEEKLY/SOURCE` |
-| 查询执行 | `codex-sw status` | 检查 CLI/App 当前登录状态 |
-| 查询执行 | `codex-sw current [cli\|app]` | 查看当前 env/account |
-| 查询执行 | `codex-sw exec -- <codex args...>` | 在当前 CLI env/account 下执行 `codex` |
-| 数据导入 | `codex-sw import-default <env> [--with-auth] [--force]` | 从默认 env 导入数据到指定 env |
-| App 管理 | `codex-sw app open [account] [-- <app args...>]` | 以指定账号打开 Codex App |
-| App 管理 | `codex-sw app use <account> [-- <app args...>]` | 切换 App 到指定账号（内部等价于 open） |
-| App 管理 | `codex-sw app logout [account]` | 注销 App 当前账号 |
-| App 管理 | `codex-sw app status` | 查看 App 管理进程状态 |
-| App 管理 | `codex-sw app stop` | 停止由工具托管启动的 App 进程 |
-| App 管理 | `codex-sw app current` | 查看 App 当前 env/account |
-| 维护命令 | `codex-sw init [--shell zsh\|bash] [--dry-run]` | 初始化 PATH 快捷命令 |
-| 维护命令 | `codex-sw upgrade [--dry-run]` | 升级到最新 npm 版本 |
-| 维护命令 | `codex-sw recover [--dry-run]` | 自动恢复损坏指针 |
-| 维护命令 | `codex-sw version` | 输出当前工具版本号 |
-| 维护命令 | `codex-sw check` | 基础健康检查 |
-| 维护命令 | `codex-sw doctor [--fix]` | 深度检查并可选自动修复 |
-| 维护命令 | `codex-sw --help` | 查看完整帮助 |
-
-插件侧详细说明：
-
-- 中文：`plugins/codex-switcher/README.md`
-- English：`plugins/codex-switcher/README.en.md`
+| 命令 | 说明 |
+| --- | --- |
+| `codex-sw ops list` | 查看账号列表与用量信息（同 `ac ls`） |
+| `codex-sw ops proxy [<host:port>\|off\|test]` | 配置/测试用量 API 代理 |
+| `codex-sw ops exec -- <codex args...>` | 在当前 CLI 上下文执行 codex |
+| `codex-sw ops import-default <env> [--with-auth] [--force]` | 导入默认环境数据 |
+| `codex-sw ops init [--shell zsh\|bash] [--dry-run]` | 初始化命令入口 |
+| `codex-sw ops recover [--dry-run]` | 恢复指针 |
+| `codex-sw ops doctor [--fix]` | 深度检查与修复 |
 
 ## 开发
 
@@ -113,21 +92,9 @@ codex-switcher ac use corp --env project-a
 npm run check
 ```
 
-## 发布到 npm
+## 发布
 
 ```bash
 npm login --registry https://registry.npmjs.org/
 npm run release:npm
 ```
-
-## 升级
-
-```bash
-codex-switcher upgrade
-```
-
-## 文档
-
-- `docs/macos-manual-checklist.md`
-- `docs/upgrade.md`
-- `docs/publish.md`

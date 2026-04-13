@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.1 - 2026-04-13
+
+- Moved health/upgrade out of ops namespace to top-level commands: `check`, `upgrade`.
+- Aligned `ac ls` with legacy `list`-style full table output, including `LAST ACTIVITY`.
+- Added `ac ls --env <env>` table filtering and smoke-test coverage for `ac ls == ops list`.
+- Updated docs to clarify `ac ls` and `ops list` parity.
+
+## 0.7.0 - 2026-04-13
+
+- Simplified command tree to core groups: `env`, `ac`/`account`, `whoami`, `status`, `version`.
+- Added `ops` namespace for operational commands: `list/proxy/exec/import-default/init/upgrade/recover/check/doctor`.
+- Renamed env/account subcommands to compact forms: `env ls/new/use`, `ac ls/login/use/logout`.
+- Added `-t` short option as alias of `--target` for env/account target selection.
+- Unified App switching into `ac use -t app --launch`; removed top-level `app` command group.
+- Removed legacy top-level account commands: `login/logout/add/remove/use/switch`.
+- Updated smoke tests and docs to the new command model.
+
 ## 0.6.6 - 2026-04-13
 
 - Removed legacy account-related top-level commands: `login/logout/add/remove/use/switch`.

@@ -2,114 +2,89 @@
 
 [中文](README.md) | English
 
-`codex-switcher` is a lightweight switcher for Codex CLI and Codex App.
-It now uses an `env + account` model: env for shared data, account for isolated `auth.json`.
+`codex-switcher` manages Codex CLI / Codex App switching with an `env + account` model.
 
 ## Background
 
 I originally used Codex for personal work while my company account lived in Cursor, so there was no conflict.  
 After the company migrated from Cursor to Codex, my personal and company Codex accounts started conflicting on the same machine, and switching became unreliable.
 
-After inspecting local behavior, I found Codex's local auth model is straightforward: if account-local data is isolated per directory, account switching becomes stable. Based on that, I built `codex-switcher` with Codex to manage, switch, and isolate all my Codex accounts.
+After checking local behavior, I found the key is simple: keep account-local data isolated by directory.  
+Based on that, I built `codex-switcher` to manage, switch, and isolate multiple Codex accounts.
 
 ## Codex Local Auth Model (Summary)
 
-The following is based on observed local behavior and filesystem layout:
+Codex stores auth state, session history, and local runtime data under `CODEX_HOME` (usually `~/.codex`).  
+When multiple accounts share the same directory, auth/session data can overwrite each other.
 
-- Both `Codex CLI` and `Codex App` read the same root directory: `CODEX_HOME` (default is usually `~/.codex`).
-- Auth state is primarily persisted in `CODEX_HOME/auth.json`.
-- Session/history/state data is also stored under the same `CODEX_HOME` (for example `history.jsonl`, `sessions/`, `state_*.sqlite`).
-- So when multiple accounts share one `CODEX_HOME`, auth/session data can overwrite or contaminate each other.
-
-`codex-switcher` solves this by decoupling shared data from auth credentials.  
-Built-in `env=default` maps to `~/.codex`, and same-env account switch only swaps `auth.json`.
+`codex-switcher` separates shared data from account credentials:  
+switching accounts within the same env only replaces `auth.json`, while keeping other shared files unchanged.
 
 ## Install
 
-### Option A: npm (global)
+### npm global install
 
 ```bash
 npm i -g @wangxt0223/codex-switcher
-codex-switcher check
+codex-sw check
 ```
 
-### Option B: from source checkout
+### Install from source
 
 ```bash
 ./scripts/install.sh
-codex-switcher check
+codex-sw check
 ```
 
-## Quick start
+## Quick Start
 
 ```bash
-codex-switcher ac login personal --env default
-codex-switcher ac login work --env default
-codex-switcher ac use personal --env default
+# Login two accounts in default env
+codex-sw ac login personal --env default
+codex-sw ac login work --env default
 
-codex-switcher env create project-a --empty
-codex-switcher ac login corp --env project-a
-codex-switcher ac use corp --env project-a
+# Switch CLI account and launch codex
+codex-sw ac use personal -t cli --launch
+
+# Switch App account and launch App
+codex-sw ac use work -t app --launch
+
+# Create env and use account in that env
+codex-sw env new project-a --empty
+codex-sw ac login corp --env project-a
+codex-sw ac use corp --env project-a -t both
 ```
 
-## Sync options
+## Core Commands
 
-- Same-env account switch only replaces `auth.json`; no shared data sync is needed.
-- `account login --sync` (cross-env setup) can sync default-env data into target env (excluding `auth.json`).
-- `ac use` (`account use`) defaults to `--launch=auto`: on an interactive terminal, `codex` starts automatically after switch.
-- `ac use --launch`: launch `codex` CLI immediately after switching.
-- `ac use --no-launch`: switch account pointer only, without launching `codex`.
-- `ac use -- <codex args...>`: run `codex` with args right after switch (implies launch).
+| Command | Description |
+| --- | --- |
+| `codex-sw env ls` | List envs |
+| `codex-sw env new <env> [--empty\|--from <src-env\|default>]` | Create env |
+| `codex-sw env use <env> [-t cli\|app\|both]` | Switch env |
+| `codex-sw ac ls [--env <env>]` | Show account overview and usage (same as `ops list`) |
+| `codex-sw ac login <account> [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync]` | Login account |
+| `codex-sw ac use <account> [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--launch\|--no-launch] [-- <codex args...>]` | Switch account |
+| `codex-sw ac logout [account] [--env <env>] [-t cli\|app\|both]` | Logout account |
+| `codex-sw whoami [-t cli\|app\|both]` | Show current env/account |
+| `codex-sw status` | Show login status |
+| `codex-sw version` | Show version |
+| `codex-sw check` | Health check |
+| `codex-sw upgrade [--dry-run]` | Upgrade tool |
+| `codex-sw --help` | Show core help |
+| `codex-sw --help-all` | Show full help |
 
-## Command Migration
+## Operations Commands
 
-- Legacy account-related top-level commands were removed:
-  `codex-sw login/logout/add/remove/use/switch`.
-- Use grouped commands instead:
-  `codex-sw env ...` and `codex-sw ac ...` (`ac` and `account` are equivalent).
-
-## Command reference
-
-Commands below use `codex-sw` (`codex-switcher` is equivalent; `ac` and `account` are equivalent):
-
-| Category | Command | Description |
-| --- | --- | --- |
-| Env | `codex-sw env list` | List all envs with CLI/App current markers |
-| Env | `codex-sw env create <env> [--empty\|--from-default\|--from-env <src>]` | Create env from empty/default/another env |
-| Env | `codex-sw env use <env> [--target cli\|app\|both]` | Switch env pointer for CLI/App |
-| Env | `codex-sw env remove <env> [--force]` | Remove env |
-| Env | `codex-sw env current [cli\|app]` | Show current env pointer |
-| Env | `codex-sw env path [env]` | Print exportable `CODEX_HOME` path |
-| Account | `codex-sw ac list [--env <env>]` | List accounts in env with current markers |
-| Account | `codex-sw ac add <account> [--env <env>]` | Add account slot |
-| Account | `codex-sw ac remove <account> [--env <env>] [--force]` | Remove account slot |
-| Account | `codex-sw ac login <account> [--env <env>] [--target cli\|app\|both] [--sync\|--no-sync]` | Login account and persist auth |
-| Account | `codex-sw ac use <account> [--env <env>] [--target cli\|app\|both] [--sync\|--no-sync] [--launch\|--no-launch] [-- <codex args...>]` | Switch to account and optionally auto-launch `codex` CLI |
-| Account | `codex-sw ac logout [account] [--env <env>] [--target cli\|app\|both]` | Logout account |
-| Account | `codex-sw ac current [cli\|app]` | Show current env/account pointer |
-| Usage proxy | `codex-sw proxy [<host:port>\|off\|test]` | Configure/test usage API proxy (only affects `list`) |
-| Query/Run | `codex-sw list` | Show `ENV/HOME/ACCOUNT/EMAIL/PLAN/5H/WEEKLY/SOURCE` |
-| Query/Run | `codex-sw status` | Show login status for current CLI/App pointers |
-| Query/Run | `codex-sw current [cli\|app]` | Show current env/account |
-| Query/Run | `codex-sw exec -- <codex args...>` | Run `codex` under current CLI env/account |
-| Import | `codex-sw import-default <env> [--with-auth] [--force]` | Import default env data into target env |
-| App | `codex-sw app open [account] [-- <app args...>]` | Open Codex App under account |
-| App | `codex-sw app use <account> [-- <app args...>]` | Switch App account (alias of open) |
-| App | `codex-sw app logout [account]` | Logout App account |
-| App | `codex-sw app status` | Show managed App process status |
-| App | `codex-sw app stop` | Stop managed App process |
-| App | `codex-sw app current` | Show current App env/account |
-| Maintenance | `codex-sw init [--shell zsh\|bash] [--dry-run]` | Initialize PATH bootstrap |
-| Maintenance | `codex-sw upgrade [--dry-run]` | Upgrade from npm |
-| Maintenance | `codex-sw recover [--dry-run]` | Recover corrupted pointers |
-| Maintenance | `codex-sw version` | Print current tool version |
-| Maintenance | `codex-sw check` | Basic health checks |
-| Maintenance | `codex-sw doctor [--fix]` | Deep diagnostics and optional auto-fix |
-| Maintenance | `codex-sw --help` | Show full help |
-
-Plugin-level docs:
-- Chinese: `plugins/codex-switcher/README.md`
-- English: `plugins/codex-switcher/README.en.md`
+| Command | Description |
+| --- | --- |
+| `codex-sw ops list` | Show account list and usage (same as `ac ls`) |
+| `codex-sw ops proxy [<host:port>\|off\|test]` | Configure/test usage API proxy |
+| `codex-sw ops exec -- <codex args...>` | Run codex in current CLI context |
+| `codex-sw ops import-default <env> [--with-auth] [--force]` | Import default env data |
+| `codex-sw ops init [--shell zsh\|bash] [--dry-run]` | Initialize command bootstrap |
+| `codex-sw ops recover [--dry-run]` | Recover pointers |
+| `codex-sw ops doctor [--fix]` | Deep diagnostics and fix |
 
 ## Development
 
@@ -117,21 +92,9 @@ Plugin-level docs:
 npm run check
 ```
 
-## Publish to npm
+## Release
 
 ```bash
 npm login --registry https://registry.npmjs.org/
 npm run release:npm
 ```
-
-## Upgrade
-
-```bash
-codex-switcher upgrade
-```
-
-## Docs
-
-- `docs/macos-manual-checklist.md`
-- `docs/upgrade.md`
-- `docs/publish.md`

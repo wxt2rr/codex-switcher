@@ -15,17 +15,11 @@ codex-sw upgrade
 codex-sw check
 ```
 
-## Breaking behavior notes
-
-- `codex-sw` is the preferred command namespace.
-- `codex-switcher` remains available for compatibility.
-- `codex-sw app stop` now targets only managed App processes launched by `codex-sw`.
-
 ## Recovery
 
 If pointers are corrupted, or env/account data directories are missing:
 
 ```bash
-codex-sw recover
+codex-sw ops recover
 codex-sw status
 ```

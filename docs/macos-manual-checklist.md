@@ -5,7 +5,6 @@ Run this checklist on a macOS machine with Codex.app installed.
 ## Setup
 
 - [ ] `codex-sw check` returns `check: ok`
-- [ ] `codex-sw ac add work --env default` and `codex-sw ac add personal --env default` succeed
 
 ## CLI isolation
 
@@ -15,16 +14,14 @@ Run this checklist on a macOS machine with Codex.app installed.
 
 ## App switching
 
-- [ ] `codex-sw app use work` opens App
-- [ ] `codex-sw app current` prints `default/work`
-- [ ] `codex-sw app use personal` restarts App under `default/personal`
-- [ ] `codex-sw app status` reports running when app is open
-- [ ] `codex-sw app stop` stops managed app process
+- [ ] `codex-sw ac use work -t app --launch` opens App
+- [ ] `codex-sw whoami -t app` prints `default/work`
+- [ ] `codex-sw ac use personal -t app --launch` restarts App under `default/personal`
 
 ## Recovery and integrity
 
-- [ ] Corrupt pointer file manually and run `codex-sw recover`
-- [ ] `codex-sw doctor --fix` completes successfully
+- [ ] Corrupt pointer file manually and run `codex-sw ops recover`
+- [ ] `codex-sw ops doctor --fix` completes successfully
 - [ ] `codex-sw check` passes after recovery
 
 ## Security checks

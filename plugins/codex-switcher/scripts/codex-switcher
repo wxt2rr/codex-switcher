@@ -35,54 +35,54 @@ DISABLE_SYSTEM_PROXY_DETECT="${CODEX_SWITCHER_DISABLE_SYSTEM_PROXY_DETECT:-false
 usage() {
   cat <<'USAGE'
 Usage:
-  codex-sw env list
-  codex-sw env create <env> [--empty|--from-default|--from-env <src>]
-  codex-sw env use <env> [--target cli|app|both]
-  codex-sw env remove <env> [--force]
-  codex-sw env current [cli|app]
-  codex-sw env path [env]
+  codex-sw env ls
+  codex-sw env new <env> [--empty|--from <src-env|default>]
+  codex-sw env use <env> [-t cli|app|both]
 
-  codex-sw ac list [--env <env>]
-  codex-sw ac add <account> [--env <env>]
-  codex-sw ac remove <account> [--env <env>] [--force]
-  codex-sw ac login <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync]
-  codex-sw ac use <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]
-  codex-sw ac logout [account] [--env <env>] [--target cli|app|both]
-  codex-sw ac current [cli|app]
+  codex-sw ac ls [--env <env>]
+  codex-sw ac login <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync]
+  codex-sw ac use <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]
+  codex-sw ac logout [account] [--env <env>] [-t cli|app|both]
 
-  codex-sw proxy [<host:port>|off|test]
-
-  codex-sw list
+  codex-sw whoami [-t cli|app|both]
   codex-sw status
-  codex-sw current [cli|app]
-  codex-sw exec -- <codex args...>
-  codex-sw import-default <env> [--with-auth] [--force]
-
-  codex-sw app open [account] [-- <app args...>]
-  codex-sw app use <account> [-- <app args...>]
-  codex-sw app logout [account]
-  codex-sw app status
-  codex-sw app stop
-  codex-sw app current
-
-  codex-sw init [--shell zsh|bash] [--dry-run]
-  codex-sw upgrade [--dry-run]
-  codex-sw recover [--dry-run]
-  codex-sw version
   codex-sw check
-  codex-sw doctor [--fix]
-
-Compatibility:
-  codex-switcher <same-commands>
+  codex-sw upgrade [--dry-run]
+  codex-sw version
+  codex-sw --help
+  codex-sw --help-all
 
 Notes:
-  - `ac` and `account` are equivalent command groups.
-  - Built-in env "default" always maps to ~/.codex (or CODEX_SWITCHER_DEFAULT_HOME).
-  - Same-env account switch only swaps auth.json and does not sync shared data.
-  - `proxy` only affects usage API calls used by `list`.
-  - If manual proxy is not set, usage API proxy is auto-detected from env/system proxy settings.
-  - `list` prints: ENV / HOME / ACCOUNT / EMAIL / PLAN / 5H USAGE / WEEKLY USAGE / SOURCE.
-  - Usage metrics are API-first and automatically fallback to local sessions; source is shown as (api|local).
+  - `ac` and `account` are equivalent.
+  - Use `--help-all` to show operations under `ops`.
+USAGE
+}
+
+usage_all() {
+  cat <<'USAGE'
+Usage:
+  codex-sw env ls
+  codex-sw env new <env> [--empty|--from <src-env|default>]
+  codex-sw env use <env> [-t cli|app|both]
+
+  codex-sw ac ls [--env <env>]
+  codex-sw ac login <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync]
+  codex-sw ac use <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]
+  codex-sw ac logout [account] [--env <env>] [-t cli|app|both]
+
+  codex-sw whoami [-t cli|app|both]
+  codex-sw status
+  codex-sw check
+  codex-sw upgrade [--dry-run]
+  codex-sw version
+
+  codex-sw ops list
+  codex-sw ops proxy [<host:port>|off|test]
+  codex-sw ops exec -- <codex args...>
+  codex-sw ops import-default <env> [--with-auth] [--force]
+  codex-sw ops init [--shell zsh|bash] [--dry-run]
+  codex-sw ops recover [--dry-run]
+  codex-sw ops doctor [--fix]
 USAGE
 }
 
@@ -918,27 +918,11 @@ cmd_account_remove() {
 }
 
 cmd_account_list() {
-  local env="$1"
-  local cli_env app_env cli_account app_account found account marks
-  require_env_exists "$env"
-
-  cli_env="$(read_current_env cli || true)"
-  app_env="$(read_current_env app || true)"
-  cli_account="$(read_current_account cli || true)"
-  app_account="$(read_current_account app || true)"
-  found=0
-
-  while IFS= read -r account; do
-    found=1
-    marks=""
-    [[ "$env" == "$cli_env" && "$account" == "$cli_account" ]] && marks="${marks} [cli-current]"
-    [[ "$env" == "$app_env" && "$account" == "$app_account" ]] && marks="${marks} [app-current]"
-    echo "- $account$marks"
-  done < <(list_accounts_for_env "$env")
-
-  if [[ "$found" -eq 0 ]]; then
-    echo "No accounts in env '$env'. Use: $SCRIPT_NAME ac login <account> --env $env"
+  local env_filter="${1:-}"
+  if [[ -n "$env_filter" ]]; then
+    require_env_exists "$env_filter"
   fi
+  cmd_list "$env_filter"
 }
 
 _cmd_account_set_target() {
@@ -1139,10 +1123,10 @@ PY
 }
 
 cmd_list() {
+  local env_filter="${1:-}"
   local cli_env app_env cli_account app_account
   local env account marks auth_file home home_display metrics
-  local email plan usage_5h usage_weekly source
-  local _last_activity=""
+  local email plan usage_5h usage_weekly source last_activity
   local usage_proxy="" usage_info=""
 
   cli_env="$(read_current_env cli || true)"
@@ -1154,8 +1138,11 @@ cmd_list() {
     IFS=$'\t' read -r _ usage_proxy <<< "$usage_info"
   fi
 
-  printf '%-12s %-28s %-30s %-38s %-10s %-20s %-20s %s\n' "ENV" "HOME" "ACCOUNT" "EMAIL" "PLAN" "5H USAGE" "WEEKLY USAGE" "SOURCE"
+  printf '%-12s %-28s %-30s %-38s %-10s %-20s %-20s %-16s %s\n' "ENV" "HOME" "ACCOUNT" "EMAIL" "PLAN" "5H USAGE" "WEEKLY USAGE" "LAST ACTIVITY" "SOURCE"
   while IFS= read -r env; do
+    if [[ -n "$env_filter" && "$env" != "$env_filter" ]]; then
+      continue
+    fi
     home="$(env_home_path "$env")"
     home_display="$(display_path_for_output "$home")"
     ensure_env_home "$env"
@@ -1166,6 +1153,7 @@ cmd_list() {
       plan=""
       usage_5h=""
       usage_weekly=""
+      last_activity=""
       source=""
       marks=""
       [[ "$env" == "$cli_env" && "$account" == "$cli_account" ]] && marks="${marks} [cli-current]"
@@ -1175,16 +1163,17 @@ cmd_list() {
 
       metrics="$(collect_profile_metrics_tsv "$account" "$auth_file" "$home" "$usage_proxy" || true)"
       if [[ -n "$metrics" ]]; then
-        IFS=$'\t' read -r email plan usage_5h usage_weekly _last_activity source <<< "$metrics"
+        IFS=$'\t' read -r email plan usage_5h usage_weekly last_activity source <<< "$metrics"
       fi
       email="${email:-($account)-}"
       plan="${plan:-unknown}"
       usage_5h="${usage_5h:--}"
       usage_weekly="${usage_weekly:--}"
+      last_activity="${last_activity:--}"
       source="${source:-local}"
       [[ "$source" == "api" || "$source" == "local" ]] || source="local"
 
-      printf '%-12s %-28s %-30s %-38s %-10s %-20s %-20s %s\n' "$env" "$home_display" "$account$marks" "$email" "$plan" "$usage_5h" "$usage_weekly" "$source"
+      printf '%-12s %-28s %-30s %-38s %-10s %-20s %-20s %-16s %s\n' "$env" "$home_display" "$account$marks" "$email" "$plan" "$usage_5h" "$usage_weekly" "$last_activity" "$source"
     done < <(list_accounts_for_env "$env")
 
     if [[ "$found" -eq 0 ]]; then
@@ -1192,18 +1181,20 @@ cmd_list() {
       plan=""
       usage_5h=""
       usage_weekly=""
+      last_activity=""
       source=""
       metrics="$(collect_profile_metrics_tsv "-" "$home/auth.json" "$home" "$usage_proxy" || true)"
       if [[ -n "$metrics" ]]; then
-        IFS=$'\t' read -r email plan usage_5h usage_weekly _last_activity source <<< "$metrics"
+        IFS=$'\t' read -r email plan usage_5h usage_weekly last_activity source <<< "$metrics"
       fi
       email="${email:--}"
       plan="${plan:-unknown}"
       usage_5h="${usage_5h:--}"
       usage_weekly="${usage_weekly:--}"
+      last_activity="${last_activity:--}"
       source="${source:-local}"
       [[ "$source" == "api" || "$source" == "local" ]] || source="local"
-      printf '%-12s %-28s %-30s %-38s %-10s %-20s %-20s %s\n' "$env" "$home_display" "-" "$email" "$plan" "$usage_5h" "$usage_weekly" "$source"
+      printf '%-12s %-28s %-30s %-38s %-10s %-20s %-20s %-16s %s\n' "$env" "$home_display" "-" "$email" "$plan" "$usage_5h" "$usage_weekly" "$last_activity" "$source"
     fi
   done < <(list_env_names | sort -u)
 }
@@ -1256,6 +1247,11 @@ target_includes_cli() {
   [[ "$target" == "cli" || "$target" == "both" ]]
 }
 
+target_includes_app() {
+  local target="$1"
+  [[ "$target" == "app" || "$target" == "both" ]]
+}
+
 cmd_account_use_and_maybe_launch() {
   local account="$1"
   local env="$2"
@@ -1266,21 +1262,25 @@ cmd_account_use_and_maybe_launch() {
 
   with_lock cmd_account_use "$account" "$env" "$target" "$sync_mode"
 
-  if ! target_includes_cli "$target"; then
-    return 0
-  fi
-
   if should_launch_codex "$launch_mode"; then
-    echo "Launching codex with env/account: $(read_current_env cli || true)/$(read_current_account cli || true)"
-    run_codex_for_target cli "$@"
-    return
+    if target_includes_cli "$target"; then
+      echo "Launching codex with env/account: $(read_current_env cli || true)/$(read_current_account cli || true)"
+      run_codex_for_target cli "$@"
+    fi
+    if target_includes_app "$target"; then
+      echo "Launching Codex App with env/account: $(read_current_env app || true)/$(read_current_account app || true)"
+      cmd_app_open "$account"
+    fi
+    return 0
   fi
 
   if [[ "$launch_mode" == "auto" ]]; then
     echo "Auto launch skipped (non-interactive shell). Use --launch to force start."
   fi
-  echo "Run in current shell if needed:"
-  echo "  export CODEX_HOME='$(target_home_path cli)'"
+  if target_includes_cli "$target"; then
+    echo "Run in current shell if needed:"
+    echo "  export CODEX_HOME='$(target_home_path cli)'"
+  fi
 }
 
 cmd_current() {
@@ -1657,18 +1657,15 @@ main() {
   case "$cmd" in
     env)
       local sub="${1:-}"
-      if [[ -z "$sub" ]]; then
-        usage
-        exit 1
-      fi
+      [[ -n "$sub" ]] || err "usage: $SCRIPT_NAME env <ls|new|use> ..."
       shift || true
       case "$sub" in
-        list)
-          [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME env list"
+        ls)
+          [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME env ls"
           cmd_env_list
           ;;
-        create)
-          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME env create <env> [--empty|--from-default|--from-env <src>]"
+        new)
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME env new <env> [--empty|--from <src-env|default>]"
           local env="$1"
           shift
           local mode="from-default"
@@ -1678,14 +1675,16 @@ main() {
               --empty)
                 mode="empty"
                 ;;
-              --from-default)
-                mode="from-default"
-                ;;
-              --from-env)
+              --from)
                 shift
-                [[ "$#" -gt 0 ]] || err "missing source env after --from-env"
-                mode="from-env"
-                src_env="$1"
+                [[ "$#" -gt 0 ]] || err "missing source env after --from"
+                if [[ "$1" == "$DEFAULT_ENV_NAME" ]]; then
+                  mode="from-default"
+                  src_env=""
+                else
+                  mode="from-env"
+                  src_env="$1"
+                fi
                 ;;
               *)
                 err "unknown option: $1"
@@ -1696,15 +1695,15 @@ main() {
           with_lock cmd_env_create "$env" "$mode" "$src_env"
           ;;
         use)
-          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME env use <env> [--target cli|app|both]"
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME env use <env> [-t cli|app|both]"
           local env="$1"
           shift
           local target="cli"
           while [[ "$#" -gt 0 ]]; do
             case "$1" in
-              --target)
+              -t|--target)
                 shift
-                [[ "$#" -gt 0 ]] || err "missing value after --target"
+                [[ "$#" -gt 0 ]] || err "missing target after -t/--target"
                 target="$1"
                 ;;
               *)
@@ -1715,25 +1714,6 @@ main() {
           done
           with_lock cmd_env_use "$env" "$target"
           ;;
-        remove)
-          [[ "$#" -ge 1 && "$#" -le 2 ]] || err "usage: $SCRIPT_NAME env remove <env> [--force]"
-          local env="$1"
-          local force="false"
-          if [[ "${2:-}" == "--force" ]]; then
-            force="true"
-          elif [[ -n "${2:-}" ]]; then
-            err "unknown option: ${2:-}"
-          fi
-          with_lock cmd_env_remove "$env" "$force"
-          ;;
-        current)
-          [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME env current [cli|app]"
-          cmd_env_current "${1:-all}"
-          ;;
-        path)
-          [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME env path [env]"
-          cmd_env_path "${1:-}"
-          ;;
         *)
           err "unknown env subcommand: $sub"
           ;;
@@ -1741,11 +1721,11 @@ main() {
       ;;
     account|ac)
       local sub="${1:-}"
-      [[ -n "$sub" ]] || err "usage: $SCRIPT_NAME ac <list|add|remove|login|use|logout|current> ..."
+      [[ -n "$sub" ]] || err "usage: $SCRIPT_NAME ac <ls|login|use|logout> ..."
       shift || true
       case "$sub" in
-        list)
-          local env="$(read_current_env cli || true)"
+        ls)
+          local env=""
           while [[ "$#" -gt 0 ]]; do
             case "$1" in
               --env)
@@ -1761,52 +1741,8 @@ main() {
           done
           cmd_account_list "$env"
           ;;
-        add)
-          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME ac add <account> [--env <env>]"
-          local account="$1"
-          shift
-          local env="$(read_current_env cli || true)"
-          while [[ "$#" -gt 0 ]]; do
-            case "$1" in
-              --env)
-                shift
-                [[ "$#" -gt 0 ]] || err "missing env after --env"
-                env="$1"
-                ;;
-              *)
-                err "unknown option: $1"
-                ;;
-            esac
-            shift
-          done
-          with_lock cmd_account_add "$account" "$env"
-          ;;
-        remove)
-          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME ac remove <account> [--env <env>] [--force]"
-          local account="$1"
-          shift
-          local env="$(read_current_env cli || true)"
-          local force="false"
-          while [[ "$#" -gt 0 ]]; do
-            case "$1" in
-              --env)
-                shift
-                [[ "$#" -gt 0 ]] || err "missing env after --env"
-                env="$1"
-                ;;
-              --force)
-                force="true"
-                ;;
-              *)
-                err "unknown option: $1"
-                ;;
-            esac
-            shift
-          done
-          with_lock cmd_account_remove "$account" "$env" "$force"
-          ;;
         login)
-          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME ac login <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync]"
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME ac login <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync]"
           local account="$1"
           shift
           local env="$(read_current_env cli || true)"
@@ -1819,9 +1755,9 @@ main() {
                 [[ "$#" -gt 0 ]] || err "missing env after --env"
                 env="$1"
                 ;;
-              --target)
+              -t|--target)
                 shift
-                [[ "$#" -gt 0 ]] || err "missing target after --target"
+                [[ "$#" -gt 0 ]] || err "missing target after -t/--target"
                 target="$1"
                 ;;
               --sync)
@@ -1839,7 +1775,7 @@ main() {
           with_lock cmd_account_login "$account" "$env" "$target" "$sync_mode"
           ;;
         use)
-          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME ac use <account> [--env <env>] [--target cli|app|both] [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]"
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME ac use <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]"
           local account="$1"
           shift
           local env="$(read_current_env cli || true)"
@@ -1854,9 +1790,9 @@ main() {
                 [[ "$#" -gt 0 ]] || err "missing env after --env"
                 env="$1"
                 ;;
-              --target)
+              -t|--target)
                 shift
-                [[ "$#" -gt 0 ]] || err "missing target after --target"
+                [[ "$#" -gt 0 ]] || err "missing target after -t/--target"
                 target="$1"
                 ;;
               --sync)
@@ -1882,9 +1818,9 @@ main() {
             esac
             shift
           done
-          if [[ "$target" == "app" ]]; then
-            [[ "$launch" != "true" ]] || err "--launch requires --target cli|both"
-            [[ "${#codex_args[@]}" -eq 0 ]] || err "cannot pass codex args with --target app"
+
+          if [[ "$target" == "app" && "${#codex_args[@]}" -gt 0 ]]; then
+            err "cannot pass codex args with -t app"
           fi
           if [[ "${#codex_args[@]}" -gt 0 ]]; then
             [[ "$launch" != "false" ]] || err "cannot pass codex args with --no-launch"
@@ -1911,9 +1847,9 @@ main() {
                 [[ "$#" -gt 0 ]] || err "missing env after --env"
                 env="$1"
                 ;;
-              --target)
+              -t|--target)
                 shift
-                [[ "$#" -gt 0 ]] || err "missing target after --target"
+                [[ "$#" -gt 0 ]] || err "missing target after -t/--target"
                 target="$1"
                 ;;
               *)
@@ -1924,113 +1860,46 @@ main() {
           done
           with_lock cmd_account_logout "$account" "$env" "$target"
           ;;
-        current)
-          [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME ac current [cli|app]"
-          cmd_account_current "${1:-all}"
-          ;;
         *)
           err "unknown account subcommand: $sub"
           ;;
       esac
       ;;
-    proxy)
-      [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME proxy [<host:port>|off|test]"
-      case "${1:-}" in
-        "")
-          cmd_proxy_show
-          ;;
-        off)
-          with_lock cmd_proxy_off
-          ;;
-        test)
-          cmd_proxy_test
-          ;;
-        *)
-          with_lock cmd_proxy_set "$1"
-          ;;
-      esac
-      ;;
-    list)
-      [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME list"
-      cmd_list
-      ;;
-    import-default)
-      [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME import-default <env> [--with-auth] [--force]"
-      local env="$1"
-      local with_auth="false"
-      local force="false"
-      shift
-      while [[ "$#" -gt 0 ]]; do
+    whoami)
+      local target="all"
+      if [[ "$#" -gt 0 ]]; then
         case "$1" in
-          --with-auth)
-            with_auth="true"
-            ;;
-          --force)
-            force="true"
+          -t|--target)
+            shift
+            [[ "$#" -gt 0 ]] || err "missing target after -t/--target"
+            target="$1"
+            shift
             ;;
           *)
             err "unknown option: $1"
             ;;
         esac
-        shift
-      done
-      with_lock cmd_import_default "$env" "$with_auth" "$force"
-      ;;
-    current)
-      [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME current [cli|app]"
-      cmd_current "${1:-all}"
+      fi
+      [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME whoami [-t cli|app|both]"
+      case "$target" in
+        cli|app)
+          cmd_current "$target"
+          ;;
+        both|all)
+          cmd_current all
+          ;;
+        *)
+          err "invalid target '$target' (use cli|app|both)"
+          ;;
+      esac
       ;;
     status)
       [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME status"
       cmd_status
       ;;
-    exec)
-      cmd_exec "$@"
-      ;;
-    app)
-      local sub="${1:-}"
-      [[ -n "$sub" ]] || err "usage: $SCRIPT_NAME app <open|use|logout|status|stop|current> ..."
-      shift || true
-      case "$sub" in
-        open)
-          local account=""
-          if [[ "$#" -gt 0 && "${1:-}" != "--" ]]; then
-            account="$1"
-            shift
-          fi
-          if [[ "${1:-}" == "--" ]]; then shift; fi
-          with_lock cmd_app_open "$account" "$@"
-          ;;
-        use)
-          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME app use <account> [-- <app args...>]"
-          local account="$1"
-          shift
-          if [[ "${1:-}" == "--" ]]; then shift; fi
-          with_lock cmd_app_use "$account" "$@"
-          ;;
-        logout)
-          [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME app logout [account]"
-          with_lock cmd_app_logout "${1:-}"
-          ;;
-        status)
-          [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME app status"
-          cmd_app_status
-          ;;
-        stop)
-          [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME app stop"
-          with_lock cmd_app_stop
-          ;;
-        current)
-          [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME app current"
-          echo "$(read_current_env app || true)/$(read_current_account app || true)"
-          ;;
-        *)
-          err "unknown app subcommand: $sub"
-          ;;
-      esac
-      ;;
-    init)
-      cmd_init "$@"
+    check)
+      [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME check"
+      cmd_check
       ;;
     upgrade)
       [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME upgrade [--dry-run]"
@@ -2042,33 +1911,94 @@ main() {
       fi
       cmd_upgrade "$dry"
       ;;
-    recover)
-      [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME recover [--dry-run]"
-      local dry="false"
-      if [[ "${1:-}" == "--dry-run" ]]; then
-        dry="true"
-      elif [[ -n "${1:-}" ]]; then
-        err "unknown option: ${1:-}"
-      fi
-      with_lock cmd_recover "$dry"
+    ops)
+      local sub="${1:-}"
+      [[ -n "$sub" ]] || err "usage: $SCRIPT_NAME ops <list|proxy|exec|import-default|init|recover|doctor> ..."
+      shift || true
+      case "$sub" in
+        list)
+          [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME ops list"
+          cmd_list
+          ;;
+        proxy)
+          [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME ops proxy [<host:port>|off|test]"
+          case "${1:-}" in
+            "")
+              cmd_proxy_show
+              ;;
+            off)
+              with_lock cmd_proxy_off
+              ;;
+            test)
+              cmd_proxy_test
+              ;;
+            *)
+              with_lock cmd_proxy_set "$1"
+              ;;
+          esac
+          ;;
+        exec)
+          cmd_exec "$@"
+          ;;
+        import-default)
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME ops import-default <env> [--with-auth] [--force]"
+          local env="$1"
+          local with_auth="false"
+          local force="false"
+          shift
+          while [[ "$#" -gt 0 ]]; do
+            case "$1" in
+              --with-auth)
+                with_auth="true"
+                ;;
+              --force)
+                force="true"
+                ;;
+              *)
+                err "unknown option: $1"
+                ;;
+            esac
+            shift
+          done
+          with_lock cmd_import_default "$env" "$with_auth" "$force"
+          ;;
+        init)
+          cmd_init "$@"
+          ;;
+        recover)
+          [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME ops recover [--dry-run]"
+          local dry="false"
+          if [[ "${1:-}" == "--dry-run" ]]; then
+            dry="true"
+          elif [[ -n "${1:-}" ]]; then
+            err "unknown option: ${1:-}"
+          fi
+          with_lock cmd_recover "$dry"
+          ;;
+        doctor)
+          [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME ops doctor [--fix]"
+          local fix="false"
+          if [[ "${1:-}" == "--fix" ]]; then
+            fix="true"
+          elif [[ -n "${1:-}" ]]; then
+            err "unknown option: ${1:-}"
+          fi
+          cmd_doctor "$fix"
+          ;;
+        help|-h|--help)
+          usage_all
+          ;;
+        *)
+          err "unknown ops subcommand: $sub"
+          ;;
+      esac
       ;;
     version)
       [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME version"
       cmd_version
       ;;
-    check)
-      [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME check"
-      cmd_check
-      ;;
-    doctor)
-      [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME doctor [--fix]"
-      local fix="false"
-      if [[ "${1:-}" == "--fix" ]]; then
-        fix="true"
-      elif [[ -n "${1:-}" ]]; then
-        err "unknown option: ${1:-}"
-      fi
-      cmd_doctor "$fix"
+    --help-all|help-all)
+      usage_all
       ;;
     help|-h|--help)
       usage
