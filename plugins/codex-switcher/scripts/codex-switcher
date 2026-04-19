@@ -389,6 +389,7 @@ tui_text() {
     en:home_opt_switch) echo "Switch" ;;
     en:home_opt_accounts) echo "Accounts" ;;
     en:home_opt_envs) echo "Environments" ;;
+    en:home_opt_proxy) echo "Proxy" ;;
     en:home_opt_lang) echo "Language" ;;
     en:home_opt_status) echo "Status" ;;
     en:home_opt_quit) echo "Quit" ;;
@@ -439,6 +440,10 @@ tui_text() {
     en:env_source_other) echo "from another env" ;;
     en:lang_title) echo "Language" ;;
     en:lang_current_prefix) echo "Current language" ;;
+    en:proxy_title) echo "Proxy" ;;
+    en:proxy_auto) echo "Auto detect (default)" ;;
+    en:proxy_manual) echo "Manual input (IP:Port)" ;;
+    en:proxy_prompt) echo "Proxy (IP:Port): " ;;
     en:back) echo "< Back" ;;
     en:exit_code_prefix) echo "[exit code: " ;;
 
@@ -1816,6 +1821,52 @@ tui_action_env_delete() {
   tui_execute_subcommand env rm "$env"
 }
 
+tui_action_proxy() {
+  local info choice input usage_info source value
+  local default_manual=""
+  while true; do
+    usage_info="$(resolve_usage_proxy_with_source || true)"
+    source=""
+    value=""
+    if [[ -n "$usage_info" ]]; then
+      IFS=$'\t' read -r source value <<< "$usage_info"
+    fi
+
+    case "$source" in
+      manual)
+        info="Current: manual ($value)"
+        default_manual="$value"
+        ;;
+      auto-env)
+        info="Current: auto-detected from env ($value)"
+        ;;
+      auto-system)
+        info="Current: auto-detected from system ($value)"
+        ;;
+      *)
+        info="Current: auto-detect (no proxy detected)"
+        ;;
+    esac
+
+    tui_choose_index_with_back "$(tui_text "$(read_ui_lang)" proxy_title)" "$info" "0" \
+      "$(tui_text "$(read_ui_lang)" proxy_auto)" \
+      "$(tui_text "$(read_ui_lang)" proxy_manual)"
+    choice="$TUI_MENU_RESULT"
+    [[ "$choice" == "-1" ]] && return 0
+    case "$choice" in
+      0)
+        tui_execute_subcommand ops proxy off
+        ;;
+      1)
+        input="$(tui_prompt_line "$(tui_text "$(read_ui_lang)" proxy_prompt)" "$default_manual")"
+        input="$(echo "${input:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        [[ -n "$input" ]] || continue
+        tui_execute_subcommand ops proxy "$input"
+        ;;
+    esac
+  done
+}
+
 tui_action_lang() {
   local idx langs current i
   local -a opts=()
@@ -2173,6 +2224,7 @@ tui_home_render_plain() {
     "$(tui_text "$(read_ui_lang)" home_opt_switch)"
     "$(tui_text "$(read_ui_lang)" home_opt_accounts)"
     "$(tui_text "$(read_ui_lang)" home_opt_envs)"
+    "$(tui_text "$(read_ui_lang)" home_opt_proxy)"
     "$(tui_text "$(read_ui_lang)" home_opt_status)"
     "$(tui_text "$(read_ui_lang)" home_opt_quit)"
   )
@@ -2180,6 +2232,7 @@ tui_home_render_plain() {
     "Switch active account quickly"
     "Manage accounts"
     "Manage environments"
+    "Configure usage API proxy"
     "View usage and status dashboard"
     "Exit"
   )
@@ -2235,6 +2288,7 @@ tui_home_render_menu_block() {
     "$(tui_text "$(read_ui_lang)" home_opt_switch)"
     "$(tui_text "$(read_ui_lang)" home_opt_accounts)"
     "$(tui_text "$(read_ui_lang)" home_opt_envs)"
+    "$(tui_text "$(read_ui_lang)" home_opt_proxy)"
     "$(tui_text "$(read_ui_lang)" home_opt_status)"
     "$(tui_text "$(read_ui_lang)" home_opt_quit)"
   )
@@ -2242,6 +2296,7 @@ tui_home_render_menu_block() {
     "Switch active account quickly"
     "Manage accounts"
     "Manage environments"
+    "Configure usage API proxy"
     "View usage and status dashboard"
     "Exit"
   )
@@ -2312,7 +2367,7 @@ tui_home_choose_action() {
   local idx=0
   local key d
   local update_hint="${1:-}"
-  local menu_lines=7
+  local menu_lines=8
   local first_render_done="false"
   while true; do
     if [[ "$TUI_INTERACTIVE" == "true" ]]; then
@@ -2330,10 +2385,10 @@ tui_home_choose_action() {
     [[ -n "$key" ]] || continue
     case "$key" in
       up)
-        idx=$(( (idx - 1 + 5) % 5 ))
+        idx=$(( (idx - 1 + 6) % 6 ))
         ;;
       down)
-        idx=$(( (idx + 1) % 5 ))
+        idx=$(( (idx + 1) % 6 ))
         ;;
       enter)
         TUI_MENU_RESULT="$idx"
@@ -2347,7 +2402,7 @@ tui_home_choose_action() {
         d="${key#digit:}"
         if [[ "$d" =~ ^[0-9]+$ ]]; then
           d=$((d - 1))
-          if (( d >= 0 && d < 5 )); then
+          if (( d >= 0 && d < 6 )); then
             TUI_MENU_RESULT="$d"
             return 0
           fi
@@ -2371,7 +2426,7 @@ cmd_tui() {
     tui_home_choose_action "$update_hint"
     choice="$TUI_MENU_RESULT"
     case "$choice" in
-      -1|4)
+      -1|5)
         break
         ;;
       0)
@@ -2384,6 +2439,9 @@ cmd_tui() {
         tui_action_envs || true
         ;;
       3)
+        tui_action_proxy || true
+        ;;
+      4)
         tui_action_status || true
         ;;
     esac

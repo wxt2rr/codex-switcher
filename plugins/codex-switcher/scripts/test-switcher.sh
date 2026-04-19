@@ -133,18 +133,19 @@ grep -Eq "Update available: [0-9]+\\.[0-9]+\\.[0-9]+ -> 99\\.99\\.99\\. run code
 export CODEX_SWITCHER_TEST_NPM_VIEW_VERSION=""
 
 [[ "$("$SW" lang)" == "language: en" ]]
-printf '5\n' | "$SW" tui >/tmp/codex_sw_tui_catalog_en.out
+printf '6\n' | "$SW" tui >/tmp/codex_sw_tui_catalog_en.out
 grep -q "https://github.com/wxt2rr/codex-switcher" /tmp/codex_sw_tui_catalog_en.out
 grep -q "1\\. Switch" /tmp/codex_sw_tui_catalog_en.out
 grep -q "2\\. Accounts" /tmp/codex_sw_tui_catalog_en.out
 grep -q "3\\. Environments" /tmp/codex_sw_tui_catalog_en.out
-grep -q "4\\. Status" /tmp/codex_sw_tui_catalog_en.out
-grep -q "5\\. Quit" /tmp/codex_sw_tui_catalog_en.out
+grep -q "4\\. Proxy" /tmp/codex_sw_tui_catalog_en.out
+grep -q "5\\. Status" /tmp/codex_sw_tui_catalog_en.out
+grep -q "6\\. Quit" /tmp/codex_sw_tui_catalog_en.out
 ! grep -q "Current status (data may be delayed by 1 minute)" /tmp/codex_sw_tui_catalog_en.out
 
 "$SW" lang en >/tmp/codex_sw_lang_en.out
 grep -q "language set to: en" /tmp/codex_sw_lang_en.out
-printf '5\n' | "$SW" tui >/tmp/codex_sw_tui_home_en.out
+printf '6\n' | "$SW" tui >/tmp/codex_sw_tui_home_en.out
 grep -q "https://github.com/wxt2rr/codex-switcher" /tmp/codex_sw_tui_home_en.out
 ! grep -q "Current status (data may be delayed by 1 minute)" /tmp/codex_sw_tui_home_en.out
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.0 - 2026-04-19
+
+- 1. 支持TUI模式，默认改为TUI
+- 2. 支持账号status状态展示
+
+## 0.7.7 - 2026-04-19
+
+- TUI-first flow, status dashboard performance and layout improvements, and interaction polish.
+
 ## 0.7.6 - 2026-04-19
 
 - Redesigned TUI around Home + Switch CLI/APP + Accounts workflow for faster account/env operations.
