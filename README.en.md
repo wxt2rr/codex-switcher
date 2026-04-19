@@ -46,13 +46,17 @@ codex-sw
 ```
 
 #### Screenshot Placeholders (replace later)
-
-- Home:
-  `![TUI Home](docs/images/tui-home.png)`
-- Switch flow:
-  `![TUI Switch](docs/images/tui-switch.png)`
-- Status:
-  `![TUI Status](docs/images/tui-status.png)`
+- Home：
+  </br>
+  ![TUI Home](https://github.com/wxt2rr/codex-switcher/blob/main/images/home.png)
+- Env / Accounts：
+  </br>
+  ![TUI Switch](https://github.com/wxt2rr/codex-switcher/blob/main/images/accounts.png)
+  </br>
+  ![TUI Switch](https://github.com/wxt2rr/codex-switcher/blob/main/images/env.png)
+- Status：
+  </br>
+  ![TUI Status](https://github.com/wxt2rr/codex-switcher/blob/main/images/status.png)
 
 ### Option 2: CLI (Secondary)
 
