@@ -48,12 +48,16 @@ codex-sw
 #### TUI 
 
 - 首页：
-  `![TUI Home](https://github.com/wxt2rr/codex-switcher/blob/main/images/home.png)`
+  </br>
+  ![TUI Home](https://github.com/wxt2rr/codex-switcher/blob/main/images/home.png)
 - 环境/账号管理：
-  `![TUI Switch](https://github.com/wxt2rr/codex-switcher/blob/main/images/accounts.png)`
-  `![TUI Switch](https://github.com/wxt2rr/codex-switcher/blob/main/images/env.png)`
+  </br>
+  ![TUI Switch](https://github.com/wxt2rr/codex-switcher/blob/main/images/accounts.png)
+  </br>
+  ![TUI Switch](https://github.com/wxt2rr/codex-switcher/blob/main/images/env.png)
 - 账号信息（订阅类型/5小时使用量/本周使用量/刷新时间）：
-  `![TUI Status](https://github.com/wxt2rr/codex-switcher/blob/main/images/status.png)`
+  </br>
+  ![TUI Status](https://github.com/wxt2rr/codex-switcher/blob/main/images/status.png)
 
 ### 方式二：CLI（次选）
 
