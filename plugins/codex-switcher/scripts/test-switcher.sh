@@ -36,6 +36,11 @@ if [[ "${1:-}" == "login" && "${2:-}" == "status" ]]; then
 fi
 if [[ "${1:-}" == "login" ]]; then
   mkdir -p "$CODEX_HOME"
+  if [[ "${2:-}" == "--with-api-key" ]]; then
+    key="${OPENAI_API_KEY:-}"
+    echo "{\"auth_mode\":\"api_key\",\"OPENAI_API_KEY\":\"$key\"}" > "$CODEX_HOME/auth.json"
+    exit 0
+  fi
   echo '{"auth_mode":"chatgpt","tokens":{"access_token":"fake-access","id_token":"fake.jwt.sig"}}' > "$CODEX_HOME/auth.json"
   exit 0
 fi
@@ -57,6 +62,13 @@ chmod +x "$BIN/fake-codex-app"
 cat > "$BIN/npm" <<'NPM'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${1:-}" == "view" && "${3:-}" == "version" ]]; then
+  echo "$*" >> "${CODEX_SWITCHER_TEST_NPM_LOG:?}"
+  if [[ -n "${CODEX_SWITCHER_TEST_NPM_VIEW_VERSION:-}" ]]; then
+    echo "${CODEX_SWITCHER_TEST_NPM_VIEW_VERSION}"
+  fi
+  exit 0
+fi
 echo "$*" > "${CODEX_SWITCHER_TEST_NPM_LOG:?}"
 exit 0
 NPM
@@ -87,9 +99,11 @@ export CODEX_SWITCHER_LOCK_WAIT_SECONDS=2
 export CODEX_SWITCHER_DEFAULT_HOME="$DEFAULT_HOME"
 export CODEX_SWITCHER_DISABLE_SYSTEM_PROXY_DETECT=true
 export CODEX_SWITCHER_TEST_NPM_LOG="$TMPBASE/npm-args.log"
+export CODEX_SWITCHER_TEST_NPM_VIEW_VERSION=""
 export CODEX_SWITCHER_TEST_CODEX_LOG="$TMPBASE/codex-args.log"
 export CODEX_SWITCHER_TEST_CURL_LOG="$TMPBASE/curl-args.log"
 export CODEX_SWITCHER_TEST_CURL_MODE="success"
+unset OPENAI_API_KEY
 unset HTTPS_PROXY https_proxy HTTP_PROXY http_proxy ALL_PROXY all_proxy
 : > "$CODEX_SWITCHER_TEST_CODEX_LOG"
 : > "$CODEX_SWITCHER_TEST_CURL_LOG"
@@ -112,9 +126,43 @@ echo "$init_out" | grep -q "\[dry-run\]"
 "$SW" upgrade
 grep -q "i -g @wangxt0223/codex-switcher@latest --registry https://registry.npmjs.org/" "$CODEX_SWITCHER_TEST_NPM_LOG"
 
-[[ "$("$SW" whoami -t cli)" == "default/default" ]]
+export CODEX_SWITCHER_TEST_NPM_VIEW_VERSION="99.99.99"
+whoami_out="$("$SW" whoami -t cli 2>/tmp/codex_sw_update_hint.err)"
+[[ "$whoami_out" == "default/default" ]]
+grep -Eq "Update available: [0-9]+\\.[0-9]+\\.[0-9]+ -> 99\\.99\\.99\\. run codex-sw upgrade" /tmp/codex_sw_update_hint.err
+export CODEX_SWITCHER_TEST_NPM_VIEW_VERSION=""
+
+[[ "$("$SW" lang)" == "language: en" ]]
+printf '5\n' | "$SW" tui >/tmp/codex_sw_tui_catalog_en.out
+grep -q "https://github.com/wxt2rr/codex-switcher" /tmp/codex_sw_tui_catalog_en.out
+grep -q "1\\. Switch" /tmp/codex_sw_tui_catalog_en.out
+grep -q "2\\. Accounts" /tmp/codex_sw_tui_catalog_en.out
+grep -q "3\\. Environments" /tmp/codex_sw_tui_catalog_en.out
+grep -q "4\\. Status" /tmp/codex_sw_tui_catalog_en.out
+grep -q "5\\. Quit" /tmp/codex_sw_tui_catalog_en.out
+! grep -q "Current status (data may be delayed by 1 minute)" /tmp/codex_sw_tui_catalog_en.out
+
+"$SW" lang en >/tmp/codex_sw_lang_en.out
+grep -q "language set to: en" /tmp/codex_sw_lang_en.out
+printf '5\n' | "$SW" tui >/tmp/codex_sw_tui_home_en.out
+grep -q "https://github.com/wxt2rr/codex-switcher" /tmp/codex_sw_tui_home_en.out
+! grep -q "Current status (data may be delayed by 1 minute)" /tmp/codex_sw_tui_home_en.out
+
+set +e
+"$SW" lang ko >/tmp/codex_sw_lang_invalid.out 2>/tmp/codex_sw_lang_invalid.err
+lang_invalid_rc=$?
+set -e
+[[ "$lang_invalid_rc" -ne 0 ]]
+grep -q "invalid language 'ko' (English-only build, use en)" /tmp/codex_sw_lang_invalid.err
 "$SW" ac login personal --env default
 "$SW" ac login work --env default
+printf 'sk-test-apikey-12345678\n' | "$SW" ac login key --env default --mode apikey >/tmp/codex_sw_apikey_login.out
+grep -q '"auth_mode":"api_key"' "$STATE/env-accounts/default/key/auth.json"
+grep -q '"OPENAI_API_KEY":"sk-test-apikey-12345678"' "$STATE/env-accounts/default/key/auth.json"
+grep -q "login --with-api-key" "$CODEX_SWITCHER_TEST_CODEX_LOG"
+grep -q "API key saved successfully" /tmp/codex_sw_apikey_login.out
+"$SW" ac use key --env default
+grep -q '"auth_mode":"api_key"' "$DEFAULT_HOME/auth.json"
 
 make_id_token() {
   python3 - "$1" "$2" <<'PY'
@@ -178,6 +226,45 @@ after_launch_count="$(wc -l < "$CODEX_SWITCHER_TEST_CODEX_LOG")"
 "$SW" ac use work --env default -t app --launch
 [[ "$("$SW" whoami -t app)" == "default/work" ]]
 
+"$SW" env new trash --empty
+echo '{"trash":"1"}' > "$ENVS/trash/home/shared.json"
+mkdir -p "$STATE/env-accounts/trash/tmp"
+cat > "$STATE/env-accounts/trash/tmp/auth.json" <<'JSON'
+{"auth_mode":"chatgpt","tokens":{"access_token":"token-trash","id_token":"trash.jwt.sig"}}
+JSON
+
+printf 'n\n' | "$SW" env rm trash >/tmp/codex_sw_env_rm_cancel_1.out
+grep -q "Cancelled" /tmp/codex_sw_env_rm_cancel_1.out
+[[ -d "$ENVS/trash/home" ]]
+[[ -d "$STATE/env-accounts/trash/tmp" ]]
+
+printf 'y\nn\n' | "$SW" env rm trash >/tmp/codex_sw_env_rm_cancel_2.out
+grep -q "Cancelled" /tmp/codex_sw_env_rm_cancel_2.out
+[[ -d "$ENVS/trash/home" ]]
+[[ -d "$STATE/env-accounts/trash/tmp" ]]
+
+printf 'y\ny\n' | "$SW" env rm trash >/tmp/codex_sw_env_rm_ok.out
+grep -q "Removed env: trash" /tmp/codex_sw_env_rm_ok.out
+[[ ! -d "$ENVS/trash" ]]
+[[ ! -d "$STATE/env-accounts/trash" ]]
+
+mkdir -p "$STATE/env-accounts/default/tmp-remove"
+cat > "$STATE/env-accounts/default/tmp-remove/auth.json" <<'JSON'
+{"auth_mode":"chatgpt","tokens":{"access_token":"token-tmp","id_token":"tmp.jwt.sig"}}
+JSON
+
+printf 'n\n' | "$SW" ac rm tmp-remove --env default >/tmp/codex_sw_ac_rm_cancel_1.out
+grep -q "Cancelled" /tmp/codex_sw_ac_rm_cancel_1.out
+[[ -f "$STATE/env-accounts/default/tmp-remove/auth.json" ]]
+
+printf 'y\nn\n' | "$SW" ac rm tmp-remove --env default >/tmp/codex_sw_ac_rm_cancel_2.out
+grep -q "Cancelled" /tmp/codex_sw_ac_rm_cancel_2.out
+[[ -f "$STATE/env-accounts/default/tmp-remove/auth.json" ]]
+
+printf 'y\ny\n' | "$SW" ac rm tmp-remove --env default >/tmp/codex_sw_ac_rm_ok.out
+grep -q "Removed account slot: default/tmp-remove" /tmp/codex_sw_ac_rm_ok.out
+[[ ! -d "$STATE/env-accounts/default/tmp-remove" ]]
+
 set +e
 "$SW" use corp --no-launch >/tmp/codex_sw_legacy_use.out 2>/tmp/codex_sw_legacy_use.err
 legacy_use_rc=$?
@@ -231,10 +318,10 @@ grep -q "LAST ACTIVITY" /tmp/codex_sw_list_api
 grep -q "SOURCE" /tmp/codex_sw_list_api
 grep -q "personal@example.com" /tmp/codex_sw_list_api
 grep -Eq "[[:space:]]+api$" /tmp/codex_sw_list_api
-grep -q "60% (" /tmp/codex_sw_list_api
-grep -q "80% (" /tmp/codex_sw_list_api
-grep -Eq "60% \\([0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}\\)" /tmp/codex_sw_list_api
-grep -Eq "80% \\([0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}\\)" /tmp/codex_sw_list_api
+grep -q "40% (" /tmp/codex_sw_list_api
+grep -q "20% (" /tmp/codex_sw_list_api
+grep -Eq "40% \\([0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}\\)" /tmp/codex_sw_list_api
+grep -Eq "20% \\([0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}\\)" /tmp/codex_sw_list_api
 grep -Eq "[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}" /tmp/codex_sw_list_api
 "$SW" ac ls --env default >/tmp/codex_sw_ac_list_default
 grep -Eq "^default[[:space:]]" /tmp/codex_sw_ac_list_default
@@ -255,10 +342,10 @@ export CODEX_SWITCHER_TEST_CURL_MODE="fail"
 : > "$CODEX_SWITCHER_TEST_CURL_LOG"
 "$SW" ops list >/tmp/codex_sw_list_local
 grep -Eq "[[:space:]]+local$" /tmp/codex_sw_list_local
-grep -q "75% (" /tmp/codex_sw_list_local
-grep -q "30% (" /tmp/codex_sw_list_local
-grep -Eq "75% \\([0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}\\)" /tmp/codex_sw_list_local
-grep -Eq "30% \\([0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}\\)" /tmp/codex_sw_list_local
+grep -q "25% (" /tmp/codex_sw_list_local
+grep -q "70% (" /tmp/codex_sw_list_local
+grep -Eq "25% \\([0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}\\)" /tmp/codex_sw_list_local
+grep -Eq "70% \\([0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}\\)" /tmp/codex_sw_list_local
 grep -q "^proxy=$" "$CODEX_SWITCHER_TEST_CURL_LOG"
 
 export CODEX_SWITCHER_TEST_CURL_MODE="success"

@@ -110,8 +110,14 @@ def parse_window(window: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(window, dict):
         return None
 
-    used = window.get("used_percent")
-    if not isinstance(used, (int, float)):
+    used = None
+    if isinstance(window.get("unused_percent"), (int, float)):
+        used = 100.0 - float(window.get("unused_percent"))
+    elif isinstance(window.get("remaining_percent"), (int, float)):
+        used = 100.0 - float(window.get("remaining_percent"))
+    elif isinstance(window.get("used_percent"), (int, float)):
+        used = float(window.get("used_percent"))
+    if used is None:
         return None
 
     minutes = window.get("window_minutes")
@@ -129,7 +135,7 @@ def parse_window(window: Any) -> Optional[Dict[str, Any]]:
     )
     return {
         "minutes": int(minutes),
-        "remaining_percent": 100.0 - float(used),
+        "used_percent": float(used),
         "reset_epoch": reset_epoch,
     }
 
@@ -219,7 +225,7 @@ def request_usage(access_token: str, account_id: str, usage_proxy: str, timeout_
 def format_usage(window: Optional[Dict[str, Any]]) -> str:
     if not window:
         return DASH
-    percent = clamp_percent(float(window["remaining_percent"]))
+    percent = clamp_percent(float(window["used_percent"]))
     reset_epoch = window.get("reset_epoch")
     if isinstance(reset_epoch, int):
         reset_text = dt.datetime.fromtimestamp(reset_epoch).strftime("%m-%d %H:%M")

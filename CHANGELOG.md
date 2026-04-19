@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.7.6 - 2026-04-19
+
+- Redesigned TUI around Home + Switch CLI/APP + Accounts workflow for faster account/env operations.
+- Added language-aware TUI interactions (zh/en/ja), quick action trigger (k/Ctrl+K), and command catalog integration.
+
+## 0.7.5 - 2026-04-19
+
+- Added interactive TUI mode via 'codex-sw tui' with dashboard, command catalog, and custom command runner covering all CLI features.
+- Updated docs and tests for TUI support while keeping CLI behavior unchanged.
+
+## 0.7.4 - 2026-04-19
+
+- Added automatic update check on every command and show upgrade hint when a newer npm version exists.
+- Added env/account remove command entrypoints with double y/n confirmation.
+
+## 0.7.3 - 2026-04-18
+
+- 1. 支持apiKey授权方式
+- 2. 支持删除命令
+
+## 0.7.2 - 2026-04-18
+
+- Added `ac login --mode auth|apikey` with `auth` as default.
+- Added interactive API key login flow for `--mode apikey` (prompt for key, save success message, then usable via `ac use`).
+- Updated smoke tests to cover API key interactive login and `--with-api-key` invocation path.
+- Reworked Chinese/English README onboarding into scenario-first examples with expected command outputs.
+
 ## 0.7.1 - 2026-04-13
 
 - Moved health/upgrade out of ops namespace to top-level commands: `check`, `upgrade`.

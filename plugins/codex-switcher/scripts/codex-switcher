@@ -20,6 +20,7 @@ ACCOUNTS_DIR="${CODEX_SWITCHER_ACCOUNTS_DIR:-$STATE_DIR/env-accounts}"
 DEFAULT_HOME="${CODEX_SWITCHER_DEFAULT_HOME:-$HOME/.codex}"
 DEFAULT_ENV_NAME="default"
 DEFAULT_ACCOUNT_NAME="default"
+DEFAULT_UI_LANG="en"
 
 APP_LOG="${CODEX_SWITCHER_APP_LOG:-$STATE_DIR/app.log}"
 SWITCH_LOG="${CODEX_SWITCHER_SWITCH_LOG:-$STATE_DIR/switcher.log}"
@@ -38,14 +39,18 @@ Usage:
   codex-sw env ls
   codex-sw env new <env> [--empty|--from <src-env|default>]
   codex-sw env use <env> [-t cli|app|both]
+  codex-sw env rm <env> [--force]
 
   codex-sw ac ls [--env <env>]
-  codex-sw ac login <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync]
+  codex-sw ac login <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--mode auth|apikey]
   codex-sw ac use <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]
   codex-sw ac logout [account] [--env <env>] [-t cli|app|both]
+  codex-sw ac rm <account> [--env <env>] [--force]
 
   codex-sw whoami [-t cli|app|both]
   codex-sw status
+  codex-sw lang [en]
+  codex-sw tui
   codex-sw check
   codex-sw upgrade [--dry-run]
   codex-sw version
@@ -64,14 +69,18 @@ Usage:
   codex-sw env ls
   codex-sw env new <env> [--empty|--from <src-env|default>]
   codex-sw env use <env> [-t cli|app|both]
+  codex-sw env rm <env> [--force]
 
   codex-sw ac ls [--env <env>]
-  codex-sw ac login <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync]
+  codex-sw ac login <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--mode auth|apikey]
   codex-sw ac use <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]
   codex-sw ac logout [account] [--env <env>] [-t cli|app|both]
+  codex-sw ac rm <account> [--env <env>] [--force]
 
   codex-sw whoami [-t cli|app|both]
   codex-sw status
+  codex-sw lang [en]
+  codex-sw tui
   codex-sw check
   codex-sw upgrade [--dry-run]
   codex-sw version
@@ -95,6 +104,84 @@ warn() {
   echo "Warning: $*" >&2
 }
 
+confirm_yes_no() {
+  local prompt="$1"
+  local answer
+
+  printf "%s [y/N]: " "$prompt" >&2
+  if ! IFS= read -r answer; then
+    return 1
+  fi
+
+  case "$answer" in
+    y|Y|yes|YES)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+confirm_delete_twice() {
+  local target="$1"
+  if ! confirm_yes_no "Remove ${target}?"; then
+    echo "Cancelled"
+    return 1
+  fi
+  if ! confirm_yes_no "Final confirmation: remove ${target}"; then
+    echo "Cancelled"
+    return 1
+  fi
+  return 0
+}
+
+ui_lang_file() {
+  echo "$STATE_DIR/ui_lang"
+}
+
+normalize_ui_lang() {
+  local raw="${1:-}"
+  local normalized
+  normalized="$(echo "$raw" | tr '[:upper:]' '[:lower:]' | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  case "$normalized" in
+    en)
+      echo "$normalized"
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+read_ui_lang() {
+  echo "en"
+}
+
+set_ui_lang() {
+  local lang="$1"
+  local file tmp
+  file="$(ui_lang_file)"
+  tmp="${file}.tmp"
+  printf '%s\n' "$lang" > "$tmp"
+  chmod 600 "$tmp" 2>/dev/null || true
+  mv "$tmp" "$file"
+}
+
+cmd_lang() {
+  local value="${1:-}"
+
+  if [[ -z "$value" ]]; then
+    echo "language: en"
+    return 0
+  fi
+
+  value="$(echo "$value" | tr '[:upper:]' '[:lower:]' | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  [[ "$value" == "en" ]] || err "invalid language '$value' (English-only build, use en)"
+  echo "language set to: en"
+}
+
 now_utc() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
 }
@@ -108,6 +195,2203 @@ switcher_version() {
   fi
 
   echo "${version:-unknown}"
+}
+
+switcher_package_name() {
+  local package_json name
+  package_json="$(cd "$SCRIPT_DIR/../../.." && pwd)/package.json"
+
+  if [[ -f "$package_json" ]]; then
+    name="$(sed -nE 's/^[[:space:]]*"name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$package_json" | head -n 1)"
+  fi
+
+  echo "${name:-}"
+}
+
+semver_is_newer() {
+  local latest="${1:-}"
+  local current="${2:-}"
+  local latest_core current_core
+  local lmaj lmin lpat cmaj cmin cpat
+
+  latest_core="$(echo "$latest" | sed -E 's/^v//; s/^([0-9]+\.[0-9]+\.[0-9]+).*$/\1/')"
+  current_core="$(echo "$current" | sed -E 's/^v//; s/^([0-9]+\.[0-9]+\.[0-9]+).*$/\1/')"
+
+  [[ "$latest_core" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  [[ "$current_core" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+
+  IFS='.' read -r lmaj lmin lpat <<< "$latest_core"
+  IFS='.' read -r cmaj cmin cpat <<< "$current_core"
+
+  if (( lmaj > cmaj )); then
+    return 0
+  fi
+  if (( lmaj < cmaj )); then
+    return 1
+  fi
+  if (( lmin > cmin )); then
+    return 0
+  fi
+  if (( lmin < cmin )); then
+    return 1
+  fi
+  if (( lpat > cpat )); then
+    return 0
+  fi
+  return 1
+}
+
+notify_update_if_available() {
+  local message
+  message="$(update_available_message || true)"
+  [[ -n "$message" ]] && echo "$message" >&2
+  return 0
+}
+
+update_available_message() {
+  local current_version package_name latest_version timeout_secs tmp pid waited_ticks
+  [[ "${CODEX_SWITCHER_SKIP_UPDATE_CHECK:-false}" == "true" ]] && return 0
+  current_version="$(switcher_version)"
+  package_name="$(switcher_package_name)"
+
+  [[ -n "$package_name" ]] || return 0
+  [[ "$current_version" != "unknown" ]] || return 0
+  command -v npm >/dev/null 2>&1 || return 0
+
+  timeout_secs="${CODEX_SWITCHER_UPDATE_CHECK_TIMEOUT:-3}"
+  [[ "$timeout_secs" =~ ^[0-9]+$ ]] || timeout_secs="3"
+  (( timeout_secs > 0 )) || return 0
+
+  tmp="$(mktemp /tmp/codex-sw-update-check.XXXXXX)"
+  (
+    npm view "$package_name" version --registry "https://registry.npmjs.org/" >"$tmp" 2>/dev/null
+  ) &
+  pid=$!
+  waited_ticks=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if (( waited_ticks >= timeout_secs * 10 )); then
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      rm -f "$tmp"
+      return 0
+    fi
+    sleep 0.1
+    waited_ticks=$((waited_ticks + 1))
+  done
+  wait "$pid" 2>/dev/null || true
+
+  latest_version="$(head -n 1 "$tmp" 2>/dev/null | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  rm -f "$tmp"
+  [[ -n "$latest_version" ]] || return 0
+
+  if semver_is_newer "$latest_version" "$current_version"; then
+    echo "Update available: $current_version -> $latest_version. run codex-sw upgrade"
+  fi
+}
+
+tui_catalog_lines() {
+  usage | sed -nE 's/^  codex-sw (.+)$/\1/p'
+}
+
+TUI_INTERACTIVE="false"
+TUI_RAW_ACTIVE="false"
+TUI_STTY_SAVED=""
+TUI_MENU_RESULT="-1"
+TUI_KEY_BUFFER=""
+TUI_COLOR_ENABLED="false"
+TUI_COLOR_BORDER=""
+TUI_COLOR_TITLE=""
+TUI_COLOR_DIM=""
+TUI_COLOR_HILITE=""
+TUI_COLOR_GOOD=""
+TUI_COLOR_WARN=""
+TUI_COLOR_BAD=""
+TUI_COLOR_BAR_EMPTY_BG=""
+TUI_COLOR_BAR_GOOD_BG=""
+TUI_COLOR_BAR_WARN_BG=""
+TUI_COLOR_BAR_BAD_BG=""
+TUI_COLOR_RESET=""
+TUI_ALT_SCREEN_ACTIVE="false"
+TUI_SHOULD_QUIT="false"
+TUI_HOME_SNAPSHOT_CACHE=""
+TUI_HOME_SNAPSHOT_CACHE_TS="0"
+TUI_HOME_SNAPSHOT_CACHE_TTL="60"
+TUI_HOME_SNAPSHOT_RENDER=""
+
+tui_text() {
+  local lang="$1"
+  local key="$2"
+  case "${lang}:${key}" in
+    zh:home_title) echo "Home" ;;
+    zh:home_tip) echo "上下键移动，回车确认，q退出" ;;
+    zh:home_accounts_title) echo "当前状态（数据有1分钟延迟）" ;;
+    zh:home_loading) echo "正在拉取账号与用量数据，请稍候..." ;;
+    zh:home_opt_switch) echo "Switch" ;;
+    zh:home_opt_accounts) echo "Accounts" ;;
+    zh:home_opt_envs) echo "Environments" ;;
+    zh:home_opt_lang) echo "Language" ;;
+    zh:home_opt_status) echo "Status" ;;
+    zh:home_opt_quit) echo "Quit" ;;
+    zh:choose) echo "请选择: " ;;
+    zh:nav_hint) echo "↑/↓ move  Enter select  q quit" ;;
+    zh:invalid_choice) echo "无效选择: " ;;
+    zh:cancelled) echo "已取消" ;;
+    zh:press_enter) echo "回车继续..." ;;
+    zh:select_env_title) echo "选择环境" ;;
+    zh:select_account_title) echo "选择账号" ;;
+    zh:select_target_title) echo "选择目标" ;;
+    zh:select_launch_title) echo "切换后启动" ;;
+    zh:launch_yes) echo "启动" ;;
+    zh:launch_switch_only) echo "只切换账号不启动" ;;
+    zh:target_cli) echo "CLI" ;;
+    zh:target_app) echo "APP" ;;
+    zh:launch_none) echo "不启动" ;;
+    zh:launch_cli) echo "启动 CLI" ;;
+    zh:launch_app) echo "启动 APP" ;;
+    zh:confirm_title) echo "确认执行" ;;
+    zh:confirm_yes) echo "确认" ;;
+    zh:confirm_no) echo "取消" ;;
+    zh:default_prefix) echo "默认" ;;
+    zh:status_logged_in) echo "logged-in" ;;
+    zh:status_not_logged_in) echo "not-logged-in" ;;
+    zh:no_logged_account) echo "该环境没有可用登录账号，请先登录" ;;
+    zh:switch_title) echo "Switch" ;;
+    zh:accounts_title) echo "Accounts" ;;
+    zh:accounts_use) echo "Use Account" ;;
+    zh:accounts_login) echo "Login Account" ;;
+    zh:accounts_logout) echo "Logout Account" ;;
+    zh:accounts_delete) echo "Delete Account" ;;
+    zh:accounts_back) echo "< 返回" ;;
+    zh:login_title) echo "Login Account" ;;
+    zh:login_account_prompt) echo "起一个账号别名: " ;;
+    zh:login_mode_title) echo "登录方式" ;;
+    zh:login_mode_auth) echo "auth" ;;
+    zh:login_mode_apikey) echo "apikey" ;;
+    zh:target_both) echo "both" ;;
+    zh:envs_title) echo "Environments" ;;
+    zh:envs_create) echo "Create Env" ;;
+    zh:envs_delete) echo "Delete Env" ;;
+    zh:envs_back) echo "< 返回" ;;
+    zh:env_name_prompt) echo "输入新环境名: " ;;
+    zh:env_source_title) echo "环境来源" ;;
+    zh:env_source_default) echo "from default" ;;
+    zh:env_source_empty) echo "empty" ;;
+    zh:env_source_other) echo "from another env" ;;
+    zh:lang_title) echo "Language" ;;
+    zh:lang_current_prefix) echo "当前语言" ;;
+    zh:back) echo "< 返回" ;;
+    zh:exit_code_prefix) echo "[退出码: " ;;
+
+    en:home_title) echo "Home" ;;
+    en:home_tip) echo "Use Up/Down to move, Enter to select, q to quit" ;;
+    en:home_accounts_title) echo "Current status (data may be delayed by 1 minute)" ;;
+    en:home_loading) echo "Loading account and usage data, please wait..." ;;
+    en:home_opt_switch) echo "Switch" ;;
+    en:home_opt_accounts) echo "Accounts" ;;
+    en:home_opt_envs) echo "Environments" ;;
+    en:home_opt_lang) echo "Language" ;;
+    en:home_opt_status) echo "Status" ;;
+    en:home_opt_quit) echo "Quit" ;;
+    en:choose) echo "Choose: " ;;
+    en:nav_hint) echo "↑/↓ move  Enter select  q quit" ;;
+    en:invalid_choice) echo "Invalid choice: " ;;
+    en:cancelled) echo "Cancelled" ;;
+    en:press_enter) echo "Press Enter to continue..." ;;
+    en:select_env_title) echo "Select env" ;;
+    en:select_account_title) echo "Select account" ;;
+    en:select_target_title) echo "Select target" ;;
+    en:select_launch_title) echo "Launch after switch" ;;
+    en:launch_yes) echo "Launch" ;;
+    en:launch_switch_only) echo "Switch only (do not launch)" ;;
+    en:target_cli) echo "CLI" ;;
+    en:target_app) echo "APP" ;;
+    en:launch_none) echo "Do not launch" ;;
+    en:launch_cli) echo "Launch CLI" ;;
+    en:launch_app) echo "Launch APP" ;;
+    en:confirm_title) echo "Confirm" ;;
+    en:confirm_yes) echo "Confirm" ;;
+    en:confirm_no) echo "Cancel" ;;
+    en:default_prefix) echo "default" ;;
+    en:status_logged_in) echo "logged-in" ;;
+    en:status_not_logged_in) echo "not-logged-in" ;;
+    en:no_logged_account) echo "No logged-in account in this env, please login first" ;;
+    en:switch_title) echo "Switch" ;;
+    en:accounts_title) echo "Accounts" ;;
+    en:accounts_use) echo "Use Account" ;;
+    en:accounts_login) echo "Login Account" ;;
+    en:accounts_logout) echo "Logout Account" ;;
+    en:accounts_delete) echo "Delete Account" ;;
+    en:accounts_back) echo "< Back" ;;
+    en:login_title) echo "Login Account" ;;
+    en:login_account_prompt) echo "Choose an account alias: " ;;
+    en:login_mode_title) echo "Login mode" ;;
+    en:login_mode_auth) echo "auth" ;;
+    en:login_mode_apikey) echo "apikey" ;;
+    en:target_both) echo "both" ;;
+    en:envs_title) echo "Environments" ;;
+    en:envs_create) echo "Create Env" ;;
+    en:envs_delete) echo "Delete Env" ;;
+    en:envs_back) echo "< Back" ;;
+    en:env_name_prompt) echo "New env name: " ;;
+    en:env_source_title) echo "Env source" ;;
+    en:env_source_default) echo "from default" ;;
+    en:env_source_empty) echo "empty" ;;
+    en:env_source_other) echo "from another env" ;;
+    en:lang_title) echo "Language" ;;
+    en:lang_current_prefix) echo "Current language" ;;
+    en:back) echo "< Back" ;;
+    en:exit_code_prefix) echo "[exit code: " ;;
+
+    ja:home_title) echo "Home" ;;
+    ja:home_tip) echo "↑/↓で移動、Enterで選択、qで終了" ;;
+    ja:home_accounts_title) echo "現在の状態（データは1分遅延する場合があります）" ;;
+    ja:home_loading) echo "アカウントと利用状況を読み込み中..." ;;
+    ja:home_opt_switch) echo "Switch" ;;
+    ja:home_opt_accounts) echo "Accounts" ;;
+    ja:home_opt_envs) echo "Environments" ;;
+    ja:home_opt_lang) echo "Language" ;;
+    ja:home_opt_status) echo "Status" ;;
+    ja:home_opt_quit) echo "Quit" ;;
+    ja:choose) echo "選択してください: " ;;
+    ja:nav_hint) echo "↑/↓ move  Enter select  q quit" ;;
+    ja:invalid_choice) echo "無効な選択: " ;;
+    ja:cancelled) echo "キャンセルしました" ;;
+    ja:press_enter) echo "Enterで続行..." ;;
+    ja:select_env_title) echo "環境を選択" ;;
+    ja:select_account_title) echo "アカウントを選択" ;;
+    ja:select_target_title) echo "ターゲットを選択" ;;
+    ja:select_launch_title) echo "切替後に起動" ;;
+    ja:launch_yes) echo "起動" ;;
+    ja:launch_switch_only) echo "アカウントのみ切替（起動しない）" ;;
+    ja:target_cli) echo "CLI" ;;
+    ja:target_app) echo "APP" ;;
+    ja:launch_none) echo "起動しない" ;;
+    ja:launch_cli) echo "CLIを起動" ;;
+    ja:launch_app) echo "APPを起動" ;;
+    ja:confirm_title) echo "確認" ;;
+    ja:confirm_yes) echo "確認" ;;
+    ja:confirm_no) echo "キャンセル" ;;
+    ja:default_prefix) echo "default" ;;
+    ja:status_logged_in) echo "logged-in" ;;
+    ja:status_not_logged_in) echo "not-logged-in" ;;
+    ja:no_logged_account) echo "この環境にログイン済みアカウントがありません。先にログインしてください" ;;
+    ja:switch_title) echo "Switch" ;;
+    ja:accounts_title) echo "Accounts" ;;
+    ja:accounts_use) echo "Use Account" ;;
+    ja:accounts_login) echo "Login Account" ;;
+    ja:accounts_logout) echo "Logout Account" ;;
+    ja:accounts_delete) echo "Delete Account" ;;
+    ja:accounts_back) echo "< 戻る" ;;
+    ja:login_title) echo "Login Account" ;;
+    ja:login_account_prompt) echo "アカウントの別名を入力: " ;;
+    ja:login_mode_title) echo "ログイン方式" ;;
+    ja:login_mode_auth) echo "auth" ;;
+    ja:login_mode_apikey) echo "apikey" ;;
+    ja:target_both) echo "both" ;;
+    ja:envs_title) echo "Environments" ;;
+    ja:envs_create) echo "Create Env" ;;
+    ja:envs_delete) echo "Delete Env" ;;
+    ja:envs_back) echo "< 戻る" ;;
+    ja:env_name_prompt) echo "新しい環境名: " ;;
+    ja:env_source_title) echo "環境の作成元" ;;
+    ja:env_source_default) echo "from default" ;;
+    ja:env_source_empty) echo "empty" ;;
+    ja:env_source_other) echo "from another env" ;;
+    ja:lang_title) echo "Language" ;;
+    ja:lang_current_prefix) echo "現在の言語" ;;
+    ja:back) echo "< 戻る" ;;
+    ja:exit_code_prefix) echo "[終了コード: " ;;
+
+    *)
+      echo "$key"
+      ;;
+  esac
+}
+
+tui_support_interactive() {
+  [[ -t 0 && -t 1 ]]
+}
+
+tui_enter_alt_screen() {
+  if [[ "$TUI_INTERACTIVE" == "true" && "$TUI_ALT_SCREEN_ACTIVE" != "true" ]]; then
+    # Use private mode 1049 (alternate buffer + cursor save/restore).
+    printf '\033[?1049h\033[H\033[2J' 2>/dev/null || true
+    TUI_ALT_SCREEN_ACTIVE="true"
+  fi
+}
+
+tui_leave_alt_screen() {
+  if [[ "$TUI_ALT_SCREEN_ACTIVE" == "true" ]]; then
+    printf '\033[?1049l' 2>/dev/null || true
+    TUI_ALT_SCREEN_ACTIVE="false"
+  fi
+}
+
+tui_setup_terminal() {
+  TUI_SHOULD_QUIT="false"
+  if tui_support_interactive; then
+    TUI_INTERACTIVE="true"
+    if [[ "${TERM:-}" != "dumb" ]]; then
+      TUI_COLOR_ENABLED="true"
+      TUI_COLOR_BORDER=$'\033[38;5;240m'
+      TUI_COLOR_TITLE=$'\033[1;38;5;255m'
+      TUI_COLOR_DIM=$'\033[38;5;245m'
+      TUI_COLOR_HILITE=$'\033[1;38;5;50m'
+      TUI_COLOR_GOOD=$'\033[1;38;5;78m'
+      TUI_COLOR_WARN=$'\033[1;38;5;220m'
+      TUI_COLOR_BAD=$'\033[1;38;5;203m'
+      TUI_COLOR_BAR_EMPTY_BG=$'\033[48;5;236m'
+      TUI_COLOR_BAR_GOOD_BG=$'\033[48;5;71m'
+      TUI_COLOR_BAR_WARN_BG=$'\033[48;5;179m'
+      TUI_COLOR_BAR_BAD_BG=$'\033[48;5;167m'
+      TUI_COLOR_RESET=$'\033[0m'
+    else
+      TUI_COLOR_ENABLED="false"
+      TUI_COLOR_BORDER=""
+      TUI_COLOR_TITLE=""
+      TUI_COLOR_DIM=""
+      TUI_COLOR_HILITE=""
+      TUI_COLOR_GOOD=""
+      TUI_COLOR_WARN=""
+      TUI_COLOR_BAD=""
+      TUI_COLOR_BAR_EMPTY_BG=""
+      TUI_COLOR_BAR_GOOD_BG=""
+      TUI_COLOR_BAR_WARN_BG=""
+      TUI_COLOR_BAR_BAD_BG=""
+      TUI_COLOR_RESET=""
+    fi
+    TUI_STTY_SAVED="$(stty -g 2>/dev/null || true)"
+    stty -echo -icanon min 1 time 0 2>/dev/null || true
+    TUI_RAW_ACTIVE="true"
+    tui_enter_alt_screen
+    # Disable alternate-scroll mode so touchpad/mouse wheel cannot emulate
+    # up/down cursor keys inside alternate screen.
+    printf '\033[?1007l' 2>/dev/null || true
+    printf '\033[?25l' 2>/dev/null || true
+  else
+    TUI_INTERACTIVE="false"
+  fi
+}
+
+tui_restore_terminal() {
+  if [[ "$TUI_RAW_ACTIVE" == "true" ]]; then
+    if [[ -n "$TUI_STTY_SAVED" ]]; then
+      stty "$TUI_STTY_SAVED" 2>/dev/null || true
+    fi
+    TUI_RAW_ACTIVE="false"
+  fi
+  if [[ "$TUI_INTERACTIVE" == "true" ]]; then
+    printf '\033[?25h\033[0m' 2>/dev/null || true
+    tui_leave_alt_screen
+  fi
+}
+
+tui_leave_raw_mode() {
+  if [[ "$TUI_INTERACTIVE" == "true" && "$TUI_RAW_ACTIVE" == "true" ]]; then
+    if [[ -n "$TUI_STTY_SAVED" ]]; then
+      stty "$TUI_STTY_SAVED" 2>/dev/null || true
+    fi
+    TUI_RAW_ACTIVE="false"
+    printf '\033[?25h' >&2 2>/dev/null || true
+  fi
+}
+
+tui_enter_raw_mode() {
+  if [[ "$TUI_INTERACTIVE" == "true" && "$TUI_RAW_ACTIVE" != "true" ]]; then
+    stty -echo -icanon min 1 time 0 2>/dev/null || true
+    TUI_RAW_ACTIVE="true"
+    printf '\033[?25l' >&2 2>/dev/null || true
+  fi
+}
+
+tui_clear_screen() {
+  if [[ "$TUI_INTERACTIVE" == "true" ]]; then
+    printf '\033[2J\033[H' >&2
+  fi
+}
+
+tui_read_key() {
+  local key next next2
+
+  # Prevent SIGTTIN suspension when this process is no longer foreground.
+  if ! tui_has_foreground_tty; then
+    echo "quit"
+    return 0
+  fi
+
+  if [[ -n "$TUI_KEY_BUFFER" ]]; then
+    key="$TUI_KEY_BUFFER"
+    TUI_KEY_BUFFER=""
+  else
+    IFS= read -rsn1 key || return 1
+  fi
+
+  # In some terminals Enter is consumed as delimiter and read returns empty key.
+  if [[ -z "$key" || "$key" == $'\n' || "$key" == $'\r' ]]; then
+    # Some terminals emit CRLF for Enter. Discard trailing CR/LF bytes so
+    # one Enter maps to exactly one action.
+    while IFS= read -rsn1 -t 0 next; do
+      case "$next" in
+        ""|$'\n'|$'\r')
+          ;;
+        *)
+          TUI_KEY_BUFFER="$next"
+          break
+          ;;
+      esac
+    done
+    echo "enter"
+    return 0
+  fi
+
+  case "$key" in
+    $'\x1b')
+      # macOS bash 3.2 does not support fractional timeout for `read -t`.
+      if IFS= read -rsn1 -t 1 next; then
+        case "$next" in
+          '[')
+            IFS= read -rsn1 -t 1 next2 || true
+            case "$next2" in
+              A) echo "up" ;;
+              B) echo "down" ;;
+              C) echo "right" ;;
+              D) echo "left" ;;
+              *) echo "esc" ;;
+            esac
+            ;;
+          O)
+            IFS= read -rsn1 -t 1 next2 || true
+            case "$next2" in
+              A) echo "up" ;;
+              B) echo "down" ;;
+              C) echo "right" ;;
+              D) echo "left" ;;
+              *) echo "esc" ;;
+            esac
+            ;;
+          *)
+            echo "esc"
+            ;;
+        esac
+      else
+        echo "esc"
+      fi
+      ;;
+    $'\n'|$'\r')
+      echo "enter"
+      ;;
+    q|Q)
+      echo "quit"
+      ;;
+    [0-9])
+      echo "digit:$key"
+      ;;
+    *)
+      echo "char:$key"
+      ;;
+  esac
+}
+
+tui_request_quit() {
+  TUI_SHOULD_QUIT="true"
+}
+
+tui_quit_requested() {
+  [[ "$TUI_SHOULD_QUIT" == "true" ]]
+}
+
+tui_has_foreground_tty() {
+  local my_pgid tty_pgid
+  my_pgid="$(ps -o pgid= -p $$ 2>/dev/null | tr -d '[:space:]')"
+  tty_pgid="$(ps -o tpgid= -p $$ 2>/dev/null | tr -d '[:space:]')"
+  [[ -n "$my_pgid" && -n "$tty_pgid" && "$my_pgid" == "$tty_pgid" ]]
+}
+
+tui_choose_index_with_back() {
+  local title="$1"
+  local info="${2:-}"
+  local default_index="${3:-0}"
+  shift 3 || true
+  local -a options=("$@")
+  local back_index
+
+  options+=("$(tui_text "$(read_ui_lang)" back)")
+  back_index=$(( ${#options[@]} - 1 ))
+  tui_choose_index "$title" "$info" "$default_index" "${options[@]}"
+  if [[ "$TUI_MENU_RESULT" == "$back_index" ]]; then
+    TUI_MENU_RESULT="-1"
+  fi
+}
+
+tui_now_epoch() {
+  date +%s
+}
+
+tui_panel_open() {
+  local title="$1"
+  if [[ "$TUI_INTERACTIVE" == "true" ]]; then
+    printf '\n' >&2
+  else
+    echo
+  fi
+  if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+    if [[ "$TUI_INTERACTIVE" == "true" ]]; then
+      printf '%b┌%b %b%s%b\n' "$TUI_COLOR_BORDER" "$TUI_COLOR_RESET" "$TUI_COLOR_TITLE" "$title" "$TUI_COLOR_RESET" >&2
+    else
+      printf '%b┌%b %b%s%b\n' "$TUI_COLOR_BORDER" "$TUI_COLOR_RESET" "$TUI_COLOR_TITLE" "$title" "$TUI_COLOR_RESET"
+    fi
+  else
+    if [[ "$TUI_INTERACTIVE" == "true" ]]; then
+      printf '┌ %s\n' "$title" >&2
+    else
+      echo "┌ $title"
+    fi
+  fi
+}
+
+tui_panel_line() {
+  local content="${1:-}"
+  if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+    if [[ "$TUI_INTERACTIVE" == "true" ]]; then
+      printf '%b│%b %s\n' "$TUI_COLOR_BORDER" "$TUI_COLOR_RESET" "$content" >&2
+    else
+      printf '%b│%b %s\n' "$TUI_COLOR_BORDER" "$TUI_COLOR_RESET" "$content"
+    fi
+  else
+    if [[ "$TUI_INTERACTIVE" == "true" ]]; then
+      printf '│ %s\n' "$content" >&2
+    else
+      echo "│ $content"
+    fi
+  fi
+}
+
+tui_panel_close() {
+  if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+    if [[ "$TUI_INTERACTIVE" == "true" ]]; then
+      printf '%b└%b\n' "$TUI_COLOR_BORDER" "$TUI_COLOR_RESET" >&2
+    else
+      printf '%b└%b\n' "$TUI_COLOR_BORDER" "$TUI_COLOR_RESET"
+    fi
+  else
+    if [[ "$TUI_INTERACTIVE" == "true" ]]; then
+      printf '└\n' >&2
+    else
+      echo "└"
+    fi
+  fi
+}
+
+tui_prompt_line() {
+  local prompt="$1"
+  local default_value="${2:-}"
+  local value
+
+  tui_leave_raw_mode
+  if [[ "$TUI_INTERACTIVE" == "true" ]]; then
+    printf "%s" "$prompt" >&2
+  else
+    printf "%s" "$prompt"
+  fi
+  if ! IFS= read -r value; then
+    value=""
+  fi
+  [[ -n "$value" ]] || value="$default_value"
+  tui_enter_raw_mode
+  echo "$value"
+}
+
+tui_pause_if_interactive() {
+  local lang
+  [[ "$TUI_INTERACTIVE" == "true" ]] || return 0
+  lang="$(read_ui_lang)"
+  tui_leave_raw_mode
+  printf "%s" "$(tui_text "$lang" press_enter)"
+  IFS= read -r _ || true
+  tui_enter_raw_mode
+}
+
+tui_render_menu() {
+  local title="$1"
+  local info="${2:-}"
+  local selected="${3:-0}"
+  shift 3 || true
+  local -a options=("$@")
+  local i line marker
+  local lang
+  lang="$(read_ui_lang)"
+
+  tui_clear_screen
+  tui_panel_open "$title"
+  if [[ -n "$info" ]]; then
+    while IFS= read -r line; do
+      tui_panel_line "$line"
+    done <<< "$info"
+    tui_panel_line ""
+  fi
+  for i in "${!options[@]}"; do
+    if [[ "$i" -eq "$selected" ]]; then
+      marker="> "
+      if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+        tui_panel_line "${TUI_COLOR_HILITE}${marker}$((i + 1)). ${options[$i]}${TUI_COLOR_RESET}"
+      else
+        tui_panel_line "$marker$((i + 1)). ${options[$i]}"
+      fi
+    else
+      marker="  "
+      tui_panel_line "$marker$((i + 1)). ${options[$i]}"
+    fi
+  done
+  tui_panel_line ""
+  if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+    tui_panel_line "${TUI_COLOR_DIM}$(tui_text "$lang" nav_hint)${TUI_COLOR_RESET}"
+  else
+    tui_panel_line "$(tui_text "$lang" nav_hint)"
+  fi
+  tui_panel_close
+}
+
+tui_terminal_cols() {
+  local cols rows
+  cols=""
+
+  if [[ -n "${COLUMNS:-}" && "${COLUMNS:-}" =~ ^[0-9]+$ ]]; then
+    cols="$COLUMNS"
+  fi
+
+  if [[ -z "$cols" ]]; then
+    read -r rows cols < <(stty size 2>/dev/null || true)
+  fi
+
+  if [[ -z "$cols" ]]; then
+    cols="$(stty size < /dev/tty 2>/dev/null | awk '{print $2}' || true)"
+  fi
+
+  if [[ -z "$cols" ]]; then
+    cols="$(tput cols 2>/dev/null || true)"
+  fi
+
+  if [[ -z "$cols" || ! "$cols" =~ ^[0-9]+$ || "$cols" -lt 40 ]]; then
+    cols=100
+  fi
+  echo "$cols"
+}
+
+tui_terminal_rows() {
+  local rows cols
+  rows=""
+
+  if [[ -n "${LINES:-}" && "${LINES:-}" =~ ^[0-9]+$ ]]; then
+    rows="$LINES"
+  fi
+
+  if [[ -z "$rows" ]]; then
+    read -r rows cols < <(stty size 2>/dev/null || true)
+  fi
+
+  if [[ -z "$rows" ]]; then
+    rows="$(stty size < /dev/tty 2>/dev/null | awk '{print $1}' || true)"
+  fi
+
+  if [[ -z "$rows" ]]; then
+    rows="$(tput lines 2>/dev/null || true)"
+  fi
+
+  if [[ -z "$rows" || ! "$rows" =~ ^[0-9]+$ || "$rows" -lt 18 ]]; then
+    rows=32
+  fi
+  echo "$rows"
+}
+
+tui_usage_percent() {
+  local usage="${1:-}"
+  local pct
+  pct="$(printf '%s\n' "$usage" | sed -nE 's/^([0-9]+)%.*/\1/p' | head -n 1)"
+  [[ -n "$pct" ]] || pct=""
+  echo "$pct"
+}
+
+tui_usage_time() {
+  local usage="${1:-}"
+  local ts
+  ts="$(printf '%s\n' "$usage" | sed -nE 's/^[0-9]+% \(([^)]+)\).*$/\1/p' | head -n 1)"
+  echo "${ts:--}"
+}
+
+tui_truncate_text() {
+  local text="${1:-}"
+  local max_len="${2:-46}"
+  if [[ "${#text}" -le "$max_len" ]]; then
+    echo "$text"
+    return 0
+  fi
+  echo "${text:0:$((max_len-3))}..."
+}
+
+tui_fit_line_visual() {
+  local text="${1:-}"
+  local width="${2:-40}"
+  local plain
+  plain="$(tui_strip_ansi "$text")"
+  if (( ${#plain} <= width )); then
+    echo "$text"
+    return 0
+  fi
+  echo "$(tui_truncate_text "$plain" "$width")"
+}
+
+tui_strip_ansi() {
+  printf '%s' "${1:-}" | sed -E $'s/\x1B\\[[0-9;]*[A-Za-z]//g'
+}
+
+tui_visual_len() {
+  local plain
+  plain="$(tui_strip_ansi "${1:-}")"
+  echo "${#plain}"
+}
+
+tui_repeat_char() {
+  local ch="${1:-─}"
+  local count="${2:-1}"
+  local out=""
+  local i
+  (( count < 0 )) && count=0
+  for ((i=0; i<count; i++)); do
+    out="${out}${ch}"
+  done
+  printf '%s' "$out"
+}
+
+tui_pad_visual_right() {
+  local text="${1:-}"
+  local width="${2:-40}"
+  local len pad
+  len="$(tui_visual_len "$text")"
+  if (( len >= width )); then
+    printf '%s' "$text"
+    return 0
+  fi
+  pad=$((width - len))
+  printf '%s%*s' "$text" "$pad" ""
+}
+
+tui_usage_bar() {
+  local usage="${1:-}"
+  local pct filled width color_bg
+  width="${2:-14}"
+  pct="$(tui_usage_percent "$usage")"
+  [[ -n "$pct" ]] || { echo ""; return 0; }
+  filled=$((pct * width / 100))
+  (( filled < 0 )) && filled=0
+  (( filled > width )) && filled=width
+
+  if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+    if (( pct >= 90 )); then
+      color_bg="$TUI_COLOR_BAR_BAD_BG"
+    elif (( pct >= 70 )); then
+      color_bg="$TUI_COLOR_BAR_WARN_BG"
+    else
+      color_bg="$TUI_COLOR_BAR_GOOD_BG"
+    fi
+    printf '%b%*s%b%b%*s%b' \
+      "$color_bg" "$filled" "" "$TUI_COLOR_RESET" \
+      "$TUI_COLOR_BAR_EMPTY_BG" "$((width - filled))" "" "$TUI_COLOR_RESET"
+  else
+    local i bar=""
+    for ((i=0; i<width; i++)); do
+      if (( i < filled )); then
+        bar="${bar}#"
+      else
+        bar="${bar}-"
+      fi
+    done
+    printf '%s' "$bar"
+  fi
+}
+
+tui_usage_pct_label() {
+  local usage="${1:-}"
+  local pct
+  pct="$(tui_usage_percent "$usage")"
+  [[ -n "$pct" ]] || { echo "--%"; return 0; }
+  if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+    if (( pct >= 90 )); then
+      printf '%b%s%%%b' "$TUI_COLOR_BAD" "$pct" "$TUI_COLOR_RESET"
+    elif (( pct >= 70 )); then
+      printf '%b%s%%%b' "$TUI_COLOR_WARN" "$pct" "$TUI_COLOR_RESET"
+    else
+      printf '%b%s%%%b' "$TUI_COLOR_GOOD" "$pct" "$TUI_COLOR_RESET"
+    fi
+  else
+    echo "${pct}%"
+  fi
+}
+
+tui_target_snapshot_tsv() {
+  local target="$1"
+  local usage_proxy="${2:-}"
+  local env account home auth_file metrics state
+  local email plan usage_5h usage_weekly last_activity source
+
+  env="$(read_current_env "$target" || true)"
+  account="$(read_current_account "$target" || true)"
+  home="$(env_home_path "$env")"
+  auth_file="$(account_auth_path "$env" "$account")"
+  [[ -f "$auth_file" ]] || auth_file="$home/auth.json"
+
+  state="$(login_state_for_target "$target" || true)"
+  metrics="$(collect_profile_metrics_tsv "$account" "$auth_file" "$home" "$usage_proxy" || true)"
+  if [[ -n "$metrics" ]]; then
+    IFS=$'\t' read -r email plan usage_5h usage_weekly last_activity source <<< "$metrics"
+  fi
+
+  email="${email:-($account)-}"
+  plan="${plan:-unknown}"
+  usage_5h="${usage_5h:--}"
+  usage_weekly="${usage_weekly:--}"
+  last_activity="${last_activity:--}"
+  source="${source:-local}"
+  [[ "$source" == "api" || "$source" == "local" ]] || source="local"
+
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$env" "$home" "$account" "${state:-unknown}" "$email" "$plan" "$usage_5h" "$usage_weekly" "$last_activity" "$source"
+}
+
+tui_snapshot_kv_line() {
+  local key="$1"
+  local value="$2"
+  local width="${3:-56}"
+  local label prefix max_value plain_value safe_value
+  printf -v label '%-12s' "${key}"
+  prefix="  ${label} "
+  max_value=$((width - ${#prefix}))
+  (( max_value < 6 )) && max_value=6
+
+  plain_value="$(tui_strip_ansi "$value")"
+  safe_value="$value"
+  if (( ${#plain_value} > max_value )); then
+    safe_value="$(tui_truncate_text "$plain_value" "$max_value")"
+  fi
+
+  if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+    printf '%b  %s%b %s\n' "$TUI_COLOR_DIM" "$label" "$TUI_COLOR_RESET" "$safe_value"
+  else
+    printf '  %s %s\n' "$label" "$safe_value"
+  fi
+}
+
+tui_snapshot_state_label() {
+  local state="${1:-unknown}"
+  if [[ "$TUI_COLOR_ENABLED" != "true" ]]; then
+    echo "$state"
+    return 0
+  fi
+  case "$state" in
+    logged-in)
+      printf '%b%s%b' "$TUI_COLOR_GOOD" "$state" "$TUI_COLOR_RESET"
+      ;;
+    *)
+      printf '%b%s%b' "$TUI_COLOR_BAD" "$state" "$TUI_COLOR_RESET"
+      ;;
+  esac
+}
+
+tui_snapshot_rule_line() {
+  local width="${1:-56}"
+  local line
+  line="$(tui_repeat_char "─" "$width")"
+  if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+    printf '%b%s%b\n' "$TUI_COLOR_BORDER" "$line" "$TUI_COLOR_RESET"
+  else
+    echo "$line"
+  fi
+}
+
+tui_snapshot_block() {
+  local label="$1"
+  local env="$2"
+  local home="$3"
+  local account="$4"
+  local state="$5"
+  local email="$6"
+  local plan="$7"
+  local usage_5h="$8"
+  local usage_weekly="$9"
+  local last_activity="${10}"
+  local source="${11}"
+  local mark="${12:-}"
+  local width="${13:-56}"
+  local pct_5h pct_week t5 tw bar5 barw account_field state_label
+  local title_line
+
+  (( width < 40 )) && width=40
+
+  state_label="$(tui_snapshot_state_label "$state")"
+  pct_5h="$(tui_usage_pct_label "$usage_5h")"
+  pct_week="$(tui_usage_pct_label "$usage_weekly")"
+  t5="$(tui_usage_time "$usage_5h")"
+  tw="$(tui_usage_time "$usage_weekly")"
+  bar5="$(tui_usage_bar "$usage_5h" 12)"
+  barw="$(tui_usage_bar "$usage_weekly" 12)"
+
+  account_field="$account"
+  [[ -n "$mark" ]] && account_field="${account_field} ${mark}"
+
+  if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+    title_line="${TUI_COLOR_HILITE}●${TUI_COLOR_RESET} ${TUI_COLOR_TITLE}[${label}] ${env}/${account}${TUI_COLOR_RESET} ${state_label}"
+  else
+    title_line="[${label}] ${env}/${account} (${state_label})"
+  fi
+
+  title_line="$(tui_truncate_text "$title_line" "$width")"
+  echo "$title_line"
+  tui_snapshot_rule_line "$width"
+  tui_snapshot_kv_line "ENV" "$env" "$width"
+  tui_snapshot_kv_line "HOME" "$home" "$width"
+  tui_snapshot_kv_line "ACCOUNT" "$account_field" "$width"
+  tui_snapshot_kv_line "EMAIL" "$email" "$width"
+  tui_snapshot_kv_line "PLAN" "$plan" "$width"
+  tui_snapshot_kv_line "5H USAGE" "${pct_5h}  ${bar5}  ${t5}" "$width"
+  tui_snapshot_kv_line "WEEKLY USAGE" "${pct_week}  ${barw}  ${tw}" "$width"
+  tui_snapshot_kv_line "LAST ACTIVITY" "$last_activity" "$width"
+  tui_snapshot_kv_line "SOURCE" "$source" "$width"
+}
+
+tui_print_two_col_blocks() {
+  local left_block="$1"
+  local right_block="$2"
+  local width="${3:-56}"
+  local sep i max
+  local -a left_lines=()
+  local -a right_lines=()
+  local left_line right_line
+
+  while IFS= read -r left_line; do
+    left_lines+=("$left_line")
+  done <<< "$left_block"
+
+  while IFS= read -r right_line; do
+    right_lines+=("$right_line")
+  done <<< "$right_block"
+
+  max="${#left_lines[@]}"
+  if (( ${#right_lines[@]} > max )); then
+    max="${#right_lines[@]}"
+  fi
+
+  if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+    sep=" ${TUI_COLOR_BORDER}│${TUI_COLOR_RESET} "
+  else
+    sep=" │ "
+  fi
+
+  for ((i=0; i<max; i++)); do
+    left_line="${left_lines[$i]:-}"
+    right_line="${right_lines[$i]:-}"
+    printf '%s%s%s\n' "$(tui_pad_visual_right "$left_line" "$width")" "$sep" "$right_line"
+  done
+}
+
+tui_snapshot_stack_separator() {
+  local cols width
+  cols="$(tui_terminal_cols)"
+  width=$((cols - 4))
+  (( width > 76 )) && width=76
+  (( width < 40 )) && width=40
+  tui_snapshot_rule_line "$width"
+}
+
+tui_snapshot_block_compact() {
+  local env="$1"
+  local account="$2"
+  local state="$3"
+  local email="$4"
+  local plan="$5"
+  local usage_5h="$6"
+  local usage_weekly="$7"
+  local last_activity="$8"
+  local source="$9"
+  local mark="${10:-}"
+  local width="${11:-42}"
+  local inner title state_label pct_5h pct_week t5 tw bar5 barw line2 line3 line4 line5 line
+  local top bottom
+
+  (( width < 34 )) && width=34
+  inner=$((width - 2))
+  (( inner < 20 )) && inner=20
+  state_label="$(tui_snapshot_state_label "$state")"
+  pct_5h="$(tui_usage_pct_label "$usage_5h")"
+  pct_week="$(tui_usage_pct_label "$usage_weekly")"
+  t5="$(tui_usage_time "$usage_5h")"
+  tw="$(tui_usage_time "$usage_weekly")"
+  bar5="$(tui_usage_bar "$usage_5h" 8)"
+  barw="$(tui_usage_bar "$usage_weekly" 8)"
+
+  if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+    title="${TUI_COLOR_HILITE}●${TUI_COLOR_RESET} ${TUI_COLOR_TITLE}${account}${TUI_COLOR_RESET}${mark} ${state_label}"
+  else
+    title="${account}${mark} ${state}"
+  fi
+  line2="${email}"
+  line3="plan:${plan}  src:${source}"
+  line4="5H  ${pct_5h} ${bar5} ${t5}"
+  line5="WK  ${pct_week} ${barw} ${tw}"
+
+  top="┌$(tui_repeat_char "─" "$inner")┐"
+  bottom="└$(tui_repeat_char "─" "$inner")┘"
+  if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+    top="${TUI_COLOR_BORDER}${top}${TUI_COLOR_RESET}"
+    bottom="${TUI_COLOR_BORDER}${bottom}${TUI_COLOR_RESET}"
+  fi
+
+  echo "$top"
+  for line in "$title" "$line2" "$line3" "$line4" "$line5"; do
+    line="$(tui_fit_line_visual "$line" "$inner")"
+    line="$(tui_pad_visual_right "$line" "$inner")"
+    if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+      printf '%b│%b%s%b│%b\n' "$TUI_COLOR_BORDER" "$TUI_COLOR_RESET" "$line" "$TUI_COLOR_BORDER" "$TUI_COLOR_RESET"
+    else
+      printf '│%s│\n' "$line"
+    fi
+  done
+  echo "$bottom"
+}
+
+tui_print_blocks_grid_files() {
+  local width="$1"
+  local line_count="${2:-7}"
+  shift 2
+  local -a files=("$@")
+  local total cols ncols sep sepw start end line i text
+
+  total="${#files[@]}"
+  (( total > 0 )) || return 0
+
+  cols="$(tui_terminal_cols)"
+  sepw=0
+  ncols=$(( (cols + sepw) / (width + sepw) ))
+  (( ncols < 1 )) && ncols=1
+  (( ncols > total )) && ncols="$total"
+
+  sep=""
+
+  for ((start=0; start<total; start+=ncols)); do
+    end=$((start + ncols - 1))
+    (( end >= total )) && end=$((total - 1))
+    for ((line=1; line<=line_count; line++)); do
+      for ((i=start; i<=end; i++)); do
+        text="$(sed -n "${line}p" "${files[$i]}" 2>/dev/null || true)"
+        if (( i > start )); then
+          # Remove only the left border glyph for merged cards.
+          # Keep trailing ANSI sequences so title/bullet colors stay intact.
+          text="$(printf '%s' "$text" | sed -E $'s/^((\\x1B\\[[0-9;]*m)*)[│┌└]/\\1/')"
+        fi
+        text="$(tui_pad_visual_right "$text" "$width")"
+        if (( i == start )); then
+          printf '%s' "$text"
+        else
+          printf '%s%s' "$sep" "$text"
+        fi
+      done
+      printf '\n'
+    done
+    if (( end < total - 1 )); then
+      echo
+    fi
+  done
+}
+
+tui_status_env_heading() {
+  local env="$1"
+  if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+    printf '%b%s%b\n' "$TUI_COLOR_TITLE" "ENV: $env" "$TUI_COLOR_RESET"
+  else
+    echo "ENV: $env"
+  fi
+}
+
+tui_account_snapshot_tsv() {
+  local env="$1"
+  local account="$2"
+  local usage_proxy="${3:-}"
+  local home auth_file metrics state
+  local email plan usage_5h usage_weekly last_activity source
+
+  home="$(env_home_path "$env")"
+  auth_file="$(account_auth_path "$env" "$account")"
+  [[ -f "$auth_file" ]] || auth_file="$home/auth.json"
+
+  if account_has_auth "$env" "$account"; then
+    state="logged-in"
+  else
+    state="not-logged-in"
+  fi
+
+  metrics="$(collect_profile_metrics_tsv "$account" "$auth_file" "$home" "$usage_proxy" || true)"
+  if [[ -n "$metrics" ]]; then
+    IFS=$'\t' read -r email plan usage_5h usage_weekly last_activity source <<< "$metrics"
+  fi
+
+  email="${email:-($account)-}"
+  plan="${plan:-unknown}"
+  usage_5h="${usage_5h:--}"
+  usage_weekly="${usage_weekly:--}"
+  last_activity="${last_activity:--}"
+  source="${source:-local}"
+  [[ "$source" == "api" || "$source" == "local" ]] || source="local"
+
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$env" "$home" "$account" "$state" "$email" "$plan" "$usage_5h" "$usage_weekly" "$last_activity" "$source"
+}
+
+tui_home_accounts_snapshot() {
+  local usage_info usage_proxy cols colw
+  local cli_env cli_account app_env app_account
+  local env account mark any
+  local s_env s_home s_account s_state s_email s_plan s_5h s_week s_last s_source
+  local max_parallel
+  local tmp_dir
+  local -a all_envs=()
+  local -a all_accounts=()
+  local -a worker_pids=()
+  local -a block_files=()
+  local -a env_block_files=()
+  local idx
+
+  usage_info="$(resolve_usage_proxy_with_source || true)"
+  usage_proxy=""
+  if [[ -n "$usage_info" ]]; then
+    IFS=$'\t' read -r _ usage_proxy <<< "$usage_info"
+  fi
+
+  cli_env="$(read_current_env cli || true)"
+  cli_account="$(read_current_account cli || true)"
+  app_env="$(read_current_env app || true)"
+  app_account="$(read_current_account app || true)"
+
+  cols="$(tui_terminal_cols)"
+  # Prefer horizontal density inside one env group.
+  colw=28
+  (( cols < 90 )) && colw=30
+
+  max_parallel="${CODEX_SWITCHER_STATUS_PARALLELISM:-6}"
+  [[ "$max_parallel" =~ ^[0-9]+$ ]] || max_parallel=6
+  (( max_parallel < 1 )) && max_parallel=1
+
+  tmp_dir="$(mktemp -d /tmp/codex-sw-status-snapshot.XXXXXX)"
+
+  any=0
+  while IFS= read -r env; do
+    while IFS= read -r account; do
+      all_envs+=("$env")
+      all_accounts+=("$account")
+      idx=$(( ${#all_envs[@]} - 1 ))
+      (
+        tui_account_snapshot_tsv "$env" "$account" "$usage_proxy" > "$tmp_dir/metric.$idx.tsv"
+      ) &
+      worker_pids+=("$!")
+      if (( ${#worker_pids[@]} >= max_parallel )); then
+        wait "${worker_pids[0]}" 2>/dev/null || true
+        worker_pids=("${worker_pids[@]:1}")
+      fi
+    done < <(list_accounts_for_env "$env")
+  done < <(list_env_names | sort -u)
+
+  for idx in "${worker_pids[@]}"; do
+    wait "$idx" 2>/dev/null || true
+  done
+
+  for idx in "${!all_envs[@]}"; do
+    any=1
+    IFS=$'\t' read -r s_env s_home s_account s_state s_email s_plan s_5h s_week s_last s_source < "$tmp_dir/metric.$idx.tsv" || true
+    s_env="${s_env:-${all_envs[$idx]}}"
+    s_account="${s_account:-${all_accounts[$idx]}}"
+    s_state="${s_state:-not-logged-in}"
+    s_email="${s_email:--}"
+    s_plan="${s_plan:-unknown}"
+    s_5h="${s_5h:---}"
+    s_week="${s_week:---}"
+    s_last="${s_last:---}"
+    s_source="${s_source:-local}"
+    s_home="$(display_path_for_output "$s_home")"
+    mark=""
+    env="${all_envs[$idx]}"
+    account="${all_accounts[$idx]}"
+    [[ "$env" == "$cli_env" && "$account" == "$cli_account" ]] && mark="${mark} [cli]"
+    [[ "$env" == "$app_env" && "$account" == "$app_account" ]] && mark="${mark} [app]"
+    tui_snapshot_block_compact "$s_env" "$s_account" "$s_state" "$s_email" "$s_plan" "$s_5h" "$s_week" "$s_last" "$s_source" "$mark" "$colw" > "$tmp_dir/block.$idx.txt"
+    block_files+=("$tmp_dir/block.$idx.txt")
+  done
+
+  if [[ "$any" -eq 0 ]]; then
+    echo "  No accounts found."
+    rm -rf "$tmp_dir"
+    return 0
+  fi
+
+  while IFS= read -r env; do
+    env_block_files=()
+    for idx in "${!all_envs[@]}"; do
+      if [[ "${all_envs[$idx]}" == "$env" ]]; then
+        env_block_files+=("${block_files[$idx]}")
+      fi
+    done
+    (( ${#env_block_files[@]} > 0 )) || continue
+    tui_status_env_heading "$env"
+    tui_print_blocks_grid_files "$colw" "7" "${env_block_files[@]}"
+    echo
+  done < <(list_env_names | sort -u)
+
+  rm -rf "$tmp_dir"
+}
+
+tui_choose_index() {
+  local title="$1"
+  local info="${2:-}"
+  local default_index="${3:-0}"
+  shift 3 || true
+  local -a options=("$@")
+  local max idx choice key d
+  local lang
+  lang="$(read_ui_lang)"
+
+  TUI_MENU_RESULT="-1"
+  max="${#options[@]}"
+  (( max > 0 )) || return 0
+  idx="$default_index"
+  (( idx >= 0 && idx < max )) || idx=0
+
+  if [[ "$TUI_INTERACTIVE" != "true" ]]; then
+    while true; do
+      tui_panel_open "$title"
+      if [[ -n "$info" ]]; then
+        while IFS= read -r choice; do
+          tui_panel_line "$choice"
+        done <<< "$info"
+        tui_panel_line ""
+      fi
+      for d in "${!options[@]}"; do
+        printf '%2d) %s\n' "$((d + 1))" "${options[$d]}"
+      done
+      printf "%s" "$(tui_text "$lang" choose)"
+      if ! IFS= read -r choice; then
+        TUI_MENU_RESULT="-1"
+        return 0
+      fi
+      choice="$(echo "${choice:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      if [[ -z "$choice" ]]; then
+        TUI_MENU_RESULT="$idx"
+        return 0
+      fi
+      case "$choice" in
+        q|Q)
+          tui_request_quit
+          TUI_MENU_RESULT="-1"
+          return 0
+          ;;
+      esac
+      if [[ "$choice" =~ ^[0-9]+$ ]]; then
+        d=$((choice - 1))
+        if (( d >= 0 && d < max )); then
+          TUI_MENU_RESULT="$d"
+          return 0
+        fi
+      fi
+      echo "$(tui_text "$lang" invalid_choice)$choice"
+    done
+  fi
+
+  while true; do
+    tui_render_menu "$title" "$info" "$idx" "${options[@]}"
+    key="$(tui_read_key || true)"
+    [[ -n "$key" ]] || continue
+    case "$key" in
+      up)
+        idx=$(( (idx - 1 + max) % max ))
+        ;;
+      down)
+        idx=$(( (idx + 1) % max ))
+        ;;
+      enter)
+        TUI_MENU_RESULT="$idx"
+        return 0
+        ;;
+      quit)
+        tui_request_quit
+        TUI_MENU_RESULT="-1"
+        return 0
+        ;;
+      digit:*)
+        d="${key#digit:}"
+        if [[ "$d" =~ ^[0-9]+$ ]]; then
+          d=$((d - 1))
+          if (( d >= 0 && d < max )); then
+            TUI_MENU_RESULT="$d"
+            return 0
+          fi
+        fi
+        ;;
+    esac
+  done
+}
+
+tui_execute_subcommand() {
+  local -a args=("$@")
+  local rc
+  local lang
+  lang="$(read_ui_lang)"
+
+  if [[ "${#args[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  tui_leave_raw_mode
+  set +e
+  CODEX_SWITCHER_SKIP_UPDATE_CHECK=true "$SCRIPT_DIR/codex-switcher" "${args[@]}"
+  rc=$?
+  set -e
+
+  echo
+  echo "$(tui_text "$lang" exit_code_prefix)$rc]"
+  # Avoid SIGTTIN suspends on some shells/TTY setups after app launch.
+  # Opt-in old blocking behavior via CODEX_SWITCHER_TUI_WAIT_ENTER=true.
+  if [[ "$TUI_INTERACTIVE" == "true" ]]; then
+    if [[ "${CODEX_SWITCHER_TUI_WAIT_ENTER:-false}" == "true" ]] && tui_has_foreground_tty; then
+      printf "%s" "$(tui_text "$lang" press_enter)"
+      IFS= read -r _ || true
+    fi
+    tui_enter_raw_mode
+  fi
+}
+
+tui_execute_subcommand_detached() {
+  local -a args=("$@")
+  local cmdline
+  if [[ "${#args[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  # Fully detach from current TTY so TUI can stay interactive.
+  nohup env CODEX_SWITCHER_SKIP_UPDATE_CHECK=true "$SCRIPT_DIR/codex-switcher" "${args[@]}" </dev/null >>"$SWITCH_LOG" 2>&1 &
+  cmdline="$(printf '%q ' "$SCRIPT_NAME" "${args[@]}")"
+  echo "已在后台执行: ${cmdline% }"
+}
+
+tui_select_env() {
+  local default_env="${1:-$(read_current_env cli || true)}"
+  local include_default="${2:-true}"
+  local info
+  local idx env
+  local -a envs=()
+
+  while IFS= read -r env; do
+    [[ "$include_default" != "true" && "$env" == "$DEFAULT_ENV_NAME" ]] && continue
+    envs+=("$env")
+  done < <(list_env_names | sort -u)
+
+  if [[ "${#envs[@]}" -eq 0 ]]; then
+    return 1
+  fi
+
+  idx=0
+  for env in "${!envs[@]}"; do
+    if [[ "${envs[$env]}" == "$default_env" ]]; then
+      idx="$env"
+      break
+    fi
+  done
+  info="$(tui_text "$(read_ui_lang)" select_env_title)"
+  tui_choose_index_with_back "$info" "" "$idx" "${envs[@]}"
+  [[ "$TUI_MENU_RESULT" == "-1" ]] && return 1
+  echo "${envs[$TUI_MENU_RESULT]}"
+}
+
+tui_account_slots_for_env() {
+  local env="$1"
+  local dir="$ACCOUNTS_DIR/$env"
+  if [[ -d "$dir" ]]; then
+    find "$dir" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | while IFS= read -r account; do
+      validate_name_noexit "$account" || continue
+      echo "$account"
+    done
+  fi
+  if account_has_auth "$env" "$DEFAULT_ACCOUNT_NAME"; then
+    echo "$DEFAULT_ACCOUNT_NAME"
+  fi
+}
+
+tui_select_account() {
+  local env="$1"
+  local default_account="${2:-$(read_current_account cli || true)}"
+  local require_auth="${3:-true}"
+  local idx account status
+  local -a accounts=()
+  local -a labels=()
+
+  while IFS= read -r account; do
+    if [[ "$require_auth" == "true" ]] && ! account_has_auth "$env" "$account"; then
+      continue
+    fi
+    accounts+=("$account")
+  done < <(tui_account_slots_for_env "$env" | sort -u)
+
+  if [[ "${#accounts[@]}" -eq 0 ]]; then
+    echo "$(tui_text "$(read_ui_lang)" no_logged_account)" >&2
+    tui_pause_if_interactive
+    return 1
+  fi
+
+  idx=0
+  for account in "${!accounts[@]}"; do
+    [[ "${accounts[$account]}" == "$default_account" ]] && idx="$account" && break
+  done
+
+  for account in "${accounts[@]}"; do
+    if account_has_auth "$env" "$account"; then
+      status="$(tui_text "$(read_ui_lang)" status_logged_in)"
+    else
+      status="$(tui_text "$(read_ui_lang)" status_not_logged_in)"
+    fi
+    labels+=("$account [$status]")
+  done
+
+  tui_choose_index_with_back "$(tui_text "$(read_ui_lang)" select_account_title) (env=$env)" "" "$idx" "${labels[@]}"
+  [[ "$TUI_MENU_RESULT" == "-1" ]] && return 1
+  echo "${accounts[$TUI_MENU_RESULT]}"
+}
+
+tui_choose_target() {
+  local allow_both="${1:-false}"
+  local -a options=()
+  local -a values=()
+  local idx
+
+  options+=("$(tui_text "$(read_ui_lang)" target_cli)")
+  values+=("cli")
+  options+=("$(tui_text "$(read_ui_lang)" target_app)")
+  values+=("app")
+  if [[ "$allow_both" == "true" ]]; then
+    options+=("$(tui_text "$(read_ui_lang)" target_both)")
+    values+=("both")
+  fi
+  tui_choose_index_with_back "$(tui_text "$(read_ui_lang)" select_target_title)" "" "0" "${options[@]}"
+  [[ "$TUI_MENU_RESULT" == "-1" ]] && return 1
+  echo "${values[$TUI_MENU_RESULT]}"
+}
+
+tui_action_switch() {
+  local target="" env="" account="" launch_mode="none" launch_idx launch_target_label
+  local stage=0
+
+  while true; do
+    tui_quit_requested && return 1
+    case "$stage" in
+      0)
+        target="$(tui_choose_target false)" || {
+          tui_quit_requested && return 1
+          return 1
+        }
+        stage=1
+        ;;
+      1)
+        env="$(tui_select_env "$(read_current_env "$target" || true)")" || {
+          tui_quit_requested && return 1
+          stage=0
+          continue
+        }
+        stage=2
+        ;;
+      2)
+        account="$(tui_select_account "$env" "$(read_current_account "$target" || true)" true)" || {
+          tui_quit_requested && return 1
+          stage=1
+          continue
+        }
+        stage=3
+        ;;
+      3)
+        case "$target" in
+          cli) launch_target_label="$(tui_text "$(read_ui_lang)" target_cli)" ;;
+          app) launch_target_label="$(tui_text "$(read_ui_lang)" target_app)" ;;
+          *) launch_target_label="$target" ;;
+        esac
+        tui_choose_index_with_back "$(tui_text "$(read_ui_lang)" select_launch_title) ${launch_target_label}" "" "0" \
+          "$(tui_text "$(read_ui_lang)" launch_yes)" \
+          "$(tui_text "$(read_ui_lang)" launch_switch_only)"
+        launch_idx="$TUI_MENU_RESULT"
+        if [[ "$launch_idx" == "-1" ]]; then
+          tui_quit_requested && return 1
+          stage=2
+          continue
+        fi
+        case "$launch_idx" in
+          0) launch_mode="$target" ;;
+          1) launch_mode="none" ;;
+          *) launch_mode="none" ;;
+        esac
+        if [[ "$launch_mode" == "none" ]]; then
+          tui_execute_subcommand ac use "$account" --env "$env" -t "$target" --no-launch
+          return 0
+        fi
+        if [[ "$target" == "app" ]]; then
+          tui_execute_subcommand_detached ac use "$account" --env "$env" -t "$target" --launch
+        else
+          tui_execute_subcommand ac use "$account" --env "$env" -t "$target" --launch
+        fi
+        return 0
+        ;;
+    esac
+  done
+}
+
+tui_action_login() {
+  local prefer_env="${1:-$(read_current_env cli || true)}"
+  local env account mode mode_idx
+  tui_panel_open "$(tui_text "$(read_ui_lang)" login_title)"
+
+  env="$(tui_select_env "$prefer_env")" || return 1
+
+  account="$(tui_prompt_line "$(tui_text "$(read_ui_lang)" login_account_prompt)" "")"
+  account="$(normalize_name_input "$account")"
+  account="$(echo "${account:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  if ! validate_name_noexit "$account"; then
+    echo "$(tui_text "$(read_ui_lang)" invalid_choice)$account"
+    tui_pause_if_interactive
+    return 1
+  fi
+
+  tui_choose_index_with_back "$(tui_text "$(read_ui_lang)" login_mode_title)" "" "0" \
+    "$(tui_text "$(read_ui_lang)" login_mode_auth)" \
+    "$(tui_text "$(read_ui_lang)" login_mode_apikey)"
+  mode_idx="$TUI_MENU_RESULT"
+  [[ "$mode_idx" == "-1" ]] && return 1
+  [[ "$mode_idx" == "1" ]] && mode="apikey" || mode="auth"
+
+  if [[ "$mode" == "apikey" ]]; then
+    tui_execute_subcommand ac login "$account" --env "$env" -t both --mode apikey
+  else
+    tui_execute_subcommand ac login "$account" --env "$env" -t both
+  fi
+}
+
+tui_action_env_create() {
+  local name src_idx src env_from
+  tui_panel_open "$(tui_text "$(read_ui_lang)" envs_create)"
+  name="$(tui_prompt_line "$(tui_text "$(read_ui_lang)" env_name_prompt)" "")"
+  name="$(normalize_name_input "$name")"
+  name="$(echo "${name:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  if ! validate_env_name_noexit "$name" || [[ "$name" == "$DEFAULT_ENV_NAME" ]]; then
+    echo "$(tui_text "$(read_ui_lang)" invalid_choice)$name"
+    tui_pause_if_interactive
+    return 1
+  fi
+
+  tui_choose_index_with_back "$(tui_text "$(read_ui_lang)" env_source_title)" "" "0" \
+    "$(tui_text "$(read_ui_lang)" env_source_default)" \
+    "$(tui_text "$(read_ui_lang)" env_source_empty)" \
+    "$(tui_text "$(read_ui_lang)" env_source_other)"
+  src_idx="$TUI_MENU_RESULT"
+  [[ "$src_idx" == "-1" ]] && return 1
+  case "$src_idx" in
+    0)
+      tui_execute_subcommand env new "$name"
+      ;;
+    1)
+      tui_execute_subcommand env new "$name" --empty
+      ;;
+    *)
+      env_from="$(tui_select_env "$(read_current_env cli || true)")" || return 1
+      tui_execute_subcommand env new "$name" --from "$env_from"
+      ;;
+  esac
+}
+
+tui_action_env_delete() {
+  local env
+  env="$(tui_select_env "$(read_current_env cli || true)" false)" || {
+    echo "$(tui_text "$(read_ui_lang)" invalid_choice)$DEFAULT_ENV_NAME"
+    tui_pause_if_interactive
+    return 1
+  }
+  tui_execute_subcommand env rm "$env"
+}
+
+tui_action_lang() {
+  local idx langs current i
+  local -a opts=()
+  local -a vals=(zh en ja)
+  current="$(read_ui_lang)"
+  for i in "${!vals[@]}"; do
+    if [[ "${vals[$i]}" == "$current" ]]; then
+      opts+=("${vals[$i]} ($(tui_text "$current" default_prefix))")
+      idx="$i"
+    else
+      opts+=("${vals[$i]}")
+    fi
+  done
+  idx="${idx:-0}"
+  tui_choose_index_with_back "$(tui_text "$current" lang_title)" "$(tui_text "$current" lang_current_prefix): $current" "$idx" "${opts[@]}"
+  langs="$TUI_MENU_RESULT"
+  [[ "$langs" == "-1" ]] && return 0
+  tui_execute_subcommand lang "${vals[$langs]}"
+}
+
+tui_action_accounts() {
+  local action target env account stage
+  while true; do
+    tui_quit_requested && return 0
+    tui_choose_index "$(tui_text "$(read_ui_lang)" accounts_title)" "" "0" \
+      "$(tui_text "$(read_ui_lang)" accounts_use)" \
+      "$(tui_text "$(read_ui_lang)" accounts_login)" \
+      "$(tui_text "$(read_ui_lang)" accounts_logout)" \
+      "$(tui_text "$(read_ui_lang)" accounts_delete)" \
+      "$(tui_text "$(read_ui_lang)" accounts_back)"
+    action="$TUI_MENU_RESULT"
+    [[ "$action" == "-1" ]] && return 0
+    case "$action" in
+      0)
+        stage=0
+        while true; do
+          tui_quit_requested && return 0
+          case "$stage" in
+            0)
+              target="$(tui_choose_target false)" || {
+                tui_quit_requested && return 0
+                break
+              }
+              stage=1
+              ;;
+            1)
+              env="$(tui_select_env "$(read_current_env "$target" || true)")" || {
+                tui_quit_requested && return 0
+                stage=0
+                continue
+              }
+              stage=2
+              ;;
+            2)
+              account="$(tui_select_account "$env" "$(read_current_account "$target" || true)" true)" || {
+                tui_quit_requested && return 0
+                stage=1
+                continue
+              }
+              tui_execute_subcommand ac use "$account" --env "$env" -t "$target" --no-launch
+              break
+              ;;
+          esac
+        done
+        ;;
+      1)
+        tui_action_login "$(read_current_env cli || true)" || true
+        ;;
+      2)
+        stage=0
+        while true; do
+          tui_quit_requested && return 0
+          case "$stage" in
+            0)
+              target="$(tui_choose_target true)" || {
+                tui_quit_requested && return 0
+                break
+              }
+              stage=1
+              ;;
+            1)
+              env="$(tui_select_env "$(read_current_env cli || true)")" || {
+                tui_quit_requested && return 0
+                stage=0
+                continue
+              }
+              stage=2
+              ;;
+            2)
+              account="$(tui_select_account "$env" "$(read_current_account cli || true)" false)" || {
+                tui_quit_requested && return 0
+                stage=1
+                continue
+              }
+              tui_execute_subcommand ac logout "$account" --env "$env" -t "$target"
+              break
+              ;;
+          esac
+        done
+        ;;
+      3)
+        stage=0
+        while true; do
+          tui_quit_requested && return 0
+          case "$stage" in
+            0)
+              env="$(tui_select_env "$(read_current_env cli || true)")" || {
+                tui_quit_requested && return 0
+                break
+              }
+              stage=1
+              ;;
+            1)
+              account="$(tui_select_account "$env" "$(read_current_account cli || true)" false)" || {
+                tui_quit_requested && return 0
+                stage=0
+                continue
+              }
+              tui_execute_subcommand ac rm "$account" --env "$env"
+              break
+              ;;
+          esac
+        done
+        ;;
+      *)
+        return 0
+        ;;
+    esac
+  done
+}
+
+tui_action_envs() {
+  local action
+  while true; do
+    tui_quit_requested && return 0
+    tui_choose_index "$(tui_text "$(read_ui_lang)" envs_title)" "" "0" \
+      "$(tui_text "$(read_ui_lang)" envs_create)" \
+      "$(tui_text "$(read_ui_lang)" envs_delete)" \
+      "$(tui_text "$(read_ui_lang)" envs_back)"
+    action="$TUI_MENU_RESULT"
+    [[ "$action" == "-1" ]] && return 0
+    case "$action" in
+      0)
+        tui_action_env_create || true
+        ;;
+      1)
+        tui_action_env_delete || true
+        ;;
+      *)
+        return 0
+        ;;
+    esac
+  done
+}
+
+tui_fetch_home_snapshot_with_loading() {
+  local snapshot tmp pid rc i frame
+  local -a frames=("◐" "◓" "◑" "◒")
+
+  if [[ "$TUI_INTERACTIVE" != "true" ]]; then
+    tui_home_accounts_snapshot
+    return 0
+  fi
+
+  tmp="$(mktemp /tmp/codex-sw-home-snapshot.XXXXXX)"
+  (
+    tui_home_accounts_snapshot >"$tmp"
+  ) &
+  pid=$!
+  i=0
+  while kill -0 "$pid" 2>/dev/null; do
+    frame="${frames[$((i % ${#frames[@]}))]}"
+    tui_render_status_loading "$frame"
+    sleep 0.12
+    i=$((i + 1))
+  done
+
+  set +e
+  wait "$pid"
+  rc=$?
+  set -e
+
+  if [[ "$rc" -eq 0 ]]; then
+    snapshot="$(cat "$tmp" 2>/dev/null || true)"
+    rm -f "$tmp"
+    printf '%s' "$snapshot"
+    return 0
+  fi
+
+  rm -f "$tmp"
+  return 1
+}
+
+tui_home_accounts_snapshot_cache_clear() {
+  TUI_HOME_SNAPSHOT_CACHE=""
+  TUI_HOME_SNAPSHOT_CACHE_TS="0"
+  TUI_HOME_SNAPSHOT_RENDER=""
+}
+
+tui_home_accounts_snapshot_cached() {
+  local now age snapshot
+  now="$(tui_now_epoch)"
+
+  if [[ -n "$TUI_HOME_SNAPSHOT_CACHE" && "$TUI_HOME_SNAPSHOT_CACHE_TS" =~ ^[0-9]+$ ]]; then
+    age=$((now - TUI_HOME_SNAPSHOT_CACHE_TS))
+    if (( age >= 0 && age < TUI_HOME_SNAPSHOT_CACHE_TTL )); then
+      TUI_HOME_SNAPSHOT_RENDER="$TUI_HOME_SNAPSHOT_CACHE"
+      return 0
+    fi
+  fi
+
+  snapshot="$(tui_fetch_home_snapshot_with_loading || true)"
+  if [[ -n "$snapshot" ]]; then
+    TUI_HOME_SNAPSHOT_CACHE="$snapshot"
+    TUI_HOME_SNAPSHOT_CACHE_TS="$now"
+    TUI_HOME_SNAPSHOT_RENDER="$snapshot"
+    return 0
+  fi
+
+  TUI_HOME_SNAPSHOT_RENDER="$TUI_HOME_SNAPSHOT_CACHE"
+}
+
+tui_render_status_loading() {
+  local spinner="${1:-◐}"
+  local lang info
+  lang="$(read_ui_lang)"
+  info="$(tui_text "$lang" home_accounts_title)
+${spinner} $(tui_text "$lang" home_loading)"
+
+  tui_render_menu "codex-sw ─ $(tui_text "$lang" home_opt_status)" "$info" "0" \
+    "$(tui_text "$lang" back)"
+}
+
+tui_status_snapshot_line_count() {
+  local snapshot="${1:-}"
+  if [[ -z "$snapshot" ]]; then
+    echo 0
+    return 0
+  fi
+  printf '%s\n' "$snapshot" | awk 'END{print NR+0}'
+}
+
+tui_render_status_scrolled() {
+  local snapshot="${1:-}"
+  local offset="${2:-0}"
+  local rows view_lines total_lines max_offset start end
+  local lang
+  lang="$(read_ui_lang)"
+
+  rows="$(tui_terminal_rows)"
+  view_lines=$((rows - 10))
+  (( view_lines < 6 )) && view_lines=6
+
+  total_lines="$(tui_status_snapshot_line_count "$snapshot")"
+  max_offset=$((total_lines - view_lines))
+  (( max_offset < 0 )) && max_offset=0
+  (( offset < 0 )) && offset=0
+  (( offset > max_offset )) && offset="$max_offset"
+
+  start=$((offset + 1))
+  end=$((offset + view_lines))
+
+  if [[ "$TUI_INTERACTIVE" == "true" ]]; then
+    # Lighter redraw than full-screen clear to reduce visible flicker.
+    printf '\033[H\033[J' >&2
+  fi
+  if [[ "$TUI_INTERACTIVE" == "true" ]]; then
+    printf 'codex-sw ─ %s\n' "$(tui_text "$lang" home_opt_status)" >&2
+    printf '\n' >&2
+    if [[ -n "$snapshot" ]]; then
+      printf '%s\n' "$snapshot" | sed -n "${start},${end}p" >&2
+    else
+      printf 'No data\n' >&2
+    fi
+    printf '\n' >&2
+    if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+      printf '%b%s%b\n' "$TUI_COLOR_DIM" "↑/↓ scroll  r refresh  Esc/q back" "$TUI_COLOR_RESET" >&2
+    else
+      printf '%s\n' "↑/↓ scroll  r refresh  Esc/q back" >&2
+    fi
+  else
+    printf 'codex-sw ─ %s\n' "$(tui_text "$lang" home_opt_status)"
+    printf '\n'
+    if [[ -n "$snapshot" ]]; then
+      printf '%s\n' "$snapshot" | sed -n "${start},${end}p"
+    else
+      printf 'No data\n'
+    fi
+    printf '\n'
+    printf '%s\n' "↑/↓ scroll  r refresh  Esc/q back"
+  fi
+}
+
+tui_action_status() {
+  local snapshot key offset total_lines rows view_lines max_offset
+  while true; do
+    tui_quit_requested && return 0
+    tui_render_status_loading
+    tui_home_accounts_snapshot_cached
+    snapshot="$TUI_HOME_SNAPSHOT_RENDER"
+    offset=0
+    while true; do
+      rows="$(tui_terminal_rows)"
+      view_lines=$((rows - 10))
+      (( view_lines < 6 )) && view_lines=6
+      total_lines="$(tui_status_snapshot_line_count "$snapshot")"
+      max_offset=$((total_lines - view_lines))
+      (( max_offset < 0 )) && max_offset=0
+      (( offset > max_offset )) && offset="$max_offset"
+
+      tui_render_status_scrolled "$snapshot" "$offset"
+      key="$(tui_read_key || true)"
+      [[ -n "$key" ]] || continue
+      case "$key" in
+        up)
+          (( offset > 0 )) && offset=$((offset - 1))
+          ;;
+        down)
+          (( offset < max_offset )) && offset=$((offset + 1))
+          ;;
+        digit:1|char:r|char:R)
+          tui_home_accounts_snapshot_cache_clear
+          tui_render_status_loading
+          tui_home_accounts_snapshot_cached
+          snapshot="$TUI_HOME_SNAPSHOT_RENDER"
+          offset=0
+          ;;
+        quit|esc)
+          return 0
+          ;;
+        enter)
+          # no-op
+          ;;
+      esac
+    done
+  done
+}
+
+tui_home_logo() {
+  cat <<'EOF'
+  ____ ___  ____  _______  __     _____ _        __
+ / ___/ _ \|  _ \| ____\ \/ /    / ____\ \      / /
+| |  | | | | | | |  _|  \  /____| (___  \ \ /\ / /
+| |__| |_| | |_| | |___ /  \_____\___ \  \ V  V /
+ \____\___/|____/|_____/_/\_\    |____/   \_/\_/
+EOF
+}
+
+tui_home_render_plain() {
+  local selected="$1"
+  local update_hint="${2:-}"
+  local i marker index_txt name_txt desc_txt
+  local c_logo="" c_link="" c_sel="" c_desc="" c_dim="" c_reset=""
+  local -a names=(
+    "$(tui_text "$(read_ui_lang)" home_opt_switch)"
+    "$(tui_text "$(read_ui_lang)" home_opt_accounts)"
+    "$(tui_text "$(read_ui_lang)" home_opt_envs)"
+    "$(tui_text "$(read_ui_lang)" home_opt_status)"
+    "$(tui_text "$(read_ui_lang)" home_opt_quit)"
+  )
+  local -a descs=(
+    "Switch active account quickly"
+    "Manage accounts"
+    "Manage environments"
+    "View usage and status dashboard"
+    "Exit"
+  )
+
+  tui_clear_screen
+  if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+    c_logo="$TUI_COLOR_HILITE"
+    c_link="$TUI_COLOR_DIM"
+    c_sel="$TUI_COLOR_HILITE"
+    c_desc="$TUI_COLOR_DIM"
+    c_dim="$TUI_COLOR_DIM"
+    c_reset="$TUI_COLOR_RESET"
+  fi
+
+  if [[ "$TUI_INTERACTIVE" == "true" ]]; then
+    if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+      while IFS= read -r line; do
+        printf '%b%s%b\n' "$c_logo" "$line" "$c_reset" >&2
+      done < <(tui_home_logo)
+      printf '%b%s%b\n' "$c_link" "https://github.com/wxt2rr/codex-switcher" "$c_reset" >&2
+    else
+      tui_home_logo >&2
+      echo "https://github.com/wxt2rr/codex-switcher" >&2
+    fi
+    echo >&2
+    if [[ -n "$update_hint" ]]; then
+      if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+        printf '%b%s%b\n' "$c_dim" "$update_hint" "$c_reset" >&2
+      else
+        echo "$update_hint" >&2
+      fi
+      echo >&2
+    fi
+    tui_home_render_menu_block "$selected" "stderr"
+  else
+    tui_home_logo
+    echo "  https://github.com/wxt2rr/codex-switcher"
+    echo
+    if [[ -n "$update_hint" ]]; then
+      echo "  $update_hint"
+      echo
+    fi
+    tui_home_render_menu_block "$selected" "stdout"
+  fi
+}
+
+tui_home_render_menu_block() {
+  local selected="$1"
+  local out="${2:-stderr}"
+  local i marker index_txt
+  local c_sel="" c_desc="" c_dim="" c_reset=""
+  local -a names=(
+    "$(tui_text "$(read_ui_lang)" home_opt_switch)"
+    "$(tui_text "$(read_ui_lang)" home_opt_accounts)"
+    "$(tui_text "$(read_ui_lang)" home_opt_envs)"
+    "$(tui_text "$(read_ui_lang)" home_opt_status)"
+    "$(tui_text "$(read_ui_lang)" home_opt_quit)"
+  )
+  local -a descs=(
+    "Switch active account quickly"
+    "Manage accounts"
+    "Manage environments"
+    "View usage and status dashboard"
+    "Exit"
+  )
+
+  if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+    c_sel="$TUI_COLOR_HILITE"
+    c_desc="$TUI_COLOR_DIM"
+    c_dim="$TUI_COLOR_DIM"
+    c_reset="$TUI_COLOR_RESET"
+  fi
+
+  for i in "${!names[@]}"; do
+    marker=" "
+    index_txt="$((i + 1))."
+    if [[ "$i" -eq "$selected" ]]; then
+      marker=">"
+      if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+        if [[ "$out" == "stderr" ]]; then
+          printf '%b%s %s %-14s%b %b%s%b\n' \
+            "$c_sel" "$marker" "$index_txt" "${names[$i]}" "$c_reset" \
+            "$c_sel" "${descs[$i]}" "$c_reset" >&2
+        else
+          printf '%b%s %s %-14s%b %b%s%b\n' \
+            "$c_sel" "$marker" "$index_txt" "${names[$i]}" "$c_reset" \
+            "$c_sel" "${descs[$i]}" "$c_reset"
+        fi
+      else
+        if [[ "$out" == "stderr" ]]; then
+          printf '%s %s %-14s %s\n' "$marker" "$index_txt" "${names[$i]}" "${descs[$i]}" >&2
+        else
+          printf '%s %s %-14s %s\n' "$marker" "$index_txt" "${names[$i]}" "${descs[$i]}"
+        fi
+      fi
+    else
+      if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+        if [[ "$out" == "stderr" ]]; then
+          printf '  %s %-14s %b%s%b\n' "$index_txt" "${names[$i]}" "$c_desc" "${descs[$i]}" "$c_reset" >&2
+        else
+          printf '  %s %-14s %b%s%b\n' "$index_txt" "${names[$i]}" "$c_desc" "${descs[$i]}" "$c_reset"
+        fi
+      else
+        if [[ "$out" == "stderr" ]]; then
+          printf '  %s %-14s %s\n' "$index_txt" "${names[$i]}" "${descs[$i]}" >&2
+        else
+          printf '  %s %-14s %s\n' "$index_txt" "${names[$i]}" "${descs[$i]}"
+        fi
+      fi
+    fi
+  done
+  if [[ "$out" == "stderr" ]]; then
+    echo >&2
+    if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+      printf '%b%s%b\n' "$c_dim" "$(tui_text "$(read_ui_lang)" nav_hint)" "$c_reset" >&2
+    else
+      echo "$(tui_text "$(read_ui_lang)" nav_hint)" >&2
+    fi
+  else
+    echo
+    if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+      printf '%b%s%b\n' "$c_dim" "$(tui_text "$(read_ui_lang)" nav_hint)" "$c_reset"
+    else
+      echo "$(tui_text "$(read_ui_lang)" nav_hint)"
+    fi
+  fi
+}
+
+tui_home_choose_action() {
+  local idx=0
+  local key d
+  local update_hint="${1:-}"
+  local menu_lines=7
+  local first_render_done="false"
+  while true; do
+    if [[ "$TUI_INTERACTIVE" == "true" ]]; then
+      if [[ "$first_render_done" != "true" ]]; then
+        tui_home_render_plain "$idx" "$update_hint"
+        first_render_done="true"
+      else
+        printf '\033[%dA\r' "$menu_lines" >&2
+        tui_home_render_menu_block "$idx" "stderr"
+      fi
+    else
+      tui_home_render_plain "$idx" "$update_hint"
+    fi
+    key="$(tui_read_key || true)"
+    [[ -n "$key" ]] || continue
+    case "$key" in
+      up)
+        idx=$(( (idx - 1 + 5) % 5 ))
+        ;;
+      down)
+        idx=$(( (idx + 1) % 5 ))
+        ;;
+      enter)
+        TUI_MENU_RESULT="$idx"
+        return 0
+        ;;
+      quit)
+        TUI_MENU_RESULT="-1"
+        return 0
+        ;;
+      digit:*)
+        d="${key#digit:}"
+        if [[ "$d" =~ ^[0-9]+$ ]]; then
+          d=$((d - 1))
+          if (( d >= 0 && d < 5 )); then
+            TUI_MENU_RESULT="$d"
+            return 0
+          fi
+        fi
+        ;;
+    esac
+  done
+}
+
+cmd_tui() {
+  local choice update_hint
+  tui_setup_terminal
+  # Some shells/TTY setups can transiently mark this process as background
+  # while app launching/focus switching; ignore TTIN/TTOU to avoid suspend.
+  trap '' TTIN TTOU
+  trap 'tui_restore_terminal; trap - TTIN TTOU' EXIT INT TERM
+  update_hint="$(CODEX_SWITCHER_UPDATE_CHECK_TIMEOUT=1 update_available_message || true)"
+
+  while true; do
+    tui_quit_requested && break
+    tui_home_choose_action "$update_hint"
+    choice="$TUI_MENU_RESULT"
+    case "$choice" in
+      -1|4)
+        break
+        ;;
+      0)
+        tui_action_switch || true
+        ;;
+      1)
+        tui_action_accounts || true
+        ;;
+      2)
+        tui_action_envs || true
+        ;;
+      3)
+        tui_action_status || true
+        ;;
+    esac
+  done
+
+  tui_restore_terminal
+  trap - TTIN TTOU
+  trap - EXIT INT TERM
 }
 
 redact() {
@@ -145,6 +2429,20 @@ validate_name_noexit() {
   [[ -n "$name" ]] || return 1
   [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || return 1
   return 0
+}
+
+normalize_name_input() {
+  local name="${1:-}"
+  # Normalize common full-width punctuation from CJK IME to ASCII.
+  name="${name//－/-}"
+  name="${name//＿/_}"
+  name="${name//．/.}"
+  # Remove bracketed-paste wrappers if terminal sent them.
+  name="${name//$'\e[200~'/}"
+  name="${name//$'\e[201~'/}"
+  # Drop control chars (including ESC/CR/LF/TAB) that are invisible on screen.
+  name="$(printf '%s' "$name" | tr -d '\000-\037\177')"
+  echo "$name"
 }
 
 validate_env_name_noexit() {
@@ -452,22 +2750,22 @@ list_env_names() {
 
 list_accounts_for_env() {
   local env="$1"
-  local dir auth_file any
+  local dir any has_default
   dir="$ACCOUNTS_DIR/$env"
   any=0
+  has_default=0
 
   if [[ -d "$dir" ]]; then
     while IFS= read -r account; do
       validate_name_noexit "$account" || continue
-      auth_file="$(account_auth_path "$env" "$account")"
-      if [[ -f "$auth_file" ]]; then
-        any=1
-        echo "$account"
-      fi
+      any=1
+      [[ "$account" == "$DEFAULT_ACCOUNT_NAME" ]] && has_default=1
+      echo "$account"
     done < <(find "$dir" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort)
   fi
 
-  if [[ "$any" -eq 0 ]] && [[ "$env" == "$DEFAULT_ENV_NAME" ]] && [[ -f "$(env_home_path "$env")/auth.json" ]]; then
+  if [[ "$env" == "$DEFAULT_ENV_NAME" && "$has_default" -eq 0 && -f "$(env_home_path "$env")/auth.json" ]]; then
+    any=1
     echo "$DEFAULT_ACCOUNT_NAME"
   fi
 }
@@ -703,6 +3001,26 @@ app_stop_managed() {
   echo "Stopped managed app process"
 }
 
+app_any_running() {
+  pgrep -f "/Codex\\.app/Contents/MacOS/Codex" >/dev/null 2>&1
+}
+
+app_stop_unmanaged_if_running() {
+  local i
+  if [[ "$(uname -s 2>/dev/null || true)" == "Darwin" ]] && command -v osascript >/dev/null 2>&1; then
+    osascript -e 'tell application "Codex" to quit' >/dev/null 2>&1 || true
+    for ((i=0; i<20; i++)); do
+      app_any_running || break
+      sleep 0.15
+    done
+  fi
+
+  if app_any_running; then
+    pkill -f "/Codex\\.app/Contents/MacOS/Codex" >/dev/null 2>&1 || true
+    sleep 0.2
+  fi
+}
+
 metrics_script_path() {
   echo "$SCRIPT_DIR/profile-metrics.py"
 }
@@ -720,6 +3038,26 @@ collect_profile_metrics_tsv() {
   else
     python3 "$script_path" --account-name "$account" --auth-file "$auth_file" --data-path "$data_path" 2>/dev/null
   fi
+}
+
+read_api_key_for_login() {
+  local api_key="${OPENAI_API_KEY:-}"
+  if [[ -n "$api_key" ]]; then
+    echo "$api_key"
+    return 0
+  fi
+
+  if [[ -t 0 ]]; then
+    printf "Enter OpenAI API key: " >&2
+    IFS= read -r -s api_key || true
+    printf "\n" >&2
+  else
+    IFS= read -r api_key || true
+  fi
+
+  api_key="$(echo "${api_key:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  [[ -n "$api_key" ]] || err "empty API key. rerun: $SCRIPT_NAME ac login <account> --mode apikey"
+  echo "$api_key"
 }
 
 cmd_env_list() {
@@ -821,6 +3159,10 @@ cmd_env_remove() {
     err "env '$env' is current App env; use --force to remove"
   fi
 
+  if ! confirm_delete_twice "env '$env'"; then
+    return 0
+  fi
+
   if [[ "$env" == "$app_env" ]]; then
     app_stop_managed >/dev/null
     set_current_env app "$DEFAULT_ENV_NAME"
@@ -899,6 +3241,10 @@ cmd_account_remove() {
     err "account '$account' is current App account in env '$env'; use --force to remove"
   fi
 
+  if ! confirm_delete_twice "account '$env/$account'"; then
+    return 0
+  fi
+
   rm -rf -- "$(account_dir_path "$env" "$account")"
   if [[ "$account" == "$DEFAULT_ACCOUNT_NAME" ]]; then
     rm -f -- "$(env_home_path "$env")/auth.json"
@@ -939,7 +3285,9 @@ cmd_account_login() {
   local env="$2"
   local target="$3"
   local sync_mode="$4"
+  local mode="$5"
   local home
+  local api_key=""
 
   validate_account_name "$account"
   require_env_exists "$env"
@@ -950,12 +3298,26 @@ cmd_account_login() {
     sync_overwrite_excluding_auth "$DEFAULT_HOME" "$home"
   fi
 
-  CODEX_HOME="$home" command codex login
+  case "$mode" in
+    auth)
+      CODEX_HOME="$home" command codex login
+      ;;
+    apikey)
+      api_key="$(read_api_key_for_login)"
+      OPENAI_API_KEY="$api_key" CODEX_HOME="$home" command codex login --with-api-key
+      ;;
+    *)
+      err "invalid mode '$mode' (use auth|apikey)"
+      ;;
+  esac
   save_env_auth_to_account "$env" "$account" || err "login did not produce auth.json in $home"
 
   with_targets "$target" _cmd_account_set_target "$env" "$account"
 
-  log_event INFO "account_login env=$env account=$account target=$target sync=$sync_mode"
+  log_event INFO "account_login env=$env account=$account target=$target sync=$sync_mode mode=$mode"
+  if [[ "$mode" == "apikey" ]]; then
+    echo "API key saved successfully for account: $env/$account"
+  fi
   echo "Logged in account: $env/$account"
 }
 
@@ -1366,12 +3728,20 @@ cmd_app_open() {
   app_bin="$(resolve_app_bin)"
 
   app_stop_managed >/dev/null
+  app_stop_unmanaged_if_running >/dev/null
 
   mkdir -p "$(dirname "$APP_LOG")"
-  nohup env CODEX_HOME="$(target_home_path app)" CODEX_SWITCHER_MANAGED=1 CODEX_SWITCHER_ENV="$env" CODEX_SWITCHER_ACCOUNT="$use_account" "$app_bin" "$@" >>"$APP_LOG" 2>&1 &
+  nohup env CODEX_HOME="$(target_home_path app)" CODEX_SWITCHER_MANAGED=1 CODEX_SWITCHER_ENV="$env" CODEX_SWITCHER_ACCOUNT="$use_account" "$app_bin" "$@" </dev/null >>"$APP_LOG" 2>&1 &
   pid="$!"
   printf '%s\n' "$pid" > "$APP_PID_FILE"
   chmod 600 "$APP_PID_FILE" 2>/dev/null || true
+
+  if [[ "$(uname -s 2>/dev/null || true)" == "Darwin" ]] && command -v osascript >/dev/null 2>&1; then
+    (
+      sleep 0.35
+      osascript -e 'tell application "Codex" to activate' >/dev/null 2>&1 || true
+    ) &
+  fi
 
   log_event INFO "app_open env=$env account=$use_account pid=$pid args=$*"
   echo "Opened Codex App with: $env/$use_account"
@@ -1648,16 +4018,19 @@ main() {
   ensure_dirs
 
   local cmd="${1:-}"
-  [[ -n "$cmd" ]] || {
-    usage
-    exit 0
-  }
-  shift || true
+  if [[ -z "$cmd" ]]; then
+    cmd="tui"
+  else
+    shift || true
+  fi
+  if [[ "$cmd" != "tui" ]]; then
+    notify_update_if_available
+  fi
 
   case "$cmd" in
     env)
       local sub="${1:-}"
-      [[ -n "$sub" ]] || err "usage: $SCRIPT_NAME env <ls|new|use> ..."
+      [[ -n "$sub" ]] || err "usage: $SCRIPT_NAME env <ls|new|use|rm> ..."
       shift || true
       case "$sub" in
         ls)
@@ -1714,6 +4087,18 @@ main() {
           done
           with_lock cmd_env_use "$env" "$target"
           ;;
+        rm|remove|delete)
+          [[ "$#" -ge 1 && "$#" -le 2 ]] || err "usage: $SCRIPT_NAME env rm <env> [--force]"
+          local env="$1"
+          shift
+          local force="false"
+          if [[ "${1:-}" == "--force" ]]; then
+            force="true"
+          elif [[ -n "${1:-}" ]]; then
+            err "unknown option: ${1:-}"
+          fi
+          with_lock cmd_env_remove "$env" "$force"
+          ;;
         *)
           err "unknown env subcommand: $sub"
           ;;
@@ -1721,7 +4106,7 @@ main() {
       ;;
     account|ac)
       local sub="${1:-}"
-      [[ -n "$sub" ]] || err "usage: $SCRIPT_NAME ac <ls|login|use|logout> ..."
+      [[ -n "$sub" ]] || err "usage: $SCRIPT_NAME ac <ls|login|use|logout|rm> ..."
       shift || true
       case "$sub" in
         ls)
@@ -1742,12 +4127,13 @@ main() {
           cmd_account_list "$env"
           ;;
         login)
-          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME ac login <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync]"
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME ac login <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--mode auth|apikey]"
           local account="$1"
           shift
           local env="$(read_current_env cli || true)"
           local target="cli"
           local sync_mode="false"
+          local mode="auth"
           while [[ "$#" -gt 0 ]]; do
             case "$1" in
               --env)
@@ -1766,13 +4152,25 @@ main() {
               --no-sync)
                 sync_mode="false"
                 ;;
+              --mode)
+                shift
+                [[ "$#" -gt 0 ]] || err "missing mode after --mode"
+                mode="$1"
+                ;;
               *)
                 err "unknown option: $1"
                 ;;
             esac
             shift
           done
-          with_lock cmd_account_login "$account" "$env" "$target" "$sync_mode"
+          case "$mode" in
+            auth|apikey)
+              ;;
+            *)
+              err "invalid mode '$mode' (use auth|apikey)"
+              ;;
+          esac
+          with_lock cmd_account_login "$account" "$env" "$target" "$sync_mode" "$mode"
           ;;
         use)
           [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME ac use <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]"
@@ -1860,6 +4258,30 @@ main() {
           done
           with_lock cmd_account_logout "$account" "$env" "$target"
           ;;
+        rm|remove|delete)
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME ac rm <account> [--env <env>] [--force]"
+          local account="$1"
+          shift
+          local env="$(read_current_env cli || true)"
+          local force="false"
+          while [[ "$#" -gt 0 ]]; do
+            case "$1" in
+              --env)
+                shift
+                [[ "$#" -gt 0 ]] || err "missing env after --env"
+                env="$1"
+                ;;
+              --force)
+                force="true"
+                ;;
+              *)
+                err "unknown option: $1"
+                ;;
+            esac
+            shift
+          done
+          with_lock cmd_account_remove "$account" "$env" "$force"
+          ;;
         *)
           err "unknown account subcommand: $sub"
           ;;
@@ -1896,6 +4318,14 @@ main() {
     status)
       [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME status"
       cmd_status
+      ;;
+    lang)
+      [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME lang [zh|en|ja]"
+      cmd_lang "${1:-}"
+      ;;
+    tui)
+      [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME tui"
+      cmd_tui
       ;;
     check)
       [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME check"
