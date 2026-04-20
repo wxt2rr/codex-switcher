@@ -310,6 +310,8 @@ TUI_COLOR_BAR_EMPTY_BG=""
 TUI_COLOR_BAR_GOOD_BG=""
 TUI_COLOR_BAR_WARN_BG=""
 TUI_COLOR_BAR_BAD_BG=""
+TUI_COLOR_INFO=""
+TUI_COLOR_PLAN=""
 TUI_COLOR_RESET=""
 TUI_ALT_SCREEN_ACTIVE="false"
 TUI_SHOULD_QUIT="false"
@@ -549,6 +551,8 @@ tui_setup_terminal() {
       TUI_COLOR_BAR_GOOD_BG=$'\033[48;5;71m'
       TUI_COLOR_BAR_WARN_BG=$'\033[48;5;179m'
       TUI_COLOR_BAR_BAD_BG=$'\033[48;5;167m'
+      TUI_COLOR_INFO=$'\033[1;38;5;117m'
+      TUI_COLOR_PLAN=$'\033[1;38;5;214m'
       TUI_COLOR_RESET=$'\033[0m'
     else
       TUI_COLOR_ENABLED="false"
@@ -563,6 +567,8 @@ tui_setup_terminal() {
       TUI_COLOR_BAR_GOOD_BG=""
       TUI_COLOR_BAR_WARN_BG=""
       TUI_COLOR_BAR_BAD_BG=""
+      TUI_COLOR_INFO=""
+      TUI_COLOR_PLAN=""
       TUI_COLOR_RESET=""
     fi
     TUI_STTY_SAVED="$(stty -g 2>/dev/null || true)"
@@ -1219,6 +1225,7 @@ tui_snapshot_block_compact() {
   local mark="${10:-}"
   local width="${11:-42}"
   local inner title state_label pct_5h pct_week t5 tw bar5 barw line2 line3 line4 line5 line
+  local mark_display plan_display
   local top bottom
 
   (( width < 34 )) && width=34
@@ -1232,13 +1239,18 @@ tui_snapshot_block_compact() {
   bar5="$(tui_usage_bar "$usage_5h" 8)"
   barw="$(tui_usage_bar "$usage_weekly" 8)"
 
+  mark_display="$mark"
+  plan_display="$plan"
   if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
-    title="${TUI_COLOR_HILITE}●${TUI_COLOR_RESET} ${TUI_COLOR_TITLE}${account}${TUI_COLOR_RESET}${mark} ${state_label}"
+    mark_display="${mark_display//\[cli\]/${TUI_COLOR_INFO}[cli]${TUI_COLOR_RESET}}"
+    mark_display="${mark_display//\[app\]/${TUI_COLOR_INFO}[app]${TUI_COLOR_RESET}}"
+    plan_display="${TUI_COLOR_PLAN}${plan}${TUI_COLOR_RESET}"
+    title="${TUI_COLOR_HILITE}●${TUI_COLOR_RESET} ${TUI_COLOR_TITLE}${account}${TUI_COLOR_RESET}${mark_display} ${state_label}"
   else
-    title="${account}${mark} ${state}"
+    title="${account}${mark_display} ${state}"
   fi
   line2="${email}"
-  line3="plan:${plan}  src:${source}"
+  line3="plan:${plan_display}  src:${source}"
   line4="5H  ${pct_5h} ${bar5} ${t5}"
   line5="WK  ${pct_week} ${barw} ${tw}"
 
@@ -1892,7 +1904,6 @@ tui_action_accounts() {
   while true; do
     tui_quit_requested && return 0
     tui_choose_index "$(tui_text "$(read_ui_lang)" accounts_title)" "" "0" \
-      "$(tui_text "$(read_ui_lang)" accounts_use)" \
       "$(tui_text "$(read_ui_lang)" accounts_login)" \
       "$(tui_text "$(read_ui_lang)" accounts_logout)" \
       "$(tui_text "$(read_ui_lang)" accounts_delete)" \
@@ -1901,41 +1912,9 @@ tui_action_accounts() {
     [[ "$action" == "-1" ]] && return 0
     case "$action" in
       0)
-        stage=0
-        while true; do
-          tui_quit_requested && return 0
-          case "$stage" in
-            0)
-              target="$(tui_choose_target false)" || {
-                tui_quit_requested && return 0
-                break
-              }
-              stage=1
-              ;;
-            1)
-              env="$(tui_select_env "$(read_current_env "$target" || true)")" || {
-                tui_quit_requested && return 0
-                stage=0
-                continue
-              }
-              stage=2
-              ;;
-            2)
-              account="$(tui_select_account "$env" "$(read_current_account "$target" || true)" true)" || {
-                tui_quit_requested && return 0
-                stage=1
-                continue
-              }
-              tui_execute_subcommand ac use "$account" --env "$env" -t "$target" --no-launch
-              break
-              ;;
-          esac
-        done
-        ;;
-      1)
         tui_action_login "$(read_current_env cli || true)" || true
         ;;
-      2)
+      1)
         stage=0
         while true; do
           tui_quit_requested && return 0
@@ -1967,7 +1946,7 @@ tui_action_accounts() {
           esac
         done
         ;;
-      3)
+      2)
         stage=0
         while true; do
           tui_quit_requested && return 0
@@ -2219,7 +2198,8 @@ tui_home_render_plain() {
   local selected="$1"
   local update_hint="${2:-}"
   local i marker index_txt name_txt desc_txt
-  local c_logo="" c_link="" c_sel="" c_desc="" c_dim="" c_reset=""
+  local c_logo="" c_link="" c_sel="" c_desc="" c_dim="" c_title="" c_reset=""
+  local hint_prefix hint_cmd
   local -a names=(
     "$(tui_text "$(read_ui_lang)" home_opt_switch)"
     "$(tui_text "$(read_ui_lang)" home_opt_accounts)"
@@ -2244,6 +2224,7 @@ tui_home_render_plain() {
     c_sel="$TUI_COLOR_HILITE"
     c_desc="$TUI_COLOR_DIM"
     c_dim="$TUI_COLOR_DIM"
+    c_title="$TUI_COLOR_TITLE"
     c_reset="$TUI_COLOR_RESET"
   fi
 
@@ -2260,7 +2241,13 @@ tui_home_render_plain() {
     echo >&2
     if [[ -n "$update_hint" ]]; then
       if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
-        printf '%b%s%b\n' "$c_dim" "$update_hint" "$c_reset" >&2
+        if [[ "$update_hint" == *"codex-sw upgrade"* ]]; then
+          hint_prefix="${update_hint%%codex-sw upgrade*}"
+          hint_cmd="codex-sw upgrade"
+          printf '%b%s%b%b%s%b\n' "$c_title" "$hint_prefix" "$c_reset" "$c_sel" "$hint_cmd" "$c_reset" >&2
+        else
+          printf '%b%s%b\n' "$c_title" "$update_hint" "$c_reset" >&2
+        fi
       else
         echo "$update_hint" >&2
       fi
@@ -2419,7 +2406,7 @@ cmd_tui() {
   # while app launching/focus switching; ignore TTIN/TTOU to avoid suspend.
   trap '' TTIN TTOU
   trap 'tui_restore_terminal; trap - TTIN TTOU' EXIT INT TERM
-  update_hint="$(CODEX_SWITCHER_UPDATE_CHECK_TIMEOUT=1 update_available_message || true)"
+  update_hint="$(CODEX_SWITCHER_UPDATE_CHECK_TIMEOUT=2 update_available_message || true)"
 
   while true; do
     tui_quit_requested && break
