@@ -551,7 +551,7 @@ tui_setup_terminal() {
       TUI_COLOR_BAR_GOOD_BG=$'\033[48;5;71m'
       TUI_COLOR_BAR_WARN_BG=$'\033[48;5;179m'
       TUI_COLOR_BAR_BAD_BG=$'\033[48;5;167m'
-      TUI_COLOR_INFO=$'\033[1;38;5;117m'
+      TUI_COLOR_INFO=$'\033[1;38;5;123m'
       TUI_COLOR_PLAN=$'\033[1;38;5;214m'
       TUI_COLOR_RESET=$'\033[0m'
     else
@@ -1320,10 +1320,36 @@ tui_print_blocks_grid_files() {
 
 tui_status_env_heading() {
   local env="$1"
+  local home
+  local line
+  home="$(display_path_for_output "$(env_home_path "$env")")"
+  line="ENV: $env   HOME: $home"
   if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
-    printf '%b%s%b\n' "$TUI_COLOR_TITLE" "ENV: $env" "$TUI_COLOR_RESET"
+    if (( ${#line} <= $(tui_terminal_cols) - 2 )); then
+      printf '%bENV: %s%b   %bHOME: %s%b\n' \
+        "$TUI_COLOR_TITLE" "$env" "$TUI_COLOR_RESET" \
+        "$TUI_COLOR_DIM" "$home" "$TUI_COLOR_RESET"
+    else
+      printf '%b%s%b\n' "$TUI_COLOR_TITLE" "ENV: $env" "$TUI_COLOR_RESET"
+      printf '%b%s%b\n' "$TUI_COLOR_DIM" "HOME: $home" "$TUI_COLOR_RESET"
+    fi
   else
-    echo "ENV: $env"
+    if (( ${#line} <= $(tui_terminal_cols) - 2 )); then
+      echo "$line"
+    else
+      echo "ENV: $env"
+      echo "HOME: $home"
+    fi
+  fi
+}
+
+status_auth_layout() {
+  if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+    printf '%bDEFAULT AUTH:%b %s\n' "$TUI_COLOR_DIM" "$TUI_COLOR_RESET" "$(display_path_for_output "$DEFAULT_HOME/auth.json")"
+    printf '%bCUSTOM  AUTH:%b %s\n' "$TUI_COLOR_DIM" "$TUI_COLOR_RESET" "$(display_path_for_output "$ACCOUNTS_DIR/{env}/{account}/auth.json")"
+  else
+    echo "DEFAULT AUTH: $(display_path_for_output "$DEFAULT_HOME/auth.json")"
+    echo "CUSTOM  AUTH: $(display_path_for_output "$ACCOUNTS_DIR/{env}/{account}/auth.json")"
   fi
 }
 
@@ -1386,6 +1412,9 @@ tui_home_accounts_snapshot() {
   app_env="$(read_current_env app || true)"
   app_account="$(read_current_account app || true)"
 
+  status_auth_layout
+  echo
+
   cols="$(tui_terminal_cols)"
   # Prefer horizontal density inside one env group.
   colw=28
@@ -1434,6 +1463,7 @@ tui_home_accounts_snapshot() {
     mark=""
     env="${all_envs[$idx]}"
     account="${all_accounts[$idx]}"
+
     [[ "$env" == "$cli_env" && "$account" == "$cli_account" ]] && mark="${mark} [cli]"
     [[ "$env" == "$app_env" && "$account" == "$app_account" ]] && mark="${mark} [app]"
     tui_snapshot_block_compact "$s_env" "$s_account" "$s_state" "$s_email" "$s_plan" "$s_5h" "$s_week" "$s_last" "$s_source" "$mark" "$colw" > "$tmp_dir/block.$idx.txt"
@@ -3728,6 +3758,7 @@ cmd_status() {
 
   echo "cli_current: $cli_env/$cli_account"
   echo "app_current: $app_env/$app_account"
+  status_auth_layout
   echo "cli($cli_env/$cli_account): $cli_state"
   echo "app($app_env/$app_account): $app_state"
 

@@ -227,6 +227,10 @@ after_launch_count="$(wc -l < "$CODEX_SWITCHER_TEST_CODEX_LOG")"
 "$SW" ac use work --env default -t app --launch
 [[ "$("$SW" whoami -t app)" == "default/work" ]]
 
+"$SW" status >/tmp/codex_sw_status_auth_paths.out
+grep -q "DEFAULT AUTH: $DEFAULT_HOME/auth.json" /tmp/codex_sw_status_auth_paths.out
+grep -q "CUSTOM  AUTH: $STATE/env-accounts/{env}/{account}/auth.json" /tmp/codex_sw_status_auth_paths.out
+
 "$SW" env new trash --empty
 echo '{"trash":"1"}' > "$ENVS/trash/home/shared.json"
 mkdir -p "$STATE/env-accounts/trash/tmp"
