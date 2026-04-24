@@ -1,6 +1,6 @@
 {
   "name": "@wangxt0223/codex-switcher",
-  "version": "0.8.3",
+  "version": "0.8.4",
   "description": "Env + account switcher for Codex CLI and Codex App with shared env data and per-account auth.",
   "license": "MIT",
   "author": "wangxt",

@@ -98,12 +98,14 @@ export CODEX_SWITCHER_APP_BIN="$BIN/fake-codex-app"
 export CODEX_SWITCHER_LOCK_WAIT_SECONDS=2
 export CODEX_SWITCHER_DEFAULT_HOME="$DEFAULT_HOME"
 export CODEX_SWITCHER_DISABLE_SYSTEM_PROXY_DETECT=true
+export CODEX_SWITCHER_DISABLE_TOKEN_REFRESH_AUTO_START=true
 export CODEX_SWITCHER_TEST_NPM_LOG="$TMPBASE/npm-args.log"
 export CODEX_SWITCHER_TEST_NPM_VIEW_VERSION=""
 export CODEX_SWITCHER_TEST_CODEX_LOG="$TMPBASE/codex-args.log"
 export CODEX_SWITCHER_TEST_CURL_LOG="$TMPBASE/curl-args.log"
 export CODEX_SWITCHER_TEST_CURL_MODE="success"
 unset OPENAI_API_KEY
+unset CODEX_SWITCHER_SKIP_UPDATE_CHECK
 unset HTTPS_PROXY https_proxy HTTP_PROXY http_proxy ALL_PROXY all_proxy
 : > "$CODEX_SWITCHER_TEST_CODEX_LOG"
 : > "$CODEX_SWITCHER_TEST_CURL_LOG"
@@ -165,13 +167,21 @@ grep -q "API key saved successfully" /tmp/codex_sw_apikey_login.out
 "$SW" ac use key --env default
 grep -q '"auth_mode":"api_key"' "$DEFAULT_HOME/auth.json"
 
+printf 'sk-relogin-key-9999\n' | "$SW" ac relogin key --env default --mode apikey >/tmp/codex_sw_relogin_apikey.out
+grep -q '"OPENAI_API_KEY":"sk-relogin-key-9999"' "$STATE/env-accounts/default/key/auth.json"
+grep -q "API key saved successfully" /tmp/codex_sw_relogin_apikey.out
+
+"$SW" ac relogin work --env default --mode auth >/tmp/codex_sw_relogin_auth.out
+grep -q "Logged in account: default/work" /tmp/codex_sw_relogin_auth.out
+grep -q '"auth_mode":"chatgpt"' "$STATE/env-accounts/default/work/auth.json"
+
 make_id_token() {
   python3 - "$1" "$2" <<'PY'
 import base64, json, sys
 email = sys.argv[1]
 plan = sys.argv[2]
 header = base64.urlsafe_b64encode(json.dumps({"alg":"none","typ":"JWT"}, separators=(",", ":")).encode()).decode().rstrip("=")
-payload = base64.urlsafe_b64encode(json.dumps({"email":email,"chatgpt_plan_type":plan}, separators=(",", ":")).encode()).decode().rstrip("=")
+payload = base64.urlsafe_b64encode(json.dumps({"email":email,"chatgpt_plan_type":plan,"exp":4102444800}, separators=(",", ":")).encode()).decode().rstrip("=")
 print(f"{header}.{payload}.sig")
 PY
 }
@@ -230,6 +240,10 @@ after_launch_count="$(wc -l < "$CODEX_SWITCHER_TEST_CODEX_LOG")"
 "$SW" status >/tmp/codex_sw_status_auth_paths.out
 grep -q "DEFAULT AUTH: $DEFAULT_HOME/auth.json" /tmp/codex_sw_status_auth_paths.out
 grep -q "CUSTOM  AUTH: $STATE/env-accounts/{env}/{account}/auth.json" /tmp/codex_sw_status_auth_paths.out
+grep -Eq "^cli_auth_expiry: -$" /tmp/codex_sw_status_auth_paths.out
+grep -Eq "^app_auth_expiry: -$" /tmp/codex_sw_status_auth_paths.out
+"$SW" ops token-refresh status >/tmp/codex_sw_token_refresh_status.out
+grep -q "^token_refresh_guard:" /tmp/codex_sw_token_refresh_status.out
 
 "$SW" env new trash --empty
 echo '{"trash":"1"}' > "$ENVS/trash/home/shared.json"

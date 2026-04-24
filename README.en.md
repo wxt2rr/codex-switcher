@@ -172,6 +172,7 @@ app: default/personal
 | `codex-sw env rm <env> [--force]` | Remove env (double `y/n` confirmation) |
 | `codex-sw ac ls [--env <env>]` | Show account overview |
 | `codex-sw ac login <account> [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--mode auth\|apikey]` | Login account |
+| `codex-sw ac relogin [account] [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--mode auth\|apikey]` | Relogin an existing account (interactive env/account/mode selection supported) |
 | `codex-sw ac use <account> [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--launch\|--no-launch] [-- <codex args...>]` | Switch account |
 | `codex-sw ac logout [account] [--env <env>] [-t cli\|app\|both]` | Logout account |
 | `codex-sw ac rm <account> [--env <env>] [--force]` | Remove account (double `y/n` confirmation) |

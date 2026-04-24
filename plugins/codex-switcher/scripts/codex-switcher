@@ -32,6 +32,10 @@ SCRIPT_NAME="${CODEX_SWITCHER_INVOKED_AS:-$(basename "$0")}"
 USAGE_API_ENDPOINT="https://chatgpt.com/backend-api/wham/usage"
 USAGE_PROXY_FILE="$STATE_DIR/usage_proxy"
 DISABLE_SYSTEM_PROXY_DETECT="${CODEX_SWITCHER_DISABLE_SYSTEM_PROXY_DETECT:-false}"
+TOKEN_REFRESH_INTERVAL_SECONDS="${CODEX_SWITCHER_TOKEN_REFRESH_INTERVAL_SECONDS:-900}"
+LAUNCHD_REFRESH_LABEL="${CODEX_SWITCHER_LAUNCHD_REFRESH_LABEL:-com.wangxt.codex-switcher.token-refresh}"
+LAUNCHD_REFRESH_PLIST="$HOME/Library/LaunchAgents/${LAUNCHD_REFRESH_LABEL}.plist"
+TOKEN_REFRESH_LOG="${CODEX_SWITCHER_TOKEN_REFRESH_LOG:-$STATE_DIR/token-refresh.log}"
 
 usage() {
   cat <<'USAGE'
@@ -43,6 +47,7 @@ Usage:
 
   codex-sw ac ls [--env <env>]
   codex-sw ac login <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--mode auth|apikey]
+  codex-sw ac relogin [account] [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--mode auth|apikey]
   codex-sw ac use <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]
   codex-sw ac logout [account] [--env <env>] [-t cli|app|both]
   codex-sw ac rm <account> [--env <env>] [--force]
@@ -73,6 +78,7 @@ Usage:
 
   codex-sw ac ls [--env <env>]
   codex-sw ac login <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--mode auth|apikey]
+  codex-sw ac relogin [account] [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--mode auth|apikey]
   codex-sw ac use <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]
   codex-sw ac logout [account] [--env <env>] [-t cli|app|both]
   codex-sw ac rm <account> [--env <env>] [--force]
@@ -92,6 +98,7 @@ Usage:
   codex-sw ops init [--shell zsh|bash] [--dry-run]
   codex-sw ops recover [--dry-run]
   codex-sw ops doctor [--fix]
+  codex-sw ops token-refresh <start|stop|status|run-once>
 USAGE
 }
 
@@ -357,10 +364,12 @@ tui_text() {
     zh:status_logged_in) echo "logged-in" ;;
     zh:status_not_logged_in) echo "not-logged-in" ;;
     zh:no_logged_account) echo "该环境没有可用登录账号，请先登录" ;;
+    zh:no_account_slot) echo "该环境没有已有账号，请先登录创建账号" ;;
     zh:switch_title) echo "Switch" ;;
     zh:accounts_title) echo "Accounts" ;;
     zh:accounts_use) echo "Use Account" ;;
     zh:accounts_login) echo "Login Account" ;;
+    zh:accounts_relogin) echo "Relogin Account" ;;
     zh:accounts_logout) echo "Logout Account" ;;
     zh:accounts_delete) echo "Delete Account" ;;
     zh:accounts_back) echo "< 返回" ;;
@@ -418,10 +427,12 @@ tui_text() {
     en:status_logged_in) echo "logged-in" ;;
     en:status_not_logged_in) echo "not-logged-in" ;;
     en:no_logged_account) echo "No logged-in account in this env, please login first" ;;
+    en:no_account_slot) echo "No account slot found in this env, please login first" ;;
     en:switch_title) echo "Switch" ;;
     en:accounts_title) echo "Accounts" ;;
     en:accounts_use) echo "Use Account" ;;
     en:accounts_login) echo "Login Account" ;;
+    en:accounts_relogin) echo "Relogin Account" ;;
     en:accounts_logout) echo "Logout Account" ;;
     en:accounts_delete) echo "Delete Account" ;;
     en:accounts_back) echo "< Back" ;;
@@ -482,10 +493,12 @@ tui_text() {
     ja:status_logged_in) echo "logged-in" ;;
     ja:status_not_logged_in) echo "not-logged-in" ;;
     ja:no_logged_account) echo "この環境にログイン済みアカウントがありません。先にログインしてください" ;;
+    ja:no_account_slot) echo "この環境に既存アカウントがありません。先にログインして作成してください" ;;
     ja:switch_title) echo "Switch" ;;
     ja:accounts_title) echo "Accounts" ;;
     ja:accounts_use) echo "Use Account" ;;
     ja:accounts_login) echo "Login Account" ;;
+    ja:accounts_relogin) echo "Relogin Account" ;;
     ja:accounts_logout) echo "Logout Account" ;;
     ja:accounts_delete) echo "Delete Account" ;;
     ja:accounts_back) echo "< 戻る" ;;
@@ -1130,8 +1143,9 @@ tui_snapshot_block() {
   local usage_weekly="$9"
   local last_activity="${10}"
   local source="${11}"
-  local mark="${12:-}"
-  local width="${13:-56}"
+  local token_expiry="${12:--}"
+  local mark="${13:-}"
+  local width="${14:-56}"
   local pct_5h pct_week t5 tw bar5 barw account_field state_label
   local title_line
 
@@ -1164,6 +1178,7 @@ tui_snapshot_block() {
   tui_snapshot_kv_line "PLAN" "$plan" "$width"
   tui_snapshot_kv_line "5H USAGE" "${pct_5h}  ${bar5}  ${t5}" "$width"
   tui_snapshot_kv_line "WEEKLY USAGE" "${pct_week}  ${barw}  ${tw}" "$width"
+  tui_snapshot_kv_line "AUTH EXPIRY" "$token_expiry" "$width"
   tui_snapshot_kv_line "LAST ACTIVITY" "$last_activity" "$width"
   tui_snapshot_kv_line "SOURCE" "$source" "$width"
 }
@@ -1222,9 +1237,10 @@ tui_snapshot_block_compact() {
   local usage_weekly="$7"
   local last_activity="$8"
   local source="$9"
-  local mark="${10:-}"
-  local width="${11:-42}"
-  local inner title state_label pct_5h pct_week t5 tw bar5 barw line2 line3 line4 line5 line
+  local token_expiry="${10:--}"
+  local mark="${11:-}"
+  local width="${12:-42}"
+  local inner title state_label pct_5h pct_week t5 tw bar5 barw line2 line3 line4 line5 line6 line
   local mark_display plan_display
   local top bottom
 
@@ -1253,6 +1269,7 @@ tui_snapshot_block_compact() {
   line3="plan:${plan_display}  src:${source}"
   line4="5H  ${pct_5h} ${bar5} ${t5}"
   line5="WK  ${pct_week} ${barw} ${tw}"
+  line6="AUTH EXP ${token_expiry}"
 
   top="┌$(tui_repeat_char "─" "$inner")┐"
   bottom="└$(tui_repeat_char "─" "$inner")┘"
@@ -1262,7 +1279,7 @@ tui_snapshot_block_compact() {
   fi
 
   echo "$top"
-  for line in "$title" "$line2" "$line3" "$line4" "$line5"; do
+  for line in "$title" "$line2" "$line3" "$line4" "$line5" "$line6"; do
     line="$(tui_fit_line_visual "$line" "$inner")"
     line="$(tui_pad_visual_right "$line" "$inner")"
     if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
@@ -1353,12 +1370,178 @@ status_auth_layout() {
   fi
 }
 
+source_auth_file_for_account() {
+  local env="$1"
+  local account="$2"
+  local slot_auth home_auth
+  slot_auth="$(account_auth_path "$env" "$account")"
+  home_auth="$(env_home_path "$env")/auth.json"
+  if [[ -f "$slot_auth" ]]; then
+    echo "$slot_auth"
+    return 0
+  fi
+  if [[ "$account" == "$DEFAULT_ACCOUNT_NAME" && -f "$home_auth" ]]; then
+    echo "$home_auth"
+    return 0
+  fi
+  return 1
+}
+
+auth_mode_for_file() {
+  local auth_file="$1"
+  python3 - "$auth_file" <<'PY'
+import json, sys
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    mode = str(data.get("auth_mode") or "").strip().lower()
+    print(mode)
+except Exception:
+    print("")
+PY
+}
+
+account_uses_auth_mode() {
+  local env="$1"
+  local account="$2"
+  local auth_file mode
+  auth_file="$(source_auth_file_for_account "$env" "$account" || true)"
+  [[ -n "$auth_file" ]] || return 1
+  mode="$(auth_mode_for_file "$auth_file")"
+  [[ "$mode" == "chatgpt" || "$mode" == "auth" || "$mode" == "" ]]
+}
+
+token_expiry_from_auth_file() {
+  local auth_file="$1"
+  python3 - "$auth_file" <<'PY'
+import base64, json, sys
+from datetime import datetime, timezone
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    token = (((data.get("tokens") or {}).get("access_token")) or "").strip()
+    if not token or "." not in token:
+        print("-")
+        raise SystemExit(0)
+    parts = token.split(".")
+    if len(parts) < 2:
+        print("-")
+        raise SystemExit(0)
+    payload = parts[1]
+    padding = "=" * (-len(payload) % 4)
+    claims = json.loads(base64.urlsafe_b64decode((payload + padding).encode("utf-8")).decode("utf-8"))
+    exp = claims.get("exp")
+    if not isinstance(exp, (int, float)) or exp <= 0:
+        print("-")
+        raise SystemExit(0)
+    dt = datetime.fromtimestamp(int(exp), tz=timezone.utc)
+    print(dt.strftime("%Y-%m-%d %H:%M:%SZ"))
+except Exception:
+    print("-")
+PY
+}
+
+token_expiry_for_env_account() {
+  local env="$1"
+  local account="$2"
+  local auth_file
+  auth_file="$(source_auth_file_for_account "$env" "$account" || true)"
+  if [[ -z "$auth_file" ]]; then
+    echo "-"
+    return 0
+  fi
+  token_expiry_from_auth_file "$auth_file"
+}
+
+launchd_available() {
+  [[ "$(uname -s 2>/dev/null || true)" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1
+}
+
+launchd_token_refresh_loaded() {
+  launchd_available || return 1
+  launchctl list "$LAUNCHD_REFRESH_LABEL" >/dev/null 2>&1
+}
+
+token_refresh_guard_status_line() {
+  if ! launchd_available; then
+    echo "unsupported (requires macOS launchd)"
+    return 0
+  fi
+  if [[ ! -f "$LAUNCHD_REFRESH_PLIST" ]]; then
+    echo "disabled"
+    return 0
+  fi
+  if launchd_token_refresh_loaded; then
+    echo "enabled(running), interval=${TOKEN_REFRESH_INTERVAL_SECONDS}s"
+  else
+    echo "enabled(not-running), interval=${TOKEN_REFRESH_INTERVAL_SECONDS}s"
+  fi
+}
+
+write_token_refresh_launchd_plist() {
+  local plist="$1"
+  local script_path uid
+  script_path="$SCRIPT_DIR/codex-switcher"
+  uid="$(id -u)"
+  mkdir -p "$HOME/Library/LaunchAgents"
+  cat > "$plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$LAUNCHD_REFRESH_LABEL</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$script_path</string>
+    <string>ops</string>
+    <string>token-refresh</string>
+    <string>run-once</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>$TOKEN_REFRESH_INTERVAL_SECONDS</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>$TOKEN_REFRESH_LOG</string>
+  <key>StandardErrorPath</key>
+  <string>$TOKEN_REFRESH_LOG</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>CODEX_SWITCHER_STATE_DIR</key>
+    <string>$STATE_DIR</string>
+    <key>CODEX_SWITCHER_ENVS_DIR</key>
+    <string>$ENVS_DIR</string>
+    <key>CODEX_SWITCHER_ACCOUNTS_DIR</key>
+    <string>$ACCOUNTS_DIR</string>
+    <key>CODEX_SWITCHER_DEFAULT_HOME</key>
+    <string>$DEFAULT_HOME</string>
+    <key>CODEX_SWITCHER_SKIP_UPDATE_CHECK</key>
+    <string>true</string>
+    <key>CODEX_SWITCHER_TOKEN_REFRESH_INTERVAL_SECONDS</key>
+    <string>$TOKEN_REFRESH_INTERVAL_SECONDS</string>
+    <key>PATH</key>
+    <string>$PATH</string>
+    <key>HOME</key>
+    <string>$HOME</string>
+    <key>USER</key>
+    <string>${USER:-}</string>
+    <key>UID</key>
+    <string>$uid</string>
+  </dict>
+</dict>
+</plist>
+PLIST
+}
+
 tui_account_snapshot_tsv() {
   local env="$1"
   local account="$2"
   local usage_proxy="${3:-}"
   local home auth_file metrics state
-  local email plan usage_5h usage_weekly last_activity source
+  local email plan usage_5h usage_weekly last_activity source token_expiry
 
   home="$(env_home_path "$env")"
   auth_file="$(account_auth_path "$env" "$account")"
@@ -1382,16 +1565,17 @@ tui_account_snapshot_tsv() {
   last_activity="${last_activity:--}"
   source="${source:-local}"
   [[ "$source" == "api" || "$source" == "local" ]] || source="local"
+  token_expiry="$(token_expiry_for_env_account "$env" "$account")"
 
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$env" "$home" "$account" "$state" "$email" "$plan" "$usage_5h" "$usage_weekly" "$last_activity" "$source"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$env" "$home" "$account" "$state" "$email" "$plan" "$usage_5h" "$usage_weekly" "$last_activity" "$source" "$token_expiry"
 }
 
 tui_home_accounts_snapshot() {
   local usage_info usage_proxy cols colw
   local cli_env cli_account app_env app_account
   local env account mark any
-  local s_env s_home s_account s_state s_email s_plan s_5h s_week s_last s_source
+  local s_env s_home s_account s_state s_email s_plan s_5h s_week s_last s_source s_exp
   local max_parallel
   local tmp_dir
   local -a all_envs=()
@@ -1449,7 +1633,7 @@ tui_home_accounts_snapshot() {
 
   for idx in "${!all_envs[@]}"; do
     any=1
-    IFS=$'\t' read -r s_env s_home s_account s_state s_email s_plan s_5h s_week s_last s_source < "$tmp_dir/metric.$idx.tsv" || true
+    IFS=$'\t' read -r s_env s_home s_account s_state s_email s_plan s_5h s_week s_last s_source s_exp < "$tmp_dir/metric.$idx.tsv" || true
     s_env="${s_env:-${all_envs[$idx]}}"
     s_account="${s_account:-${all_accounts[$idx]}}"
     s_state="${s_state:-not-logged-in}"
@@ -1459,6 +1643,7 @@ tui_home_accounts_snapshot() {
     s_week="${s_week:---}"
     s_last="${s_last:---}"
     s_source="${s_source:-local}"
+    s_exp="${s_exp:---}"
     s_home="$(display_path_for_output "$s_home")"
     mark=""
     env="${all_envs[$idx]}"
@@ -1466,7 +1651,7 @@ tui_home_accounts_snapshot() {
 
     [[ "$env" == "$cli_env" && "$account" == "$cli_account" ]] && mark="${mark} [cli]"
     [[ "$env" == "$app_env" && "$account" == "$app_account" ]] && mark="${mark} [app]"
-    tui_snapshot_block_compact "$s_env" "$s_account" "$s_state" "$s_email" "$s_plan" "$s_5h" "$s_week" "$s_last" "$s_source" "$mark" "$colw" > "$tmp_dir/block.$idx.txt"
+    tui_snapshot_block_compact "$s_env" "$s_account" "$s_state" "$s_email" "$s_plan" "$s_5h" "$s_week" "$s_last" "$s_source" "$s_exp" "$mark" "$colw" > "$tmp_dir/block.$idx.txt"
     block_files+=("$tmp_dir/block.$idx.txt")
   done
 
@@ -1485,7 +1670,7 @@ tui_home_accounts_snapshot() {
     done
     (( ${#env_block_files[@]} > 0 )) || continue
     tui_status_env_heading "$env"
-    tui_print_blocks_grid_files "$colw" "7" "${env_block_files[@]}"
+    tui_print_blocks_grid_files "$colw" "8" "${env_block_files[@]}"
     echo
   done < <(list_env_names | sort -u)
 
@@ -1683,7 +1868,11 @@ tui_select_account() {
   done < <(tui_account_slots_for_env "$env" | sort -u)
 
   if [[ "${#accounts[@]}" -eq 0 ]]; then
-    echo "$(tui_text "$(read_ui_lang)" no_logged_account)" >&2
+    if [[ "$require_auth" == "true" ]]; then
+      echo "$(tui_text "$(read_ui_lang)" no_logged_account)" >&2
+    else
+      echo "$(tui_text "$(read_ui_lang)" no_account_slot)" >&2
+    fi
     tui_pause_if_interactive
     return 1
   fi
@@ -1821,6 +2010,24 @@ tui_action_login() {
   fi
 }
 
+tui_action_relogin() {
+  local prefer_env="${1:-$(read_current_env cli || true)}"
+  local env account mode mode_idx
+  tui_panel_open "$(tui_text "$(read_ui_lang)" accounts_relogin)"
+
+  env="$(tui_select_env "$prefer_env")" || return 1
+  account="$(tui_select_account "$env" "$(read_current_account cli || true)" false)" || return 1
+
+  tui_choose_index_with_back "$(tui_text "$(read_ui_lang)" login_mode_title)" "" "0" \
+    "$(tui_text "$(read_ui_lang)" login_mode_auth)" \
+    "$(tui_text "$(read_ui_lang)" login_mode_apikey)"
+  mode_idx="$TUI_MENU_RESULT"
+  [[ "$mode_idx" == "-1" ]] && return 1
+  [[ "$mode_idx" == "1" ]] && mode="apikey" || mode="auth"
+
+  tui_execute_subcommand ac relogin "$account" --env "$env" -t both --mode "$mode"
+}
+
 tui_action_env_create() {
   local name src_idx src env_from
   tui_panel_open "$(tui_text "$(read_ui_lang)" envs_create)"
@@ -1930,11 +2137,12 @@ tui_action_lang() {
 }
 
 tui_action_accounts() {
-  local action target env account stage
+  local action env account stage
   while true; do
     tui_quit_requested && return 0
     tui_choose_index "$(tui_text "$(read_ui_lang)" accounts_title)" "" "0" \
       "$(tui_text "$(read_ui_lang)" accounts_login)" \
+      "$(tui_text "$(read_ui_lang)" accounts_relogin)" \
       "$(tui_text "$(read_ui_lang)" accounts_logout)" \
       "$(tui_text "$(read_ui_lang)" accounts_delete)" \
       "$(tui_text "$(read_ui_lang)" accounts_back)"
@@ -1945,38 +2153,33 @@ tui_action_accounts() {
         tui_action_login "$(read_current_env cli || true)" || true
         ;;
       1)
+        tui_action_relogin "$(read_current_env cli || true)" || true
+        ;;
+      2)
         stage=0
         while true; do
           tui_quit_requested && return 0
           case "$stage" in
             0)
-              target="$(tui_choose_target true)" || {
+              env="$(tui_select_env "$(read_current_env cli || true)")" || {
                 tui_quit_requested && return 0
                 break
               }
               stage=1
               ;;
             1)
-              env="$(tui_select_env "$(read_current_env cli || true)")" || {
+              account="$(tui_select_account "$env" "$(read_current_account cli || true)" false)" || {
                 tui_quit_requested && return 0
                 stage=0
                 continue
               }
-              stage=2
-              ;;
-            2)
-              account="$(tui_select_account "$env" "$(read_current_account cli || true)" false)" || {
-                tui_quit_requested && return 0
-                stage=1
-                continue
-              }
-              tui_execute_subcommand ac logout "$account" --env "$env" -t "$target"
+              tui_execute_subcommand ac logout "$account" --env "$env" -t both
               break
               ;;
           esac
         done
         ;;
-      2)
+      3)
         stage=0
         while true; do
           tui_quit_requested && return 0
@@ -3346,6 +3549,16 @@ cmd_account_list() {
   cmd_list "$env_filter"
 }
 
+account_slot_exists() {
+  local env="$1"
+  local target_account="$2"
+  local account
+  while IFS= read -r account; do
+    [[ "$account" == "$target_account" ]] && return 0
+  done < <(list_accounts_for_env "$env")
+  return 1
+}
+
 _cmd_account_set_target() {
   local target="$1"
   local env="$2"
@@ -3392,8 +3605,71 @@ cmd_account_login() {
   log_event INFO "account_login env=$env account=$account target=$target sync=$sync_mode mode=$mode"
   if [[ "$mode" == "apikey" ]]; then
     echo "API key saved successfully for account: $env/$account"
+  else
+    maybe_enable_token_refresh_guard
   fi
   echo "Logged in account: $env/$account"
+}
+
+select_login_mode_interactive() {
+  local mode_idx
+  tui_choose_index_with_back "$(tui_text "$(read_ui_lang)" login_mode_title)" "" "0" \
+    "$(tui_text "$(read_ui_lang)" login_mode_auth)" \
+    "$(tui_text "$(read_ui_lang)" login_mode_apikey)"
+  mode_idx="$TUI_MENU_RESULT"
+  [[ "$mode_idx" == "-1" ]] && return 1
+  if [[ "$mode_idx" == "1" ]]; then
+    echo "apikey"
+  else
+    echo "auth"
+  fi
+}
+
+cmd_account_relogin() {
+  local account="${1:-}"
+  local env="${2:-}"
+  local target="$3"
+  local sync_mode="$4"
+  local mode="${5:-}"
+
+  if [[ -z "$env" ]]; then
+    if [[ -t 0 ]]; then
+      env="$(tui_select_env "$(read_current_env cli || true)")" || err "cancelled"
+    else
+      err "missing env. use: $SCRIPT_NAME ac relogin [account] --env <env> [--mode auth|apikey]"
+    fi
+  fi
+
+  require_env_exists "$env"
+
+  if [[ -z "$account" ]]; then
+    if [[ -t 0 ]]; then
+      account="$(tui_select_account "$env" "$(read_current_account cli || true)" false)" || err "cancelled"
+    else
+      err "missing account. use: $SCRIPT_NAME ac relogin [account] --env <env> [--mode auth|apikey]"
+    fi
+  fi
+
+  validate_account_name "$account"
+  account_slot_exists "$env" "$account" || err "account '$account' not found in env '$env'. existing accounts are required for relogin"
+
+  if [[ -z "$mode" ]]; then
+    if [[ -t 0 ]]; then
+      mode="$(select_login_mode_interactive)" || err "cancelled"
+    else
+      mode="auth"
+    fi
+  fi
+
+  case "$mode" in
+    auth|apikey)
+      ;;
+    *)
+      err "invalid mode '$mode' (use auth|apikey)"
+      ;;
+  esac
+
+  cmd_account_login "$account" "$env" "$target" "$sync_mode" "$mode"
 }
 
 cmd_account_use() {
@@ -3559,11 +3835,147 @@ PY
   return 1
 }
 
+checksum_file() {
+  local path="$1"
+  if command -v shasum >/dev/null 2>&1; then
+    shasum "$path" | awk '{print $1}'
+  elif command -v md5 >/dev/null 2>&1; then
+    md5 -q "$path"
+  else
+    wc -c < "$path" | tr -d ' '
+  fi
+}
+
+refresh_account_token_once() {
+  local env="$1"
+  local account="$2"
+  local auth_file tmp_home before after rc
+  local current_cli_env current_cli_account current_app_env current_app_account
+  auth_file="$(source_auth_file_for_account "$env" "$account" || true)"
+  [[ -n "$auth_file" ]] || return 1
+
+  tmp_home="$(mktemp -d /tmp/codex-sw-token-refresh.XXXXXX)"
+  mkdir -p "$tmp_home"
+  copy_auth_file "$auth_file" "$tmp_home/auth.json"
+  before="$(checksum_file "$tmp_home/auth.json" 2>/dev/null || true)"
+
+  rc=0
+  CODEX_HOME="$tmp_home" command codex login status >/dev/null 2>&1 || rc=$?
+  if [[ ! -f "$tmp_home/auth.json" ]]; then
+    rm -rf -- "$tmp_home"
+    return 1
+  fi
+
+  after="$(checksum_file "$tmp_home/auth.json" 2>/dev/null || true)"
+  copy_auth_file "$tmp_home/auth.json" "$auth_file"
+  rm -rf -- "$tmp_home"
+
+  current_cli_env="$(read_current_env cli || true)"
+  current_cli_account="$(read_current_account cli || true)"
+  current_app_env="$(read_current_env app || true)"
+  current_app_account="$(read_current_account app || true)"
+  if [[ "$env" == "$current_cli_env" && "$account" == "$current_cli_account" ]]; then
+    install_account_auth_to_env "$env" "$account"
+  fi
+  if [[ "$env" == "$current_app_env" && "$account" == "$current_app_account" ]]; then
+    install_account_auth_to_env "$env" "$account"
+  fi
+
+  if [[ "$before" != "$after" ]]; then
+    echo "changed"
+  else
+    echo "unchanged"
+  fi
+  return "$rc"
+}
+
+cmd_token_refresh_run_once_inner() {
+  local env account state
+  local scanned=0 refreshed=0 changed=0 failed=0
+
+  while IFS= read -r env; do
+    while IFS= read -r account; do
+      scanned=$((scanned + 1))
+      if ! account_uses_auth_mode "$env" "$account"; then
+        continue
+      fi
+      state="$(refresh_account_token_once "$env" "$account" || true)"
+      refreshed=$((refreshed + 1))
+      if [[ "$state" == "changed" ]]; then
+        changed=$((changed + 1))
+      elif [[ "$state" != "unchanged" ]]; then
+        failed=$((failed + 1))
+      fi
+    done < <(list_accounts_for_env "$env")
+  done < <(list_env_names | sort -u)
+
+  log_event INFO "token_refresh_run_once scanned=$scanned refreshed=$refreshed changed=$changed failed=$failed"
+  echo "token_refresh: scanned=$scanned refreshed=$refreshed changed=$changed failed=$failed"
+}
+
+cmd_token_refresh_run_once() {
+  with_lock cmd_token_refresh_run_once_inner
+}
+
+cmd_token_refresh_start() {
+  local silent="${1:-false}"
+  local plist="$LAUNCHD_REFRESH_PLIST"
+
+  launchd_available || err "token refresh guard requires macOS launchd"
+  [[ "$TOKEN_REFRESH_INTERVAL_SECONDS" =~ ^[0-9]+$ ]] || err "invalid TOKEN_REFRESH_INTERVAL_SECONDS='$TOKEN_REFRESH_INTERVAL_SECONDS'"
+  (( TOKEN_REFRESH_INTERVAL_SECONDS >= 60 )) || err "TOKEN_REFRESH_INTERVAL_SECONDS must be >= 60"
+
+  mkdir -p "$STATE_DIR"
+  : > "$TOKEN_REFRESH_LOG"
+  chmod 600 "$TOKEN_REFRESH_LOG" 2>/dev/null || true
+
+  write_token_refresh_launchd_plist "$plist"
+  chmod 600 "$plist" 2>/dev/null || true
+
+  launchctl unload "$plist" >/dev/null 2>&1 || true
+  launchctl load -w "$plist" >/dev/null 2>&1 || err "failed to load launchd job from $plist"
+  launchctl start "$LAUNCHD_REFRESH_LABEL" >/dev/null 2>&1 || true
+
+  log_event INFO "token_refresh_start label=$LAUNCHD_REFRESH_LABEL interval=$TOKEN_REFRESH_INTERVAL_SECONDS"
+  if [[ "$silent" != "true" ]]; then
+    echo "token_refresh_guard: enabled (label=$LAUNCHD_REFRESH_LABEL, interval=${TOKEN_REFRESH_INTERVAL_SECONDS}s)"
+    echo "token_refresh_log: $TOKEN_REFRESH_LOG"
+  fi
+}
+
+cmd_token_refresh_stop() {
+  local plist="$LAUNCHD_REFRESH_PLIST"
+  launchd_available || err "token refresh guard requires macOS launchd"
+  if [[ -f "$plist" ]]; then
+    launchctl unload "$plist" >/dev/null 2>&1 || true
+    rm -f -- "$plist"
+  fi
+  log_event INFO "token_refresh_stop label=$LAUNCHD_REFRESH_LABEL"
+  echo "token_refresh_guard: disabled"
+}
+
+cmd_token_refresh_status() {
+  echo "token_refresh_guard: $(token_refresh_guard_status_line)"
+  if [[ -f "$LAUNCHD_REFRESH_PLIST" ]]; then
+    echo "token_refresh_plist: $LAUNCHD_REFRESH_PLIST"
+    echo "token_refresh_log: $TOKEN_REFRESH_LOG"
+  fi
+}
+
+maybe_enable_token_refresh_guard() {
+  if [[ "${CODEX_SWITCHER_DISABLE_TOKEN_REFRESH_AUTO_START:-false}" == "true" ]]; then
+    return 0
+  fi
+  if launchd_available; then
+    cmd_token_refresh_start true >/dev/null 2>&1 || warn "failed to enable token refresh guard automatically; run: $SCRIPT_NAME ops token-refresh start"
+  fi
+}
+
 cmd_list() {
   local env_filter="${1:-}"
   local cli_env app_env cli_account app_account
   local env account marks auth_file home home_display metrics
-  local email plan usage_5h usage_weekly source last_activity
+  local email plan usage_5h usage_weekly source last_activity token_expiry
   local usage_proxy="" usage_info=""
 
   cli_env="$(read_current_env cli || true)"
@@ -3575,7 +3987,7 @@ cmd_list() {
     IFS=$'\t' read -r _ usage_proxy <<< "$usage_info"
   fi
 
-  printf '%-12s %-28s %-30s %-38s %-10s %-20s %-20s %-16s %s\n' "ENV" "HOME" "ACCOUNT" "EMAIL" "PLAN" "5H USAGE" "WEEKLY USAGE" "LAST ACTIVITY" "SOURCE"
+  printf '%-12s %-28s %-30s %-38s %-10s %-20s %-20s %-20s %-16s %s\n' "ENV" "HOME" "ACCOUNT" "EMAIL" "PLAN" "5H USAGE" "WEEKLY USAGE" "AUTH EXPIRY" "LAST ACTIVITY" "SOURCE"
   while IFS= read -r env; do
     if [[ -n "$env_filter" && "$env" != "$env_filter" ]]; then
       continue
@@ -3590,6 +4002,7 @@ cmd_list() {
       plan=""
       usage_5h=""
       usage_weekly=""
+      token_expiry=""
       last_activity=""
       source=""
       marks=""
@@ -3606,11 +4019,12 @@ cmd_list() {
       plan="${plan:-unknown}"
       usage_5h="${usage_5h:--}"
       usage_weekly="${usage_weekly:--}"
+      token_expiry="$(token_expiry_for_env_account "$env" "$account")"
       last_activity="${last_activity:--}"
       source="${source:-local}"
       [[ "$source" == "api" || "$source" == "local" ]] || source="local"
 
-      printf '%-12s %-28s %-30s %-38s %-10s %-20s %-20s %-16s %s\n' "$env" "$home_display" "$account$marks" "$email" "$plan" "$usage_5h" "$usage_weekly" "$last_activity" "$source"
+      printf '%-12s %-28s %-30s %-38s %-10s %-20s %-20s %-20s %-16s %s\n' "$env" "$home_display" "$account$marks" "$email" "$plan" "$usage_5h" "$usage_weekly" "$token_expiry" "$last_activity" "$source"
     done < <(list_accounts_for_env "$env")
 
     if [[ "$found" -eq 0 ]]; then
@@ -3618,6 +4032,7 @@ cmd_list() {
       plan=""
       usage_5h=""
       usage_weekly=""
+      token_expiry=""
       last_activity=""
       source=""
       metrics="$(collect_profile_metrics_tsv "-" "$home/auth.json" "$home" "$usage_proxy" || true)"
@@ -3628,10 +4043,11 @@ cmd_list() {
       plan="${plan:-unknown}"
       usage_5h="${usage_5h:--}"
       usage_weekly="${usage_weekly:--}"
+      token_expiry="-"
       last_activity="${last_activity:--}"
       source="${source:-local}"
       [[ "$source" == "api" || "$source" == "local" ]] || source="local"
-      printf '%-12s %-28s %-30s %-38s %-10s %-20s %-20s %-16s %s\n' "$env" "$home_display" "-" "$email" "$plan" "$usage_5h" "$usage_weekly" "$last_activity" "$source"
+      printf '%-12s %-28s %-30s %-38s %-10s %-20s %-20s %-20s %-16s %s\n' "$env" "$home_display" "-" "$email" "$plan" "$usage_5h" "$usage_weekly" "$token_expiry" "$last_activity" "$source"
     fi
   done < <(list_env_names | sort -u)
 }
@@ -3759,6 +4175,9 @@ cmd_status() {
   echo "cli_current: $cli_env/$cli_account"
   echo "app_current: $app_env/$app_account"
   status_auth_layout
+  echo "cli_auth_expiry: $(token_expiry_for_env_account "$cli_env" "$cli_account")"
+  echo "app_auth_expiry: $(token_expiry_for_env_account "$app_env" "$app_account")"
+  echo "token_refresh_guard: $(token_refresh_guard_status_line)"
   echo "cli($cli_env/$cli_account): $cli_state"
   echo "app($app_env/$app_account): $app_state"
 
@@ -4182,7 +4601,7 @@ main() {
       ;;
     account|ac)
       local sub="${1:-}"
-      [[ -n "$sub" ]] || err "usage: $SCRIPT_NAME ac <ls|login|use|logout|rm> ..."
+      [[ -n "$sub" ]] || err "usage: $SCRIPT_NAME ac <ls|login|relogin|use|logout|rm> ..."
       shift || true
       case "$sub" in
         ls)
@@ -4247,6 +4666,52 @@ main() {
               ;;
           esac
           with_lock cmd_account_login "$account" "$env" "$target" "$sync_mode" "$mode"
+          ;;
+        relogin)
+          local account=""
+          if [[ "$#" -gt 0 && "${1:-}" != --* ]]; then
+            account="$1"
+            shift
+          fi
+          local env=""
+          local target="cli"
+          local sync_mode="false"
+          local mode=""
+          while [[ "$#" -gt 0 ]]; do
+            case "$1" in
+              --env)
+                shift
+                [[ "$#" -gt 0 ]] || err "missing env after --env"
+                env="$1"
+                ;;
+              --account)
+                shift
+                [[ "$#" -gt 0 ]] || err "missing account after --account"
+                account="$1"
+                ;;
+              -t|--target)
+                shift
+                [[ "$#" -gt 0 ]] || err "missing target after -t/--target"
+                target="$1"
+                ;;
+              --sync)
+                sync_mode="true"
+                ;;
+              --no-sync)
+                sync_mode="false"
+                ;;
+              --mode)
+                shift
+                [[ "$#" -gt 0 ]] || err "missing mode after --mode"
+                mode="$1"
+                ;;
+              *)
+                err "unknown option: $1"
+                ;;
+            esac
+            shift
+          done
+          with_lock cmd_account_relogin "$account" "$env" "$target" "$sync_mode" "$mode"
           ;;
         use)
           [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME ac use <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]"
@@ -4419,7 +4884,7 @@ main() {
       ;;
     ops)
       local sub="${1:-}"
-      [[ -n "$sub" ]] || err "usage: $SCRIPT_NAME ops <list|proxy|exec|import-default|init|recover|doctor> ..."
+      [[ -n "$sub" ]] || err "usage: $SCRIPT_NAME ops <list|proxy|exec|import-default|init|recover|doctor|token-refresh> ..."
       shift || true
       case "$sub" in
         list)
@@ -4490,6 +4955,27 @@ main() {
             err "unknown option: ${1:-}"
           fi
           cmd_doctor "$fix"
+          ;;
+        token-refresh)
+          [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME ops token-refresh <start|stop|status|run-once>"
+          local action="${1:-status}"
+          case "$action" in
+            start)
+              cmd_token_refresh_start
+              ;;
+            stop)
+              cmd_token_refresh_stop
+              ;;
+            status)
+              cmd_token_refresh_status
+              ;;
+            run-once)
+              cmd_token_refresh_run_once
+              ;;
+            *)
+              err "unknown token-refresh action: $action (use start|stop|status|run-once)"
+              ;;
+          esac
           ;;
         help|-h|--help)
           usage_all

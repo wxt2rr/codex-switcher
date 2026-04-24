@@ -173,6 +173,7 @@ app: default/personal
 | `codex-sw env rm <env> [--force]` | 删除环境（需二次 `y/n` 确认） |
 | `codex-sw ac ls [--env <env>]` | 查看账号总览 |
 | `codex-sw ac login <account> [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--mode auth\|apikey]` | 登录账号 |
+| `codex-sw ac relogin [account] [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--mode auth\|apikey]` | 重新登录已有账号（可交互选择环境/账号/模式） |
 | `codex-sw ac use <account> [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--launch\|--no-launch] [-- <codex args...>]` | 切换账号 |
 | `codex-sw ac logout [account] [--env <env>] [-t cli\|app\|both]` | 注销账号 |
 | `codex-sw ac rm <account> [--env <env>] [--force]` | 删除账号（需二次 `y/n` 确认） |

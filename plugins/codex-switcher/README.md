@@ -14,6 +14,7 @@ codex-switcher env rm <env> [--force]
 
 codex-switcher ac ls [--env <env>]
 codex-switcher ac login <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--mode auth|apikey]
+codex-switcher ac relogin [account] [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--mode auth|apikey]
 codex-switcher ac use <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]
 codex-switcher ac logout [account] [--env <env>] [-t cli|app|both]
 codex-switcher ac rm <account> [--env <env>] [--force]
@@ -33,6 +34,7 @@ codex-switcher ops import-default <env> [--with-auth] [--force]
 codex-switcher ops init [--shell zsh|bash] [--dry-run]
 codex-switcher ops recover [--dry-run]
 codex-switcher ops doctor [--fix]
+codex-switcher ops token-refresh <start|stop|status|run-once>
 ```
 
 ## 验证
