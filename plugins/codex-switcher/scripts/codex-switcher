@@ -1261,6 +1261,21 @@ tui_snapshot_block_compact() {
   bar5="$(tui_usage_bar "$usage_5h" 8)"
   barw="$(tui_usage_bar "$usage_weekly" 8)"
 
+  if [[ "$source" == "apikey" ]]; then
+    mark_display="$mark"
+    if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+      mark_display="${mark_display//\[cli\]/${TUI_COLOR_INFO}[cli]${TUI_COLOR_RESET}}"
+      mark_display="${mark_display//\[app\]/${TUI_COLOR_INFO}[app]${TUI_COLOR_RESET}}"
+      title="${TUI_COLOR_HILITE}●${TUI_COLOR_RESET} ${TUI_COLOR_TITLE}${account}${TUI_COLOR_RESET}${mark_display} ${state_label}"
+    else
+      title="${account}${mark_display} ${state}"
+    fi
+    line2="alias:${account}"
+    line3="api key:${email}"
+    line4=""
+    line5=""
+    line6=""
+  else
   mark_display="$mark"
   plan_display="$plan"
   if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
@@ -1276,6 +1291,7 @@ tui_snapshot_block_compact() {
   line4="5H  ${pct_5h} ${bar5} ${t5}"
   line5="WK  ${pct_week} ${barw} ${tw}"
   line6="AUTH EXP ${token_expiry}"
+  fi
 
   top="┌$(tui_repeat_char "─" "$inner")┐"
   bottom="└$(tui_repeat_char "─" "$inner")┘"
@@ -1408,6 +1424,33 @@ except Exception:
 PY
 }
 
+api_key_mask_for_file() {
+  local auth_file="$1"
+  python3 - "$auth_file" <<'PY'
+import json, sys
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    key = str(data.get("OPENAI_API_KEY") or "").strip()
+    if not key:
+        print("-")
+    elif len(key) <= 7:
+        print("***")
+    else:
+        print(f"{key[:3]}***{key[-4:]}")
+except Exception:
+    print("-")
+PY
+}
+
+auth_file_is_api_key() {
+  local auth_file="$1"
+  local mode
+  mode="$(auth_mode_for_file "$auth_file")"
+  [[ "$mode" == "api_key" || "$mode" == "apikey" ]]
+}
+
 account_uses_auth_mode() {
   local env="$1"
   local account="$2"
@@ -1500,6 +1543,52 @@ token_refresh_last_need_relogin() {
   fi
 }
 
+format_log_time_local() {
+  date '+%Y-%m-%d %H:%M:%S %Z'
+}
+
+token_email_from_auth_file() {
+  local auth_file="$1"
+  python3 - "$auth_file" <<'PY'
+import base64
+import json
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    tokens = data.get("tokens")
+    if not isinstance(tokens, dict):
+        print("-")
+        raise SystemExit(0)
+    token = tokens.get("id_token")
+    if not isinstance(token, str) or "." not in token:
+        print("-")
+        raise SystemExit(0)
+    parts = token.split(".")
+    if len(parts) < 2:
+        print("-")
+        raise SystemExit(0)
+    payload = parts[1]
+    padding = "=" * (-len(payload) % 4)
+    claims = json.loads(base64.urlsafe_b64decode((payload + padding).encode("utf-8")).decode("utf-8"))
+    email = claims.get("email")
+    print(email if isinstance(email, str) and email.strip() else "-")
+except Exception:
+    print("-")
+PY
+}
+
+format_token_refresh_row() {
+  local account="$1"
+  local email="$2"
+  local expiry="$3"
+  local ttl="$4"
+  local status="$5"
+  printf '  %-22s %-34s %-20s %-12s %s\n' "$account" "$email" "$expiry" "$ttl" "$status"
+}
+
 write_token_refresh_launchd_plist() {
   local plist="$1"
   local script_path uid
@@ -1571,6 +1660,19 @@ tui_account_snapshot_tsv() {
     state="logged-in"
   else
     state="not-logged-in"
+  fi
+
+  if [[ -f "$auth_file" ]] && auth_file_is_api_key "$auth_file"; then
+    email="$(api_key_mask_for_file "$auth_file")"
+    plan="-"
+    usage_5h="-"
+    usage_weekly="-"
+    last_activity="-"
+    source="apikey"
+    token_expiry="-"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$env" "$home" "$account" "$state" "$email" "$plan" "$usage_5h" "$usage_weekly" "$last_activity" "$source" "$token_expiry"
+    return 0
   fi
 
   metrics="$(collect_profile_metrics_tsv "$account" "$auth_file" "$home" "$usage_proxy" || true)"
@@ -1797,11 +1899,13 @@ tui_execute_subcommand() {
     return 0
   fi
 
-  tui_leave_raw_mode
+  debug_event "tui_subcommand_start args=${args[*]} interactive=$TUI_INTERACTIVE raw=$TUI_RAW_ACTIVE alt=$TUI_ALT_SCREEN_ACTIVE"
+  tui_restore_terminal
   set +e
   CODEX_SWITCHER_SKIP_UPDATE_CHECK=true "$SCRIPT_DIR/codex-switcher" "${args[@]}"
   rc=$?
   set -e
+  debug_event "tui_subcommand_exit rc=$rc args=${args[*]}"
 
   echo
   echo "$(tui_text "$lang" exit_code_prefix)$rc]"
@@ -1812,8 +1916,32 @@ tui_execute_subcommand() {
       printf "%s" "$(tui_text "$lang" press_enter)"
       IFS= read -r _ || true
     fi
-    tui_enter_raw_mode
+    tui_setup_terminal
   fi
+}
+
+tui_execute_launch_subcommand() {
+  local -a args=("$@")
+  local rc
+  local lang
+  lang="$(read_ui_lang)"
+
+  if [[ "${#args[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  debug_event "tui_launch_subcommand_start args=${args[*]} interactive=$TUI_INTERACTIVE raw=$TUI_RAW_ACTIVE alt=$TUI_ALT_SCREEN_ACTIVE"
+  tui_restore_terminal
+  set +e
+  CODEX_SWITCHER_SKIP_UPDATE_CHECK=true "$SCRIPT_DIR/codex-switcher" "${args[@]}"
+  rc=$?
+  set -e
+  debug_event "tui_launch_subcommand_exit rc=$rc args=${args[*]}"
+
+  echo
+  echo "$(tui_text "$lang" exit_code_prefix)$rc]"
+  tui_request_quit
+  return "$rc"
 }
 
 tui_execute_subcommand_detached() {
@@ -1985,15 +2113,12 @@ tui_action_switch() {
           1) launch_mode="none" ;;
           *) launch_mode="none" ;;
         esac
+        debug_event "tui_switch_selected target=$target env=$env account=$account launch_mode=$launch_mode launch_idx=$launch_idx"
         if [[ "$launch_mode" == "none" ]]; then
           tui_execute_subcommand ac use "$account" --env "$env" -t "$target" --no-launch
           return 0
         fi
-        if [[ "$target" == "app" ]]; then
-          tui_execute_subcommand_detached ac use "$account" --env "$env" -t "$target" --launch
-        else
-          tui_execute_subcommand ac use "$account" --env "$env" -t "$target" --launch
-        fi
+        tui_execute_launch_subcommand ac use "$account" --env "$env" -t "$target" --launch
         return 0
         ;;
     esac
@@ -2616,6 +2741,7 @@ tui_home_render_menu_block() {
   local selected="$1"
   local out="${2:-stderr}"
   local i marker index_txt
+  local name_width=22
   local c_sel="" c_desc="" c_dim="" c_reset=""
   local -a names=(
     "$(tui_text "$(read_ui_lang)" home_opt_switch)"
@@ -2652,33 +2778,33 @@ tui_home_render_menu_block() {
       marker=">"
       if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
         if [[ "$out" == "stderr" ]]; then
-          printf '%b%s %s %-14s%b %b%s%b\n' \
-            "$c_sel" "$marker" "$index_txt" "${names[$i]}" "$c_reset" \
+          printf "%b%s %s %-*s%b %b%s%b\n" \
+            "$c_sel" "$marker" "$index_txt" "$name_width" "${names[$i]}" "$c_reset" \
             "$c_sel" "${descs[$i]}" "$c_reset" >&2
         else
-          printf '%b%s %s %-14s%b %b%s%b\n' \
-            "$c_sel" "$marker" "$index_txt" "${names[$i]}" "$c_reset" \
+          printf "%b%s %s %-*s%b %b%s%b\n" \
+            "$c_sel" "$marker" "$index_txt" "$name_width" "${names[$i]}" "$c_reset" \
             "$c_sel" "${descs[$i]}" "$c_reset"
         fi
       else
         if [[ "$out" == "stderr" ]]; then
-          printf '%s %s %-14s %s\n' "$marker" "$index_txt" "${names[$i]}" "${descs[$i]}" >&2
+          printf "%s %s %-*s %s\n" "$marker" "$index_txt" "$name_width" "${names[$i]}" "${descs[$i]}" >&2
         else
-          printf '%s %s %-14s %s\n' "$marker" "$index_txt" "${names[$i]}" "${descs[$i]}"
+          printf "%s %s %-*s %s\n" "$marker" "$index_txt" "$name_width" "${names[$i]}" "${descs[$i]}"
         fi
       fi
     else
       if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
         if [[ "$out" == "stderr" ]]; then
-          printf '  %s %-14s %b%s%b\n' "$index_txt" "${names[$i]}" "$c_desc" "${descs[$i]}" "$c_reset" >&2
+          printf "  %s %-*s %b%s%b\n" "$index_txt" "$name_width" "${names[$i]}" "$c_desc" "${descs[$i]}" "$c_reset" >&2
         else
-          printf '  %s %-14s %b%s%b\n' "$index_txt" "${names[$i]}" "$c_desc" "${descs[$i]}" "$c_reset"
+          printf "  %s %-*s %b%s%b\n" "$index_txt" "$name_width" "${names[$i]}" "$c_desc" "${descs[$i]}" "$c_reset"
         fi
       else
         if [[ "$out" == "stderr" ]]; then
-          printf '  %s %-14s %s\n' "$index_txt" "${names[$i]}" "${descs[$i]}" >&2
+          printf "  %s %-*s %s\n" "$index_txt" "$name_width" "${names[$i]}" "${descs[$i]}" >&2
         else
-          printf '  %s %-14s %s\n' "$index_txt" "${names[$i]}" "${descs[$i]}"
+          printf "  %s %-*s %s\n" "$index_txt" "$name_width" "${names[$i]}" "${descs[$i]}"
         fi
       fi
     fi
@@ -2808,6 +2934,11 @@ log_event() {
   mkdir -p "$STATE_DIR"
   chmod 700 "$STATE_DIR" 2>/dev/null || true
   printf '%s [%s] %s\n' "$(now_utc)" "$level" "$message" | redact >> "$SWITCH_LOG"
+}
+
+debug_event() {
+  [[ "${CODEX_SWITCHER_DEBUG:-false}" == "true" ]] || return 0
+  log_event DEBUG "$@"
 }
 
 ensure_dirs() {
@@ -3128,12 +3259,17 @@ account_has_auth() {
   local auth_file home_auth
   auth_file="$(account_auth_path "$env" "$account")"
   if [[ -f "$auth_file" ]]; then
+    debug_event "account_has_auth env=$env account=$account source=account file=$auth_file result=true"
     return 0
   fi
   if [[ "$account" == "$DEFAULT_ACCOUNT_NAME" ]]; then
     home_auth="$(env_home_path "$env")/auth.json"
-    [[ -f "$home_auth" ]] && return 0
+    if [[ -f "$home_auth" ]]; then
+      debug_event "account_has_auth env=$env account=$account source=env_home file=$home_auth result=true"
+      return 0
+    fi
   fi
+  debug_event "account_has_auth env=$env account=$account source=none account_file=$auth_file result=false"
   return 1
 }
 
@@ -3203,14 +3339,18 @@ install_account_auth_to_env() {
   local src dst
   src="$(account_auth_path "$env" "$account")"
   dst="$(env_home_path "$env")/auth.json"
+  debug_event "install_auth_start env=$env account=$account src=$src dst=$dst src_exists=$([[ -f "$src" ]] && echo true || echo false) dst_exists=$([[ -f "$dst" ]] && echo true || echo false)"
   if [[ -f "$src" ]]; then
     copy_auth_file "$src" "$dst"
+    debug_event "install_auth_done env=$env account=$account source=account dst=$dst dst_exists=$([[ -f "$dst" ]] && echo true || echo false)"
     return 0
   fi
   if [[ "$account" == "$DEFAULT_ACCOUNT_NAME" ]] && [[ -f "$dst" ]]; then
+    debug_event "install_auth_done env=$env account=$account source=existing_default dst=$dst dst_exists=true"
     return 0
   fi
   rm -f -- "$dst"
+  debug_event "install_auth_cleared env=$env account=$account dst=$dst"
 }
 
 sync_overwrite_excluding_auth() {
@@ -3319,18 +3459,26 @@ ensure_target_auth_installed() {
 run_codex_for_target() {
   local target="$1"
   shift
+  local home rc codex_bin
   ensure_target_auth_installed "$target"
-  CODEX_HOME="$(target_home_path "$target")" command codex "$@"
+  home="$(target_home_path "$target")"
+  codex_bin="$(resolve_codex_bin)"
+  debug_event "codex_launch_start target=$target home=$home args=$* auth_exists=$([[ -f "$home/auth.json" ]] && echo true || echo false) codex_bin=$codex_bin"
+  CODEX_HOME="$home" "$codex_bin" "$@"
+  rc=$?
+  debug_event "codex_launch_exit target=$target home=$home rc=$rc"
+  return "$rc"
 }
 
 login_state_for_target() {
   local target="$1"
-  local rc home
+  local rc home codex_bin
   ensure_target_auth_installed "$target"
   home="$(target_home_path "$target")"
+  codex_bin="$(resolve_codex_bin)"
 
   rc=0
-  CODEX_HOME="$home" command codex login status >/dev/null 2>&1 || rc=$?
+  CODEX_HOME="$home" "$codex_bin" login status >/dev/null 2>&1 || rc=$?
   if [[ "$rc" -eq 0 ]]; then
     echo "logged-in"
   else
@@ -3354,6 +3502,28 @@ resolve_app_bin() {
     return
   fi
   err "Codex.app binary not found. set CODEX_SWITCHER_APP_BIN manually"
+}
+
+resolve_codex_bin() {
+  if [[ -n "${CODEX_SWITCHER_CODEX_BIN:-}" ]]; then
+    [[ -x "$CODEX_SWITCHER_CODEX_BIN" ]] || err "CODEX_SWITCHER_CODEX_BIN is not executable: $CODEX_SWITCHER_CODEX_BIN"
+    echo "$CODEX_SWITCHER_CODEX_BIN"
+    return
+  fi
+
+  if command -v codex >/dev/null 2>&1; then
+    command -v codex
+    return
+  fi
+  if [[ -x "/Applications/Codex.app/Contents/Resources/codex" ]]; then
+    echo "/Applications/Codex.app/Contents/Resources/codex"
+    return
+  fi
+  if [[ -x "$HOME/Applications/Codex.app/Contents/Resources/codex" ]]; then
+    echo "$HOME/Applications/Codex.app/Contents/Resources/codex"
+    return
+  fi
+  err "codex binary not found. install Codex CLI or set CODEX_SWITCHER_CODEX_BIN"
 }
 
 kill_tree() {
@@ -3982,14 +4152,7 @@ refresh_account_token_once() {
   copy_auth_file "$auth_file" "$tmp_home/auth.json"
   before="$(checksum_file "$tmp_home/auth.json" 2>/dev/null || true)"
   exec_log="$(mktemp /tmp/codex-sw-token-refresh-exec.XXXXXX.log)"
-  codex_bin="$(command -v codex || true)"
-  if [[ -z "$codex_bin" ]]; then
-    printf 'codex binary not found in PATH\n' > "$exec_log"
-    rm -f -- "$exec_log"
-    rm -rf -- "$tmp_home"
-    echo "failed"
-    return 0
-  fi
+  codex_bin="$(resolve_codex_bin)"
 
   rc=0
   python3 - "$tmp_home" "$exec_log" "$codex_bin" <<'PY' || rc=$?
@@ -4081,11 +4244,15 @@ PY
 cmd_token_refresh_run_once_inner() {
   local env account state
   local scanned=0 skipped=0 refreshed=0 changed=0 failed=0 need_relogin=0 auth_file before_exp after_exp now_ts start_ts
-  local remaining_sec ttl_label after_ttl
+  local remaining_sec ttl_label after_ttl email
 
   start_ts="$(date +%s)"
   now_ts="$(now_utc)"
-  echo "[$now_ts] start --- token refresh run"
+  echo
+  echo "Token refresh run  $(format_log_time_local)"
+  echo "UTC: $now_ts"
+  printf '  %-22s %-34s %-20s %-12s %s\n' "ACCOUNT" "EMAIL" "EXPIRES" "REMAINING" "STATUS"
+  printf '  %-22s %-34s %-20s %-12s %s\n' "----------------------" "----------------------------------" "--------------------" "------------" "----------------"
 
   while IFS= read -r env; do
     while IFS= read -r account; do
@@ -4095,6 +4262,7 @@ cmd_token_refresh_run_once_inner() {
       fi
       auth_file="$(source_auth_file_for_account "$env" "$account" || true)"
       before_exp="$(token_expiry_from_auth_file "$auth_file" 2>/dev/null || echo "-")"
+      email="$(token_email_from_auth_file "$auth_file" 2>/dev/null || echo "-")"
 
       IFS='|' read -r remaining_sec ttl_label <<< "$(python3 - "$before_exp" <<'PYINNER'
 import sys
@@ -4119,7 +4287,7 @@ PYINNER
 
       if [[ "$remaining_sec" =~ ^[0-9]+$ ]] && (( remaining_sec > 86400 )); then
         skipped=$((skipped + 1))
-        echo "  $env/$account | exp: $before_exp | ttl: $ttl_label | >1d → fresh"
+        format_token_refresh_row "$env/$account" "$email" "$before_exp" "$ttl_label" "fresh"
         continue
       fi
 
@@ -4129,6 +4297,7 @@ PYINNER
       refreshed=$((refreshed + 1))
       if [[ "$state" == "changed" ]]; then
         changed=$((changed + 1))
+        email="$(token_email_from_auth_file "$auth_file" 2>/dev/null || echo "$email")"
         after_ttl="$(python3 - "$after_exp" <<'PYINNER2'
 import sys
 from datetime import datetime, timezone
@@ -4149,16 +4318,16 @@ except Exception:
     print("-")
 PYINNER2
 )"
-        echo "  $env/$account | exp: $before_exp → $after_exp | ttl: $ttl_label → $after_ttl | ≤1d → changed"
+        format_token_refresh_row "$env/$account" "$email" "$after_exp" "$after_ttl" "refreshed"
       elif [[ "$state" == "need_relogin" ]]; then
         need_relogin=$((need_relogin + 1))
         failed=$((failed + 1))
-        echo "  $env/$account | exp: $before_exp | ttl: $ttl_label | ≤1d → need_relogin"
+        format_token_refresh_row "$env/$account" "$email" "$before_exp" "$ttl_label" "relogin required"
       elif [[ "$state" != "unchanged" ]]; then
         failed=$((failed + 1))
-        echo "  $env/$account | exp: $before_exp | ttl: $ttl_label | ≤1d → failed"
+        format_token_refresh_row "$env/$account" "$email" "$before_exp" "$ttl_label" "failed"
       else
-        echo "  $env/$account | exp: $before_exp | ttl: $ttl_label | ≤1d → unchanged"
+        format_token_refresh_row "$env/$account" "$email" "$before_exp" "$ttl_label" "checked"
       fi
     done < <(list_accounts_for_env "$env")
   done < <(list_env_names | sort -u)
@@ -4167,7 +4336,7 @@ PYINNER2
   end_ts="$(date +%s)"
   total_took=$((end_ts - start_ts))
 
-  echo "done — scanned=$scanned, skipped=$skipped(fresh), refreshed=$refreshed, changed=$changed, failed=$failed, need_relogin=$need_relogin, took=${total_took}s"
+  echo "Summary: scanned=$scanned  fresh=$skipped  checked=$refreshed  refreshed=$changed  failed=$failed  relogin=$need_relogin  duration=${total_took}s"
   log_event INFO "token_refresh_run_once scanned=$scanned skipped=$skipped refreshed=$refreshed changed=$changed failed=$failed need_relogin=$need_relogin took=${total_took}s"
 }
 
@@ -4371,9 +4540,12 @@ cmd_account_use_and_maybe_launch() {
   local launch_mode="${5:-auto}"
   shift 5 || true
 
+  debug_event "account_use_launch_start env=$env account=$account target=$target sync=$sync_mode launch=$launch_mode args=$* stdin_tty=$([[ -t 0 ]] && echo true || echo false) stdout_tty=$([[ -t 1 ]] && echo true || echo false)"
   with_lock cmd_account_use "$account" "$env" "$target" "$sync_mode"
+  debug_event "account_use_launch_after_switch env=$env account=$account target=$target launch=$launch_mode cli=$(read_current_env cli || true)/$(read_current_account cli || true) app=$(read_current_env app || true)/$(read_current_account app || true)"
 
   if should_launch_codex "$launch_mode"; then
+    debug_event "account_use_launch_decision env=$env account=$account target=$target launch=$launch_mode result=launch"
     if target_includes_cli "$target"; then
       echo "Launching codex with env/account: $(read_current_env cli || true)/$(read_current_account cli || true)"
       run_codex_for_target cli "$@"
@@ -4385,6 +4557,7 @@ cmd_account_use_and_maybe_launch() {
     return 0
   fi
 
+  debug_event "account_use_launch_decision env=$env account=$account target=$target launch=$launch_mode result=skip"
   if [[ "$launch_mode" == "auto" ]]; then
     echo "Auto launch skipped (non-interactive shell). Use --launch to force start."
   fi
@@ -4467,6 +4640,7 @@ cmd_app_open() {
 
   env="$(read_current_env app || true)"
   use_account="${account:-$(read_current_account app || true)}"
+  debug_event "app_open_start env=$env account=$use_account raw_account_arg=$account args=$*"
   validate_account_name "$use_account"
   require_env_exists "$env"
   account_has_auth "$env" "$use_account" || err "account '$use_account' not logged in under env '$env'. run: $SCRIPT_NAME ac login $use_account --env $env --target app"
@@ -4476,10 +4650,12 @@ cmd_app_open() {
   ensure_target_auth_installed app
 
   login_state="$(login_state_for_target app)"
+  debug_event "app_open_login_state env=$env account=$use_account state=$login_state home=$(target_home_path app) auth_exists=$([[ -f "$(target_home_path app)/auth.json" ]] && echo true || echo false)"
   if [[ "$login_state" != "logged-in" ]]; then
     err "account '$use_account' in env '$env' is not logged in"
   fi
   app_bin="$(resolve_app_bin)"
+  debug_event "app_open_resolved_bin env=$env account=$use_account app_bin=$app_bin"
 
   app_stop_managed >/dev/null
   app_stop_unmanaged_if_running >/dev/null
@@ -4487,6 +4663,7 @@ cmd_app_open() {
   mkdir -p "$(dirname "$APP_LOG")"
   nohup env CODEX_HOME="$(target_home_path app)" CODEX_SWITCHER_MANAGED=1 CODEX_SWITCHER_ENV="$env" CODEX_SWITCHER_ACCOUNT="$use_account" "$app_bin" "$@" </dev/null >>"$APP_LOG" 2>&1 &
   pid="$!"
+  debug_event "app_open_spawned env=$env account=$use_account pid=$pid home=$(target_home_path app) app_log=$APP_LOG"
   printf '%s\n' "$pid" > "$APP_PID_FILE"
   chmod 600 "$APP_PID_FILE" 2>/dev/null || true
 
@@ -4667,7 +4844,7 @@ scan_logs_for_secrets() {
 }
 
 cmd_check() {
-  command -v codex >/dev/null 2>&1 || err "codex command not found in PATH"
+  resolve_codex_bin >/dev/null
   resolve_app_bin >/dev/null
   ensure_dirs
 
@@ -4721,11 +4898,11 @@ cmd_doctor() {
   echo "cli_current: $(read_current_env cli || true)/$(read_current_account cli || true)"
   echo "app_current: $(read_current_env app || true)/$(read_current_account app || true)"
 
-  if ! command -v codex >/dev/null 2>&1; then
+  if ! resolve_codex_bin >/dev/null 2>&1; then
     echo "- codex in PATH: missing"
     issues=1
   else
-    echo "- codex in PATH: ok"
+    echo "- codex binary: ok ($(resolve_codex_bin))"
   fi
 
   if resolve_app_bin >/dev/null 2>&1; then
@@ -5126,6 +5303,10 @@ main() {
     tui)
       [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME tui"
       cmd_tui
+      ;;
+    __test-status-snapshot)
+      [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME __test-status-snapshot"
+      tui_home_accounts_snapshot
       ;;
     check)
       [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME check"

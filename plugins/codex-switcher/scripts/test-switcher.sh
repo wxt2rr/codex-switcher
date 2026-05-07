@@ -143,6 +143,7 @@ grep -q "3\\. Environments" /tmp/codex_sw_tui_catalog_en.out
 grep -q "4\\. Proxy" /tmp/codex_sw_tui_catalog_en.out
 grep -q "5\\. Status" /tmp/codex_sw_tui_catalog_en.out
 grep -q "6\\. Refresh Account Token" /tmp/codex_sw_tui_catalog_en.out
+grep -Eq "6\\. Refresh Account Token[[:space:]]{2,}Run one token refresh scan now" /tmp/codex_sw_tui_catalog_en.out
 grep -q "7\\. Logs" /tmp/codex_sw_tui_catalog_en.out
 grep -q "8\\. Quit" /tmp/codex_sw_tui_catalog_en.out
 ! grep -q "Current status (data may be delayed by 1 minute)" /tmp/codex_sw_tui_catalog_en.out
@@ -172,6 +173,11 @@ grep -q '"auth_mode":"api_key"' "$DEFAULT_HOME/auth.json"
 printf 'sk-relogin-key-9999\n' | "$SW" ac relogin key --env default --mode apikey >/tmp/codex_sw_relogin_apikey.out
 grep -q '"OPENAI_API_KEY":"sk-relogin-key-9999"' "$STATE/env-accounts/default/key/auth.json"
 grep -q "API key saved successfully" /tmp/codex_sw_relogin_apikey.out
+COLUMNS=100 LINES=32 "$SW" __test-status-snapshot >/tmp/codex_sw_tui_status_apikey.out
+grep -Fq "api key" /tmp/codex_sw_tui_status_apikey.out
+grep -Fq "sk-***9999" /tmp/codex_sw_tui_status_apikey.out
+! grep -Fq "plan:apikey" /tmp/codex_sw_tui_status_apikey.out
+! grep -Fq "AUTH EXP --" /tmp/codex_sw_tui_status_apikey.out
 
 "$SW" ac relogin work --env default --mode auth >/tmp/codex_sw_relogin_auth.out
 grep -q "Logged in account: default/work" /tmp/codex_sw_relogin_auth.out
@@ -246,6 +252,12 @@ grep -Eq "^cli_auth_expiry: -$" /tmp/codex_sw_status_auth_paths.out
 grep -Eq "^app_auth_expiry: -$" /tmp/codex_sw_status_auth_paths.out
 "$SW" ops token-refresh status >/tmp/codex_sw_token_refresh_status.out
 grep -q "^token_refresh_guard:" /tmp/codex_sw_token_refresh_status.out
+"$SW" ops token-refresh run-once >/tmp/codex_sw_token_refresh_run_once.out
+grep -q "^Token refresh run  " /tmp/codex_sw_token_refresh_run_once.out
+grep -q "ACCOUNT.*EMAIL.*EXPIRES.*REMAINING.*STATUS" /tmp/codex_sw_token_refresh_run_once.out
+grep -q "default/personal.*personal@example.com" /tmp/codex_sw_token_refresh_run_once.out
+grep -q "^Summary: scanned=" /tmp/codex_sw_token_refresh_run_once.out
+! grep -q "start --- token refresh run" /tmp/codex_sw_token_refresh_run_once.out
 
 "$SW" env new trash --empty
 echo '{"trash":"1"}' > "$ENVS/trash/home/shared.json"
