@@ -185,5 +185,25 @@ app: default/personal
 | `codex-sw version` | 查看版本 |
 | `codex-sw check` | 健康检查 |
 | `codex-sw upgrade [--dry-run]` | 升级工具 |
+| `codex-sw ops token-refresh start` | 启动 token 自动续期守护（launchd） |
+| `codex-sw ops token-refresh stop` | 停止 token 自动续期守护 |
+| `codex-sw ops token-refresh status` | 查看 token 自动续期守护状态与日志路径 |
+| `codex-sw ops token-refresh run-once` | 立即执行一次 token 续期扫描 |
 | `codex-sw --help` | 查看核心命令帮助 |
 | `codex-sw --help-all` | 查看完整命令帮助 |
+
+## Token 自动续期与日志
+
+```bash
+# 启动守护
+codex-sw ops token-refresh start
+
+# 查看状态
+codex-sw ops token-refresh status
+
+# 立即执行一次扫描（会打印 scanned/skipped/refreshed/changed/failed/need_relogin）
+codex-sw ops token-refresh run-once
+```
+
+在 TUI 首页可进入 `Logs` 查看续期日志（`q` / `Esc` 返回）。
+当输出出现 `need_relogin` 时，表示该账号的 refresh token 已不可用，需要执行 `codex-sw ac relogin <account> --env <env>`。

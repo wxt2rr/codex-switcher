@@ -184,5 +184,25 @@ app: default/personal
 | `codex-sw version` | Show version |
 | `codex-sw check` | Health check |
 | `codex-sw upgrade [--dry-run]` | Upgrade tool |
+| `codex-sw ops token-refresh start` | Start token auto-refresh guard (launchd) |
+| `codex-sw ops token-refresh stop` | Stop token auto-refresh guard |
+| `codex-sw ops token-refresh status` | Show token auto-refresh guard status and log path |
+| `codex-sw ops token-refresh run-once` | Execute one token refresh scan immediately |
 | `codex-sw --help` | Show core help |
 | `codex-sw --help-all` | Show full help |
+
+## Token Auto Refresh and Logs
+
+```bash
+# Start guard
+codex-sw ops token-refresh start
+
+# Check status
+codex-sw ops token-refresh status
+
+# Execute one scan (prints scanned/skipped/refreshed/changed/failed/need_relogin)
+codex-sw ops token-refresh run-once
+```
+
+From the TUI home screen, open `Logs` to inspect refresh logs (`q` / `Esc` to go back).
+If `need_relogin` appears, that account's refresh token is no longer usable; run `codex-sw ac relogin <account> --env <env>`.

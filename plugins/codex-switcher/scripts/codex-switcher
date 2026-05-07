@@ -340,7 +340,9 @@ tui_text() {
     zh:home_opt_envs) echo "Environments" ;;
     zh:home_opt_lang) echo "Language" ;;
     zh:home_opt_status) echo "Status" ;;
+    zh:home_opt_refresh) echo "Refresh Account Token" ;;
     zh:home_opt_quit) echo "Quit" ;;
+    zh:home_opt_logs) echo "Logs" ;;
     zh:choose) echo "请选择: " ;;
     zh:nav_hint) echo "↑/↓ move  Enter select  q quit" ;;
     zh:invalid_choice) echo "无效选择: " ;;
@@ -403,7 +405,9 @@ tui_text() {
     en:home_opt_proxy) echo "Proxy" ;;
     en:home_opt_lang) echo "Language" ;;
     en:home_opt_status) echo "Status" ;;
+    en:home_opt_refresh) echo "Refresh Account Token" ;;
     en:home_opt_quit) echo "Quit" ;;
+    en:home_opt_logs) echo "Logs" ;;
     en:choose) echo "Choose: " ;;
     en:nav_hint) echo "↑/↓ move  Enter select  q quit" ;;
     en:invalid_choice) echo "Invalid choice: " ;;
@@ -469,7 +473,9 @@ tui_text() {
     ja:home_opt_envs) echo "Environments" ;;
     ja:home_opt_lang) echo "Language" ;;
     ja:home_opt_status) echo "Status" ;;
+    ja:home_opt_refresh) echo "Refresh Account Token" ;;
     ja:home_opt_quit) echo "Quit" ;;
+    ja:home_opt_logs) echo "Logs" ;;
     ja:choose) echo "選択してください: " ;;
     ja:nav_hint) echo "↑/↓ move  Enter select  q quit" ;;
     ja:invalid_choice) echo "無効な選択: " ;;
@@ -1480,6 +1486,20 @@ token_refresh_guard_status_line() {
   fi
 }
 
+token_refresh_last_need_relogin() {
+  if [[ ! -f "$TOKEN_REFRESH_LOG" ]]; then
+    echo "-"
+    return 0
+  fi
+  local last
+  last="$(rg -o "need_relogin=[0-9]+" "$TOKEN_REFRESH_LOG" 2>/dev/null | tail -n 1 | cut -d= -f2 || true)"
+  if [[ -n "$last" ]]; then
+    echo "$last"
+  else
+    echo "0"
+  fi
+}
+
 write_token_refresh_launchd_plist() {
   local plist="$1"
   local script_path uid
@@ -2417,6 +2437,95 @@ tui_action_status() {
   done
 }
 
+tui_action_logs() {
+  local lang file lines key
+  lang="$(read_ui_lang)"
+  file="$TOKEN_REFRESH_LOG"
+
+  while true; do
+    tui_quit_requested && return 0
+
+    if [[ -f "$file" ]]; then
+      lines="$(cat "$file" 2>/dev/null || true)"
+    else
+      lines="(log file not found: $file)"
+    fi
+
+    while true; do
+      tui_quit_requested && return 0
+
+      tui_clear_screen
+      tui_panel_open "Logs - $TOKEN_REFRESH_LOG"
+      if [[ -n "$lines" ]]; then
+        while IFS= read -r line; do
+          tui_panel_line "$line"
+        done <<< "$lines"
+      else
+        tui_panel_line "(empty)"
+      fi
+      tui_panel_close
+      echo
+      if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+        printf "%b%s%b\n" "$TUI_COLOR_DIM" "q / Esc back" "$TUI_COLOR_RESET"
+      else
+        echo "q / Esc back"
+      fi
+
+      key="$(tui_read_key || true)"
+      [[ -n "$key" ]] || continue
+      case "$key" in
+        quit|esc)
+          break
+          ;;
+      esac
+    done
+    break
+  done
+}
+
+tui_action_refresh_token() {
+  local key output
+  while true; do
+    tui_quit_requested && return 0
+    tui_clear_screen
+    tui_panel_open "Refresh Account Token"
+    tui_panel_line "Running one refresh scan..."
+    tui_panel_close
+
+    output="$(cmd_token_refresh_run_once 2>&1 || true)"
+
+    while true; do
+      tui_quit_requested && return 0
+      tui_clear_screen
+      tui_panel_open "Refresh Account Token"
+      if [[ -n "$output" ]]; then
+        while IFS= read -r line; do
+          tui_panel_line "$line"
+        done <<< "$output"
+      else
+        tui_panel_line "(no output)"
+      fi
+      tui_panel_close
+      echo
+      if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
+        printf "%b%s%b\n" "$TUI_COLOR_DIM" "r run again  q / Esc back" "$TUI_COLOR_RESET"
+      else
+        echo "r run again  q / Esc back"
+      fi
+      key="$(tui_read_key || true)"
+      [[ -n "$key" ]] || continue
+      case "$key" in
+        char:r|char:R|digit:1)
+          break
+          ;;
+        quit|esc)
+          return 0
+          ;;
+      esac
+    done
+  done
+}
+
 tui_home_logo() {
   cat <<'EOF'
   ____ ___  ____  _______  __     _____ _        __
@@ -2439,6 +2548,8 @@ tui_home_render_plain() {
     "$(tui_text "$(read_ui_lang)" home_opt_envs)"
     "$(tui_text "$(read_ui_lang)" home_opt_proxy)"
     "$(tui_text "$(read_ui_lang)" home_opt_status)"
+    "$(tui_text "$(read_ui_lang)" home_opt_refresh)"
+    "$(tui_text "$(read_ui_lang)" home_opt_logs)"
     "$(tui_text "$(read_ui_lang)" home_opt_quit)"
   )
   local -a descs=(
@@ -2447,6 +2558,8 @@ tui_home_render_plain() {
     "Manage environments"
     "Configure usage API proxy"
     "View usage and status dashboard"
+    "Run one token refresh scan now"
+    "View token refresh logs"
     "Exit"
   )
 
@@ -2510,6 +2623,8 @@ tui_home_render_menu_block() {
     "$(tui_text "$(read_ui_lang)" home_opt_envs)"
     "$(tui_text "$(read_ui_lang)" home_opt_proxy)"
     "$(tui_text "$(read_ui_lang)" home_opt_status)"
+    "$(tui_text "$(read_ui_lang)" home_opt_refresh)"
+    "$(tui_text "$(read_ui_lang)" home_opt_logs)"
     "$(tui_text "$(read_ui_lang)" home_opt_quit)"
   )
   local -a descs=(
@@ -2518,6 +2633,8 @@ tui_home_render_menu_block() {
     "Manage environments"
     "Configure usage API proxy"
     "View usage and status dashboard"
+    "Run one token refresh scan now"
+    "View token refresh logs"
     "Exit"
   )
 
@@ -2587,7 +2704,7 @@ tui_home_choose_action() {
   local idx=0
   local key d
   local update_hint="${1:-}"
-  local menu_lines=8
+  local menu_lines=10
   local first_render_done="false"
   while true; do
     if [[ "$TUI_INTERACTIVE" == "true" ]]; then
@@ -2605,10 +2722,10 @@ tui_home_choose_action() {
     [[ -n "$key" ]] || continue
     case "$key" in
       up)
-        idx=$(( (idx - 1 + 6) % 6 ))
+        idx=$(( (idx - 1 + 8) % 8 ))
         ;;
       down)
-        idx=$(( (idx + 1) % 6 ))
+        idx=$(( (idx + 1) % 8 ))
         ;;
       enter)
         TUI_MENU_RESULT="$idx"
@@ -2622,7 +2739,7 @@ tui_home_choose_action() {
         d="${key#digit:}"
         if [[ "$d" =~ ^[0-9]+$ ]]; then
           d=$((d - 1))
-          if (( d >= 0 && d < 6 )); then
+          if (( d >= 0 && d < 8 )); then
             TUI_MENU_RESULT="$d"
             return 0
           fi
@@ -2646,7 +2763,7 @@ cmd_tui() {
     tui_home_choose_action "$update_hint"
     choice="$TUI_MENU_RESULT"
     case "$choice" in
-      -1|5)
+      -1|7)
         break
         ;;
       0)
@@ -2663,6 +2780,12 @@ cmd_tui() {
         ;;
       4)
         tui_action_status || true
+        ;;
+      5)
+        tui_action_refresh_token || true
+        ;;
+      6)
+        tui_action_logs || true
         ;;
     esac
   done
@@ -3849,21 +3972,80 @@ checksum_file() {
 refresh_account_token_once() {
   local env="$1"
   local account="$2"
-  local auth_file tmp_home before after rc
+  local auth_file tmp_home before after rc exec_log codex_bin
   local current_cli_env current_cli_account current_app_env current_app_account
   auth_file="$(source_auth_file_for_account "$env" "$account" || true)"
-  [[ -n "$auth_file" ]] || return 1
+  [[ -n "$auth_file" ]] || { echo "failed"; return 0; }
 
   tmp_home="$(mktemp -d /tmp/codex-sw-token-refresh.XXXXXX)"
   mkdir -p "$tmp_home"
   copy_auth_file "$auth_file" "$tmp_home/auth.json"
   before="$(checksum_file "$tmp_home/auth.json" 2>/dev/null || true)"
+  exec_log="$(mktemp /tmp/codex-sw-token-refresh-exec.XXXXXX.log)"
+  codex_bin="$(command -v codex || true)"
+  if [[ -z "$codex_bin" ]]; then
+    printf 'codex binary not found in PATH\n' > "$exec_log"
+    rm -f -- "$exec_log"
+    rm -rf -- "$tmp_home"
+    echo "failed"
+    return 0
+  fi
 
   rc=0
-  CODEX_HOME="$tmp_home" command codex login status >/dev/null 2>&1 || rc=$?
+  python3 - "$tmp_home" "$exec_log" "$codex_bin" <<'PY' || rc=$?
+import os
+import subprocess
+import sys
+
+codex_home = sys.argv[1]
+log_path = sys.argv[2]
+codex_bin = sys.argv[3]
+env = dict(os.environ)
+env["CODEX_HOME"] = codex_home
+cmd = [
+    codex_bin,
+    "exec",
+    "--skip-git-repo-check",
+    "reply with: ok",
+]
+try:
+    result = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=20,
+        env=env,
+    )
+    with open(log_path, "w", encoding="utf-8") as f:
+        f.write(result.stdout or "")
+    raise SystemExit(result.returncode)
+except subprocess.TimeoutExpired as e:
+    with open(log_path, "w", encoding="utf-8") as f:
+        f.write((e.stdout or "") if isinstance(e.stdout, str) else "")
+        f.write("\n[timeout]\n")
+    raise SystemExit(124)
+except FileNotFoundError:
+    with open(log_path, "w", encoding="utf-8") as f:
+        f.write("codex binary not found\n")
+    raise SystemExit(127)
+PY
   if [[ ! -f "$tmp_home/auth.json" ]]; then
+    rm -f -- "$exec_log"
     rm -rf -- "$tmp_home"
-    return 1
+    echo "failed"
+    return 0
+  fi
+
+  if ! python3 - "$tmp_home/auth.json" <<'PY' >/dev/null 2>&1; then
+import json, sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    json.load(f)
+PY
+    rm -f -- "$exec_log"
+    rm -rf -- "$tmp_home"
+    echo "failed"
+    return 0
   fi
 
   after="$(checksum_file "$tmp_home/auth.json" 2>/dev/null || true)"
@@ -3883,15 +4065,27 @@ refresh_account_token_once() {
 
   if [[ "$before" != "$after" ]]; then
     echo "changed"
+  elif (( rc != 0 )); then
+    if rg -qi "refresh token.*(expired|revoked|reused)|please log out and sign in again|not logged in" "$exec_log" 2>/dev/null; then
+      echo "need_relogin"
+    else
+      echo "failed"
+    fi
   else
     echo "unchanged"
   fi
-  return "$rc"
+  rm -f -- "$exec_log"
+  return 0
 }
 
 cmd_token_refresh_run_once_inner() {
   local env account state
-  local scanned=0 refreshed=0 changed=0 failed=0
+  local scanned=0 skipped=0 refreshed=0 changed=0 failed=0 need_relogin=0 auth_file before_exp after_exp now_ts start_ts
+  local remaining_sec ttl_label after_ttl
+
+  start_ts="$(date +%s)"
+  now_ts="$(now_utc)"
+  echo "[$now_ts] start --- token refresh run"
 
   while IFS= read -r env; do
     while IFS= read -r account; do
@@ -3899,18 +4093,82 @@ cmd_token_refresh_run_once_inner() {
       if ! account_uses_auth_mode "$env" "$account"; then
         continue
       fi
+      auth_file="$(source_auth_file_for_account "$env" "$account" || true)"
+      before_exp="$(token_expiry_from_auth_file "$auth_file" 2>/dev/null || echo "-")"
+
+      IFS='|' read -r remaining_sec ttl_label <<< "$(python3 - "$before_exp" <<'PYINNER'
+import sys
+from datetime import datetime, timezone
+exp = sys.argv[1].strip()
+try:
+    dt = datetime.strptime(exp, "%Y-%m-%d %H:%M:%SZ").replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    total = int((dt - now).total_seconds())
+    if total < 0:
+        print(f"{total}|expired")
+    elif total < 3600:
+        print(f"{total}|{total // 60}m {total % 60}s")
+    elif total < 86400:
+        print(f"{total}|{total // 3600}h {(total % 3600) // 60}m")
+    else:
+        print(f"{total}|{total // 86400}d {(total % 86400) // 3600}h")
+except Exception:
+    print("-1|-")
+PYINNER
+)"
+
+      if [[ "$remaining_sec" =~ ^[0-9]+$ ]] && (( remaining_sec > 86400 )); then
+        skipped=$((skipped + 1))
+        echo "  $env/$account | exp: $before_exp | ttl: $ttl_label | >1d → fresh"
+        continue
+      fi
+
       state="$(refresh_account_token_once "$env" "$account" || true)"
+      after_exp="$(token_expiry_from_auth_file "$auth_file" 2>/dev/null || echo "-")"
+
       refreshed=$((refreshed + 1))
       if [[ "$state" == "changed" ]]; then
         changed=$((changed + 1))
+        after_ttl="$(python3 - "$after_exp" <<'PYINNER2'
+import sys
+from datetime import datetime, timezone
+exp = sys.argv[1].strip()
+try:
+    dt = datetime.strptime(exp, "%Y-%m-%d %H:%M:%SZ").replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    total = int((dt - now).total_seconds())
+    if total < 0:
+        print("expired")
+    elif total < 3600:
+        print(f"{total // 60}m {total % 60}s")
+    elif total < 86400:
+        print(f"{total // 3600}h {(total % 3600) // 60}m")
+    else:
+        print(f"{total // 86400}d {(total % 86400) // 3600}h")
+except Exception:
+    print("-")
+PYINNER2
+)"
+        echo "  $env/$account | exp: $before_exp → $after_exp | ttl: $ttl_label → $after_ttl | ≤1d → changed"
+      elif [[ "$state" == "need_relogin" ]]; then
+        need_relogin=$((need_relogin + 1))
+        failed=$((failed + 1))
+        echo "  $env/$account | exp: $before_exp | ttl: $ttl_label | ≤1d → need_relogin"
       elif [[ "$state" != "unchanged" ]]; then
         failed=$((failed + 1))
+        echo "  $env/$account | exp: $before_exp | ttl: $ttl_label | ≤1d → failed"
+      else
+        echo "  $env/$account | exp: $before_exp | ttl: $ttl_label | ≤1d → unchanged"
       fi
     done < <(list_accounts_for_env "$env")
   done < <(list_env_names | sort -u)
 
-  log_event INFO "token_refresh_run_once scanned=$scanned refreshed=$refreshed changed=$changed failed=$failed"
-  echo "token_refresh: scanned=$scanned refreshed=$refreshed changed=$changed failed=$failed"
+  local end_ts total_took
+  end_ts="$(date +%s)"
+  total_took=$((end_ts - start_ts))
+
+  echo "done — scanned=$scanned, skipped=$skipped(fresh), refreshed=$refreshed, changed=$changed, failed=$failed, need_relogin=$need_relogin, took=${total_took}s"
+  log_event INFO "token_refresh_run_once scanned=$scanned skipped=$skipped refreshed=$refreshed changed=$changed failed=$failed need_relogin=$need_relogin took=${total_took}s"
 }
 
 cmd_token_refresh_run_once() {
@@ -4178,6 +4436,7 @@ cmd_status() {
   echo "cli_auth_expiry: $(token_expiry_for_env_account "$cli_env" "$cli_account")"
   echo "app_auth_expiry: $(token_expiry_for_env_account "$app_env" "$app_account")"
   echo "token_refresh_guard: $(token_refresh_guard_status_line)"
+  echo "token_refresh_need_relogin_last_run: $(token_refresh_last_need_relogin)"
   echo "cli($cli_env/$cli_account): $cli_state"
   echo "app($app_env/$app_account): $app_state"
 
