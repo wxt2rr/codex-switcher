@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.8 - 2026-05-07
+
+- Optimized token refresh log timestamp display and added an EMAIL column to refresh log rows.
+
 ## 0.8.7 - 2026-05-07
 
 - 新增 TUI 菜单项 Refresh Account Token，支持手动触发一次 token 刷新。
