@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.7 - 2026-05-07
+
+- 新增 TUI 菜单项 Refresh Account Token，支持手动触发一次 token 刷新。
+- 修复 TUI 上下选择错位叠印问题（菜单重绘行数与项目数同步）。
+- 优化 token 刷新流程：改为预热请求驱动，增加 need_relogin 状态与可观测输出。
+
 ## 0.8.6 - 2026-04-24
 
 - 1. 支持显示AUTH TOKEN过期时间
