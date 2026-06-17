@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.8.11 - 2026-05-13
+
+- Fixed `status` card layout so account blocks wrap earlier and remain readable when one environment has many accounts.
+
+## 0.8.10 - 2026-05-12
+
+- Added explicit `app restart-current` and `app launch-new` commands for Codex App control, and changed account switching to switch only by default.
+- Added API key login base URL selection, persisted auth metadata, and runtime `OPENAI_BASE_URL` injection for custom API-compatible endpoints.
+- Added `sub2api` login mode to import token JSON into managed `auth.json` account slots.
+- Improved TUI API key login, Home navigation, menu redraw behavior, and quiet success handling after returning to Home.
+- Fixed TUI interactive menus that could fall back to numeric `Choose:` prompts, and fixed environment removal from the current CLI env by using force removal.
+
+## 0.8.9 - 2026-05-09
+
+- Fixed auth login and API key login flows to resolve the Codex binary via resolve_codex_bin, so global npm installs no longer fail with 'codex: command not found'.
+
 ## 0.8.8 - 2026-05-07
 
 - Optimized token refresh log timestamp display and added an EMAIL column to refresh log rows.
@@ -82,7 +98,7 @@
 - Added `ops` namespace for operational commands: `list/proxy/exec/import-default/init/upgrade/recover/check/doctor`.
 - Renamed env/account subcommands to compact forms: `env ls/new/use`, `ac ls/login/use/logout`.
 - Added `-t` short option as alias of `--target` for env/account target selection.
-- Unified App switching into `ac use -t app --launch`; removed top-level `app` command group.
+- Unified App switching into explicit `app restart-current` / `app launch-new`; restored top-level `app` command group.
 - Removed legacy top-level account commands: `login/logout/add/remove/use/switch`.
 - Updated smoke tests and docs to the new command model.
 
@@ -90,7 +106,7 @@
 
 - Removed legacy account-related top-level commands: `login/logout/add/remove/use/switch`.
 - Added `ac` as first-class short alias for `account` (`ac` and `account` are equivalent groups).
-- Extended `ac/account use` with launch behavior parity (`--launch|--no-launch|-- <codex args...>`, default `auto`).
+- Removed launch behavior from `ac/account use`; launch control is now explicit under `app`.
 - Updated Chinese/English README docs and manual checklist to use latest `env + account(ac)` command style.
 - Added smoke-test assertions to ensure legacy top-level commands fail with `unknown command`.
 

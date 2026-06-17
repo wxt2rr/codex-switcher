@@ -29,6 +29,24 @@ npm i -g @wangxt0223/codex-switcher
 codex-sw check
 ```
 
+## 桌面版（Electron）
+
+当前仓库已经包含一个可运行的 Electron 桌面版，位置在 `apps/desktop`。
+
+- 前端构建：`npm run desktop:build`
+- 本地开发：`npm run desktop:dev`
+- Electron 运行：`npm run desktop:electron`
+- 桌面测试：`npm run desktop:test`
+- 目录打包：`npm run package:dir --workspace ./apps/desktop`
+
+说明：
+
+- 当前桌面版已经覆盖：overview、env/account 切换、env 创建、runtime base URL 更新、原生 login/relogin、账号与环境删除确认、proxy、token refresh、doctor、recover、App 状态、CLI 启动、日志查看和高级命令桥接。
+- 操作结果已支持结构化摘要视图，同时保留原始输出，适合排障。
+- 当前桌面壳使用 Electron，复用 Node/TypeScript core bridge；仓库内已验证前端构建、主进程构建、桌面测试，以及目录打包后的 App 启动。
+- 当前未完成的主要是发行级能力，例如应用图标、签名、公证和分发流程。
+- 详细架构和迁移说明见 [docs/desktop-core-architecture.md](docs/desktop-core-architecture.md)。
+
 ### 源码安装
 
 ```bash
@@ -136,6 +154,7 @@ app: project-a/corp
 ```bash
 $ codex-sw ac login my-api --env default --mode apikey
 Enter OpenAI API key: sk-xxxxxxxxxxxxxxxx
+Base URL [1] default [2] custom (default: 1): 1
 API key saved successfully for account: default/my-api
 Logged in account: default/my-api
 
@@ -174,7 +193,10 @@ app: default/personal
 | `codex-sw ac ls [--env <env>]` | 查看账号总览 |
 | `codex-sw ac login <account> [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--mode auth\|apikey]` | 登录账号 |
 | `codex-sw ac relogin [account] [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--mode auth\|apikey]` | 重新登录已有账号（可交互选择环境/账号/模式） |
-| `codex-sw ac use <account> [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--launch\|--no-launch] [-- <codex args...>]` | 切换账号 |
+| `codex-sw ac base-url <account> [--env <env>] [--mode default\|custom]` | 修改 API key 账号的 OpenAI Base URL |
+| `codex-sw ac use <account> [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync]` | 切换账号 |
+| `codex-sw app restart-current` | 重启当前 `app` 指针对应的 APP 实例 |
+| `codex-sw app launch-new` | 基于当前 `app` 指针新开一个 APP 实例 |
 | `codex-sw ac logout [account] [--env <env>] [-t cli\|app\|both]` | 注销账号 |
 | `codex-sw ac rm <account> [--env <env>] [--force]` | 删除账号（需二次 `y/n` 确认） |
 | `codex-sw whoami [-t cli\|app\|both]` | 查看当前 env/account |
@@ -207,3 +229,7 @@ codex-sw ops token-refresh run-once
 
 在 TUI 首页可进入 `Logs` 查看续期日志（`q` / `Esc` 返回）。
 当输出出现 `need_relogin` 时，表示该账号的 refresh token 已不可用，需要执行 `codex-sw ac relogin <account> --env <env>`。
+
+`apikey` 模式下，登录/重登录时会额外询问 OpenAI Base URL。
+`default` 表示不注入 `OPENAI_BASE_URL`；`custom` 会按账号保存并在 CLI/App 启动时自动注入。
+`status` 和 TUI 状态卡片会显示当前账号使用的 `base_url`。

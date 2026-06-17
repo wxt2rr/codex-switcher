@@ -1,7 +1,8 @@
 {
   "name": "@wangxt0223/codex-switcher",
-  "version": "0.8.8",
+  "version": "0.8.11",
   "description": "Env + account switcher for Codex CLI and Codex App with shared env data and per-account auth.",
+  "private": true,
   "license": "MIT",
   "author": "wangxt",
   "homepage": "https://github.com/wangxt/codex-switcher",
@@ -21,8 +22,14 @@
     "codex-sw": "plugins/codex-switcher/scripts/codex-sw",
     "codex-switcher": "plugins/codex-switcher/scripts/codex-switcher"
   },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "files": [
     "plugins/codex-switcher/**",
+    "!plugins/codex-switcher/**/__pycache__/**",
+    "!plugins/codex-switcher/**/*.pyc",
     "docs/**",
     "scripts/install.sh",
     "scripts/uninstall.sh",
@@ -33,11 +40,24 @@
   "scripts": {
     "lint": "bash -n plugins/codex-switcher/scripts/codex-switcher && bash -n plugins/codex-switcher/scripts/codex-sw",
     "test": "plugins/codex-switcher/scripts/test-switcher.sh",
+    "cli:test": "tsx --test scripts/core-cli.test.ts scripts/legacy-cli-compat.test.ts",
+    "core:test": "tsx --test packages/core/src/**/*.test.ts packages/core/src/*.test.ts",
+    "core:build": "tsc -p packages/core/tsconfig.json",
+    "core:cli": "tsx scripts/core-cli.ts",
+    "desktop:build": "npm run build --workspace ./apps/desktop",
+    "desktop:dev": "npm run electron:dev --workspace ./apps/desktop",
+    "desktop:electron": "npm run electron --workspace ./apps/desktop",
+    "desktop:test": "npm run test:desktop --workspace ./apps/desktop",
     "check": "npm run lint && npm run test",
     "prepublishOnly": "npm run check",
     "release:npm": "./scripts/publish-npm.sh",
     "release:npm:token": "./scripts/publish-npm-with-token.sh",
     "release:npm:auto": "./scripts/release-publish.sh"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.8",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
   },
   "engines": {
     "node": ">=18"

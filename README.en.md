@@ -29,6 +29,24 @@ npm i -g @wangxt0223/codex-switcher
 codex-sw check
 ```
 
+## Desktop App (Electron)
+
+This repository now includes a runnable Electron desktop app under `apps/desktop`.
+
+- Frontend build: `npm run desktop:build`
+- Local frontend dev: `npm run desktop:dev`
+- Electron runtime: `npm run desktop:electron`
+- Desktop tests: `npm run desktop:test`
+- Directory packaging: `npm run package:dir --workspace ./apps/desktop`
+
+Notes:
+
+- The desktop app now covers overview, env/account switching, env creation, runtime base URL updates, native login/relogin, confirmation flows for destructive actions, proxy, token refresh, doctor, recover, app status, CLI launch, log viewing, and advanced command bridging.
+- Operation results now include structured summaries with raw output fallback for debugging.
+- The desktop app uses Electron and reuses the Node/TypeScript core bridge; frontend build, main-process build, desktop tests, and packaged app startup have been verified in-repo.
+- The main unfinished work is release hardening such as app icon, code signing, notarization, and distribution.
+- See [docs/desktop-core-architecture.md](docs/desktop-core-architecture.md) for architecture and migration notes.
+
 ### Install from source
 
 ```bash
@@ -135,6 +153,7 @@ Goal: skip web login, save an API key account, then use it immediately.
 ```text
 $ codex-sw ac login my-api --env default --mode apikey
 Enter OpenAI API key: sk-xxxxxxxxxxxxxxxx
+Base URL [1] default [2] custom (default: 1): 1
 API key saved successfully for account: default/my-api
 Logged in account: default/my-api
 
@@ -173,7 +192,10 @@ app: default/personal
 | `codex-sw ac ls [--env <env>]` | Show account overview |
 | `codex-sw ac login <account> [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--mode auth\|apikey]` | Login account |
 | `codex-sw ac relogin [account] [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--mode auth\|apikey]` | Relogin an existing account (interactive env/account/mode selection supported) |
-| `codex-sw ac use <account> [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--launch\|--no-launch] [-- <codex args...>]` | Switch account |
+| `codex-sw ac base-url <account> [--env <env>] [--mode default\|custom]` | Update the OpenAI Base URL for an API key account |
+| `codex-sw ac use <account> [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync]` | Switch account |
+| `codex-sw app restart-current` | Restart the APP instance for the current `app` pointer |
+| `codex-sw app launch-new` | Launch a new APP instance for the current `app` pointer |
 | `codex-sw ac logout [account] [--env <env>] [-t cli\|app\|both]` | Logout account |
 | `codex-sw ac rm <account> [--env <env>] [--force]` | Remove account (double `y/n` confirmation) |
 | `codex-sw whoami [-t cli\|app\|both]` | Show current env/account |
@@ -206,3 +228,7 @@ codex-sw ops token-refresh run-once
 
 From the TUI home screen, open `Logs` to inspect refresh logs (`q` / `Esc` to go back).
 If `need_relogin` appears, that account's refresh token is no longer usable; run `codex-sw ac relogin <account> --env <env>`.
+
+For `apikey` mode, login/relogin also asks for the OpenAI Base URL.
+`default` means `OPENAI_BASE_URL` is not injected; `custom` is stored per account and injected automatically when launching CLI/App.
+`status` and the TUI status card show the effective `base_url`.

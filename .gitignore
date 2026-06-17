@@ -27,6 +27,7 @@ yarn-error.log*
 tmp/
 temp/
 *.tmp
+apps/
 
 # Local Codex metadata
 .codex/

@@ -14,9 +14,9 @@ Run this checklist on a macOS machine with Codex.app installed.
 
 ## App switching
 
-- [ ] `codex-sw ac use work -t app --launch` opens App
+- [ ] `codex-sw ac use work -t app && codex-sw app restart-current` opens App
 - [ ] `codex-sw whoami -t app` prints `default/work`
-- [ ] `codex-sw ac use personal -t app --launch` restarts App under `default/personal`
+- [ ] `codex-sw ac use personal -t app && codex-sw app restart-current` restarts App under `default/personal`
 
 ## Recovery and integrity
 

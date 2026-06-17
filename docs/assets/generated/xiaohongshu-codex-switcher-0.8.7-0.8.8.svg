@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1242" height="1660" viewBox="0 0 1242 1660">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8fbff"/>
+      <stop offset="0.45" stop-color="#eef7f2"/>
+      <stop offset="1" stop-color="#fff4ee"/>
+    </linearGradient>
+    <linearGradient id="ink" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#12303f"/>
+      <stop offset="1" stop-color="#1f6f62"/>
+    </linearGradient>
+    <linearGradient id="cardA" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eef7ff"/>
+    </linearGradient>
+    <linearGradient id="cardB" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#fff2e8"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#20424c" flood-opacity="0.15"/>
+    </filter>
+    <style>
+      text {
+        font-family: "PingFang SC", "Hiragino Sans GB", "STHeiti", "Arial Unicode MS", sans-serif;
+        fill: #17323c;
+      }
+      .mono {
+        font-family: "SF Mono", "Menlo", "Monaco", monospace;
+      }
+      .small { font-size: 34px; }
+      .body { font-size: 42px; font-weight: 650; }
+      .note { font-size: 31px; fill: #5a6d72; }
+      .title { font-size: 86px; font-weight: 850; letter-spacing: 0; }
+      .subtitle { font-size: 46px; font-weight: 700; fill: #43636a; }
+      .version { font-size: 58px; font-weight: 850; fill: #ffffff; }
+      .cardTitle { font-size: 48px; font-weight: 850; }
+      .pill { font-size: 30px; font-weight: 750; fill: #ffffff; }
+    </style>
+  </defs>
+
+  <rect width="1242" height="1660" fill="url(#bg)"/>
+  <path d="M0 118 C160 78 318 92 494 44 C720 -18 900 12 1242 0 L1242 0 L1242 300 C1010 260 830 310 640 255 C402 185 182 248 0 200 Z" fill="#dceff1" opacity="0.72"/>
+  <path d="M0 1450 C208 1390 336 1480 545 1430 C764 1377 912 1279 1242 1344 L1242 1660 L0 1660 Z" fill="#ffe2d2" opacity="0.58"/>
+
+  <g transform="translate(78 78)">
+    <rect x="0" y="0" width="238" height="56" rx="28" fill="#17323c"/>
+    <text x="32" y="38" class="pill">codex-switcher</text>
+    <text x="0" y="158" class="title" fill="url(#ink)">版本更新速览</text>
+    <text x="0" y="224" class="subtitle">0.8.7 + 0.8.8 两个版本的新功能</text>
+  </g>
+
+  <g transform="translate(78 372)" filter="url(#shadow)">
+    <rect x="0" y="0" width="1086" height="506" rx="34" fill="url(#cardA)"/>
+    <rect x="0" y="0" width="18" height="506" rx="9" fill="#2d7ff9"/>
+    <rect x="44" y="42" width="164" height="70" rx="35" fill="#2d7ff9"/>
+    <text x="78" y="90" class="version mono">0.8.7</text>
+    <text x="44" y="170" class="cardTitle">Token 刷新从命令行进入 TUI</text>
+
+    <g transform="translate(44 232)">
+      <circle cx="18" cy="18" r="10" fill="#2d7ff9"/>
+      <text x="52" y="32" class="body">新增 Refresh Account Token 菜单项</text>
+      <text x="52" y="78" class="note">在 TUI 首页直接手动触发一次 token 刷新</text>
+    </g>
+    <g transform="translate(44 346)">
+      <circle cx="18" cy="18" r="10" fill="#2d7ff9"/>
+      <text x="52" y="32" class="body">刷新流程改为预热请求驱动</text>
+      <text x="52" y="78" class="note">增加 need_relogin 状态，问题账号更容易定位</text>
+    </g>
+    <g transform="translate(770 250)">
+      <rect x="0" y="0" width="246" height="156" rx="22" fill="#16344a"/>
+      <text x="24" y="48" class="mono small" fill="#c9fff1">Refresh</text>
+      <text x="24" y="92" class="mono small" fill="#ffffff">Token</text>
+      <path d="M176 84 a40 40 0 1 1 -8 -24" fill="none" stroke="#7df0c0" stroke-width="12" stroke-linecap="round"/>
+      <path d="M166 48 L194 56 L176 78 Z" fill="#7df0c0"/>
+    </g>
+  </g>
+
+  <g transform="translate(78 946)" filter="url(#shadow)">
+    <rect x="0" y="0" width="1086" height="506" rx="34" fill="url(#cardB)"/>
+    <rect x="0" y="0" width="18" height="506" rx="9" fill="#f27a2e"/>
+    <rect x="44" y="42" width="164" height="70" rx="35" fill="#f27a2e"/>
+    <text x="78" y="90" class="version mono">0.8.8</text>
+    <text x="44" y="170" class="cardTitle">日志更清楚，账号一眼识别</text>
+
+    <g transform="translate(44 232)">
+      <circle cx="18" cy="18" r="10" fill="#f27a2e"/>
+      <text x="52" y="32" class="body">优化 token refresh 执行日期格式</text>
+      <text x="52" y="78" class="note">本地时间 + UTC 双线索，排查定时任务更直观</text>
+    </g>
+    <g transform="translate(44 346)">
+      <circle cx="18" cy="18" r="10" fill="#f27a2e"/>
+      <text x="52" y="32" class="body">刷新日志新增 EMAIL 列</text>
+      <text x="52" y="78" class="note">从 auth token 解析邮箱，不只看到 env/account</text>
+    </g>
+    <g transform="translate(676 244)">
+      <rect x="0" y="0" width="360" height="176" rx="22" fill="#fff8f4" stroke="#ffd2b7" stroke-width="3"/>
+      <text x="26" y="48" class="mono" font-size="24" fill="#7a553f">ACCOUNT   EMAIL</text>
+      <rect x="26" y="70" width="308" height="2" fill="#e8b899"/>
+      <text x="26" y="112" class="mono" font-size="23" fill="#17323c">default/work</text>
+      <text x="26" y="148" class="mono" font-size="23" fill="#1f6f62">work@example.com</text>
+    </g>
+  </g>
+
+  <g transform="translate(78 1514)">
+    <rect x="0" y="0" width="1086" height="76" rx="38" fill="#17323c"/>
+    <text x="44" y="50" class="small" fill="#ffffff">适合多账号切换：少一步查日志，多一眼确认账号</text>
+    <text x="882" y="50" class="mono small" fill="#b9fff0">codex-sw</text>
+  </g>
+</svg>

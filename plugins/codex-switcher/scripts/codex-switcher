@@ -25,6 +25,8 @@ DEFAULT_UI_LANG="en"
 APP_LOG="${CODEX_SWITCHER_APP_LOG:-$STATE_DIR/app.log}"
 SWITCH_LOG="${CODEX_SWITCHER_SWITCH_LOG:-$STATE_DIR/switcher.log}"
 APP_PID_FILE="$STATE_DIR/app.pid"
+APP_INSTANCES_DIR="$STATE_DIR/app-instances"
+APP_LAST_INSTANCE_FILE="$STATE_DIR/app-last-instance"
 LOCK_DIR="$STATE_DIR/.lock"
 LOCK_WAIT_SECONDS="${CODEX_SWITCHER_LOCK_WAIT_SECONDS:-10}"
 
@@ -46,9 +48,12 @@ Usage:
   codex-sw env rm <env> [--force]
 
   codex-sw ac ls [--env <env>]
-  codex-sw ac login <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--mode auth|apikey]
-  codex-sw ac relogin [account] [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--mode auth|apikey]
-  codex-sw ac use <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]
+  codex-sw ac login <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--mode auth|apikey|sub2api]
+  codex-sw ac relogin [account] [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--mode auth|apikey|sub2api]
+  codex-sw ac use <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync]
+  codex-sw cli launch-current [-- <codex args...>]
+  codex-sw app restart-current
+  codex-sw app launch-new
   codex-sw ac logout [account] [--env <env>] [-t cli|app|both]
   codex-sw ac rm <account> [--env <env>] [--force]
 
@@ -77,9 +82,12 @@ Usage:
   codex-sw env rm <env> [--force]
 
   codex-sw ac ls [--env <env>]
-  codex-sw ac login <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--mode auth|apikey]
-  codex-sw ac relogin [account] [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--mode auth|apikey]
-  codex-sw ac use <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]
+  codex-sw ac login <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--mode auth|apikey|sub2api]
+  codex-sw ac relogin [account] [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--mode auth|apikey|sub2api]
+  codex-sw ac use <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync]
+  codex-sw cli launch-current [-- <codex args...>]
+  codex-sw app restart-current
+  codex-sw app launch-new
   codex-sw ac logout [account] [--env <env>] [-t cli|app|both]
   codex-sw ac rm <account> [--env <env>] [--force]
 
@@ -322,6 +330,7 @@ TUI_COLOR_PLAN=""
 TUI_COLOR_RESET=""
 TUI_ALT_SCREEN_ACTIVE="false"
 TUI_SHOULD_QUIT="false"
+TUI_GO_HOME="false"
 TUI_HOME_SNAPSHOT_CACHE=""
 TUI_HOME_SNAPSHOT_CACHE_TS="0"
 TUI_HOME_SNAPSHOT_CACHE_TTL="60"
@@ -351,9 +360,10 @@ tui_text() {
     zh:select_env_title) echo "选择环境" ;;
     zh:select_account_title) echo "选择账号" ;;
     zh:select_target_title) echo "选择目标" ;;
-    zh:select_launch_title) echo "切换后启动" ;;
-    zh:launch_yes) echo "启动" ;;
-    zh:launch_switch_only) echo "只切换账号不启动" ;;
+    zh:select_action_title) echo "切换后动作" ;;
+    zh:action_restart_current) echo "重启当前 APP" ;;
+    zh:action_launch_new) echo "新开一个 APP 实例" ;;
+    zh:action_switch_only) echo "只切换账号不启动" ;;
     zh:target_cli) echo "CLI" ;;
     zh:target_app) echo "APP" ;;
     zh:launch_none) echo "不启动" ;;
@@ -380,6 +390,7 @@ tui_text() {
     zh:login_mode_title) echo "登录方式" ;;
     zh:login_mode_auth) echo "auth" ;;
     zh:login_mode_apikey) echo "apikey" ;;
+    zh:login_mode_sub2api) echo "sub2api" ;;
     zh:target_both) echo "both" ;;
     zh:envs_title) echo "Environments" ;;
     zh:envs_create) echo "Create Env" ;;
@@ -416,9 +427,10 @@ tui_text() {
     en:select_env_title) echo "Select env" ;;
     en:select_account_title) echo "Select account" ;;
     en:select_target_title) echo "Select target" ;;
-    en:select_launch_title) echo "Launch after switch" ;;
-    en:launch_yes) echo "Launch" ;;
-    en:launch_switch_only) echo "Switch only (do not launch)" ;;
+    en:select_action_title) echo "Action after switch" ;;
+    en:action_restart_current) echo "Restart current APP" ;;
+    en:action_launch_new) echo "Launch new APP instance" ;;
+    en:action_switch_only) echo "Switch only (do not launch)" ;;
     en:target_cli) echo "CLI" ;;
     en:target_app) echo "APP" ;;
     en:launch_none) echo "Do not launch" ;;
@@ -445,6 +457,7 @@ tui_text() {
     en:login_mode_title) echo "Login mode" ;;
     en:login_mode_auth) echo "auth" ;;
     en:login_mode_apikey) echo "apikey" ;;
+    en:login_mode_sub2api) echo "sub2api" ;;
     en:target_both) echo "both" ;;
     en:envs_title) echo "Environments" ;;
     en:envs_create) echo "Create Env" ;;
@@ -484,9 +497,10 @@ tui_text() {
     ja:select_env_title) echo "環境を選択" ;;
     ja:select_account_title) echo "アカウントを選択" ;;
     ja:select_target_title) echo "ターゲットを選択" ;;
-    ja:select_launch_title) echo "切替後に起動" ;;
-    ja:launch_yes) echo "起動" ;;
-    ja:launch_switch_only) echo "アカウントのみ切替（起動しない）" ;;
+    ja:select_action_title) echo "切替後の動作" ;;
+    ja:action_restart_current) echo "現在の APP を再起動" ;;
+    ja:action_launch_new) echo "新しい APP インスタンスを起動" ;;
+    ja:action_switch_only) echo "アカウントのみ切替（起動しない）" ;;
     ja:target_cli) echo "CLI" ;;
     ja:target_app) echo "APP" ;;
     ja:launch_none) echo "起動しない" ;;
@@ -513,6 +527,7 @@ tui_text() {
     ja:login_mode_title) echo "ログイン方式" ;;
     ja:login_mode_auth) echo "auth" ;;
     ja:login_mode_apikey) echo "apikey" ;;
+    ja:login_mode_sub2api) echo "sub2api" ;;
     ja:target_both) echo "both" ;;
     ja:envs_title) echo "Environments" ;;
     ja:envs_create) echo "Create Env" ;;
@@ -534,21 +549,75 @@ tui_text() {
   esac
 }
 
+tui_read_base_url_mode_menu() {
+  local idx
+  tui_choose_index_with_back "Base URL" "" "0" "Use default" "Use custom"
+  idx="$TUI_MENU_RESULT"
+  if [[ "$idx" == "-2" ]]; then
+    tui_request_home
+    echo ""
+    return 2
+  fi
+  if [[ "$idx" == "-1" ]]; then
+    echo ""
+    return 1
+  fi
+  if [[ "$idx" == "1" ]]; then
+    echo "custom"
+  else
+    echo "default"
+  fi
+}
+
+tui_execute_apikey_account_command() {
+  local action="$1"
+  local account="$2"
+  local env="$3"
+  local api_key base_mode base_url
+
+  api_key="$(tui_prompt_secret_line "Enter OpenAI API key: ")"
+  api_key="$(echo "${api_key:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  if [[ -z "$api_key" ]]; then
+    echo "empty API key"
+    tui_pause_if_interactive
+    return 1
+  fi
+
+  base_mode="$(tui_read_base_url_mode_menu || true)"
+  if [[ -z "$base_mode" ]]; then
+    tui_home_requested && return 1
+    return 1
+  fi
+
+  if [[ "$base_mode" == "custom" ]]; then
+    base_url="$(tui_prompt_line "OpenAI Base URL" "")"
+    base_url="$(normalize_base_url_input "$base_url" || true)"
+    if [[ -z "$base_url" ]]; then
+      echo "invalid OpenAI Base URL. expected http(s)://..."
+      tui_pause_if_interactive
+      return 1
+    fi
+    tui_execute_subcommand_quiet_with_input "$api_key"$'\n'"2"$'\n'"$base_url" ac "$action" "$account" --env "$env" -t both --mode apikey
+  else
+    tui_execute_subcommand_quiet_with_input "$api_key"$'\n'"1" ac "$action" "$account" --env "$env" -t both --mode apikey
+  fi
+}
+
 tui_support_interactive() {
-  [[ -t 0 && -t 1 ]]
+  [[ -t 0 && -t 2 ]]
 }
 
 tui_enter_alt_screen() {
   if [[ "$TUI_INTERACTIVE" == "true" && "$TUI_ALT_SCREEN_ACTIVE" != "true" ]]; then
     # Use private mode 1049 (alternate buffer + cursor save/restore).
-    printf '\033[?1049h\033[H\033[2J' 2>/dev/null || true
+    printf '\033[?1049h\033[H\033[2J' >&2 2>/dev/null || true
     TUI_ALT_SCREEN_ACTIVE="true"
   fi
 }
 
 tui_leave_alt_screen() {
   if [[ "$TUI_ALT_SCREEN_ACTIVE" == "true" ]]; then
-    printf '\033[?1049l' 2>/dev/null || true
+    printf '\033[?1049l' >&2 2>/dev/null || true
     TUI_ALT_SCREEN_ACTIVE="false"
   fi
 }
@@ -596,8 +665,8 @@ tui_setup_terminal() {
     tui_enter_alt_screen
     # Disable alternate-scroll mode so touchpad/mouse wheel cannot emulate
     # up/down cursor keys inside alternate screen.
-    printf '\033[?1007l' 2>/dev/null || true
-    printf '\033[?25l' 2>/dev/null || true
+    printf '\033[?1007l' >&2 2>/dev/null || true
+    printf '\033[?25l' >&2 2>/dev/null || true
   else
     TUI_INTERACTIVE="false"
   fi
@@ -611,7 +680,7 @@ tui_restore_terminal() {
     TUI_RAW_ACTIVE="false"
   fi
   if [[ "$TUI_INTERACTIVE" == "true" ]]; then
-    printf '\033[?25h\033[0m' 2>/dev/null || true
+    printf '\033[?25h\033[0m' >&2 2>/dev/null || true
     tui_leave_alt_screen
   fi
 }
@@ -636,7 +705,7 @@ tui_enter_raw_mode() {
 
 tui_clear_screen() {
   if [[ "$TUI_INTERACTIVE" == "true" ]]; then
-    printf '\033[2J\033[H' >&2
+    printf '\033[H\033[2J\033[3J' >&2
   fi
 }
 
@@ -730,6 +799,18 @@ tui_quit_requested() {
   [[ "$TUI_SHOULD_QUIT" == "true" ]]
 }
 
+tui_request_home() {
+  TUI_GO_HOME="true"
+}
+
+tui_home_requested() {
+  [[ "$TUI_GO_HOME" == "true" ]]
+}
+
+tui_clear_home_request() {
+  TUI_GO_HOME="false"
+}
+
 tui_has_foreground_tty() {
   local my_pgid tty_pgid
   my_pgid="$(ps -o pgid= -p $$ 2>/dev/null | tr -d '[:space:]')"
@@ -743,13 +824,18 @@ tui_choose_index_with_back() {
   local default_index="${3:-0}"
   shift 3 || true
   local -a options=("$@")
-  local back_index
+  local back_index home_index
 
   options+=("$(tui_text "$(read_ui_lang)" back)")
-  back_index=$(( ${#options[@]} - 1 ))
+  options+=("< Home")
+  home_index=$(( ${#options[@]} - 1 ))
+  back_index=$((home_index - 1))
   tui_choose_index "$title" "$info" "$default_index" "${options[@]}"
   if [[ "$TUI_MENU_RESULT" == "$back_index" ]]; then
     TUI_MENU_RESULT="-1"
+  elif [[ "$TUI_MENU_RESULT" == "$home_index" ]]; then
+    TUI_MENU_RESULT="-2"
+    tui_request_home
   fi
 }
 
@@ -831,12 +917,29 @@ tui_prompt_line() {
   echo "$value"
 }
 
+tui_prompt_secret_line() {
+  local prompt="$1"
+  local value
+
+  tui_leave_raw_mode
+  if [[ "$TUI_INTERACTIVE" == "true" ]]; then
+    printf "%s" "$prompt" >&2
+    IFS= read -r -s value || true
+    printf "\n" >&2
+  else
+    printf "%s" "$prompt"
+    IFS= read -r value || true
+  fi
+  tui_enter_raw_mode
+  echo "$value"
+}
+
 tui_pause_if_interactive() {
   local lang
   [[ "$TUI_INTERACTIVE" == "true" ]] || return 0
   lang="$(read_ui_lang)"
   tui_leave_raw_mode
-  printf "%s" "$(tui_text "$lang" press_enter)"
+  printf "%s" "$(tui_text "$lang" press_enter)" >&2
   IFS= read -r _ || true
   tui_enter_raw_mode
 }
@@ -1272,7 +1375,7 @@ tui_snapshot_block_compact() {
     fi
     line2="alias:${account}"
     line3="api key:${email}"
-    line4=""
+    line4="base url:$(display_base_url_for_account "$env" "$account")"
     line5=""
     line6=""
   else
@@ -1318,18 +1421,16 @@ tui_print_blocks_grid_files() {
   local line_count="${2:-7}"
   shift 2
   local -a files=("$@")
-  local total cols ncols sep sepw start end line i text
+  local total cols ncols gap start end line i text
 
   total="${#files[@]}"
   (( total > 0 )) || return 0
 
   cols="$(tui_terminal_cols)"
-  sepw=0
-  ncols=$(( (cols + sepw) / (width + sepw) ))
+  gap=1
+  ncols=$(( (cols + gap) / (width + gap) ))
   (( ncols < 1 )) && ncols=1
   (( ncols > total )) && ncols="$total"
-
-  sep=""
 
   for ((start=0; start<total; start+=ncols)); do
     end=$((start + ncols - 1))
@@ -1346,7 +1447,7 @@ tui_print_blocks_grid_files() {
         if (( i == start )); then
           printf '%s' "$text"
         else
-          printf '%s%s' "$sep" "$text"
+          printf ' %s' "$text"
         fi
       done
       printf '\n'
@@ -1444,6 +1545,18 @@ except Exception:
 PY
 }
 
+account_auth_status_line() {
+  local env="$1"
+  local account="$2"
+  local preferred
+  preferred="$(preferred_auth_method_for_account "$env" "$account")"
+  if [[ "$preferred" == "apikey" ]]; then
+    echo "apikey | base_url: $(display_base_url_for_account "$env" "$account")"
+  else
+    echo "chatgpt"
+  fi
+}
+
 auth_file_is_api_key() {
   local auth_file="$1"
   local mode
@@ -1451,7 +1564,59 @@ auth_file_is_api_key() {
   [[ "$mode" == "api_key" || "$mode" == "apikey" ]]
 }
 
-account_uses_auth_mode() {
+preferred_auth_method_for_account() {
+  local env="$1"
+  local account="$2"
+  local preferred auth_file
+  preferred="$(runtime_field_for_account "$env" "$account" "preferred_auth_method")"
+  if [[ -n "$preferred" ]]; then
+    echo "$preferred"
+    return 0
+  fi
+  auth_file="$(source_auth_file_for_account "$env" "$account" || true)"
+  if [[ -n "$auth_file" ]] && auth_file_is_api_key "$auth_file"; then
+    echo "apikey"
+  else
+    echo "chatgpt"
+  fi
+}
+
+openai_base_url_mode_for_account() {
+  local env="$1"
+  local account="$2"
+  local mode
+  mode="$(runtime_field_for_account "$env" "$account" "openai_base_url_mode")"
+  if [[ "$mode" == "custom" ]]; then
+    echo "custom"
+  else
+    echo "default"
+  fi
+}
+
+openai_base_url_for_account() {
+  local env="$1"
+  local account="$2"
+  runtime_field_for_account "$env" "$account" "openai_base_url"
+}
+
+display_base_url_for_account() {
+  local env="$1"
+  local account="$2"
+  local mode base_url
+  mode="$(openai_base_url_mode_for_account "$env" "$account")"
+  if [[ "$mode" != "custom" ]]; then
+    echo "default"
+    return 0
+  fi
+  base_url="$(openai_base_url_for_account "$env" "$account")"
+  if [[ -n "$base_url" ]]; then
+    echo "$base_url"
+  else
+    echo "default"
+  fi
+}
+
+account_uses_chatgpt_auth_mode() {
   local env="$1"
   local account="$2"
   local auth_file mode
@@ -1459,6 +1624,15 @@ account_uses_auth_mode() {
   [[ -n "$auth_file" ]] || return 1
   mode="$(auth_mode_for_file "$auth_file")"
   [[ "$mode" == "chatgpt" || "$mode" == "auth" || "$mode" == "" ]]
+}
+
+account_uses_api_key_mode() {
+  local env="$1"
+  local account="$2"
+  local auth_file
+  auth_file="$(source_auth_file_for_account "$env" "$account" || true)"
+  [[ -n "$auth_file" ]] || return 1
+  auth_file_is_api_key "$auth_file"
 }
 
 token_expiry_from_auth_file() {
@@ -1694,6 +1868,12 @@ tui_account_snapshot_tsv() {
 }
 
 tui_home_accounts_snapshot() {
+  if core_cli_available; then
+    if tui_home_accounts_snapshot_from_core; then
+      return 0
+    fi
+  fi
+
   local usage_info usage_proxy cols colw
   local cli_env cli_account app_env app_account
   local env account mark any
@@ -1722,9 +1902,10 @@ tui_home_accounts_snapshot() {
   echo
 
   cols="$(tui_terminal_cols)"
-  # Prefer horizontal density inside one env group.
-  colw=28
-  (( cols < 90 )) && colw=30
+  # Keep status cards readable; prefer earlier wrapping over dense packing.
+  colw=52
+  (( cols < 140 )) && colw=48
+  (( cols < 110 )) && colw=44
 
   max_parallel="${CODEX_SWITCHER_STATUS_PARALLELISM:-6}"
   [[ "$max_parallel" =~ ^[0-9]+$ ]] || max_parallel=6
@@ -1749,9 +1930,11 @@ tui_home_accounts_snapshot() {
     done < <(list_accounts_for_env "$env")
   done < <(list_env_names | sort -u)
 
-  for idx in "${worker_pids[@]}"; do
-    wait "$idx" 2>/dev/null || true
-  done
+  if (( ${#worker_pids[@]} > 0 )); then
+    for idx in "${worker_pids[@]}"; do
+      wait "$idx" 2>/dev/null || true
+    done
+  fi
 
   for idx in "${!all_envs[@]}"; do
     any=1
@@ -1797,6 +1980,64 @@ tui_home_accounts_snapshot() {
   done < <(list_env_names | sort -u)
 
   rm -rf "$tmp_dir"
+}
+
+tui_home_accounts_snapshot_from_core() {
+  local core_cli overview_json
+  core_cli="$(core_cli_path)"
+  overview_json="$(npx --yes tsx "$core_cli" overview 2>/dev/null || true)"
+  [[ -n "$overview_json" ]] || return 1
+
+  python3 - <<'PY' "$overview_json"
+import json
+import sys
+
+overview = json.loads(sys.argv[1])
+status = overview.get("status") or {}
+accounts = overview.get("accounts") or []
+
+def tag(account):
+    marks = []
+    if account.get("isCurrentCli"):
+        marks.append("[cli]")
+    if account.get("isCurrentApp"):
+        marks.append("[app]")
+    return " ".join(marks)
+
+def print_target(title, payload):
+    current = payload.get("current", "-")
+    auth = payload.get("auth", "-")
+    expiry = payload.get("authExpiry", "-")
+    state = payload.get("loginState", "unknown")
+    print(f"{title} [{state}]")
+    print("────────────────────────────────────────────────────────")
+    print(f"TARGET        {current}")
+    print(f"AUTH          {auth}")
+    print(f"AUTH EXPIRY   {expiry}")
+    print()
+
+print_target("CLI", status.get("cli") or {})
+print_target("APP", status.get("app") or {})
+
+grouped = {}
+for account in accounts:
+    grouped.setdefault(account.get("envName", "default"), []).append(account)
+
+for env_name in sorted(grouped):
+    print(f"ENV: {env_name}")
+    print("────────────────────────────────────────────────────────")
+    for account in sorted(grouped[env_name], key=lambda item: item.get("name", "")):
+        auth_mode = account.get("authMode", "-")
+        preferred = (account.get("runtime") or {}).get("preferredAuthMethod", "-")
+        base_url = (account.get("runtime") or {}).get("openaiBaseUrl") or "default"
+        api_key_preview = account.get("apiKeyPreview") or "-"
+        print(f"{account.get('name', '-')} {tag(account)}")
+        print(f"  auth: {auth_mode} / {preferred}")
+        if auth_mode == "apikey":
+            print(f"  api key:{api_key_preview}")
+            print(f"  base url:{base_url}")
+        print()
+PY
 }
 
 tui_choose_index() {
@@ -1901,6 +2142,9 @@ tui_execute_subcommand() {
 
   debug_event "tui_subcommand_start args=${args[*]} interactive=$TUI_INTERACTIVE raw=$TUI_RAW_ACTIVE alt=$TUI_ALT_SCREEN_ACTIVE"
   tui_restore_terminal
+  if [[ "$TUI_INTERACTIVE" == "true" ]]; then
+    printf '\033[H\033[2J\033[3J' >&2
+  fi
   set +e
   CODEX_SWITCHER_SKIP_UPDATE_CHECK=true "$SCRIPT_DIR/codex-switcher" "${args[@]}"
   rc=$?
@@ -1909,15 +2153,78 @@ tui_execute_subcommand() {
 
   echo
   echo "$(tui_text "$lang" exit_code_prefix)$rc]"
+  if [[ "$rc" -eq 0 ]]; then
+    tui_home_accounts_snapshot_cache_clear
+  fi
   # Avoid SIGTTIN suspends on some shells/TTY setups after app launch.
   # Opt-in old blocking behavior via CODEX_SWITCHER_TUI_WAIT_ENTER=true.
   if [[ "$TUI_INTERACTIVE" == "true" ]]; then
     if [[ "${CODEX_SWITCHER_TUI_WAIT_ENTER:-false}" == "true" ]] && tui_has_foreground_tty; then
-      printf "%s" "$(tui_text "$lang" press_enter)"
+      printf "%s" "$(tui_text "$lang" press_enter)" >&2
       IFS= read -r _ || true
     fi
     tui_setup_terminal
   fi
+}
+
+tui_execute_subcommand_quiet_impl() {
+  local input_file="$1"
+  shift
+  local -a args=("$@")
+  local rc output_file
+  local lang
+  lang="$(read_ui_lang)"
+
+  if [[ "${#args[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  output_file="$(mktemp /tmp/codex-sw-tui-subcommand.XXXXXX)"
+  debug_event "tui_subcommand_quiet_start args=${args[*]} interactive=$TUI_INTERACTIVE raw=$TUI_RAW_ACTIVE alt=$TUI_ALT_SCREEN_ACTIVE"
+  tui_restore_terminal
+  set +e
+  if [[ -n "$input_file" ]]; then
+    CODEX_SWITCHER_SKIP_UPDATE_CHECK=true "$SCRIPT_DIR/codex-switcher" "${args[@]}" <"$input_file" >"$output_file" 2>&1
+  else
+    CODEX_SWITCHER_SKIP_UPDATE_CHECK=true "$SCRIPT_DIR/codex-switcher" "${args[@]}" >"$output_file" 2>&1
+  fi
+  rc=$?
+  set -e
+  debug_event "tui_subcommand_quiet_exit rc=$rc args=${args[*]}"
+
+  if [[ "$TUI_INTERACTIVE" == "true" ]]; then
+    tui_setup_terminal
+  fi
+
+  if [[ "$rc" -ne 0 ]]; then
+    cat "$output_file"
+    echo
+    echo "$(tui_text "$lang" exit_code_prefix)$rc]"
+    rm -f -- "$output_file"
+    return "$rc"
+  fi
+
+  tui_home_accounts_snapshot_cache_clear
+  rm -f -- "$output_file"
+  return 0
+}
+
+tui_execute_subcommand_quiet() {
+  tui_execute_subcommand_quiet_impl "" "$@"
+}
+
+tui_execute_subcommand_quiet_with_input() {
+  local input_payload="$1"
+  shift
+  local input_file rc
+
+  input_file="$(mktemp /tmp/codex-sw-tui-subcommand-input.XXXXXX)"
+  chmod 600 "$input_file" 2>/dev/null || true
+  printf '%s\n' "$input_payload" >"$input_file"
+  tui_execute_subcommand_quiet_impl "$input_file" "$@"
+  rc=$?
+  rm -f -- "$input_file"
+  return "$rc"
 }
 
 tui_execute_launch_subcommand() {
@@ -1932,6 +2239,9 @@ tui_execute_launch_subcommand() {
 
   debug_event "tui_launch_subcommand_start args=${args[*]} interactive=$TUI_INTERACTIVE raw=$TUI_RAW_ACTIVE alt=$TUI_ALT_SCREEN_ACTIVE"
   tui_restore_terminal
+  if [[ "$TUI_INTERACTIVE" == "true" ]]; then
+    printf '\033[H\033[2J\033[3J' >&2
+  fi
   set +e
   CODEX_SWITCHER_SKIP_UPDATE_CHECK=true "$SCRIPT_DIR/codex-switcher" "${args[@]}"
   rc=$?
@@ -1982,6 +2292,7 @@ tui_select_env() {
   done
   info="$(tui_text "$(read_ui_lang)" select_env_title)"
   tui_choose_index_with_back "$info" "" "$idx" "${envs[@]}"
+  [[ "$TUI_MENU_RESULT" == "-2" ]] && return 2
   [[ "$TUI_MENU_RESULT" == "-1" ]] && return 1
   echo "${envs[$TUI_MENU_RESULT]}"
 }
@@ -2031,15 +2342,27 @@ tui_select_account() {
   done
 
   for account in "${accounts[@]}"; do
-    if account_has_auth "$env" "$account"; then
-      status="$(tui_text "$(read_ui_lang)" status_logged_in)"
+    local preferred base_url_mode
+    preferred="$(preferred_auth_method_for_account "$env" "$account")"
+    if [[ "$preferred" == "apikey" ]]; then
+      base_url_mode="$(openai_base_url_mode_for_account "$env" "$account")"
+      if [[ "$base_url_mode" == "custom" ]]; then
+        labels+=("$account [apikey, custom-base-url]")
+      else
+        labels+=("$account [apikey]")
+      fi
     else
-      status="$(tui_text "$(read_ui_lang)" status_not_logged_in)"
+      if account_has_auth "$env" "$account"; then
+        status="$(tui_text "$(read_ui_lang)" status_logged_in)"
+      else
+        status="$(tui_text "$(read_ui_lang)" status_not_logged_in)"
+      fi
+      labels+=("$account [$status]")
     fi
-    labels+=("$account [$status]")
   done
 
   tui_choose_index_with_back "$(tui_text "$(read_ui_lang)" select_account_title) (env=$env)" "" "$idx" "${labels[@]}"
+  [[ "$TUI_MENU_RESULT" == "-2" ]] && return 2
   [[ "$TUI_MENU_RESULT" == "-1" ]] && return 1
   echo "${accounts[$TUI_MENU_RESULT]}"
 }
@@ -2059,66 +2382,99 @@ tui_choose_target() {
     values+=("both")
   fi
   tui_choose_index_with_back "$(tui_text "$(read_ui_lang)" select_target_title)" "" "0" "${options[@]}"
+  [[ "$TUI_MENU_RESULT" == "-2" ]] && return 2
   [[ "$TUI_MENU_RESULT" == "-1" ]] && return 1
   echo "${values[$TUI_MENU_RESULT]}"
 }
 
 tui_action_switch() {
-  local target="" env="" account="" launch_mode="none" launch_idx launch_target_label
+  local target="" env="" account="" action_idx
+  local title=""
   local stage=0
+  local rc
 
   while true; do
     tui_quit_requested && return 1
+    tui_home_requested && return 1
     case "$stage" in
       0)
-        target="$(tui_choose_target false)" || {
+        target="$(tui_choose_target false)"
+        rc=$?
+        if [[ "$rc" -ne 0 ]]; then
           tui_quit_requested && return 1
+          [[ "$rc" -eq 2 ]] && tui_request_home && return 1
           return 1
-        }
+        fi
         stage=1
         ;;
       1)
-        env="$(tui_select_env "$(read_current_env "$target" || true)")" || {
+        env="$(tui_select_env "$(read_current_env "$target" || true)")"
+        rc=$?
+        if [[ "$rc" -ne 0 ]]; then
           tui_quit_requested && return 1
+          [[ "$rc" -eq 2 ]] && tui_request_home && return 1
           stage=0
           continue
-        }
+        fi
         stage=2
         ;;
       2)
-        account="$(tui_select_account "$env" "$(read_current_account "$target" || true)" true)" || {
+        account="$(tui_select_account "$env" "$(read_current_account "$target" || true)" true)"
+        rc=$?
+        if [[ "$rc" -ne 0 ]]; then
           tui_quit_requested && return 1
+          [[ "$rc" -eq 2 ]] && tui_request_home && return 1
           stage=1
           continue
-        }
+        fi
         stage=3
         ;;
       3)
-        case "$target" in
-          cli) launch_target_label="$(tui_text "$(read_ui_lang)" target_cli)" ;;
-          app) launch_target_label="$(tui_text "$(read_ui_lang)" target_app)" ;;
-          *) launch_target_label="$target" ;;
-        esac
-        tui_choose_index_with_back "$(tui_text "$(read_ui_lang)" select_launch_title) ${launch_target_label}" "" "0" \
-          "$(tui_text "$(read_ui_lang)" launch_yes)" \
-          "$(tui_text "$(read_ui_lang)" launch_switch_only)"
-        launch_idx="$TUI_MENU_RESULT"
-        if [[ "$launch_idx" == "-1" ]]; then
+        if [[ "$target" == "cli" ]]; then
+          title="$(tui_text "$(read_ui_lang)" select_action_title)"
+          tui_choose_index_with_back "$title" "" "0" \
+            "$(tui_text "$(read_ui_lang)" launch_cli)" \
+            "$(tui_text "$(read_ui_lang)" launch_none)"
+        else
+          title="$(tui_text "$(read_ui_lang)" select_action_title)"
+          tui_choose_index_with_back "$title" "" "0" \
+            "$(tui_text "$(read_ui_lang)" action_restart_current)" \
+            "$(tui_text "$(read_ui_lang)" action_launch_new)" \
+            "$(tui_text "$(read_ui_lang)" action_switch_only)"
+        fi
+        action_idx="$TUI_MENU_RESULT"
+        if [[ "$action_idx" == "-2" ]]; then
+          tui_request_home
+          return 1
+        fi
+        if [[ "$action_idx" == "-1" ]]; then
           tui_quit_requested && return 1
+          tui_home_requested && return 1
           stage=2
           continue
         fi
-        case "$launch_idx" in
-          0) launch_mode="$target" ;;
-          1) launch_mode="none" ;;
-          *) launch_mode="none" ;;
-        esac
-        debug_event "tui_switch_selected target=$target env=$env account=$account launch_mode=$launch_mode launch_idx=$launch_idx"
-        if [[ "$launch_mode" == "none" ]]; then
-          tui_execute_subcommand ac use "$account" --env "$env" -t "$target" --no-launch
-          return 0
+        debug_event "tui_switch_selected target=$target env=$env account=$account action_idx=$action_idx"
+        tui_execute_subcommand ac use "$account" --env "$env" -t "$target"
+        if [[ "$target" == "cli" ]]; then
+          case "$action_idx" in
+            0)
+              tui_execute_subcommand cli launch-current
+              ;;
+            *)
+              ;;
+          esac
+        else
+          case "$action_idx" in
+            0)
+              tui_execute_subcommand app restart-current
+              ;;
+            1)
+              tui_execute_subcommand app launch-new
+              ;;
+            *)
+              ;;
+          esac
         fi
-        tui_execute_launch_subcommand ac use "$account" --env "$env" -t "$target" --launch
         return 0
         ;;
     esac
@@ -2128,9 +2484,15 @@ tui_action_switch() {
 tui_action_login() {
   local prefer_env="${1:-$(read_current_env cli || true)}"
   local env account mode mode_idx
+  local rc
   tui_panel_open "$(tui_text "$(read_ui_lang)" login_title)"
 
-  env="$(tui_select_env "$prefer_env")" || return 1
+  env="$(tui_select_env "$prefer_env")"
+  rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    [[ "$rc" -eq 2 ]] && tui_request_home
+    return 1
+  fi
 
   account="$(tui_prompt_line "$(tui_text "$(read_ui_lang)" login_account_prompt)" "")"
   account="$(normalize_name_input "$account")"
@@ -2143,38 +2505,71 @@ tui_action_login() {
 
   tui_choose_index_with_back "$(tui_text "$(read_ui_lang)" login_mode_title)" "" "0" \
     "$(tui_text "$(read_ui_lang)" login_mode_auth)" \
-    "$(tui_text "$(read_ui_lang)" login_mode_apikey)"
+    "$(tui_text "$(read_ui_lang)" login_mode_apikey)" \
+    "$(tui_text "$(read_ui_lang)" login_mode_sub2api)"
   mode_idx="$TUI_MENU_RESULT"
+  [[ "$mode_idx" == "-2" ]] && tui_request_home && return 1
   [[ "$mode_idx" == "-1" ]] && return 1
-  [[ "$mode_idx" == "1" ]] && mode="apikey" || mode="auth"
+  case "$mode_idx" in
+    1) mode="apikey" ;;
+    2) mode="sub2api" ;;
+    *) mode="auth" ;;
+  esac
 
   if [[ "$mode" == "apikey" ]]; then
-    tui_execute_subcommand ac login "$account" --env "$env" -t both --mode apikey
+    tui_execute_apikey_account_command login "$account" "$env" || return 1
+    tui_request_home
+  elif [[ "$mode" == "sub2api" ]]; then
+    tui_execute_subcommand_quiet ac login "$account" --env "$env" -t both --mode sub2api
+    tui_request_home
   else
-    tui_execute_subcommand ac login "$account" --env "$env" -t both
+    tui_execute_subcommand_quiet ac login "$account" --env "$env" -t both
+    tui_request_home
   fi
 }
 
 tui_action_relogin() {
   local prefer_env="${1:-$(read_current_env cli || true)}"
   local env account mode mode_idx
+  local rc
   tui_panel_open "$(tui_text "$(read_ui_lang)" accounts_relogin)"
 
-  env="$(tui_select_env "$prefer_env")" || return 1
-  account="$(tui_select_account "$env" "$(read_current_account cli || true)" false)" || return 1
+  env="$(tui_select_env "$prefer_env")"
+  rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    [[ "$rc" -eq 2 ]] && tui_request_home
+    return 1
+  fi
+  account="$(tui_select_account "$env" "$(read_current_account cli || true)" false)"
+  rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    [[ "$rc" -eq 2 ]] && tui_request_home
+    return 1
+  fi
 
   tui_choose_index_with_back "$(tui_text "$(read_ui_lang)" login_mode_title)" "" "0" \
     "$(tui_text "$(read_ui_lang)" login_mode_auth)" \
-    "$(tui_text "$(read_ui_lang)" login_mode_apikey)"
+    "$(tui_text "$(read_ui_lang)" login_mode_apikey)" \
+    "$(tui_text "$(read_ui_lang)" login_mode_sub2api)"
   mode_idx="$TUI_MENU_RESULT"
+  [[ "$mode_idx" == "-2" ]] && tui_request_home && return 1
   [[ "$mode_idx" == "-1" ]] && return 1
-  [[ "$mode_idx" == "1" ]] && mode="apikey" || mode="auth"
+  case "$mode_idx" in
+    1) mode="apikey" ;;
+    2) mode="sub2api" ;;
+    *) mode="auth" ;;
+  esac
 
-  tui_execute_subcommand ac relogin "$account" --env "$env" -t both --mode "$mode"
+  if [[ "$mode" == "apikey" ]]; then
+    tui_execute_apikey_account_command relogin "$account" "$env" || return 1
+  else
+    tui_execute_subcommand_quiet ac relogin "$account" --env "$env" -t both --mode "$mode"
+  fi
+  tui_request_home
 }
 
 tui_action_env_create() {
-  local name src_idx src env_from
+  local name src_idx src env_from rc
   tui_panel_open "$(tui_text "$(read_ui_lang)" envs_create)"
   name="$(tui_prompt_line "$(tui_text "$(read_ui_lang)" env_name_prompt)" "")"
   name="$(normalize_name_input "$name")"
@@ -2190,6 +2585,7 @@ tui_action_env_create() {
     "$(tui_text "$(read_ui_lang)" env_source_empty)" \
     "$(tui_text "$(read_ui_lang)" env_source_other)"
   src_idx="$TUI_MENU_RESULT"
+  [[ "$src_idx" == "-2" ]] && tui_request_home && return 1
   [[ "$src_idx" == "-1" ]] && return 1
   case "$src_idx" in
     0)
@@ -2199,20 +2595,29 @@ tui_action_env_create() {
       tui_execute_subcommand env new "$name" --empty
       ;;
     *)
-      env_from="$(tui_select_env "$(read_current_env cli || true)")" || return 1
+      env_from="$(tui_select_env "$(read_current_env cli || true)")"
+      rc=$?
+      if [[ "$rc" -ne 0 ]]; then
+        [[ "$rc" -eq 2 ]] && tui_request_home
+        return 1
+      fi
       tui_execute_subcommand env new "$name" --from "$env_from"
       ;;
   esac
 }
 
 tui_action_env_delete() {
-  local env
-  env="$(tui_select_env "$(read_current_env cli || true)" false)" || {
+  local env rc
+  env="$(tui_select_env "$(read_current_env cli || true)" false)"
+  rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    [[ "$rc" -eq 2 ]] && tui_request_home && return 1
     echo "$(tui_text "$(read_ui_lang)" invalid_choice)$DEFAULT_ENV_NAME"
     tui_pause_if_interactive
     return 1
-  }
-  tui_execute_subcommand env rm "$env"
+  fi
+  tui_execute_subcommand env rm "$env" --force
+  tui_home_accounts_snapshot_cache_clear
 }
 
 tui_action_proxy() {
@@ -2246,6 +2651,7 @@ tui_action_proxy() {
       "$(tui_text "$(read_ui_lang)" proxy_auto)" \
       "$(tui_text "$(read_ui_lang)" proxy_manual)"
     choice="$TUI_MENU_RESULT"
+    [[ "$choice" == "-2" ]] && tui_request_home && return 0
     [[ "$choice" == "-1" ]] && return 0
     case "$choice" in
       0)
@@ -2277,28 +2683,32 @@ tui_action_lang() {
   idx="${idx:-0}"
   tui_choose_index_with_back "$(tui_text "$current" lang_title)" "$(tui_text "$current" lang_current_prefix): $current" "$idx" "${opts[@]}"
   langs="$TUI_MENU_RESULT"
+  [[ "$langs" == "-2" ]] && tui_request_home && return 0
   [[ "$langs" == "-1" ]] && return 0
   tui_execute_subcommand lang "${vals[$langs]}"
 }
 
 tui_action_accounts() {
-  local action env account stage
+  local action env account stage rc
   while true; do
     tui_quit_requested && return 0
-    tui_choose_index "$(tui_text "$(read_ui_lang)" accounts_title)" "" "0" \
+    tui_home_requested && return 0
+    tui_choose_index_with_back "$(tui_text "$(read_ui_lang)" accounts_title)" "" "0" \
       "$(tui_text "$(read_ui_lang)" accounts_login)" \
       "$(tui_text "$(read_ui_lang)" accounts_relogin)" \
       "$(tui_text "$(read_ui_lang)" accounts_logout)" \
-      "$(tui_text "$(read_ui_lang)" accounts_delete)" \
-      "$(tui_text "$(read_ui_lang)" accounts_back)"
+      "$(tui_text "$(read_ui_lang)" accounts_delete)"
     action="$TUI_MENU_RESULT"
+    [[ "$action" == "-2" ]] && tui_request_home && return 0
     [[ "$action" == "-1" ]] && return 0
     case "$action" in
       0)
         tui_action_login "$(read_current_env cli || true)" || true
+        tui_home_requested && return 0
         ;;
       1)
         tui_action_relogin "$(read_current_env cli || true)" || true
+        tui_home_requested && return 0
         ;;
       2)
         stage=0
@@ -2306,18 +2716,24 @@ tui_action_accounts() {
           tui_quit_requested && return 0
           case "$stage" in
             0)
-              env="$(tui_select_env "$(read_current_env cli || true)")" || {
+              env="$(tui_select_env "$(read_current_env cli || true)")"
+              rc=$?
+              if [[ "$rc" -ne 0 ]]; then
                 tui_quit_requested && return 0
+                [[ "$rc" -eq 2 ]] && tui_request_home && return 0
                 break
-              }
+              fi
               stage=1
               ;;
             1)
-              account="$(tui_select_account "$env" "$(read_current_account cli || true)" false)" || {
+              account="$(tui_select_account "$env" "$(read_current_account cli || true)" false)"
+              rc=$?
+              if [[ "$rc" -ne 0 ]]; then
                 tui_quit_requested && return 0
+                [[ "$rc" -eq 2 ]] && tui_request_home && return 0
                 stage=0
                 continue
-              }
+              fi
               tui_execute_subcommand ac logout "$account" --env "$env" -t both
               break
               ;;
@@ -2330,18 +2746,24 @@ tui_action_accounts() {
           tui_quit_requested && return 0
           case "$stage" in
             0)
-              env="$(tui_select_env "$(read_current_env cli || true)")" || {
+              env="$(tui_select_env "$(read_current_env cli || true)")"
+              rc=$?
+              if [[ "$rc" -ne 0 ]]; then
                 tui_quit_requested && return 0
+                [[ "$rc" -eq 2 ]] && tui_request_home && return 0
                 break
-              }
+              fi
               stage=1
               ;;
             1)
-              account="$(tui_select_account "$env" "$(read_current_account cli || true)" false)" || {
+              account="$(tui_select_account "$env" "$(read_current_account cli || true)" false)"
+              rc=$?
+              if [[ "$rc" -ne 0 ]]; then
                 tui_quit_requested && return 0
+                [[ "$rc" -eq 2 ]] && tui_request_home && return 0
                 stage=0
                 continue
-              }
+              fi
               tui_execute_subcommand ac rm "$account" --env "$env"
               break
               ;;
@@ -2359,18 +2781,21 @@ tui_action_envs() {
   local action
   while true; do
     tui_quit_requested && return 0
-    tui_choose_index "$(tui_text "$(read_ui_lang)" envs_title)" "" "0" \
+    tui_home_requested && return 0
+    tui_choose_index_with_back "$(tui_text "$(read_ui_lang)" envs_title)" "" "0" \
       "$(tui_text "$(read_ui_lang)" envs_create)" \
-      "$(tui_text "$(read_ui_lang)" envs_delete)" \
-      "$(tui_text "$(read_ui_lang)" envs_back)"
+      "$(tui_text "$(read_ui_lang)" envs_delete)"
     action="$TUI_MENU_RESULT"
+    [[ "$action" == "-2" ]] && tui_request_home && return 0
     [[ "$action" == "-1" ]] && return 0
     case "$action" in
       0)
         tui_action_env_create || true
+        tui_home_requested && return 0
         ;;
       1)
         tui_action_env_delete || true
+        tui_home_requested && return 0
         ;;
       *)
         return 0
@@ -2589,11 +3014,11 @@ tui_action_logs() {
         tui_panel_line "(empty)"
       fi
       tui_panel_close
-      echo
+      echo >&2
       if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
-        printf "%b%s%b\n" "$TUI_COLOR_DIM" "q / Esc back" "$TUI_COLOR_RESET"
+        printf "%b%s%b\n" "$TUI_COLOR_DIM" "q / Esc back" "$TUI_COLOR_RESET" >&2
       else
-        echo "q / Esc back"
+        echo "q / Esc back" >&2
       fi
 
       key="$(tui_read_key || true)"
@@ -2631,11 +3056,11 @@ tui_action_refresh_token() {
         tui_panel_line "(no output)"
       fi
       tui_panel_close
-      echo
+      echo >&2
       if [[ "$TUI_COLOR_ENABLED" == "true" ]]; then
-        printf "%b%s%b\n" "$TUI_COLOR_DIM" "r run again  q / Esc back" "$TUI_COLOR_RESET"
+        printf "%b%s%b\n" "$TUI_COLOR_DIM" "r run again  q / Esc back" "$TUI_COLOR_RESET" >&2
       else
-        echo "r run again  q / Esc back"
+        echo "r run again  q / Esc back" >&2
       fi
       key="$(tui_read_key || true)"
       [[ -n "$key" ]] || continue
@@ -2830,20 +3255,8 @@ tui_home_choose_action() {
   local idx=0
   local key d
   local update_hint="${1:-}"
-  local menu_lines=10
-  local first_render_done="false"
   while true; do
-    if [[ "$TUI_INTERACTIVE" == "true" ]]; then
-      if [[ "$first_render_done" != "true" ]]; then
-        tui_home_render_plain "$idx" "$update_hint"
-        first_render_done="true"
-      else
-        printf '\033[%dA\r' "$menu_lines" >&2
-        tui_home_render_menu_block "$idx" "stderr"
-      fi
-    else
-      tui_home_render_plain "$idx" "$update_hint"
-    fi
+    tui_home_render_plain "$idx" "$update_hint"
     key="$(tui_read_key || true)"
     [[ -n "$key" ]] || continue
     case "$key" in
@@ -2883,9 +3296,14 @@ cmd_tui() {
   trap '' TTIN TTOU
   trap 'tui_restore_terminal; trap - TTIN TTOU' EXIT INT TERM
   update_hint="$(CODEX_SWITCHER_UPDATE_CHECK_TIMEOUT=2 update_available_message || true)"
+  tui_clear_home_request
 
   while true; do
     tui_quit_requested && break
+    if tui_home_requested; then
+      tui_clear_home_request
+      continue
+    fi
     tui_home_choose_action "$update_hint"
     choice="$TUI_MENU_RESULT"
     case "$choice" in
@@ -3017,6 +3435,17 @@ account_auth_path() {
   local env="$1"
   local account="$2"
   echo "$(account_dir_path "$env" "$account")/auth.json"
+}
+
+account_runtime_path() {
+  local env="$1"
+  local account="$2"
+  echo "$(account_dir_path "$env" "$account")/runtime.json"
+}
+
+env_config_path() {
+  local env="$1"
+  echo "$(env_home_path "$env")/config.toml"
 }
 
 current_env_file() {
@@ -3177,6 +3606,14 @@ set_current_account() {
 read_current_env() {
   local target="$1"
   local file value
+
+  if core_cli_available; then
+    if value="$(core_read_current_env "$target")"; then
+      echo "$value"
+      return 0
+    fi
+  fi
+
   file="$(current_env_file "$target")"
 
   if [[ ! -f "$file" ]]; then
@@ -3197,6 +3634,14 @@ read_current_env() {
 read_current_account() {
   local target="$1"
   local file value
+
+  if core_cli_available; then
+    if value="$(core_read_current_account "$target")"; then
+      echo "$value"
+      return 0
+    fi
+  fi
+
   file="$(current_account_file "$target")"
 
   if [[ ! -f "$file" ]]; then
@@ -3212,6 +3657,44 @@ read_current_account() {
 
   echo "$value"
   return 0
+}
+
+core_cli_path() {
+  local repo_root
+  repo_root="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+  echo "$repo_root/scripts/core-cli.ts"
+}
+
+core_cli_available() {
+  local core_cli
+  core_cli="$(core_cli_path)"
+  command -v npx >/dev/null 2>&1 && [[ -f "$core_cli" ]]
+}
+
+core_read_current_env() {
+  local target="$1"
+  local core_cli output
+  core_cli="$(core_cli_path)"
+  output="$(npx --yes tsx "$core_cli" whoami "$target" 2>/dev/null || true)"
+  output="${output%%/*}"
+  [[ -n "$output" ]] || return 1
+  echo "$output"
+}
+
+core_read_current_account() {
+  local target="$1"
+  local core_cli output
+  core_cli="$(core_cli_path)"
+  output="$(npx --yes tsx "$core_cli" whoami "$target" 2>/dev/null || true)"
+  output="${output#*/}"
+  [[ -n "$output" ]] || return 1
+  echo "$output"
+}
+
+run_core_cli_command() {
+  local core_cli
+  core_cli="$(core_cli_path)"
+  npx --yes tsx "$core_cli" "$@"
 }
 
 ensure_env_home() {
@@ -3274,6 +3757,12 @@ account_has_auth() {
 }
 
 list_env_names() {
+  if core_cli_available; then
+    local core_cli
+    core_cli="$(core_cli_path)"
+    npx --yes tsx "$core_cli" env-ls | sed -E 's/^-[[:space:]]+([^[:space:]]+).*$/\1/'
+    return 0
+  fi
   echo "$DEFAULT_ENV_NAME"
   if [[ -d "$ENVS_DIR" ]]; then
     find "$ENVS_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort | while IFS= read -r env; do
@@ -3287,6 +3776,12 @@ list_env_names() {
 
 list_accounts_for_env() {
   local env="$1"
+  if core_cli_available; then
+    local core_cli
+    core_cli="$(core_cli_path)"
+    npx --yes tsx "$core_cli" account-ls "$env" | sed -E 's/^-[[:space:]]+([^[:space:]]+).*$/\1/'
+    return 0
+  fi
   local dir any has_default
   dir="$ACCOUNTS_DIR/$env"
   any=0
@@ -3297,13 +3792,13 @@ list_accounts_for_env() {
       validate_name_noexit "$account" || continue
       any=1
       [[ "$account" == "$DEFAULT_ACCOUNT_NAME" ]] && has_default=1
-      echo "$account"
+      echo "$account" || true
     done < <(find "$dir" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort)
   fi
 
   if [[ "$env" == "$DEFAULT_ENV_NAME" && "$has_default" -eq 0 && -f "$(env_home_path "$env")/auth.json" ]]; then
     any=1
-    echo "$DEFAULT_ACCOUNT_NAME"
+    echo "$DEFAULT_ACCOUNT_NAME" || true
   fi
 }
 
@@ -3317,6 +3812,150 @@ copy_auth_file() {
   mv "$tmp" "$dst"
 }
 
+write_auth_config_for_env_account() {
+  local env="$1"
+  local account="$2"
+  local config_file preferred mode base_url tmp
+  ensure_env_home "$env"
+  config_file="$(env_config_path "$env")"
+  preferred="$(preferred_auth_method_for_account "$env" "$account")"
+  mode="$(openai_base_url_mode_for_account "$env" "$account")"
+  base_url="$(openai_base_url_for_account "$env" "$account")"
+  tmp="${config_file}.tmp"
+  python3 - "$config_file" "$tmp" "$preferred" "$mode" "$base_url" <<'PY'
+import pathlib, re, sys
+
+src_path = pathlib.Path(sys.argv[1])
+tmp_path = pathlib.Path(sys.argv[2])
+preferred = (sys.argv[3] or "").strip() or "chatgpt"
+mode = (sys.argv[4] or "").strip() or "default"
+base_url = (sys.argv[5] or "").strip()
+
+existing = ""
+if src_path.exists():
+    existing = src_path.read_text(encoding="utf-8")
+
+lines = existing.splitlines()
+kept = []
+skip_blank_after_header = False
+for line in lines:
+    stripped = line.strip()
+    if stripped in ('[model_providers.openai]', '[model_providers."openai"]'):
+        skip_blank_after_header = True
+        continue
+    if re.match(r'^preferred_auth_method\s*=', stripped):
+        continue
+    if re.match(r'^openai_base_url\s*=', stripped):
+        continue
+    if skip_blank_after_header and stripped == "":
+        continue
+    skip_blank_after_header = False
+    kept.append(line)
+
+while kept and kept[0].strip() == "":
+    kept.pop(0)
+while kept and kept[-1].strip() == "":
+    kept.pop()
+
+prefix = [f'preferred_auth_method = "{preferred}"']
+if preferred == "apikey" and mode == "custom" and base_url:
+    prefix.append(f'openai_base_url = "{base_url}"')
+
+parts = ["\n".join(prefix)]
+if kept:
+    parts.append("\n".join(kept))
+content = "\n".join(parts) + "\n"
+tmp_path.write_text(content, encoding="utf-8")
+PY
+  chmod 600 "$tmp" 2>/dev/null || true
+  mv "$tmp" "$config_file"
+}
+
+clear_auth_config_for_env() {
+  local env="$1"
+  local config_file tmp
+  ensure_env_home "$env"
+  config_file="$(env_config_path "$env")"
+  [[ -f "$config_file" ]] || return 0
+  tmp="${config_file}.tmp"
+  python3 - "$config_file" "$tmp" <<'PY'
+import pathlib, re, sys
+
+src_path = pathlib.Path(sys.argv[1])
+tmp_path = pathlib.Path(sys.argv[2])
+lines = src_path.read_text(encoding="utf-8").splitlines()
+kept = []
+skip_blank_after_header = False
+for line in lines:
+    stripped = line.strip()
+    if stripped in ('[model_providers.openai]', '[model_providers."openai"]'):
+        skip_blank_after_header = True
+        continue
+    if re.match(r'^preferred_auth_method\s*=', stripped):
+        continue
+    if re.match(r'^openai_base_url\s*=', stripped):
+        continue
+    if skip_blank_after_header and stripped == "":
+        continue
+    skip_blank_after_header = False
+    kept.append(line)
+
+while kept and kept[0].strip() == "":
+    kept.pop(0)
+while kept and kept[-1].strip() == "":
+    kept.pop()
+
+content = ("\n".join(kept) + "\n") if kept else ""
+tmp_path.write_text(content, encoding="utf-8")
+PY
+  chmod 600 "$tmp" 2>/dev/null || true
+  mv "$tmp" "$config_file"
+}
+
+write_account_runtime() {
+  local env="$1"
+  local account="$2"
+  local preferred_auth_method="$3"
+  local base_url_mode="$4"
+  local base_url="${5:-}"
+  local dst tmp
+  ensure_account_slot "$env" "$account"
+  dst="$(account_runtime_path "$env" "$account")"
+  tmp="${dst}.tmp"
+  python3 - "$tmp" "$preferred_auth_method" "$base_url_mode" "$base_url" <<'PY'
+import json, sys
+path, preferred, mode, base_url = sys.argv[1:5]
+payload = {
+    "preferred_auth_method": preferred,
+    "openai_base_url_mode": mode,
+    "openai_base_url": base_url,
+}
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(payload, f, ensure_ascii=True, separators=(",", ":"))
+PY
+  chmod 600 "$tmp" 2>/dev/null || true
+  mv "$tmp" "$dst"
+}
+
+runtime_field_for_account() {
+  local env="$1"
+  local account="$2"
+  local field="$3"
+  local runtime_file
+  runtime_file="$(account_runtime_path "$env" "$account")"
+  python3 - "$runtime_file" "$field" <<'PY'
+import json, sys
+path, field = sys.argv[1], sys.argv[2]
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    value = data.get(field, "")
+    print("" if value is None else str(value))
+except Exception:
+    print("")
+PY
+}
+
 save_env_auth_to_account() {
   local env="$1"
   local account="$2"
@@ -3328,9 +3967,27 @@ save_env_auth_to_account() {
   copy_auth_file "$home_auth" "$dst"
 }
 
+refresh_targets_for_account_if_current() {
+  local env="$1"
+  local account="$2"
+  local cli_env app_env cli_account app_account
+  cli_env="$(read_current_env cli || true)"
+  app_env="$(read_current_env app || true)"
+  cli_account="$(read_current_account cli || true)"
+  app_account="$(read_current_account app || true)"
+
+  if [[ "$env" == "$cli_env" && "$account" == "$cli_account" ]]; then
+    install_account_auth_to_env "$env" "$account"
+  fi
+  if [[ "$env" == "$app_env" && "$account" == "$app_account" ]]; then
+    install_account_auth_to_env "$env" "$account"
+  fi
+}
+
 clear_env_auth() {
   local env="$1"
   rm -f -- "$(env_home_path "$env")/auth.json"
+  clear_auth_config_for_env "$env"
 }
 
 install_account_auth_to_env() {
@@ -3342,14 +3999,17 @@ install_account_auth_to_env() {
   debug_event "install_auth_start env=$env account=$account src=$src dst=$dst src_exists=$([[ -f "$src" ]] && echo true || echo false) dst_exists=$([[ -f "$dst" ]] && echo true || echo false)"
   if [[ -f "$src" ]]; then
     copy_auth_file "$src" "$dst"
+    write_auth_config_for_env_account "$env" "$account"
     debug_event "install_auth_done env=$env account=$account source=account dst=$dst dst_exists=$([[ -f "$dst" ]] && echo true || echo false)"
     return 0
   fi
   if [[ "$account" == "$DEFAULT_ACCOUNT_NAME" ]] && [[ -f "$dst" ]]; then
+    write_auth_config_for_env_account "$env" "$account"
     debug_event "install_auth_done env=$env account=$account source=existing_default dst=$dst dst_exists=true"
     return 0
   fi
   rm -f -- "$dst"
+  clear_auth_config_for_env "$env"
   debug_event "install_auth_cleared env=$env account=$account dst=$dst"
 }
 
@@ -3456,15 +4116,68 @@ ensure_target_auth_installed() {
   fi
 }
 
+runtime_env_lines_for_target() {
+  local target="$1"
+  local env account auth_file api_key preferred base_url_mode base_url
+  env="$(read_current_env "$target" || true)"
+  account="$(read_current_account "$target" || true)"
+  preferred="$(preferred_auth_method_for_account "$env" "$account")"
+
+  if [[ "$preferred" == "apikey" ]]; then
+    auth_file="$(source_auth_file_for_account "$env" "$account" || true)"
+    if [[ -z "$auth_file" ]]; then
+      printf 'OPENAI_API_KEY=\n'
+      printf 'OPENAI_BASE_URL=\n'
+      return 0
+    fi
+    api_key="$(python3 - "$auth_file" <<'PY'
+import json, sys
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    print(str(data.get("OPENAI_API_KEY") or "").strip())
+except Exception:
+    print("")
+PY
+)"
+    if [[ -z "$api_key" ]]; then
+      printf 'OPENAI_API_KEY=\n'
+      printf 'OPENAI_BASE_URL=\n'
+      return 0
+    fi
+    printf 'OPENAI_API_KEY=%s\n' "$api_key"
+    base_url_mode="$(openai_base_url_mode_for_account "$env" "$account")"
+    if [[ "$base_url_mode" == "custom" ]]; then
+      base_url="$(openai_base_url_for_account "$env" "$account")"
+      if [[ -n "$base_url" ]]; then
+        printf 'OPENAI_BASE_URL=%s\n' "$base_url"
+      else
+        printf 'OPENAI_BASE_URL=\n'
+      fi
+    else
+      printf 'OPENAI_BASE_URL=\n'
+    fi
+  else
+    printf 'OPENAI_API_KEY=\n'
+    printf 'OPENAI_BASE_URL=\n'
+  fi
+}
+
 run_codex_for_target() {
   local target="$1"
   shift
   local home rc codex_bin
+  local -a env_args=()
+  local line
   ensure_target_auth_installed "$target"
   home="$(target_home_path "$target")"
   codex_bin="$(resolve_codex_bin)"
   debug_event "codex_launch_start target=$target home=$home args=$* auth_exists=$([[ -f "$home/auth.json" ]] && echo true || echo false) codex_bin=$codex_bin"
-  CODEX_HOME="$home" "$codex_bin" "$@"
+  while IFS= read -r line; do
+    env_args+=("$line")
+  done < <(runtime_env_lines_for_target "$target")
+  env "${env_args[@]}" CODEX_HOME="$home" "$codex_bin" "$@"
   rc=$?
   debug_event "codex_launch_exit target=$target home=$home rc=$rc"
   return "$rc"
@@ -3538,38 +4251,113 @@ kill_tree() {
   kill "$pid" >/dev/null 2>&1 || true
 }
 
-app_is_running() {
-  if [[ ! -f "$APP_PID_FILE" ]]; then
-    return 1
-  fi
-  local pid
-  pid="$(cat "$APP_PID_FILE" 2>/dev/null || true)"
+app_instance_pid_file() {
+  local instance_id="$1"
+  echo "$APP_INSTANCES_DIR/${instance_id}.pid"
+}
+
+app_instance_log_file() {
+  local instance_id="$1"
+  echo "$APP_INSTANCES_DIR/${instance_id}.log"
+}
+
+app_instances_dir_ensure() {
+  mkdir -p "$APP_INSTANCES_DIR"
+}
+
+app_generate_instance_id() {
+  printf '%s-%s\n' "$(date +%Y%m%d%H%M%S)" "$$"
+}
+
+app_is_pid_running() {
+  local pid="$1"
   [[ -n "$pid" ]] || return 1
   kill -0 "$pid" >/dev/null 2>&1
 }
 
-app_stop_managed() {
-  if [[ ! -f "$APP_PID_FILE" ]]; then
-    echo "No managed app process to stop"
-    return 0
-  fi
+app_last_instance_id() {
+  cat "$APP_LAST_INSTANCE_FILE" 2>/dev/null || true
+}
 
+app_set_last_instance_id() {
+  local instance_id="$1"
+  printf '%s\n' "$instance_id" > "$APP_LAST_INSTANCE_FILE"
+  chmod 600 "$APP_LAST_INSTANCE_FILE" 2>/dev/null || true
+}
+
+app_remove_last_instance_if_matches() {
+  local instance_id="$1"
+  local current
+  current="$(app_last_instance_id)"
+  if [[ "$current" == "$instance_id" ]]; then
+    rm -f "$APP_LAST_INSTANCE_FILE"
+  fi
+}
+
+app_prune_instance_file() {
+  local instance_id="$1"
+  rm -f "$(app_instance_pid_file "$instance_id")"
+  app_remove_last_instance_if_matches "$instance_id"
+}
+
+app_collect_managed_instances() {
+  local pid_file instance_id pid
+  app_instances_dir_ensure
+  for pid_file in "$APP_INSTANCES_DIR"/*.pid; do
+    [[ -e "$pid_file" ]] || continue
+    instance_id="$(basename "$pid_file" .pid)"
+    pid="$(cat "$pid_file" 2>/dev/null || true)"
+    if app_is_pid_running "$pid"; then
+      printf '%s\t%s\n' "$instance_id" "$pid"
+    else
+      app_prune_instance_file "$instance_id"
+    fi
+  done
+}
+
+app_is_running() {
   local pid
   pid="$(cat "$APP_PID_FILE" 2>/dev/null || true)"
-  if [[ -z "$pid" ]]; then
-    rm -f "$APP_PID_FILE"
-    echo "No managed app process to stop"
+  if app_is_pid_running "$pid"; then
     return 0
   fi
+  rm -f "$APP_PID_FILE"
+  app_collect_managed_instances >/dev/null
+}
 
-  if kill -0 "$pid" >/dev/null 2>&1; then
-    log_event INFO "app_stop pid=$pid"
+app_stop_managed_instance() {
+  local instance_id="$1"
+  local pid
+  pid="$(cat "$(app_instance_pid_file "$instance_id")" 2>/dev/null || true)"
+  if app_is_pid_running "$pid"; then
+    log_event INFO "app_stop instance=$instance_id pid=$pid"
     kill_tree "$pid"
     sleep 0.3
   fi
+  app_prune_instance_file "$instance_id"
+}
+
+app_stop_managed() {
+  local stopped=0 instance_id pid last_instance
+  last_instance="$(app_last_instance_id)"
+  if [[ -n "$last_instance" && -f "$(app_instance_pid_file "$last_instance")" ]]; then
+    app_stop_managed_instance "$last_instance"
+    stopped=1
+  else
+    while IFS=$'\t' read -r instance_id pid; do
+      [[ -n "$instance_id" ]] || continue
+      app_stop_managed_instance "$instance_id"
+      stopped=1
+    done < <(app_collect_managed_instances)
+  fi
 
   rm -f "$APP_PID_FILE"
-  echo "Stopped managed app process"
+
+  if [[ "$stopped" -eq 1 ]]; then
+    echo "Stopped managed app process"
+  else
+    echo "No managed app process to stop"
+  fi
 }
 
 app_any_running() {
@@ -3631,7 +4419,133 @@ read_api_key_for_login() {
   echo "$api_key"
 }
 
+normalize_base_url_input() {
+  local value
+  value="$(echo "${1:-}" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  [[ -n "$value" ]] || return 1
+  case "$value" in
+    http://*|https://*)
+      echo "$value"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+read_base_url_mode_for_login() {
+  local choice
+  if [[ -t 0 ]]; then
+    printf "Base URL [1] default [2] custom (default: 1): " >&2
+    IFS= read -r choice || true
+  else
+    IFS= read -r choice || true
+  fi
+  choice="$(echo "${choice:-1}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  case "$choice" in
+    ""|1|default)
+      echo "default"
+      ;;
+    2|custom)
+      echo "custom"
+      ;;
+    *)
+      err "invalid base URL choice '$choice' (use 1/default or 2/custom)"
+      ;;
+  esac
+}
+
+read_custom_base_url_for_login() {
+  local base_url
+  if [[ -t 0 ]]; then
+    printf "Enter OpenAI Base URL: " >&2
+    IFS= read -r base_url || true
+  else
+    IFS= read -r base_url || true
+  fi
+  base_url="$(normalize_base_url_input "${base_url:-}" || true)"
+  [[ -n "$base_url" ]] || err "invalid OpenAI Base URL. expected http(s)://..."
+  echo "$base_url"
+}
+
+read_sub2api_json_for_login() {
+  local payload=""
+  if [[ -t 0 ]]; then
+    echo "Paste sub2api JSON and end with EOF (Ctrl-D):" >&2
+    payload="$(cat || true)"
+  else
+    payload="$(cat || true)"
+  fi
+  payload="$(echo "${payload:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  [[ -n "$payload" ]] || err "empty sub2api JSON. rerun: $SCRIPT_NAME ac login <account> --mode sub2api"
+  echo "$payload"
+}
+
+write_auth_json_from_sub2api_payload() {
+  local home="$1"
+  local payload="$2"
+  local auth_file tmp_file
+  auth_file="$home/auth.json"
+  tmp_file="${auth_file}.tmp"
+  python3 - "$tmp_file" "$payload" <<'PY'
+import json, sys
+
+dst = sys.argv[1]
+raw = sys.argv[2]
+try:
+    data = json.loads(raw)
+except Exception as exc:
+    raise SystemExit(f"invalid sub2api JSON: {exc}")
+
+def s(value):
+    return "" if value is None else str(value).strip()
+
+access_token = s(data.get("access_token"))
+id_token = s(data.get("id_token"))
+refresh_token = s(data.get("refresh_token"))
+last_refresh = s(data.get("last_refresh"))
+email = s(data.get("email"))
+account_id = s(data.get("account_id"))
+expired = s(data.get("expired"))
+
+if not access_token:
+    raise SystemExit("sub2api JSON missing access_token")
+if not id_token:
+    raise SystemExit("sub2api JSON missing id_token")
+
+payload = {
+    "auth_mode": "chatgpt",
+    "tokens": {
+        "access_token": access_token,
+        "id_token": id_token,
+    },
+}
+if refresh_token:
+    payload["refresh_token"] = refresh_token
+if last_refresh:
+    payload["last_refresh"] = last_refresh
+if email:
+    payload["email"] = email
+if account_id:
+    payload["account_id"] = account_id
+if expired:
+    payload["expired"] = expired
+
+with open(dst, "w", encoding="utf-8") as f:
+    json.dump(payload, f, ensure_ascii=True, separators=(",", ":"))
+PY
+  chmod 600 "$tmp_file" 2>/dev/null || true
+  mv "$tmp_file" "$auth_file"
+}
+
 cmd_env_list() {
+  local repo_root core_cli
+  repo_root="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+  core_cli="$repo_root/scripts/core-cli.ts"
+  if command -v npx >/dev/null 2>&1 && [[ -f "$core_cli" ]]; then
+    npx --yes tsx "$core_cli" env-ls
+    return 0
+  fi
   local cli_env app_env env marks
   cli_env="$(read_current_env cli || true)"
   app_env="$(read_current_env app || true)"
@@ -3706,6 +4620,12 @@ cmd_env_use() {
   local target="$2"
 
   require_env_exists "$env"
+  if core_cli_available; then
+    run_core_cli_command env-use "$env" "$target" >/dev/null
+    log_event INFO "env_use env=$env target=$target core=true"
+    echo "Switched $target env to: $env"
+    return 0
+  fi
   with_targets "$target" _cmd_env_use_target "$env"
   log_event INFO "env_use env=$env target=$target"
   echo "Switched $target env to: $env"
@@ -3836,8 +4756,15 @@ cmd_account_remove() {
 
 cmd_account_list() {
   local env_filter="${1:-}"
+  local repo_root core_cli
   if [[ -n "$env_filter" ]]; then
     require_env_exists "$env_filter"
+  fi
+  repo_root="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+  core_cli="$repo_root/scripts/core-cli.ts"
+  if command -v npx >/dev/null 2>&1 && [[ -f "$core_cli" ]]; then
+    npx --yes tsx "$core_cli" account-ls "${env_filter:-}"
+    return 0
   fi
   cmd_list "$env_filter"
 }
@@ -3867,13 +4794,17 @@ cmd_account_login() {
   local target="$3"
   local sync_mode="$4"
   local mode="$5"
-  local home
+  local home codex_bin
   local api_key=""
+  local sub2api_payload=""
+  local base_url_mode="default"
+  local base_url=""
 
   validate_account_name "$account"
   require_env_exists "$env"
   ensure_env_home "$env"
   home="$(env_home_path "$env")"
+  codex_bin="$(resolve_codex_bin)"
 
   if [[ "$sync_mode" == "true" && "$env" != "$DEFAULT_ENV_NAME" ]]; then
     sync_overwrite_excluding_auth "$DEFAULT_HOME" "$home"
@@ -3881,17 +4812,29 @@ cmd_account_login() {
 
   case "$mode" in
     auth)
-      CODEX_HOME="$home" command codex login
+      CODEX_HOME="$home" "$codex_bin" login
+      write_account_runtime "$env" "$account" "chatgpt" "default" ""
       ;;
     apikey)
       api_key="$(read_api_key_for_login)"
-      OPENAI_API_KEY="$api_key" CODEX_HOME="$home" command codex login --with-api-key
+      base_url_mode="$(read_base_url_mode_for_login)"
+      if [[ "$base_url_mode" == "custom" ]]; then
+        base_url="$(read_custom_base_url_for_login)"
+      fi
+      printf '%s\n' "$api_key" | CODEX_HOME="$home" "$codex_bin" login --with-api-key
+      write_account_runtime "$env" "$account" "apikey" "$base_url_mode" "$base_url"
+      ;;
+    sub2api)
+      sub2api_payload="$(read_sub2api_json_for_login)"
+      write_auth_json_from_sub2api_payload "$home" "$sub2api_payload"
+      write_account_runtime "$env" "$account" "chatgpt" "default" ""
       ;;
     *)
-      err "invalid mode '$mode' (use auth|apikey)"
+      err "invalid mode '$mode' (use auth|apikey|sub2api)"
       ;;
   esac
   save_env_auth_to_account "$env" "$account" || err "login did not produce auth.json in $home"
+  refresh_targets_for_account_if_current "$env" "$account"
 
   with_targets "$target" _cmd_account_set_target "$env" "$account"
 
@@ -3904,18 +4847,57 @@ cmd_account_login() {
   echo "Logged in account: $env/$account"
 }
 
+cmd_account_base_url_update() {
+  local account="$1"
+  local env="$2"
+  local mode="${3:-default}"
+  local base_url=""
+
+  validate_account_name "$account"
+  require_env_exists "$env"
+  account_has_auth "$env" "$account" || err "account '$account' not found in env '$env'"
+  if ! account_uses_api_key_mode "$env" "$account"; then
+    err "account '$env/$account' is not apikey-authenticated"
+  fi
+
+  case "$mode" in
+    default)
+      :
+      ;;
+    custom)
+      base_url="$(read_custom_base_url_for_login)"
+      ;;
+    *)
+      err "invalid base URL mode '$mode' (use default|custom)"
+      ;;
+  esac
+
+  if core_cli_available; then
+    run_core_cli_command runtime-update "$env" "$account" "${base_url:-default}" >/dev/null
+    log_event INFO "account_base_url_update env=$env account=$account mode=$mode core=true"
+    echo "Updated base URL for account: $env/$account"
+    return 0
+  fi
+
+  write_account_runtime "$env" "$account" "apikey" "$mode" "$base_url"
+  refresh_targets_for_account_if_current "$env" "$account"
+  log_event INFO "account_base_url_update env=$env account=$account mode=$mode"
+  echo "Updated base URL for account: $env/$account"
+}
+
 select_login_mode_interactive() {
   local mode_idx
   tui_choose_index_with_back "$(tui_text "$(read_ui_lang)" login_mode_title)" "" "0" \
     "$(tui_text "$(read_ui_lang)" login_mode_auth)" \
-    "$(tui_text "$(read_ui_lang)" login_mode_apikey)"
+    "$(tui_text "$(read_ui_lang)" login_mode_apikey)" \
+    "$(tui_text "$(read_ui_lang)" login_mode_sub2api)"
   mode_idx="$TUI_MENU_RESULT"
   [[ "$mode_idx" == "-1" ]] && return 1
-  if [[ "$mode_idx" == "1" ]]; then
-    echo "apikey"
-  else
-    echo "auth"
-  fi
+  case "$mode_idx" in
+    1) echo "apikey" ;;
+    2) echo "sub2api" ;;
+    *) echo "auth" ;;
+  esac
 }
 
 cmd_account_relogin() {
@@ -3929,7 +4911,7 @@ cmd_account_relogin() {
     if [[ -t 0 ]]; then
       env="$(tui_select_env "$(read_current_env cli || true)")" || err "cancelled"
     else
-      err "missing env. use: $SCRIPT_NAME ac relogin [account] --env <env> [--mode auth|apikey]"
+      err "missing env. use: $SCRIPT_NAME ac relogin [account] --env <env> [--mode auth|apikey|sub2api]"
     fi
   fi
 
@@ -3939,7 +4921,7 @@ cmd_account_relogin() {
     if [[ -t 0 ]]; then
       account="$(tui_select_account "$env" "$(read_current_account cli || true)" false)" || err "cancelled"
     else
-      err "missing account. use: $SCRIPT_NAME ac relogin [account] --env <env> [--mode auth|apikey]"
+      err "missing account. use: $SCRIPT_NAME ac relogin [account] --env <env> [--mode auth|apikey|sub2api]"
     fi
   fi
 
@@ -3955,10 +4937,10 @@ cmd_account_relogin() {
   fi
 
   case "$mode" in
-    auth|apikey)
+    auth|apikey|sub2api)
       ;;
     *)
-      err "invalid mode '$mode' (use auth|apikey)"
+      err "invalid mode '$mode' (use auth|apikey|sub2api)"
       ;;
   esac
 
@@ -3977,6 +4959,13 @@ cmd_account_use() {
 
   if [[ "$sync_mode" == "true" ]]; then
     warn "same-env account switch only replaces auth.json; --sync is ignored"
+  fi
+
+  if core_cli_available; then
+    run_core_cli_command account-use "$env" "$account" "$target" >/dev/null
+    log_event INFO "account_use env=$env account=$account target=$target core=true"
+    echo "Switched $target account to: $env/$account"
+    return 0
   fi
 
   with_targets "$target" _cmd_account_set_target "$env" "$account"
@@ -4002,6 +4991,7 @@ cmd_account_logout() {
   require_env_exists "$env"
 
   rm -f -- "$(account_auth_path "$env" "$account")"
+  rm -f -- "$(account_runtime_path "$env" "$account")"
 
   cli_env="$(read_current_env cli || true)"
   app_env="$(read_current_env app || true)"
@@ -4019,6 +5009,7 @@ cmd_account_logout() {
 
   if [[ "$account" == "$DEFAULT_ACCOUNT_NAME" ]]; then
     rm -f -- "$(env_home_path "$env")/auth.json"
+    clear_auth_config_for_env "$env"
   fi
 
   log_event INFO "account_logout env=$env account=$account target=$target"
@@ -4257,7 +5248,7 @@ cmd_token_refresh_run_once_inner() {
   while IFS= read -r env; do
     while IFS= read -r account; do
       scanned=$((scanned + 1))
-      if ! account_uses_auth_mode "$env" "$account"; then
+      if ! account_uses_chatgpt_auth_mode "$env" "$account"; then
         continue
       fi
       auth_file="$(source_auth_file_for_account "$env" "$account" || true)"
@@ -4498,28 +5489,11 @@ cmd_import_default() {
   if [[ "$with_auth" == "true" && -f "$DEFAULT_HOME/auth.json" ]]; then
     ensure_account_slot "$env" "$DEFAULT_ACCOUNT_NAME"
     copy_auth_file "$DEFAULT_HOME/auth.json" "$(account_auth_path "$env" "$DEFAULT_ACCOUNT_NAME")"
+    write_account_runtime "$env" "$DEFAULT_ACCOUNT_NAME" "$(preferred_auth_method_for_account "$DEFAULT_ENV_NAME" "$DEFAULT_ACCOUNT_NAME")" "$(openai_base_url_mode_for_account "$DEFAULT_ENV_NAME" "$DEFAULT_ACCOUNT_NAME")" "$(openai_base_url_for_account "$DEFAULT_ENV_NAME" "$DEFAULT_ACCOUNT_NAME")"
   fi
 
   log_event INFO "import_default_as_env env=$env with_auth=$with_auth force=$force"
   echo "Imported default data to env: $env"
-}
-
-should_launch_codex() {
-  local mode="$1"
-  case "$mode" in
-    true)
-      return 0
-      ;;
-    false)
-      return 1
-      ;;
-    auto)
-      [[ -t 0 && -t 1 ]]
-      ;;
-    *)
-      return 1
-      ;;
-  esac
 }
 
 target_includes_cli() {
@@ -4532,35 +5506,75 @@ target_includes_app() {
   [[ "$target" == "app" || "$target" == "both" ]]
 }
 
-cmd_account_use_and_maybe_launch() {
+app_validate_current_account() {
+  local env use_account login_state
+
+  env="$(read_current_env app || true)"
+  use_account="$(read_current_account app || true)"
+  debug_event "app_current_resolve env=$env account=$use_account"
+  validate_account_name "$use_account"
+  require_env_exists "$env"
+  account_has_auth "$env" "$use_account" || err "account '$use_account' not logged in under env '$env'. run: $SCRIPT_NAME ac login $use_account --env $env --target app"
+
+  ensure_target_auth_installed app
+  login_state="$(login_state_for_target app)"
+  debug_event "app_current_login_state env=$env account=$use_account state=$login_state home=$(target_home_path app) auth_exists=$([[ -f "$(target_home_path app)/auth.json" ]] && echo true || echo false)"
+  if [[ "$login_state" != "logged-in" ]]; then
+    err "account '$use_account' in env '$env' is not logged in"
+  fi
+
+  printf '%s\t%s\n' "$env" "$use_account"
+}
+
+app_spawn_current_instance() {
+  local env="$1"
+  local use_account="$2"
+  local app_bin pid instance_id log_file
+  local -a env_args=()
+  local line
+
+  app_bin="$(resolve_app_bin)"
+  instance_id="$(app_generate_instance_id)"
+  log_file="$(app_instance_log_file "$instance_id")"
+  app_instances_dir_ensure
+  debug_event "app_spawn_prepare env=$env account=$use_account app_bin=$app_bin instance=$instance_id log=$log_file"
+
+  while IFS= read -r line; do
+    env_args+=("$line")
+  done < <(runtime_env_lines_for_target app)
+
+  nohup env "${env_args[@]}" CODEX_HOME="$(target_home_path app)" CODEX_SWITCHER_MANAGED=1 CODEX_SWITCHER_ENV="$env" CODEX_SWITCHER_ACCOUNT="$use_account" CODEX_SWITCHER_INSTANCE_ID="$instance_id" "$app_bin" </dev/null >>"$log_file" 2>&1 &
+  pid="$!"
+
+  printf '%s\n' "$pid" > "$(app_instance_pid_file "$instance_id")"
+  printf '%s\n' "$pid" > "$APP_PID_FILE"
+  chmod 600 "$(app_instance_pid_file "$instance_id")" "$APP_PID_FILE" 2>/dev/null || true
+  app_set_last_instance_id "$instance_id"
+
+  debug_event "app_spawned env=$env account=$use_account pid=$pid home=$(target_home_path app) instance=$instance_id app_log=$log_file"
+
+  if [[ "$(uname -s 2>/dev/null || true)" == "Darwin" ]] && command -v osascript >/dev/null 2>&1; then
+    (
+      sleep 0.35
+      osascript -e 'tell application "Codex" to activate' >/dev/null 2>&1 || true
+    ) &
+  fi
+
+  log_event INFO "app_spawn env=$env account=$use_account pid=$pid instance=$instance_id"
+  echo "Opened Codex App with: $env/$use_account"
+  echo "App instance: $instance_id"
+  echo "App log: $log_file"
+}
+
+cmd_account_use_selected() {
   local account="$1"
   local env="$2"
   local target="$3"
   local sync_mode="${4:-false}"
-  local launch_mode="${5:-auto}"
-  shift 5 || true
 
-  debug_event "account_use_launch_start env=$env account=$account target=$target sync=$sync_mode launch=$launch_mode args=$* stdin_tty=$([[ -t 0 ]] && echo true || echo false) stdout_tty=$([[ -t 1 ]] && echo true || echo false)"
+  debug_event "account_use_start env=$env account=$account target=$target sync=$sync_mode stdin_tty=$([[ -t 0 ]] && echo true || echo false) stdout_tty=$([[ -t 1 ]] && echo true || echo false)"
   with_lock cmd_account_use "$account" "$env" "$target" "$sync_mode"
-  debug_event "account_use_launch_after_switch env=$env account=$account target=$target launch=$launch_mode cli=$(read_current_env cli || true)/$(read_current_account cli || true) app=$(read_current_env app || true)/$(read_current_account app || true)"
-
-  if should_launch_codex "$launch_mode"; then
-    debug_event "account_use_launch_decision env=$env account=$account target=$target launch=$launch_mode result=launch"
-    if target_includes_cli "$target"; then
-      echo "Launching codex with env/account: $(read_current_env cli || true)/$(read_current_account cli || true)"
-      run_codex_for_target cli "$@"
-    fi
-    if target_includes_app "$target"; then
-      echo "Launching Codex App with env/account: $(read_current_env app || true)/$(read_current_account app || true)"
-      cmd_app_open "$account"
-    fi
-    return 0
-  fi
-
-  debug_event "account_use_launch_decision env=$env account=$account target=$target launch=$launch_mode result=skip"
-  if [[ "$launch_mode" == "auto" ]]; then
-    echo "Auto launch skipped (non-interactive shell). Use --launch to force start."
-  fi
+  debug_event "account_use_done env=$env account=$account target=$target cli=$(read_current_env cli || true)/$(read_current_account cli || true) app=$(read_current_env app || true)/$(read_current_account app || true)"
   if target_includes_cli "$target"; then
     echo "Run in current shell if needed:"
     echo "  export CODEX_HOME='$(target_home_path cli)'"
@@ -4569,6 +5583,17 @@ cmd_account_use_and_maybe_launch() {
 
 cmd_current() {
   local target="${1:-all}"
+  local repo_root core_cli
+  repo_root="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+  core_cli="$repo_root/scripts/core-cli.ts"
+  if command -v npx >/dev/null 2>&1 && [[ -f "$core_cli" ]]; then
+    case "$target" in
+      cli|app|all)
+        npx --yes tsx "$core_cli" whoami "$target"
+        return 0
+        ;;
+    esac
+  fi
   case "$target" in
     cli)
       echo "$(read_current_env cli || true)/$(read_current_account cli || true)"
@@ -4587,6 +5612,19 @@ cmd_current() {
 }
 
 cmd_status() {
+  local repo_root core_cli
+  repo_root="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+  core_cli="$repo_root/scripts/core-cli.ts"
+  if command -v npx >/dev/null 2>&1 && [[ -f "$core_cli" ]]; then
+    local state_dir default_home accounts_dir
+    state_dir="${CODEX_SWITCHER_STATE_DIR:-$HOME/.codex-switcher}"
+    default_home="${CODEX_SWITCHER_DEFAULT_HOME:-$HOME/.codex}"
+    accounts_dir="${CODEX_SWITCHER_ACCOUNTS_DIR:-$state_dir/env-accounts}"
+    echo "DEFAULT AUTH: $(display_path_for_output "$default_home/auth.json")"
+    echo "CUSTOM  AUTH: $(display_path_for_output "$accounts_dir/{env}/{account}/auth.json")"
+    npx --yes tsx "$core_cli" status
+    return 0
+  fi
   local cli_env app_env cli_account app_account
   local cli_ptr_state app_ptr_state cli_acc_state app_acc_state
   local cli_state app_state exit_code
@@ -4606,6 +5644,8 @@ cmd_status() {
   echo "cli_current: $cli_env/$cli_account"
   echo "app_current: $app_env/$app_account"
   status_auth_layout
+  echo "cli_auth: $(account_auth_status_line "$cli_env" "$cli_account")"
+  echo "app_auth: $(account_auth_status_line "$app_env" "$app_account")"
   echo "cli_auth_expiry: $(token_expiry_for_env_account "$cli_env" "$cli_account")"
   echo "app_auth_expiry: $(token_expiry_for_env_account "$app_env" "$app_account")"
   echo "token_refresh_guard: $(token_refresh_guard_status_line)"
@@ -4633,56 +5673,31 @@ cmd_exec() {
   run_codex_for_target cli "$@"
 }
 
-cmd_app_open() {
-  local account="${1:-}"
-  shift || true
-  local env app_bin pid login_state use_account
-
-  env="$(read_current_env app || true)"
-  use_account="${account:-$(read_current_account app || true)}"
-  debug_event "app_open_start env=$env account=$use_account raw_account_arg=$account args=$*"
-  validate_account_name "$use_account"
-  require_env_exists "$env"
-  account_has_auth "$env" "$use_account" || err "account '$use_account' not logged in under env '$env'. run: $SCRIPT_NAME ac login $use_account --env $env --target app"
-
-  set_current_env app "$env"
-  set_current_account app "$use_account"
-  ensure_target_auth_installed app
-
-  login_state="$(login_state_for_target app)"
-  debug_event "app_open_login_state env=$env account=$use_account state=$login_state home=$(target_home_path app) auth_exists=$([[ -f "$(target_home_path app)/auth.json" ]] && echo true || echo false)"
-  if [[ "$login_state" != "logged-in" ]]; then
-    err "account '$use_account' in env '$env' is not logged in"
+cmd_cli_launch_current() {
+  if [[ "${1:-}" == "--" ]]; then
+    shift
   fi
-  app_bin="$(resolve_app_bin)"
-  debug_event "app_open_resolved_bin env=$env account=$use_account app_bin=$app_bin"
-
-  app_stop_managed >/dev/null
-  app_stop_unmanaged_if_running >/dev/null
-
-  mkdir -p "$(dirname "$APP_LOG")"
-  nohup env CODEX_HOME="$(target_home_path app)" CODEX_SWITCHER_MANAGED=1 CODEX_SWITCHER_ENV="$env" CODEX_SWITCHER_ACCOUNT="$use_account" "$app_bin" "$@" </dev/null >>"$APP_LOG" 2>&1 &
-  pid="$!"
-  debug_event "app_open_spawned env=$env account=$use_account pid=$pid home=$(target_home_path app) app_log=$APP_LOG"
-  printf '%s\n' "$pid" > "$APP_PID_FILE"
-  chmod 600 "$APP_PID_FILE" 2>/dev/null || true
-
-  if [[ "$(uname -s 2>/dev/null || true)" == "Darwin" ]] && command -v osascript >/dev/null 2>&1; then
-    (
-      sleep 0.35
-      osascript -e 'tell application "Codex" to activate' >/dev/null 2>&1 || true
-    ) &
+  if [[ "$#" -gt 0 ]]; then
+    echo "Launching codex with env/account: $(read_current_env cli || true)/$(read_current_account cli || true)"
+    run_codex_for_target cli "$@"
+    return "$?"
   fi
-
-  log_event INFO "app_open env=$env account=$use_account pid=$pid args=$*"
-  echo "Opened Codex App with: $env/$use_account"
-  echo "App log: $APP_LOG"
+  echo "Launching codex with env/account: $(read_current_env cli || true)/$(read_current_account cli || true)"
+  run_codex_for_target cli
 }
 
-cmd_app_use() {
-  local account="$1"
-  shift || true
-  cmd_app_open "$account" "$@"
+cmd_app_restart_current() {
+  local env use_account
+  IFS=$'\t' read -r env use_account < <(app_validate_current_account)
+  app_stop_managed >/dev/null
+  app_stop_unmanaged_if_running >/dev/null
+  app_spawn_current_instance "$env" "$use_account"
+}
+
+cmd_app_launch_new() {
+  local env use_account
+  IFS=$'\t' read -r env use_account < <(app_validate_current_account)
+  app_spawn_current_instance "$env" "$use_account"
 }
 
 cmd_app_logout() {
@@ -4703,11 +5718,6 @@ cmd_app_status() {
   fi
   echo "app_process: not-running"
   return 1
-}
-
-cmd_app_stop() {
-  app_stop_managed
-  log_event INFO "app_stop"
 }
 
 cmd_init() {
@@ -5058,7 +6068,7 @@ main() {
           cmd_account_list "$env"
           ;;
         login)
-          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME ac login <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--mode auth|apikey]"
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME ac login <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--mode auth|apikey|sub2api]"
           local account="$1"
           shift
           local env="$(read_current_env cli || true)"
@@ -5095,10 +6105,10 @@ main() {
             shift
           done
           case "$mode" in
-            auth|apikey)
+            auth|apikey|sub2api)
               ;;
             *)
-              err "invalid mode '$mode' (use auth|apikey)"
+              err "invalid mode '$mode' (use auth|apikey|sub2api)"
               ;;
           esac
           with_lock cmd_account_login "$account" "$env" "$target" "$sync_mode" "$mode"
@@ -5149,15 +6159,39 @@ main() {
           done
           with_lock cmd_account_relogin "$account" "$env" "$target" "$sync_mode" "$mode"
           ;;
+        base-url)
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME ac base-url <account> [--env <env>] [--mode default|custom]"
+          local account="$1"
+          shift
+          local env="$(read_current_env cli || true)"
+          local mode="default"
+          while [[ "$#" -gt 0 ]]; do
+            case "$1" in
+              --env)
+                shift
+                [[ "$#" -gt 0 ]] || err "missing env after --env"
+                env="$1"
+                ;;
+              --mode)
+                shift
+                [[ "$#" -gt 0 ]] || err "missing mode after --mode"
+                mode="$1"
+                ;;
+              *)
+                err "unknown option: $1"
+                ;;
+            esac
+            shift
+          done
+          with_lock cmd_account_base_url_update "$account" "$env" "$mode"
+          ;;
         use)
-          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME ac use <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync] [--launch|--no-launch] [-- <codex args...>]"
+          [[ "$#" -ge 1 ]] || err "usage: $SCRIPT_NAME ac use <account> [--env <env>] [-t cli|app|both] [--sync|--no-sync]"
           local account="$1"
           shift
           local env="$(read_current_env cli || true)"
           local target="cli"
           local sync_mode="false"
-          local launch="auto"
-          local codex_args=()
           while [[ "$#" -gt 0 ]]; do
             case "$1" in
               --env)
@@ -5176,36 +6210,16 @@ main() {
               --no-sync)
                 sync_mode="false"
                 ;;
-              --launch)
-                launch="true"
-                ;;
-              --no-launch)
-                launch="false"
-                ;;
-              --)
-                shift
-                codex_args=("$@")
-                break
-                ;;
               *)
+                if [[ "$1" == "--launch" || "$1" == "--no-launch" ]]; then
+                  err "option $1 was removed. use '$SCRIPT_NAME app restart-current' or '$SCRIPT_NAME app launch-new'"
+                fi
                 err "unknown option: $1"
                 ;;
             esac
             shift
           done
-
-          if [[ "$target" == "app" && "${#codex_args[@]}" -gt 0 ]]; then
-            err "cannot pass codex args with -t app"
-          fi
-          if [[ "${#codex_args[@]}" -gt 0 ]]; then
-            [[ "$launch" != "false" ]] || err "cannot pass codex args with --no-launch"
-            launch="true"
-          fi
-          if [[ "${#codex_args[@]}" -gt 0 ]]; then
-            cmd_account_use_and_maybe_launch "$account" "$env" "$target" "$sync_mode" "$launch" "${codex_args[@]}"
-          else
-            cmd_account_use_and_maybe_launch "$account" "$env" "$target" "$sync_mode" "$launch"
-          fi
+          cmd_account_use_selected "$account" "$env" "$target" "$sync_mode"
           ;;
         logout)
           local account=""
@@ -5295,6 +6309,45 @@ main() {
     status)
       [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME status"
       cmd_status
+      ;;
+    cli)
+      local action="${1:-}"
+      [[ -n "$action" ]] || err "usage: $SCRIPT_NAME cli <launch-current> [-- <codex args...>]"
+      shift || true
+      case "$action" in
+        launch-current)
+          cmd_cli_launch_current "$@"
+          ;;
+        *)
+          err "unknown cli action: $action (use launch-current)"
+          ;;
+      esac
+      ;;
+    app)
+      local action="${1:-}"
+      [[ -n "$action" ]] || err "usage: $SCRIPT_NAME app <restart-current|launch-new|status|logout> ..."
+      shift || true
+      case "$action" in
+        restart-current)
+          [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME app restart-current"
+          cmd_app_restart_current
+          ;;
+        launch-new)
+          [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME app launch-new"
+          cmd_app_launch_new
+          ;;
+        status)
+          [[ "$#" -eq 0 ]] || err "usage: $SCRIPT_NAME app status"
+          cmd_app_status
+          ;;
+        logout)
+          [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME app logout [account]"
+          cmd_app_logout "${1:-}"
+          ;;
+        *)
+          err "unknown app action: $action (use restart-current|launch-new|status|logout)"
+          ;;
+      esac
       ;;
     lang)
       [[ "$#" -le 1 ]] || err "usage: $SCRIPT_NAME lang [zh|en|ja]"
