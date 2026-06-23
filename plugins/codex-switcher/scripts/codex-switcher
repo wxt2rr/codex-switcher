@@ -4650,8 +4650,10 @@ cmd_env_remove() {
     err "env '$env' is current App env; use --force to remove"
   fi
 
-  if ! confirm_delete_twice "env '$env'"; then
-    return 0
+  if [[ "$force" != "true" ]]; then
+    if ! confirm_delete_twice "env '$env'"; then
+      return 0
+    fi
   fi
 
   if [[ "$env" == "$app_env" ]]; then
@@ -4732,8 +4734,10 @@ cmd_account_remove() {
     err "account '$account' is current App account in env '$env'; use --force to remove"
   fi
 
-  if ! confirm_delete_twice "account '$env/$account'"; then
-    return 0
+  if [[ "$force" != "true" ]]; then
+    if ! confirm_delete_twice "account '$env/$account'"; then
+      return 0
+    fi
   fi
 
   rm -rf -- "$(account_dir_path "$env" "$account")"

@@ -21,6 +21,9 @@ export interface AccountRuntimeSettings {
   openaiBaseUrl?: string;
   providerId?: string;
   model?: string;
+  independentModelEnabled?: boolean;
+  independentModelApiKey?: string;
+  independentModelBaseUrl?: string;
 }
 
 export interface AccountState {
@@ -270,6 +273,15 @@ function validateRuntimeSettings(
   }
   if (typeof value.model === "string") {
     runtime.model = value.model;
+  }
+  if (typeof value.independentModelEnabled === "boolean") {
+    runtime.independentModelEnabled = value.independentModelEnabled;
+  }
+  if (typeof value.independentModelApiKey === "string") {
+    runtime.independentModelApiKey = value.independentModelApiKey;
+  }
+  if (typeof value.independentModelBaseUrl === "string") {
+    runtime.independentModelBaseUrl = value.independentModelBaseUrl;
   }
 
   return runtime;

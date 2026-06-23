@@ -55,6 +55,41 @@ export function createEnvService() {
                 },
             };
         },
+        updateEnv(state, input) {
+            const env = state.envs[input.envName];
+            if (!env) {
+                throw createEnvError("ENV_NOT_FOUND", `Env '${input.envName}' not found`);
+            }
+            if (input.envName === DEFAULT_ENV_NAME &&
+                input.nextEnvName !== DEFAULT_ENV_NAME) {
+                throw createEnvError("RESERVED_ENV", "Cannot rename reserved default env");
+            }
+            if (input.nextEnvName !== input.envName &&
+                state.envs[input.nextEnvName]) {
+                throw createEnvError("ENV_EXISTS", `Env '${input.nextEnvName}' already exists`);
+            }
+            const nextEnv = {
+                ...env,
+                name: input.nextEnvName,
+                path: input.homePath,
+            };
+            const envs = { ...state.envs };
+            delete envs[input.envName];
+            envs[input.nextEnvName] = nextEnv;
+            return {
+                ...state,
+                generatedAt: input.now,
+                envs,
+                targets: {
+                    cli: state.targets.cli.env === input.envName
+                        ? { ...state.targets.cli, env: input.nextEnvName }
+                        : state.targets.cli,
+                    app: state.targets.app.env === input.envName
+                        ? { ...state.targets.app, env: input.nextEnvName }
+                        : state.targets.app,
+                },
+            };
+        },
         selectEnv(state, input) {
             const env = state.envs[input.envName];
             if (!env) {

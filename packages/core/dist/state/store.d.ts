@@ -14,6 +14,9 @@ export interface AccountRuntimeSettings {
     openaiBaseUrl?: string;
     providerId?: string;
     model?: string;
+    independentModelEnabled?: boolean;
+    independentModelApiKey?: string;
+    independentModelBaseUrl?: string;
 }
 export interface AccountState {
     name: string;

@@ -106,6 +106,32 @@ def load_json(path: str) -> Dict[str, Any]:
     return {}
 
 
+def parse_json_string(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, str) or not raw.strip():
+        return {}
+    try:
+        obj = json.loads(raw)
+        if isinstance(obj, dict):
+            return obj
+    except Exception:
+        return {}
+    return {}
+
+
+def nested_auth_namespace(payload: Dict[str, Any]) -> Dict[str, Any]:
+    namespace = payload.get("https://api.openai.com/auth")
+    if isinstance(namespace, dict):
+        return namespace
+    return {}
+
+
+def first_string(*values: Any) -> str:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
 def parse_window(window: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(window, dict):
         return None
@@ -327,26 +353,33 @@ def main() -> int:
     auth_data = load_json(args.auth_file)
     tokens = auth_data.get("tokens")
     if not isinstance(tokens, dict):
-        tokens = {}
+        tokens = parse_json_string(tokens)
 
-    access_token = tokens.get("access_token")
-    if not isinstance(access_token, str):
-        access_token = ""
-    account_id = tokens.get("account_id")
-    if not isinstance(account_id, str):
-        account_id = ""
-    id_token = tokens.get("id_token")
-    if not isinstance(id_token, str):
-        id_token = ""
+    access_token = first_string(tokens.get("access_token"), auth_data.get("access_token"))
+    account_id = first_string(tokens.get("account_id"), auth_data.get("account_id"))
+    id_token = first_string(tokens.get("id_token"), auth_data.get("id_token"))
 
     claims = decode_jwt_payload(id_token)
-    email = claims.get("email")
-    if not isinstance(email, str):
-        email = ""
+    auth_claims = nested_auth_namespace(claims)
+    email = first_string(claims.get("email"), auth_data.get("email"))
 
-    plan_from_claims = normalize_plan(claims.get("chatgpt_plan_type") or claims.get("plan_type"))
+    plan_from_claims = normalize_plan(
+        auth_claims.get("chatgpt_plan_type")
+        or claims.get("chatgpt_plan_type")
+        or claims.get("plan_type")
+    )
     if plan_from_claims == "unknown":
-        plan_from_claims = normalize_plan(auth_data.get("chatgpt_plan_type") or auth_data.get("plan_type"))
+        plan_from_claims = normalize_plan(
+            auth_data.get("chatgpt_plan_type")
+            or auth_data.get("plan_type")
+            or nested_auth_namespace(auth_data).get("chatgpt_plan_type")
+        )
+    if not account_id:
+        account_id = first_string(
+            auth_claims.get("chatgpt_account_id"),
+            claims.get("chatgpt_account_id"),
+            auth_data.get("account_id"),
+        )
 
     api_metrics = collect_api_metrics(access_token, account_id, args.usage_proxy, args.timeout_seconds)
     local_metrics = collect_local_metrics(args.data_path)

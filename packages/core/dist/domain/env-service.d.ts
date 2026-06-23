@@ -15,6 +15,12 @@ export interface CreateEnvInput {
 export interface RemoveEnvInput {
     envName: string;
 }
+export interface UpdateEnvInput {
+    envName: string;
+    nextEnvName: string;
+    homePath: string;
+    now: string;
+}
 export interface SelectEnvInput {
     target: TargetName;
     envName: string;
@@ -27,5 +33,6 @@ export declare function createEnvService(): {
     listEnvs(state: SwitcherState): EnvSummary[];
     createEnv(state: SwitcherState, input: CreateEnvInput): SwitcherState;
     removeEnv(state: SwitcherState, input: RemoveEnvInput): SwitcherState;
+    updateEnv(state: SwitcherState, input: UpdateEnvInput): SwitcherState;
     selectEnv(state: SwitcherState, input: SelectEnvInput): SwitcherState;
 };

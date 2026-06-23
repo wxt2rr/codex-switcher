@@ -63,6 +63,12 @@ export declare function createCoreApi(options: CoreApiOptions): {
         cloneFromEnv?: string;
         now: string;
     }): SwitcherState;
+    updateEnv(input: {
+        envName: string;
+        nextEnvName: string;
+        homePath: string;
+        now: string;
+    }): SwitcherState;
     updateAccountRuntime(input: {
         envName: string;
         accountName: string;

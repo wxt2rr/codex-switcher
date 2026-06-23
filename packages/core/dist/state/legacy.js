@@ -1,5 +1,5 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { DEFAULT_SCHEMA_VERSION, } from "./store.js";
 const DEFAULT_ENV_NAME = "default";
 const DEFAULT_ACCOUNT_NAME = "default";
@@ -43,6 +43,9 @@ export async function writeLegacyRuntime(options) {
         preferred_auth_method: options.runtime.preferredAuthMethod,
         openai_base_url_mode: options.runtime.openaiBaseUrlMode,
         openai_base_url: options.runtime.openaiBaseUrl ?? "",
+        independent_model_enabled: options.runtime.independentModelEnabled ?? false,
+        independent_model_api_key: options.runtime.independentModelApiKey ?? "",
+        independent_model_base_url: options.runtime.independentModelBaseUrl ?? "",
     }, null, 2)}\n`, "utf8");
 }
 export async function createLegacyEnv(options) {
@@ -50,6 +53,19 @@ export async function createLegacyEnv(options) {
         return;
     }
     await mkdir(join(options.envsDir, options.envName, "home"), { recursive: true });
+}
+export async function updateLegacyEnv(options) {
+    if (options.envName !== options.nextEnvName && options.envName === DEFAULT_ENV_NAME) {
+        throw new Error("Cannot rename reserved default env");
+    }
+    if (options.envName !== options.nextEnvName && options.nextEnvName !== DEFAULT_ENV_NAME) {
+        await renameIfExists(join(options.envsDir, options.envName), join(options.envsDir, options.nextEnvName));
+        await renameIfExists(join(options.stateDir, "env-accounts", options.envName), join(options.stateDir, "env-accounts", options.nextEnvName));
+        await renameIfExists(getEnvMetaPath(options.stateDir, options.envName), getEnvMetaPath(options.stateDir, options.nextEnvName));
+    }
+    await writeLegacyEnvMeta(options.stateDir, options.nextEnvName, {
+        homePath: options.homePath,
+    });
 }
 async function readLegacyEnvState(envName, options) {
     const accountRoot = join(options.stateDir, "env-accounts", envName);
@@ -63,9 +79,10 @@ async function readLegacyEnvState(envName, options) {
     ])));
     return {
         name: envName,
-        path: envName === DEFAULT_ENV_NAME
-            ? options.defaultHome
-            : join(options.envsDir, envName, "home"),
+        path: (await readLegacyEnvMeta(options.stateDir, envName)).homePath ||
+            (envName === DEFAULT_ENV_NAME
+                ? options.defaultHome
+                : join(options.envsDir, envName, "home")),
         accounts,
     };
 }
@@ -80,6 +97,9 @@ async function readLegacyAccountState(accountRoot, accountName) {
             preferredAuthMethod: normalizePreferredAuthMethod(runtimeRecord.preferred_auth_method),
             openaiBaseUrlMode: normalizeOpenAIBaseUrlMode(runtimeRecord.openai_base_url_mode),
             openaiBaseUrl: runtimeRecord.openai_base_url || undefined,
+            independentModelEnabled: runtimeRecord.independent_model_enabled === true,
+            independentModelApiKey: runtimeRecord.independent_model_api_key || undefined,
+            independentModelBaseUrl: runtimeRecord.independent_model_base_url || undefined,
         },
     };
     if (authData) {
@@ -135,6 +155,36 @@ async function listDirectoryNames(path) {
     catch {
         return [];
     }
+}
+async function readLegacyEnvMeta(stateDir, envName) {
+    try {
+        const raw = await readFile(getEnvMetaPath(stateDir, envName), "utf8");
+        const parsed = JSON.parse(raw);
+        return typeof parsed.homePath === "string" && parsed.homePath
+            ? { homePath: parsed.homePath }
+            : {};
+    }
+    catch {
+        return {};
+    }
+}
+async function writeLegacyEnvMeta(stateDir, envName, value) {
+    const metaPath = getEnvMetaPath(stateDir, envName);
+    await mkdir(join(stateDir, "env-meta"), { recursive: true });
+    await writeFile(`${metaPath}`, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+function getEnvMetaPath(stateDir, envName) {
+    return join(stateDir, "env-meta", `${envName}.json`);
+}
+async function renameIfExists(source, target) {
+    try {
+        await stat(source);
+    }
+    catch {
+        return;
+    }
+    await mkdir(dirname(target), { recursive: true });
+    await rename(source, target);
 }
 function normalizePreferredAuthMethod(value) {
     return value === "apikey" ? "apikey" : "chatgpt";

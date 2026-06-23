@@ -21,7 +21,15 @@ export interface CreateLegacyEnvOptions {
     envsDir: string;
     envName: string;
 }
+export interface UpdateLegacyEnvOptions {
+    stateDir: string;
+    envsDir: string;
+    envName: string;
+    nextEnvName: string;
+    homePath: string;
+}
 export declare function readLegacyState(options: ReadLegacyStateOptions): Promise<SwitcherState>;
 export declare function writeLegacyPointers(options: WriteLegacyPointersOptions): Promise<void>;
 export declare function writeLegacyRuntime(options: WriteLegacyRuntimeOptions): Promise<void>;
 export declare function createLegacyEnv(options: CreateLegacyEnvOptions): Promise<void>;
+export declare function updateLegacyEnv(options: UpdateLegacyEnvOptions): Promise<void>;

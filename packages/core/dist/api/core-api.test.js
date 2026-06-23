@@ -153,4 +153,18 @@ test("core api creates env and updates account runtime", () => {
     });
     assert.equal(nextRuntime.envs.default.accounts.personal.runtime.openaiBaseUrl, "https://new-runtime.example/v1");
 });
+test("core api updates environment configuration", () => {
+    const state = createSampleState();
+    const api = createCoreApi({
+        getState: () => state,
+    });
+    const nextEnv = api.updateEnv({
+        envName: "default",
+        nextEnvName: "default",
+        homePath: "/tmp/relocated-default-home",
+        now: "2026-06-16T11:42:00.000Z",
+    });
+    assert.equal(nextEnv.envs.default?.path, "/tmp/relocated-default-home");
+    assert.equal(nextEnv.targets.cli.env, "default");
+});
 //# sourceMappingURL=core-api.test.js.map

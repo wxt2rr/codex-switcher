@@ -29,6 +29,9 @@ test("legacy reader hydrates envs, accounts, runtime settings, and target pointe
         preferred_auth_method: "chatgpt",
         openai_base_url_mode: "default",
         openai_base_url: "",
+        independent_model_enabled: true,
+        independent_model_api_key: "sk-model",
+        independent_model_base_url: "https://model.example/v1",
       }),
       "utf8",
     );
@@ -55,6 +58,15 @@ test("legacy reader hydrates envs, accounts, runtime settings, and target pointe
     assert.equal(
       state.envs.default.accounts.personal.runtime.openaiBaseUrl,
       "https://proxy.example.test/v1",
+    );
+    assert.equal(state.envs.default.accounts.work.runtime.independentModelEnabled, true);
+    assert.equal(
+      state.envs.default.accounts.work.runtime.independentModelApiKey,
+      "sk-model",
+    );
+    assert.equal(
+      state.envs.default.accounts.work.runtime.independentModelBaseUrl,
+      "https://model.example/v1",
     );
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -91,6 +103,36 @@ test("legacy reader hydrates auth metadata from account auth.json", async () => 
       auth_mode: "apikey",
       OPENAI_API_KEY: "sk-test-1234567890",
     });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("legacy reader prefers persisted env metadata home path overrides", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-legacy-env-meta-"));
+  const stateDir = join(root, ".codex-switcher");
+  const envsDir = join(root, ".codex-envs");
+  const defaultHome = join(root, ".codex");
+
+  try {
+    await mkdir(join(envsDir, "project-a", "home"), { recursive: true });
+    await mkdir(join(stateDir, "env-meta"), { recursive: true });
+    await mkdir(defaultHome, { recursive: true });
+
+    await writeFile(
+      join(stateDir, "env-meta", "project-a.json"),
+      JSON.stringify({ homePath: "/tmp/custom-project-home" }),
+      "utf8",
+    );
+
+    const state = await readLegacyState({
+      stateDir,
+      envsDir,
+      defaultHome,
+      now: "2026-06-16T01:02:03.000Z",
+    });
+
+    assert.equal(state.envs["project-a"]?.path, "/tmp/custom-project-home");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

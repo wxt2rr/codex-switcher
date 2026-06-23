@@ -52,6 +52,56 @@ test("target-home writer installs auth.json and managed config for apikey accoun
         await rm(root, { recursive: true, force: true });
     }
 });
+test("target-home writer appends managed custom model config for auth account when enabled", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-custom-model-"));
+    const homePath = join(root, "home");
+    const state = {
+        schemaVersion: DEFAULT_SCHEMA_VERSION,
+        generatedAt: "2026-06-23T10:00:00.000Z",
+        targets: {
+            cli: { env: "default", account: "default" },
+            app: { env: "default", account: "default" },
+        },
+        envs: {
+            default: {
+                name: "default",
+                path: homePath,
+                accounts: {
+                    default: {
+                        name: "default",
+                        authMode: "auth",
+                        runtime: {
+                            preferredAuthMethod: "chatgpt",
+                            openaiBaseUrlMode: "default",
+                            independentModelEnabled: true,
+                            independentModelApiKey: "sk-apikey",
+                            independentModelBaseUrl: "https://proxy.example.test/v1",
+                        },
+                        authData: {
+                            tokens: "{\"access_token\":\"demo\"}",
+                        },
+                    },
+                },
+            },
+        },
+        tasks: { recent: [] },
+    };
+    try {
+        await applyTargetHomeState({ state, target: "cli" });
+        const config = await readFile(join(homePath, "config.toml"), "utf8");
+        assert.match(config, /preferred_auth_method = "chatgpt"/);
+        assert.match(config, /model_provider = "custom"/);
+        assert.match(config, /\[model_providers\.custom\]/);
+        assert.match(config, /name = "custom"/);
+        assert.match(config, /model = "gpt-5.4"/);
+        assert.match(config, /base_url = "https:\/\/proxy\.example\.test\/v1"/);
+        assert.match(config, /experimental_bearer_token = "sk-apikey"/);
+        assert.match(config, /requires_openai_auth = true/);
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
 test("target-home writer preserves unmanaged config and removes managed fields on clear", async () => {
     const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-clear-"));
     const homePath = join(root, "home");
@@ -61,6 +111,8 @@ test("target-home writer preserves unmanaged config and removes managed fields o
         const config = await readFile(join(homePath, "config.toml"), "utf8");
         assert.doesNotMatch(config, /preferred_auth_method/);
         assert.doesNotMatch(config, /openai_base_url/);
+        assert.doesNotMatch(config, /model_provider = "custom"/);
+        assert.doesNotMatch(config, /\[model_providers\.custom\]/);
         assert.match(config, /model = "gpt-5.5"/);
     }
     finally {
@@ -98,6 +150,8 @@ test("target-home writer clears managed files when selected account is missing",
         const config = await readFile(join(homePath, "config.toml"), "utf8");
         assert.doesNotMatch(config, /preferred_auth_method/);
         assert.doesNotMatch(config, /openai_base_url/);
+        assert.doesNotMatch(config, /model_provider = "custom"/);
+        assert.doesNotMatch(config, /\[model_providers\.custom\]/);
         assert.match(config, /model = "gpt-5.5"/);
     }
     finally {
@@ -106,6 +160,6 @@ test("target-home writer clears managed files when selected account is missing",
 });
 async function applyFixture(homePath) {
     await mkdir(homePath, { recursive: true });
-    await writeFile(join(homePath, "config.toml"), 'preferred_auth_method = "apikey"\nopenai_base_url = "https://proxy.example.test/v1"\nmodel = "gpt-5.5"\n', "utf8");
+    await writeFile(join(homePath, "config.toml"), 'preferred_auth_method = "apikey"\nopenai_base_url = "https://proxy.example.test/v1"\nmodel = "gpt-5.5"\nmodel_provider = "custom"\n\n[model_providers.custom]\nname = "custom"\nmodel = "gpt-5.4"\nbase_url = "https://proxy.example.test/v1"\nexperimental_bearer_token = "sk-old"\nrequires_openai_auth = true\n', "utf8");
 }
 //# sourceMappingURL=target-home.test.js.map

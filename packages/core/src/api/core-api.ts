@@ -85,6 +85,15 @@ export function createCoreApi(options: CoreApiOptions) {
       return envs.createEnv(options.getState(), input);
     },
 
+    updateEnv(input: {
+      envName: string;
+      nextEnvName: string;
+      homePath: string;
+      now: string;
+    }) {
+      return envs.updateEnv(options.getState(), input);
+    },
+
     updateAccountRuntime(input: {
       envName: string;
       accountName: string;

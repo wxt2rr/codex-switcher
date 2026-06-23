@@ -59,6 +59,19 @@ async function writeManagedConfig(
   ) {
     managedLines.push(`openai_base_url = "${runtime.openaiBaseUrl}"`);
   }
+  if (runtime.independentModelEnabled && runtime.preferredAuthMethod === "chatgpt") {
+    managedLines.push("");
+    managedLines.push('model_provider = "custom"');
+    managedLines.push("");
+    managedLines.push("[model_providers.custom]");
+    managedLines.push('name = "custom"');
+    managedLines.push('model = "gpt-5.4"');
+    managedLines.push(`base_url = ${quoteTomlString(runtime.independentModelBaseUrl ?? "")}`);
+    managedLines.push(
+      `experimental_bearer_token = ${quoteTomlString(runtime.independentModelApiKey ?? "")}`,
+    );
+    managedLines.push("requires_openai_auth = true");
+  }
 
   const content = `${managedLines.join("\n")}${cleaned ? `\n${cleaned}` : ""}\n`;
   await writeFile(configPath, content, "utf8");
@@ -75,19 +88,55 @@ async function clearManagedConfig(configPath: string) {
 }
 
 function removeManagedConfigLines(content: string): string {
-  return content
-    .split(/\r?\n/)
-    .filter((line) => {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        return false;
+  const lines = content.split(/\r?\n/);
+  const kept: string[] = [];
+  let skipCustomSection = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      if (!skipCustomSection) {
+        kept.push(line);
       }
-      return (
-        !trimmed.startsWith("preferred_auth_method") &&
-        !trimmed.startsWith("openai_base_url")
-      );
-    })
-    .join("\n");
+      continue;
+    }
+
+    if (trimmed === "[model_providers.custom]") {
+      skipCustomSection = true;
+      continue;
+    }
+
+    if (skipCustomSection) {
+      if (trimmed.startsWith("[")) {
+        skipCustomSection = false;
+      } else {
+        continue;
+      }
+    }
+
+    if (
+      trimmed.startsWith("preferred_auth_method") ||
+      trimmed.startsWith("openai_base_url") ||
+      trimmed === 'model_provider = "custom"'
+    ) {
+      continue;
+    }
+
+    kept.push(line);
+  }
+
+  while (kept.length > 0 && kept[0]?.trim() === "") {
+    kept.shift();
+  }
+  while (kept.length > 0 && kept[kept.length - 1]?.trim() === "") {
+    kept.pop();
+  }
+
+  return kept.join("\n");
+}
+
+function quoteTomlString(value: string): string {
+  return JSON.stringify(value);
 }
 
 async function readText(path: string): Promise<string> {

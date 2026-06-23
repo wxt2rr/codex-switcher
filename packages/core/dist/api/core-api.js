@@ -50,6 +50,9 @@ export function createCoreApi(options) {
         createEnv(input) {
             return envs.createEnv(options.getState(), input);
         },
+        updateEnv(input) {
+            return envs.updateEnv(options.getState(), input);
+        },
         updateAccountRuntime(input) {
             return accounts.updateRuntime(options.getState(), input);
         },

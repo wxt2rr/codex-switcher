@@ -1,5 +1,5 @@
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 import {
   DEFAULT_SCHEMA_VERSION,
@@ -39,10 +39,25 @@ export interface CreateLegacyEnvOptions {
   envName: string;
 }
 
+export interface UpdateLegacyEnvOptions {
+  stateDir: string;
+  envsDir: string;
+  envName: string;
+  nextEnvName: string;
+  homePath: string;
+}
+
 interface LegacyRuntimeRecord {
   preferred_auth_method?: string;
   openai_base_url_mode?: string;
   openai_base_url?: string;
+  independent_model_enabled?: boolean;
+  independent_model_api_key?: string;
+  independent_model_base_url?: string;
+}
+
+interface LegacyEnvMetaRecord {
+  homePath?: string;
 }
 
 export async function readLegacyState(
@@ -125,6 +140,9 @@ export async function writeLegacyRuntime(
         preferred_auth_method: options.runtime.preferredAuthMethod,
         openai_base_url_mode: options.runtime.openaiBaseUrlMode,
         openai_base_url: options.runtime.openaiBaseUrl ?? "",
+        independent_model_enabled: options.runtime.independentModelEnabled ?? false,
+        independent_model_api_key: options.runtime.independentModelApiKey ?? "",
+        independent_model_base_url: options.runtime.independentModelBaseUrl ?? "",
       },
       null,
       2,
@@ -139,6 +157,31 @@ export async function createLegacyEnv(options: CreateLegacyEnvOptions): Promise<
   }
 
   await mkdir(join(options.envsDir, options.envName, "home"), { recursive: true });
+}
+
+export async function updateLegacyEnv(options: UpdateLegacyEnvOptions): Promise<void> {
+  if (options.envName !== options.nextEnvName && options.envName === DEFAULT_ENV_NAME) {
+    throw new Error("Cannot rename reserved default env");
+  }
+
+  if (options.envName !== options.nextEnvName && options.nextEnvName !== DEFAULT_ENV_NAME) {
+    await renameIfExists(
+      join(options.envsDir, options.envName),
+      join(options.envsDir, options.nextEnvName),
+    );
+    await renameIfExists(
+      join(options.stateDir, "env-accounts", options.envName),
+      join(options.stateDir, "env-accounts", options.nextEnvName),
+    );
+    await renameIfExists(
+      getEnvMetaPath(options.stateDir, options.envName),
+      getEnvMetaPath(options.stateDir, options.nextEnvName),
+    );
+  }
+
+  await writeLegacyEnvMeta(options.stateDir, options.nextEnvName, {
+    homePath: options.homePath,
+  });
 }
 
 async function readLegacyEnvState(
@@ -164,9 +207,10 @@ async function readLegacyEnvState(
   return {
     name: envName,
     path:
-      envName === DEFAULT_ENV_NAME
+      (await readLegacyEnvMeta(options.stateDir, envName)).homePath ||
+      (envName === DEFAULT_ENV_NAME
         ? options.defaultHome
-        : join(options.envsDir, envName, "home"),
+        : join(options.envsDir, envName, "home")),
     accounts,
   };
 }
@@ -183,16 +227,19 @@ async function readLegacyAccountState(
     name: accountName,
     authMode:
       runtimeRecord.preferred_auth_method === "apikey" ? "apikey" : "auth",
-    runtime: {
-      preferredAuthMethod: normalizePreferredAuthMethod(
-        runtimeRecord.preferred_auth_method,
-      ),
-      openaiBaseUrlMode: normalizeOpenAIBaseUrlMode(
-        runtimeRecord.openai_base_url_mode,
-      ),
-      openaiBaseUrl: runtimeRecord.openai_base_url || undefined,
-    },
-  };
+      runtime: {
+        preferredAuthMethod: normalizePreferredAuthMethod(
+          runtimeRecord.preferred_auth_method,
+        ),
+        openaiBaseUrlMode: normalizeOpenAIBaseUrlMode(
+          runtimeRecord.openai_base_url_mode,
+        ),
+        openaiBaseUrl: runtimeRecord.openai_base_url || undefined,
+        independentModelEnabled: runtimeRecord.independent_model_enabled === true,
+        independentModelApiKey: runtimeRecord.independent_model_api_key || undefined,
+        independentModelBaseUrl: runtimeRecord.independent_model_base_url || undefined,
+      },
+    };
 
   if (authData) {
     accountState.authData = authData;
@@ -255,6 +302,46 @@ async function listDirectoryNames(path: string): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+async function readLegacyEnvMeta(
+  stateDir: string,
+  envName: string,
+): Promise<LegacyEnvMetaRecord> {
+  try {
+    const raw = await readFile(getEnvMetaPath(stateDir, envName), "utf8");
+    const parsed = JSON.parse(raw) as LegacyEnvMetaRecord;
+    return typeof parsed.homePath === "string" && parsed.homePath
+      ? { homePath: parsed.homePath }
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeLegacyEnvMeta(
+  stateDir: string,
+  envName: string,
+  value: LegacyEnvMetaRecord,
+): Promise<void> {
+  const metaPath = getEnvMetaPath(stateDir, envName);
+  await mkdir(join(stateDir, "env-meta"), { recursive: true });
+  await writeFile(`${metaPath}`, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function getEnvMetaPath(stateDir: string, envName: string): string {
+  return join(stateDir, "env-meta", `${envName}.json`);
+}
+
+async function renameIfExists(source: string, target: string): Promise<void> {
+  try {
+    await stat(source);
+  } catch {
+    return;
+  }
+
+  await mkdir(dirname(target), { recursive: true });
+  await rename(source, target);
 }
 
 function normalizePreferredAuthMethod(value: unknown): PreferredAuthMethod {

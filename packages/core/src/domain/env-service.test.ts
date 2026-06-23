@@ -107,3 +107,38 @@ test("env service switches a target to the requested env when it exists", () => 
   assert.equal(next.targets.cli.env, "project-a");
   assert.equal(next.targets.cli.account, "default");
 });
+
+test("env service updates env name and path while preserving accounts and targets", () => {
+  const service = createEnvService();
+  const state = createSampleState();
+
+  const next = service.updateEnv(state, {
+    envName: "default",
+    nextEnvName: "default",
+    homePath: "/tmp/custom-default-home",
+    now: "2026-06-16T08:20:00.000Z",
+  });
+
+  assert.equal(next.envs.default?.path, "/tmp/custom-default-home");
+  assert.deepEqual(Object.keys(next.envs.default?.accounts ?? {}), ["work", "personal"]);
+  assert.equal(next.targets.cli.env, "default");
+  assert.equal(next.generatedAt, "2026-06-16T08:20:00.000Z");
+});
+
+test("env service rejects renaming the reserved default env", () => {
+  const service = createEnvService();
+
+  assert.throws(
+    () =>
+      service.updateEnv(createSampleState(), {
+        envName: "default",
+        nextEnvName: "workspace",
+        homePath: "/tmp/workspace-home",
+        now: "2026-06-16T08:25:00.000Z",
+      }),
+    (error: unknown) => {
+      assert.equal((error as EnvServiceError).code, "RESERVED_ENV");
+      return true;
+    },
+  );
+});
