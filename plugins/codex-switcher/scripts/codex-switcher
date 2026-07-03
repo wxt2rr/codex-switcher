@@ -4118,7 +4118,7 @@ ensure_target_auth_installed() {
 
 runtime_env_lines_for_target() {
   local target="$1"
-  local env account auth_file api_key preferred base_url_mode base_url
+  local env account auth_file api_key preferred base_url_mode base_url proxy_info proxy_value
   env="$(read_current_env "$target" || true)"
   account="$(read_current_account "$target" || true)"
   preferred="$(preferred_auth_method_for_account "$env" "$account")"
@@ -4161,6 +4161,19 @@ PY
   else
     printf 'OPENAI_API_KEY=\n'
     printf 'OPENAI_BASE_URL=\n'
+  fi
+
+  proxy_info="$(resolve_usage_proxy_with_source || true)"
+  if [[ -n "$proxy_info" ]]; then
+    IFS=$'\t' read -r _ proxy_value <<< "$proxy_info"
+    if [[ -n "$proxy_value" ]]; then
+      printf 'HTTP_PROXY=%s\n' "$proxy_value"
+      printf 'HTTPS_PROXY=%s\n' "$proxy_value"
+      printf 'ALL_PROXY=%s\n' "$proxy_value"
+      printf 'http_proxy=%s\n' "$proxy_value"
+      printf 'https_proxy=%s\n' "$proxy_value"
+      printf 'all_proxy=%s\n' "$proxy_value"
+    fi
   fi
 }
 

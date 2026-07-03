@@ -19,8 +19,9 @@
     "codex-home"
   ],
   "bin": {
-    "codex-sw": "plugins/codex-switcher/scripts/codex-sw",
-    "codex-switcher": "plugins/codex-switcher/scripts/codex-switcher"
+    "codex-sw": "scripts/bin/codex-sw.cjs",
+    "codex-switcher": "scripts/bin/codex-sw.cjs",
+    "codex-sw-node": "scripts/bin/codex-sw-node.cjs"
   },
   "workspaces": [
     "packages/*",
@@ -30,17 +31,25 @@
     "plugins/codex-switcher/**",
     "!plugins/codex-switcher/**/__pycache__/**",
     "!plugins/codex-switcher/**/*.pyc",
+    "scripts/bin/**",
     "docs/**",
     "scripts/install.sh",
+    "scripts/windows-manual-capture.ps1",
+    "scripts/windows-manual-start.ps1",
+    "scripts/windows-manual-result-template.ps1",
     "scripts/uninstall.sh",
     "CHANGELOG.md",
     "LICENSE",
     "README.md"
   ],
   "scripts": {
-    "lint": "bash -n plugins/codex-switcher/scripts/codex-switcher && bash -n plugins/codex-switcher/scripts/codex-sw",
-    "test": "plugins/codex-switcher/scripts/test-switcher.sh",
-    "cli:test": "tsx --test scripts/core-cli.test.ts scripts/legacy-cli-compat.test.ts",
+    "lint:bash": "bash -n plugins/codex-switcher/scripts/codex-switcher && bash -n plugins/codex-switcher/scripts/codex-sw",
+    "lint": "npm run lint:bash",
+    "test:cross-platform": "tsx --test packages/core/src/**/*.test.ts packages/core/src/*.test.ts scripts/bin-entry.test.ts scripts/ci-workflow.test.ts scripts/core-cli.test.ts scripts/node-cli.test.ts scripts/install-wrapper.test.ts scripts/readme-consistency.test.ts scripts/run-lifecycle-tests.test.ts scripts/windows-handoff.test.ts scripts/windows-manual-checklist.test.ts scripts/windows-manual-capture.test.ts scripts/windows-manual-start.test.ts scripts/windows-manual-result-template.test.ts scripts/windows-manual-result-template-script.test.ts scripts/windows-support-audit.test.ts scripts/package-files.test.ts scripts/package-scripts.test.ts",
+    "test:legacy-bash": "tsx --test scripts/legacy-cli-compat.test.ts",
+    "test": "npm run test:cross-platform && npm run test:legacy-bash",
+    "node-cli:test": "npm run test:cross-platform",
+    "cli:test": "npm run test:cross-platform && npm run test:legacy-bash",
     "core:test": "tsx --test packages/core/src/**/*.test.ts packages/core/src/*.test.ts",
     "core:build": "tsc -p packages/core/tsconfig.json",
     "core:cli": "tsx scripts/core-cli.ts",
@@ -48,6 +57,11 @@
     "desktop:dev": "npm run electron:dev --workspace ./apps/desktop",
     "desktop:electron": "npm run electron --workspace ./apps/desktop",
     "desktop:test": "npm run test:desktop --workspace ./apps/desktop",
+    "test:lifecycle": "node ./scripts/run-lifecycle-tests.mjs",
+    "windows:manual:start": "powershell -ExecutionPolicy Bypass -File ./scripts/windows-manual-start.ps1",
+    "windows:manual:capture": "powershell -ExecutionPolicy Bypass -File ./scripts/windows-manual-capture.ps1",
+    "windows:manual:result-template": "powershell -ExecutionPolicy Bypass -File ./scripts/windows-manual-result-template.ps1",
+    "check:cross-platform": "npm run test:cross-platform && npm run core:build",
     "check": "npm run lint && npm run test",
     "prepublishOnly": "npm run check",
     "release:npm": "./scripts/publish-npm.sh",

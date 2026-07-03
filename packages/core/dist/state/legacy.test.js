@@ -23,6 +23,7 @@ test("legacy reader hydrates envs, accounts, runtime settings, and target pointe
             openai_base_url_mode: "default",
             openai_base_url: "",
             independent_model_enabled: true,
+            independent_model_provider_id: "gateway",
             independent_model_api_key: "sk-model",
             independent_model_base_url: "https://model.example/v1",
         }), "utf8");
@@ -42,6 +43,7 @@ test("legacy reader hydrates envs, accounts, runtime settings, and target pointe
         assert.equal(state.envs.default.path, defaultHome);
         assert.equal(state.envs.default.accounts.personal.runtime.openaiBaseUrl, "https://proxy.example.test/v1");
         assert.equal(state.envs.default.accounts.work.runtime.independentModelEnabled, true);
+        assert.equal(state.envs.default.accounts.work.runtime.independentModelProviderId, "gateway");
         assert.equal(state.envs.default.accounts.work.runtime.independentModelApiKey, "sk-model");
         assert.equal(state.envs.default.accounts.work.runtime.independentModelBaseUrl, "https://model.example/v1");
     }

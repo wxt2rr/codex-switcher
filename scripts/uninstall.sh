@@ -1,37 +1,37 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+NODE_BIN="$ROOT/scripts/bin/codex-sw-node.cjs"
+STATE_DIR="${CODEX_SWITCHER_STATE_DIR:-$HOME/.codex-switcher}"
+ENVS_DIR="${CODEX_SWITCHER_ENVS_DIR:-$HOME/.codex-envs}"
+
 PURGE="false"
-if [[ "${1:-}" == "--purge" ]]; then
-  PURGE="true"
-elif [[ -n "${1:-}" ]]; then
-  echo "Usage: $0 [--purge]" >&2
-  exit 1
-fi
+NODE_ARGS=()
 
-remove_block() {
-  local file="$1"
-  local start="# >>> codex-sw init >>>"
-  local end="# <<< codex-sw init <<<"
-  [[ -f "$file" ]] || return 0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --purge)
+      PURGE="true"
+      shift
+      ;;
+    --shell)
+      [[ $# -ge 2 ]] || { echo "Usage: $0 [--shell <shell>] [--purge]" >&2; exit 1; }
+      NODE_ARGS+=("$1" "$2")
+      shift 2
+      ;;
+    *)
+      echo "Usage: $0 [--shell <shell>] [--purge]" >&2
+      exit 1
+      ;;
+  esac
+done
 
-  awk -v s="$start" -v e="$end" '
-    $0 == s {skip=1; next}
-    $0 == e {skip=0; next}
-    skip != 1 {print}
-  ' "$file" > "$file.tmp"
-  mv "$file.tmp" "$file"
-}
+[[ -f "$NODE_BIN" ]] || { echo "codex-sw node entry not found: $NODE_BIN" >&2; exit 1; }
 
-rm -f "$HOME/.local/bin/codex-sw" "$HOME/.local/bin/codex-switcher"
-remove_block "$HOME/.zshrc"
-remove_block "$HOME/.bashrc"
+node "$NODE_BIN" uninstall "${NODE_ARGS[@]}"
 
 if [[ "$PURGE" == "true" ]]; then
-  rm -rf "$HOME/.codex-switcher" "$HOME/.codex-profiles"
-fi
-
-echo "Uninstalled codex-sw."
-if [[ "$PURGE" == "true" ]]; then
-  echo "State and profiles removed."
+  rm -rf "$STATE_DIR" "$ENVS_DIR"
+  echo "State and env homes removed."
 fi

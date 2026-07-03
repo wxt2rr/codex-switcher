@@ -29,6 +29,15 @@ npm i -g @wangxt0223/codex-switcher
 codex-sw check
 ```
 
+### 平台支持现状
+
+- 当前默认入口：`codex-sw`
+- macOS / 类 Unix 终端下：`codex-sw` 默认继续走 Bash 版入口，保持现有工作流稳定
+- Windows 下：`codex-sw` / `codex-switcher` / `codex-sw-node` 安装后默认走 Node/TypeScript CLI 入口
+- Windows 原生支持：`cmd`、PowerShell、Windows Terminal
+- `codex-sw-node` 仍保留为显式 Node 入口，便于脚本化调用、验证与排障
+- macOS 当前仍以现有 Bash 入口为默认工作流，避免打断已有使用习惯
+
 ## 桌面版（Electron）
 
 当前仓库已经包含一个可运行的 Electron 桌面版，位置在 `apps/desktop`。
@@ -53,6 +62,18 @@ codex-sw check
 ./scripts/install.sh
 codex-sw check
 ```
+
+- Windows 下从源码安装建议直接运行：`node scripts/bin/codex-sw-node.cjs install --shell powershell`
+- 如果你使用 `cmd`，可改用：`node scripts/bin/codex-sw-node.cjs install --shell cmd`
+- 如果你主要通过 Windows Terminal 启动 PowerShell，可改用：`node scripts/bin/codex-sw-node.cjs install --shell windows-terminal`
+- Windows 下从源码卸载建议直接运行：`node scripts/bin/codex-sw-node.cjs uninstall --shell powershell`
+- 如果需要同时清理 switcher 状态和 env home，可直接追加：`--purge`
+- Windows 真机验收清单见 [docs/windows-manual-checklist.md](docs/windows-manual-checklist.md)
+- Windows 真机验收可直接从：`powershell -ExecutionPolicy Bypass -File .\scripts\windows-manual-start.ps1 -EvidencePath .\windows-manual-evidence.txt -ResultPath .\windows-manual-result.md` 开始
+- 在源码仓库里，也可以直接运行：`npm run windows:manual:start`
+- 如需在 Codex App 外部终端重新打开生命周期敏感测试，可运行：`npm run test:lifecycle`
+- 只想重抓命令证据时，可运行：`npm run windows:manual:capture`
+- 只想重建预填充结果模板时，可运行：`npm run windows:manual:result-template`
 
 ## 快速开始（推荐 TUI）
 
@@ -191,12 +212,15 @@ app: default/personal
 | `codex-sw env use <env> [-t cli\|app\|both]` | 切换环境 |
 | `codex-sw env rm <env> [--force]` | 删除环境（需二次 `y/n` 确认） |
 | `codex-sw ac ls [--env <env>]` | 查看账号总览 |
-| `codex-sw ac login <account> [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--mode auth\|apikey]` | 登录账号 |
-| `codex-sw ac relogin [account] [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--mode auth\|apikey]` | 重新登录已有账号（可交互选择环境/账号/模式） |
+| `codex-sw ac login <account> [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--mode auth\|apikey\|sub2api]` | 登录账号 |
+| `codex-sw ac relogin [account] [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--mode auth\|apikey\|sub2api]` | 重新登录已有账号（可交互选择环境/账号/模式） |
 | `codex-sw ac base-url <account> [--env <env>] [--mode default\|custom]` | 修改 API key 账号的 OpenAI Base URL |
 | `codex-sw ac use <account> [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync]` | 切换账号 |
 | `codex-sw app restart-current` | 重启当前 `app` 指针对应的 APP 实例 |
 | `codex-sw app launch-new` | 基于当前 `app` 指针新开一个 APP 实例 |
+| `codex-sw app stop-managed` | 停止当前由 switcher 管理的 APP 进程 |
+| `codex-sw app status` | 查看当前 `app` 指针对应的 APP 进程状态 |
+| `codex-sw app logout [account]` | 仅注销当前 `app` 指针对应账号 |
 | `codex-sw ac logout [account] [--env <env>] [-t cli\|app\|both]` | 注销账号 |
 | `codex-sw ac rm <account> [--env <env>] [--force]` | 删除账号（需二次 `y/n` 确认） |
 | `codex-sw whoami [-t cli\|app\|both]` | 查看当前 env/account |
@@ -207,7 +231,13 @@ app: default/personal
 | `codex-sw version` | 查看版本 |
 | `codex-sw check` | 健康检查 |
 | `codex-sw upgrade [--dry-run]` | 升级工具 |
-| `codex-sw ops token-refresh start` | 启动 token 自动续期守护（launchd） |
+| `codex-sw ops list` | 列出 env / home / account / current 标记总览 |
+| `codex-sw ops proxy [show\|test\|off\|<host:port>\|<scheme://host:port>]` | 查看、设置或测试 usage API 代理 |
+| `codex-sw ops init [--shell zsh\|bash\|powershell\|cmd\|windows-terminal\|wt] [--dry-run]` | 安装 shell 初始化片段与 launcher |
+| `codex-sw ops import-default <env> [--with-auth] [--force]` | 把默认环境数据导入到目标 env |
+| `codex-sw ops recover [--dry-run]` | 修复损坏的当前指针并回写 target home |
+| `codex-sw ops doctor [--fix]` | 查看平台/路径/二进制探测结果，并可执行基础修复 |
+| `codex-sw ops token-refresh start` | 启动 token 自动续期守护（Windows 计划任务 / macOS launchd） |
 | `codex-sw ops token-refresh stop` | 停止 token 自动续期守护 |
 | `codex-sw ops token-refresh status` | 查看 token 自动续期守护状态与日志路径 |
 | `codex-sw ops token-refresh run-once` | 立即执行一次 token 续期扫描 |

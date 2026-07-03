@@ -22,6 +22,7 @@ export interface AccountRuntimeSettings {
   providerId?: string;
   model?: string;
   independentModelEnabled?: boolean;
+  independentModelProviderId?: string;
   independentModelApiKey?: string;
   independentModelBaseUrl?: string;
 }
@@ -276,6 +277,9 @@ function validateRuntimeSettings(
   }
   if (typeof value.independentModelEnabled === "boolean") {
     runtime.independentModelEnabled = value.independentModelEnabled;
+  }
+  if (typeof value.independentModelProviderId === "string") {
+    runtime.independentModelProviderId = value.independentModelProviderId;
   }
   if (typeof value.independentModelApiKey === "string") {
     runtime.independentModelApiKey = value.independentModelApiKey;

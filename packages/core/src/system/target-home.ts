@@ -60,11 +60,12 @@ async function writeManagedConfig(
     managedLines.push(`openai_base_url = "${runtime.openaiBaseUrl}"`);
   }
   if (runtime.independentModelEnabled && runtime.preferredAuthMethod === "chatgpt") {
+    const providerId = normalizeProviderId(runtime.independentModelProviderId);
     managedLines.push("");
-    managedLines.push('model_provider = "custom"');
+    managedLines.push(`model_provider = ${quoteTomlString(providerId)}`);
     managedLines.push("");
-    managedLines.push("[model_providers.custom]");
-    managedLines.push('name = "custom"');
+    managedLines.push(`[model_providers.${providerId}]`);
+    managedLines.push(`name = ${quoteTomlString(providerId)}`);
     managedLines.push('model = "gpt-5.4"');
     managedLines.push(`base_url = ${quoteTomlString(runtime.independentModelBaseUrl ?? "")}`);
     managedLines.push(
@@ -90,25 +91,33 @@ async function clearManagedConfig(configPath: string) {
 function removeManagedConfigLines(content: string): string {
   const lines = content.split(/\r?\n/);
   const kept: string[] = [];
-  let skipCustomSection = false;
+  const managedProviderIds = new Set(
+    lines
+      .map((line) => line.trim().match(/^model_provider\s*=\s*"([^"]+)"$/)?.[1] ?? "")
+      .filter(Boolean),
+  );
+  let skipManagedProviderSection = false;
 
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) {
-      if (!skipCustomSection) {
+      if (!skipManagedProviderSection) {
         kept.push(line);
       }
       continue;
     }
 
-    if (trimmed === "[model_providers.custom]") {
-      skipCustomSection = true;
-      continue;
+    const providerHeaderMatch = trimmed.match(/^\[model_providers\.([A-Za-z0-9_-]+)\]$/);
+    if (providerHeaderMatch) {
+      if (managedProviderIds.has(providerHeaderMatch[1] ?? "")) {
+        skipManagedProviderSection = true;
+        continue;
+      }
     }
 
-    if (skipCustomSection) {
+    if (skipManagedProviderSection) {
       if (trimmed.startsWith("[")) {
-        skipCustomSection = false;
+        skipManagedProviderSection = false;
       } else {
         continue;
       }
@@ -117,7 +126,7 @@ function removeManagedConfigLines(content: string): string {
     if (
       trimmed.startsWith("preferred_auth_method") ||
       trimmed.startsWith("openai_base_url") ||
-      trimmed === 'model_provider = "custom"'
+      trimmed.startsWith("model_provider = ")
     ) {
       continue;
     }
@@ -137,6 +146,11 @@ function removeManagedConfigLines(content: string): string {
 
 function quoteTomlString(value: string): string {
   return JSON.stringify(value);
+}
+
+function normalizeProviderId(value: string | undefined): string {
+  const trimmed = (value ?? "").trim();
+  return trimmed || "custom";
 }
 
 async function readText(path: string): Promise<string> {

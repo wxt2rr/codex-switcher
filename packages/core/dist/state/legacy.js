@@ -44,6 +44,7 @@ export async function writeLegacyRuntime(options) {
         openai_base_url_mode: options.runtime.openaiBaseUrlMode,
         openai_base_url: options.runtime.openaiBaseUrl ?? "",
         independent_model_enabled: options.runtime.independentModelEnabled ?? false,
+        independent_model_provider_id: options.runtime.independentModelProviderId ?? "custom",
         independent_model_api_key: options.runtime.independentModelApiKey ?? "",
         independent_model_base_url: options.runtime.independentModelBaseUrl ?? "",
     }, null, 2)}\n`, "utf8");
@@ -98,6 +99,7 @@ async function readLegacyAccountState(accountRoot, accountName) {
             openaiBaseUrlMode: normalizeOpenAIBaseUrlMode(runtimeRecord.openai_base_url_mode),
             openaiBaseUrl: runtimeRecord.openai_base_url || undefined,
             independentModelEnabled: runtimeRecord.independent_model_enabled === true,
+            independentModelProviderId: runtimeRecord.independent_model_provider_id || "custom",
             independentModelApiKey: runtimeRecord.independent_model_api_key || undefined,
             independentModelBaseUrl: runtimeRecord.independent_model_base_url || undefined,
         },

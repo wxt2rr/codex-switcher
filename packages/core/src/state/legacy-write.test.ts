@@ -52,6 +52,7 @@ test("legacy writer persists runtime settings for account", async () => {
         openaiBaseUrlMode: "custom",
         openaiBaseUrl: "https://runtime.example/v1",
         independentModelEnabled: true,
+        independentModelProviderId: "gateway",
         independentModelApiKey: "sk-model",
         independentModelBaseUrl: "https://model.example/v1",
       },
@@ -65,6 +66,7 @@ test("legacy writer persists runtime settings for account", async () => {
     assert.match(raw, /"openai_base_url_mode": "custom"/);
     assert.match(raw, /"openai_base_url": "https:\/\/runtime\.example\/v1"/);
     assert.match(raw, /"independent_model_enabled": true/);
+    assert.match(raw, /"independent_model_provider_id": "gateway"/);
     assert.match(raw, /"independent_model_api_key": "sk-model"/);
     assert.match(raw, /"independent_model_base_url": "https:\/\/model\.example\/v1"/);
   } finally {

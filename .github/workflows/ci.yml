@@ -5,8 +5,15 @@ on:
   pull_request:
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  cross-platform:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+          - ubuntu-latest
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -15,17 +22,37 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Run lint
-        run: npm run lint
-      - name: Run core tests
-        run: npm run core:test
-      - name: Run core CLI tests
-        run: npm run cli:test
+      - name: Run cross-platform tests
+        run: npm run test:cross-platform
       - name: Build core
         run: npm run core:build
+
+  mac-legacy:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint legacy bash entrypoints
+        run: npm run lint:bash
+      - name: Run legacy bash compatibility tests
+        run: npm run test:legacy-bash
+
+  mac-desktop:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
       - name: Build desktop frontend
         run: npm run desktop:build
       - name: Run desktop tests
         run: npm run desktop:test
-      - name: Run tests
-        run: npm run test

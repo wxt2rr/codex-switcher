@@ -1,0 +1,113 @@
+export interface StatusViewData {
+  cli: {
+    current: string;
+    auth: string;
+    authExpiry: string;
+    loginState: string;
+  };
+  app: {
+    current: string;
+    auth: string;
+    authExpiry: string;
+    loginState: string;
+  };
+  tokenRefresh: {
+    guard: string;
+    needReloginLastRun: string;
+  };
+  setup?: {
+    summary: string;
+    suggestion: string;
+  };
+}
+
+export interface StatusOverviewData {
+  envName: string;
+  name: string;
+  isCurrentCli?: boolean;
+  isCurrentApp?: boolean;
+  authMode: string;
+  runtime?: {
+    preferredAuthMethod?: string;
+    openaiBaseUrl?: string;
+  };
+  apiKeyPreview?: string;
+}
+
+export function renderStatusScreen(input: {
+  status: StatusViewData;
+  accounts: StatusOverviewData[];
+  offset?: number;
+  viewLines?: number;
+}): string {
+  const lines = buildStatusLines(input.status, input.accounts);
+  const offset = Math.max(0, input.offset ?? 0);
+  const viewLines = Math.max(6, input.viewLines ?? lines.length);
+  const visible = lines.slice(offset, offset + viewLines);
+
+  return `codex-sw-node - Status\n\n${visible.join("\n")}\n\nUp/Down scroll  Esc/q back\n`;
+}
+
+export function buildStatusLines(
+  status: StatusViewData,
+  accounts: StatusOverviewData[],
+): string[] {
+  const lines = [
+    `CLI [${status.cli.loginState}]`,
+    "--------------------------------------------------------",
+    `TARGET        ${status.cli.current}`,
+    `AUTH          ${status.cli.auth}`,
+    `AUTH EXPIRY   ${status.cli.authExpiry}`,
+    "",
+    `APP [${status.app.loginState}]`,
+    "--------------------------------------------------------",
+    `TARGET        ${status.app.current}`,
+    `AUTH          ${status.app.auth}`,
+    `AUTH EXPIRY   ${status.app.authExpiry}`,
+    "",
+    `TOKEN REFRESH ${status.tokenRefresh.guard}`,
+    `NEED RELOGIN  ${status.tokenRefresh.needReloginLastRun}`,
+    "",
+  ];
+
+  if (status.setup?.summary) {
+    lines.push(`SETUP         ${status.setup.summary}`);
+    if (status.setup.suggestion) {
+      lines.push(`ACTION        ${status.setup.suggestion}`);
+    }
+    lines.push("");
+  }
+
+  const grouped = new Map<string, StatusOverviewData[]>();
+  for (const account of accounts) {
+    const list = grouped.get(account.envName) || [];
+    list.push(account);
+    grouped.set(account.envName, list);
+  }
+
+  for (const envName of [...grouped.keys()].sort()) {
+    lines.push(`ENV: ${envName}`);
+    lines.push("--------------------------------------------------------");
+    const envAccounts = grouped.get(envName) || [];
+    for (const account of envAccounts.sort((a, b) => a.name.localeCompare(b.name))) {
+      const tags = [
+        account.isCurrentCli ? "[cli]" : "",
+        account.isCurrentApp ? "[app]" : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      lines.push(`${account.name}${tags ? ` ${tags}` : ""}`);
+      lines.push(
+        `  auth: ${account.authMode} / ${account.runtime?.preferredAuthMethod ?? "-"}`,
+      );
+      if (account.authMode === "apikey") {
+        lines.push(`  api key: ${account.apiKeyPreview ?? "-"}`);
+        lines.push(`  base url: ${account.runtime?.openaiBaseUrl || "default"}`);
+      }
+      lines.push("");
+    }
+  }
+
+  return lines;
+}

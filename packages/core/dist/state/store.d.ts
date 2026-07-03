@@ -15,6 +15,7 @@ export interface AccountRuntimeSettings {
     providerId?: string;
     model?: string;
     independentModelEnabled?: boolean;
+    independentModelProviderId?: string;
     independentModelApiKey?: string;
     independentModelBaseUrl?: string;
 }

@@ -29,6 +29,15 @@ npm i -g @wangxt0223/codex-switcher
 codex-sw check
 ```
 
+### Platform Support Status
+
+- Current default entrypoint: `codex-sw`
+- On macOS and Unix-like terminals: `codex-sw` still defaults to the legacy Bash entrypoint to preserve the current workflow
+- On Windows: installed `codex-sw`, `codex-switcher`, and `codex-sw-node` now default to the Node/TypeScript CLI entrypoint
+- Windows native support: `cmd`, PowerShell, and Windows Terminal
+- `codex-sw-node` remains available as the explicit Node entrypoint for scripting, verification, and troubleshooting
+- macOS currently keeps the existing Bash entrypoints as the default workflow to avoid disrupting established usage
+
 ## Desktop App (Electron)
 
 This repository now includes a runnable Electron desktop app under `apps/desktop`.
@@ -53,6 +62,18 @@ Notes:
 ./scripts/install.sh
 codex-sw check
 ```
+
+- On Windows, prefer running from source with: `node scripts/bin/codex-sw-node.cjs install --shell powershell`
+- If you use `cmd`, use: `node scripts/bin/codex-sw-node.cjs install --shell cmd`
+- If you mainly launch PowerShell through Windows Terminal, use: `node scripts/bin/codex-sw-node.cjs install --shell windows-terminal`
+- On Windows, prefer uninstalling from source with: `node scripts/bin/codex-sw-node.cjs uninstall --shell powershell`
+- If you also want to remove switcher state and env homes, append: `--purge`
+- For live Windows validation, see [docs/windows-manual-checklist.md](docs/windows-manual-checklist.md)
+- To start live Windows validation directly, run: `powershell -ExecutionPolicy Bypass -File .\scripts\windows-manual-start.ps1 -EvidencePath .\windows-manual-evidence.txt -ResultPath .\windows-manual-result.md`
+- From a source checkout, you can also run: `npm run windows:manual:start`
+- To re-enable lifecycle-sensitive coverage from an external terminal outside Codex App, run: `npm run test:lifecycle`
+- If you only want to recapture command evidence, run: `npm run windows:manual:capture`
+- If you only want to regenerate the prefilled result template, run: `npm run windows:manual:result-template`
 
 ## Quick Start (TUI First)
 
@@ -190,12 +211,15 @@ app: default/personal
 | `codex-sw env use <env> [-t cli\|app\|both]` | Switch env |
 | `codex-sw env rm <env> [--force]` | Remove env (double `y/n` confirmation) |
 | `codex-sw ac ls [--env <env>]` | Show account overview |
-| `codex-sw ac login <account> [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--mode auth\|apikey]` | Login account |
-| `codex-sw ac relogin [account] [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--mode auth\|apikey]` | Relogin an existing account (interactive env/account/mode selection supported) |
+| `codex-sw ac login <account> [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--mode auth\|apikey\|sub2api]` | Login account |
+| `codex-sw ac relogin [account] [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync] [--mode auth\|apikey\|sub2api]` | Relogin an existing account (interactive env/account/mode selection supported) |
 | `codex-sw ac base-url <account> [--env <env>] [--mode default\|custom]` | Update the OpenAI Base URL for an API key account |
 | `codex-sw ac use <account> [--env <env>] [-t cli\|app\|both] [--sync\|--no-sync]` | Switch account |
 | `codex-sw app restart-current` | Restart the APP instance for the current `app` pointer |
 | `codex-sw app launch-new` | Launch a new APP instance for the current `app` pointer |
+| `codex-sw app stop-managed` | Stop the APP process currently managed by switcher |
+| `codex-sw app status` | Show the APP process state for the current `app` pointer |
+| `codex-sw app logout [account]` | Logout only the account selected by the current `app` pointer |
 | `codex-sw ac logout [account] [--env <env>] [-t cli\|app\|both]` | Logout account |
 | `codex-sw ac rm <account> [--env <env>] [--force]` | Remove account (double `y/n` confirmation) |
 | `codex-sw whoami [-t cli\|app\|both]` | Show current env/account |
@@ -206,7 +230,13 @@ app: default/personal
 | `codex-sw version` | Show version |
 | `codex-sw check` | Health check |
 | `codex-sw upgrade [--dry-run]` | Upgrade tool |
-| `codex-sw ops token-refresh start` | Start token auto-refresh guard (launchd) |
+| `codex-sw ops list` | List env / home / account / current markers in one table |
+| `codex-sw ops proxy [show\|test\|off\|<host:port>\|<scheme://host:port>]` | Show, set, or test the usage API proxy |
+| `codex-sw ops init [--shell zsh\|bash\|powershell\|cmd\|windows-terminal\|wt] [--dry-run]` | Install shell init blocks and launcher files |
+| `codex-sw ops import-default <env> [--with-auth] [--force]` | Import default env data into a target env |
+| `codex-sw ops recover [--dry-run]` | Repair broken current pointers and re-apply target home state |
+| `codex-sw ops doctor [--fix]` | Show platform/path/binary diagnostics and optionally apply basic fixes |
+| `codex-sw ops token-refresh start` | Start token auto-refresh guard (Windows scheduled task / macOS launchd) |
 | `codex-sw ops token-refresh stop` | Stop token auto-refresh guard |
 | `codex-sw ops token-refresh status` | Show token auto-refresh guard status and log path |
 | `codex-sw ops token-refresh run-once` | Execute one token refresh scan immediately |

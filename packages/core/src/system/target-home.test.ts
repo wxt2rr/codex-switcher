@@ -84,6 +84,7 @@ test("target-home writer appends managed custom model config for auth account wh
               preferredAuthMethod: "chatgpt",
               openaiBaseUrlMode: "default",
               independentModelEnabled: true,
+              independentModelProviderId: "gateway",
               independentModelApiKey: "sk-apikey",
               independentModelBaseUrl: "https://proxy.example.test/v1",
             },
@@ -102,9 +103,9 @@ test("target-home writer appends managed custom model config for auth account wh
 
     const config = await readFile(join(homePath, "config.toml"), "utf8");
     assert.match(config, /preferred_auth_method = "chatgpt"/);
-    assert.match(config, /model_provider = "custom"/);
-    assert.match(config, /\[model_providers\.custom\]/);
-    assert.match(config, /name = "custom"/);
+    assert.match(config, /model_provider = "gateway"/);
+    assert.match(config, /\[model_providers\.gateway\]/);
+    assert.match(config, /name = "gateway"/);
     assert.match(config, /model = "gpt-5.4"/);
     assert.match(config, /base_url = "https:\/\/proxy\.example\.test\/v1"/);
     assert.match(config, /experimental_bearer_token = "sk-apikey"/);
@@ -126,7 +127,9 @@ test("target-home writer preserves unmanaged config and removes managed fields o
     assert.doesNotMatch(config, /preferred_auth_method/);
     assert.doesNotMatch(config, /openai_base_url/);
     assert.doesNotMatch(config, /model_provider = "custom"/);
+    assert.doesNotMatch(config, /model_provider = "gateway"/);
     assert.doesNotMatch(config, /\[model_providers\.custom\]/);
+    assert.doesNotMatch(config, /\[model_providers\.gateway\]/);
     assert.match(config, /model = "gpt-5.5"/);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -173,7 +176,9 @@ test("target-home writer clears managed files when selected account is missing",
     assert.doesNotMatch(config, /preferred_auth_method/);
     assert.doesNotMatch(config, /openai_base_url/);
     assert.doesNotMatch(config, /model_provider = "custom"/);
+    assert.doesNotMatch(config, /model_provider = "gateway"/);
     assert.doesNotMatch(config, /\[model_providers\.custom\]/);
+    assert.doesNotMatch(config, /\[model_providers\.gateway\]/);
     assert.match(config, /model = "gpt-5.5"/);
   } finally {
     await rm(root, { recursive: true, force: true });

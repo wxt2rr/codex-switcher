@@ -26,7 +26,7 @@ cat > "$BIN/codex" <<'FAKE'
 #!/usr/bin/env bash
 set -euo pipefail
 echo "${CODEX_HOME:-}|$*" >> "${CODEX_SWITCHER_TEST_CODEX_LOG:?}"
-echo "api_key=${OPENAI_API_KEY:-}|base_url=${OPENAI_BASE_URL:-}" >> "${CODEX_SWITCHER_TEST_CODEX_ENV_LOG:?}"
+echo "api_key=${OPENAI_API_KEY:-}|base_url=${OPENAI_BASE_URL:-}|https_proxy=${HTTPS_PROXY:-}|http_proxy=${HTTP_PROXY:-}|all_proxy=${ALL_PROXY:-}" >> "${CODEX_SWITCHER_TEST_CODEX_ENV_LOG:?}"
 if [[ "${1:-}" == "login" && "${2:-}" == "status" ]]; then
   if [[ -f "${CODEX_HOME}/auth.json" ]]; then
     echo "Logged in"
@@ -56,7 +56,7 @@ chmod +x "$BIN/codex"
 cat > "$BIN/fake-codex-app" <<'APP'
 #!/usr/bin/env bash
 set -euo pipefail
-echo "api_key=${OPENAI_API_KEY:-}|base_url=${OPENAI_BASE_URL:-}" >> "${CODEX_SWITCHER_TEST_APP_ENV_LOG:?}"
+echo "api_key=${OPENAI_API_KEY:-}|base_url=${OPENAI_BASE_URL:-}|https_proxy=${HTTPS_PROXY:-}|http_proxy=${HTTP_PROXY:-}|all_proxy=${ALL_PROXY:-}" >> "${CODEX_SWITCHER_TEST_APP_ENV_LOG:?}"
 sleep 30
 APP
 chmod +x "$BIN/fake-codex-app"
@@ -314,6 +314,7 @@ grep -q '^preferred_auth_method = "apikey"$' "$DEFAULT_HOME/config.toml"
 head -n 1 "$DEFAULT_HOME/config.toml" | grep -q '^preferred_auth_method = "apikey"$'
 "$SW" cli launch-current -- login status >/tmp/codex_sw_cli_launch_apikey_default.out
 tail -n 1 "$CODEX_SWITCHER_TEST_CODEX_ENV_LOG" | grep -q "api_key=sk-test-apikey-12345678|base_url="
+tail -n 1 "$CODEX_SWITCHER_TEST_CODEX_ENV_LOG" | grep -q "https_proxy=http://127.0.0.1:7899|http_proxy=http://127.0.0.1:7899|all_proxy=http://127.0.0.1:7899"
 
 ORIG_CODEX_BIN="${CODEX_SWITCHER_CODEX_BIN:-}"
 BIN_ONLY_CODEX="$BIN/codex-bin-only"
@@ -359,6 +360,7 @@ head -n 1 "$DEFAULT_HOME/config.toml" | grep -q '^preferred_auth_method = "apike
 head -n 2 "$DEFAULT_HOME/config.toml" | tail -n 1 | grep -q '^openai_base_url = "https://proxy.example.test/v1"$'
 "$SW" cli launch-current -- login status >/tmp/codex_sw_cli_launch_apikey_custom.out
 tail -n 1 "$CODEX_SWITCHER_TEST_CODEX_ENV_LOG" | grep -q "api_key=sk-relogin-key-9999|base_url=https://proxy.example.test/v1"
+tail -n 1 "$CODEX_SWITCHER_TEST_CODEX_ENV_LOG" | grep -q "https_proxy=http://127.0.0.1:7899|http_proxy=http://127.0.0.1:7899|all_proxy=http://127.0.0.1:7899"
 COLUMNS=100 LINES=32 "$SW" __test-status-snapshot >/tmp/codex_sw_tui_status_apikey.out
 grep -Fq "api key" /tmp/codex_sw_tui_status_apikey.out
 grep -Fq "sk-***9999" /tmp/codex_sw_tui_status_apikey.out
@@ -552,12 +554,14 @@ fi
 [[ "$("$SW" whoami -t app)" == "default/work" ]]
 "$SW" app restart-current >/tmp/codex_sw_app_restart.out
 grep -q "Opened Codex App with: default/work" /tmp/codex_sw_app_restart.out
+tail -n 1 "$CODEX_SWITCHER_TEST_APP_ENV_LOG" | grep -q "https_proxy=http://127.0.0.1:7899|http_proxy=http://127.0.0.1:7899|all_proxy=http://127.0.0.1:7899"
 first_pid="$(cat "$STATE/app.pid")"
 app_instances_after_restart="$(find "$STATE/app-instances" -name '*.pid' | wc -l | tr -d ' ')"
 [[ "$app_instances_after_restart" -eq 1 ]]
 
 "$SW" app launch-new >/tmp/codex_sw_app_launch_new.out
 grep -q "Opened Codex App with: default/work" /tmp/codex_sw_app_launch_new.out
+tail -n 1 "$CODEX_SWITCHER_TEST_APP_ENV_LOG" | grep -q "https_proxy=http://127.0.0.1:7899|http_proxy=http://127.0.0.1:7899|all_proxy=http://127.0.0.1:7899"
 second_pid="$(cat "$STATE/app.pid")"
 [[ "$second_pid" != "$first_pid" ]]
 app_instances_after_launch_new="$(find "$STATE/app-instances" -name '*.pid' | wc -l | tr -d ' ')"
