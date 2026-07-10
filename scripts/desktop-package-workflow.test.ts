@@ -26,7 +26,9 @@ test("desktop packaging workflow builds native installers for version tags and m
   for (const content of requiredContent) {
     assert.ok(workflow.includes(content), `desktop package workflow should include: ${content}`);
   }
-  assert.equal(workflow.match(/actions\/upload-artifact@v4/g)?.length, 2);
+  assert.equal(workflow.match(/actions\/checkout@v7/g)?.length, 2);
+  assert.equal(workflow.match(/actions\/setup-node@v6/g)?.length, 2);
+  assert.equal(workflow.match(/actions\/upload-artifact@v7/g)?.length, 2);
   assert.equal(workflow.match(/if-no-files-found: error/g)?.length, 2);
   assert.equal(workflow.match(/retention-days: 14/g)?.length, 2);
   assert.doesNotMatch(workflow, /contents:\s*write/);

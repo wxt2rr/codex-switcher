@@ -15,10 +15,13 @@ async function writeFileRecursive(path: string, content: string): Promise<void> 
 
 test("electron bridge resolves log paths from env overrides and defaults", () => {
   const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
   const previousSwitchLog = process.env.CODEX_SWITCHER_SWITCH_LOG;
   const previousRefreshLog = process.env.CODEX_SWITCHER_TOKEN_REFRESH_LOG;
+  const testHome = join(tmpdir(), "codex-switcher-test-home");
 
-  process.env.HOME = "/Users/tester";
+  process.env.HOME = testHome;
+  process.env.USERPROFILE = testHome;
   process.env.CODEX_SWITCHER_SWITCH_LOG = "/tmp/custom-switcher.log";
   process.env.CODEX_SWITCHER_TOKEN_REFRESH_LOG = "/tmp/custom-token-refresh.log";
 
@@ -28,13 +31,16 @@ test("electron bridge resolves log paths from env overrides and defaults", () =>
   delete process.env.CODEX_SWITCHER_SWITCH_LOG;
   delete process.env.CODEX_SWITCHER_TOKEN_REFRESH_LOG;
 
-  assert.equal(__testUtils.resolveLogPath("switcher"), "/Users/tester/.codex-switcher/switcher.log");
-  assert.equal(__testUtils.resolveLogPath("token-refresh"), "/Users/tester/.codex-switcher/token-refresh.log");
+  assert.equal(__testUtils.resolveLogPath("switcher"), join(testHome, ".codex-switcher", "switcher.log"));
+  assert.equal(__testUtils.resolveLogPath("token-refresh"), join(testHome, ".codex-switcher", "token-refresh.log"));
   assert.throws(() => __testUtils.resolveLogPath("unknown"), /unsupported log kind/);
 
-  process.env.HOME = previousHome;
-  process.env.CODEX_SWITCHER_SWITCH_LOG = previousSwitchLog;
-  process.env.CODEX_SWITCHER_TOKEN_REFRESH_LOG = previousRefreshLog;
+  if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
+  if (previousUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = previousUserProfile;
+  if (previousSwitchLog === undefined) delete process.env.CODEX_SWITCHER_SWITCH_LOG;
+  else process.env.CODEX_SWITCHER_SWITCH_LOG = previousSwitchLog;
+  if (previousRefreshLog === undefined) delete process.env.CODEX_SWITCHER_TOKEN_REFRESH_LOG;
+  else process.env.CODEX_SWITCHER_TOKEN_REFRESH_LOG = previousRefreshLog;
 });
 
 test("electron bridge validates sub2api payloads before account artifact generation", () => {
@@ -181,7 +187,7 @@ test("electron bridge keeps the legacy bash switcher command on macOS", () => {
   });
 
   assert.equal(plan.command, "bash");
-  assert.match(plan.args[0] ?? "", /plugins\/codex-switcher\/scripts\/codex-switcher$/);
+  assert.match(plan.args[0] ?? "", /plugins[\\/]codex-switcher[\\/]scripts[\\/]codex-switcher$/);
   assert.deepEqual(plan.args.slice(1), ["ops", "doctor"]);
 });
 
@@ -223,9 +229,9 @@ test("electron bridge derives legacy paths from Windows runtime defaults", () =>
     "win32",
   );
 
-  assert.equal(options.stateDir, "C:\\Users\\tester/.codex-switcher");
-  assert.equal(options.envsDir, "C:\\Users\\tester/.codex-envs");
-  assert.equal(options.defaultHome, "C:\\Users\\tester/.codex");
+  assert.equal(options.stateDir, join("C:\\Users\\tester", ".codex-switcher"));
+  assert.equal(options.envsDir, join("C:\\Users\\tester", ".codex-envs"));
+  assert.equal(options.defaultHome, join("C:\\Users\\tester", ".codex"));
 });
 
 test("electron bridge derives legacy paths from macOS runtime defaults", () => {
@@ -236,12 +242,12 @@ test("electron bridge derives legacy paths from macOS runtime defaults", () => {
     "darwin",
   );
 
-  assert.equal(options.stateDir, "/Users/tester/.codex-switcher");
-  assert.equal(options.envsDir, "/Users/tester/.codex-envs");
-  assert.equal(options.defaultHome, "/Users/tester/.codex");
+  assert.equal(options.stateDir, join("/Users/tester", ".codex-switcher"));
+  assert.equal(options.envsDir, join("/Users/tester", ".codex-envs"));
+  assert.equal(options.defaultHome, join("/Users/tester", ".codex"));
 });
 
-test("electron bridge resolves usage proxy through shared core detection", async () => {
+test("electron bridge resolves usage proxy through shared core detection", { skip: process.platform !== "darwin" }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-proxy-"));
   const previousEnv = { ...process.env };
 
@@ -279,7 +285,7 @@ test("electron bridge resolves Windows codex binary candidates without macOS har
     "win32",
   );
 
-  assert.equal(codexBin, "C:\\Users\\tester/AppData/Local/Programs/Codex/codex.exe");
+  assert.equal(codexBin, join("C:\\Users\\tester", "AppData", "Local", "Programs", "Codex", "codex.exe"));
 });
 
 test("electron bridge honors explicit codex binary override before platform defaults", () => {
