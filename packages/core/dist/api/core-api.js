@@ -23,7 +23,7 @@ export function createCoreApi(options) {
                     .flatMap((envName) => accounts.listAccounts(state, { envName }).map((account) => ({
                     envName,
                     ...account,
-                    apiKeyPreview: maskApiKey(state.envs[envName]?.accounts[account.name]?.authData?.OPENAI_API_KEY),
+                    apiKeyPreview: maskApiKey(readAuthStringField(state.envs[envName]?.accounts[account.name]?.authData, "OPENAI_API_KEY")),
                 }))),
                 recentTasks: state.tasks.recent,
             };
@@ -38,7 +38,7 @@ export function createCoreApi(options) {
                 .flatMap((envName) => accounts.listAccounts(state, { envName }).map((account) => ({
                 envName,
                 ...account,
-                apiKeyPreview: maskApiKey(state.envs[envName]?.accounts[account.name]?.authData?.OPENAI_API_KEY),
+                apiKeyPreview: maskApiKey(readAuthStringField(state.envs[envName]?.accounts[account.name]?.authData, "OPENAI_API_KEY")),
             })));
         },
         selectEnv(input) {
@@ -101,7 +101,10 @@ function describeAuthExpiry(account) {
         return "-";
     }
     try {
-        const tokens = JSON.parse(account.authData.tokens);
+        const rawTokens = account.authData.tokens;
+        const tokens = typeof rawTokens === "string"
+            ? JSON.parse(rawTokens)
+            : rawTokens;
         const accessToken = tokens.access_token;
         if (!accessToken) {
             return "-";
@@ -143,5 +146,9 @@ function maskApiKey(value) {
         return "***";
     }
     return `${value.slice(0, 3)}***${value.slice(-4)}`;
+}
+function readAuthStringField(authData, field) {
+    const value = authData?.[field];
+    return typeof value === "string" && value.trim() ? value : undefined;
 }
 //# sourceMappingURL=core-api.js.map

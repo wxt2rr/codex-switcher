@@ -57,6 +57,13 @@ export async function readUsageProxyState(stateDir, env = process.env, platform 
             value: system,
         };
     }
+    const clash = await detectClashVergeUsageProxy(env, platform);
+    if (clash) {
+        return {
+            source: "auto-system",
+            value: clash,
+        };
+    }
     return {
         source: "off",
         value: "",
@@ -96,6 +103,38 @@ async function detectSystemUsageProxy(env, platform) {
         return null;
     }
 }
+async function detectClashVergeUsageProxy(env, platform) {
+    if (env.DISABLE_SYSTEM_PROXY_DETECT === "true") {
+        return null;
+    }
+    if (detectPlatform(platform) !== "macos") {
+        return null;
+    }
+    const homeDir = env.HOME ||
+        process.env.HOME;
+    if (!homeDir) {
+        return null;
+    }
+    const configDir = join(homeDir, "Library", "Application Support", "io.github.clash-verge-rev.clash-verge-rev");
+    const candidates = [
+        join(configDir, "clash-verge.yaml"),
+        join(configDir, "clash-verge-check.yaml"),
+        join(configDir, "verge.yaml"),
+    ];
+    for (const filePath of candidates) {
+        try {
+            const raw = await readFile(filePath, "utf8");
+            const proxy = parseClashVergeProxyDump(raw);
+            if (proxy) {
+                return proxy;
+            }
+        }
+        catch {
+            continue;
+        }
+    }
+    return null;
+}
 function parseMacOsProxyDump(raw) {
     const httpsProxy = extractMacOsProxy(raw, "HTTPS");
     if (httpsProxy) {
@@ -124,5 +163,27 @@ function extractMacOsProxy(raw, kind) {
 function matchProxyField(raw, field) {
     const match = raw.match(new RegExp(`^\\s*${field}\\s*:\\s*(.+)$`, "m"));
     return match?.[1]?.trim() || null;
+}
+function parseClashVergeProxyDump(raw) {
+    const patterns = [
+        /^\s*mixed-port:\s*(\d+)\s*$/m,
+        /^\s*verge_mixed_port:\s*(\d+)\s*$/m,
+        /^\s*port:\s*(\d+)\s*$/m,
+        /^\s*verge_port:\s*(\d+)\s*$/m,
+    ];
+    for (const pattern of patterns) {
+        const match = raw.match(pattern);
+        const value = Number.parseInt(match?.[1] || "", 10);
+        if (!Number.isInteger(value) || value <= 0 || value > 65535) {
+            continue;
+        }
+        try {
+            return normalizeUsageProxyValue(`http://127.0.0.1:${value}`);
+        }
+        catch {
+            continue;
+        }
+    }
+    return null;
 }
 //# sourceMappingURL=proxy.js.map

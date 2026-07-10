@@ -1,0 +1,45 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { UsageRouterManager } from "./usage-router-manager.js";
+import { startUsageRouterService } from "./usage-router-service.js";
+
+test("environment routing skips AUTH accounts and restores exact upstream URLs", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-manager-"));
+  let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
+  const manager = new UsageRouterManager({
+    stateDir, serviceEntryPath: "unused",
+    launchService: async () => { service = await startUsageRouterService({ stateDir: join(stateDir, "usage-router") }); },
+  });
+  const values = new Map<string, string>();
+  const update = async (account: string, baseUrl: string) => { values.set(account, baseUrl); };
+  try {
+    const enabled = await manager.enableEnvironment("work", [
+      { envName: "work", accountName: "key", authMode: "apikey", baseUrl: "https://api.example.com/v1/" },
+      { envName: "work", accountName: "login", authMode: "auth", baseUrl: "" },
+    ], update);
+    assert.equal(enabled.routedAccounts, 1);
+    assert.match(values.get("key") ?? "", /^http:\/\/127\.0\.0\.1:\d+\/routes\//);
+    assert.equal(values.has("login"), false);
+
+    await manager.disableEnvironment("work", update);
+    assert.equal(values.get("key"), "https://api.example.com/v1/");
+  } finally {
+    await service?.close();
+  }
+});
+
+test("read-only route lookup does not start a missing router service", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-manager-readonly-"));
+  let launchCount = 0;
+  const manager = new UsageRouterManager({
+    stateDir,
+    serviceEntryPath: "unused",
+    launchService: async () => { launchCount += 1; },
+  });
+  assert.deepEqual(await manager.listRoutesIfRunning(), []);
+  assert.equal(launchCount, 0);
+});

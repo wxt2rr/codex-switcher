@@ -84,7 +84,8 @@ export async function restartCurrentCodexApp(input, runner = defaultCodexAppRunn
 async function defaultManagedAppStopper(pid) {
     try {
         await executeManagedAppStopPlan(buildManagedAppStopPlan({
-            platform: detectPlatform(),
+            platform: detectPlatform(process.env.CODEX_SWITCHER_TEST_PLATFORM ||
+                process.platform),
             pid,
             preferAppQuit: true,
         }));

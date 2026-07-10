@@ -9,6 +9,14 @@ export type AuthMode = "auth" | "apikey" | "provider-profile";
 export type PreferredAuthMethod = "chatgpt" | "apikey";
 export type OpenAIBaseUrlMode = "default" | "custom";
 export type TaskStatus = "pending" | "running" | "succeeded" | "failed";
+export type AuthDataValue =
+  | string
+  | number
+  | boolean
+  | null
+  | Record<string, unknown>
+  | unknown[];
+export type AuthDataRecord = Record<string, AuthDataValue>;
 
 export interface TargetPointer {
   env: string;
@@ -31,7 +39,7 @@ export interface AccountState {
   name: string;
   authMode: AuthMode;
   runtime: AccountRuntimeSettings;
-  authData?: Record<string, string>;
+  authData?: AuthDataRecord;
 }
 
 export interface EnvState {
@@ -229,7 +237,7 @@ function validateAccountState(name: string, value: unknown): AccountState {
     runtime: validateRuntimeSettings(name, value.runtime),
   };
 
-  if (isStringRecord(value.authData)) {
+  if (isAuthDataRecord(value.authData)) {
     accountState.authData = value.authData;
   }
 
@@ -361,9 +369,23 @@ function isTaskStatus(value: unknown): value is TaskStatus {
   );
 }
 
-function isStringRecord(value: unknown): value is Record<string, string> {
-  return (
-    isRecord(value) &&
-    Object.values(value).every((entry) => typeof entry === "string")
-  );
+function isAuthDataRecord(value: unknown): value is AuthDataRecord {
+  return isRecord(value) && Object.values(value).every(isAuthDataValue);
+}
+
+function isAuthDataValue(value: unknown): value is AuthDataValue {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return true;
+  }
+
+  if (Array.isArray(value)) {
+    return true;
+  }
+
+  return isRecord(value);
 }

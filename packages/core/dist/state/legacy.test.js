@@ -78,6 +78,39 @@ test("legacy reader hydrates auth metadata from account auth.json", async () => 
         await rm(root, { recursive: true, force: true });
     }
 });
+test("legacy reader preserves nested token objects from account auth.json", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-legacy-auth-object-"));
+    const stateDir = join(root, ".codex-switcher");
+    const envsDir = join(root, ".codex-envs");
+    const defaultHome = join(root, ".codex");
+    try {
+        await mkdir(join(stateDir, "env-accounts", "default", "personal"), { recursive: true });
+        await mkdir(defaultHome, { recursive: true });
+        await writeFile(join(stateDir, "env-accounts", "default", "personal", "auth.json"), JSON.stringify({
+            auth_mode: "chatgpt",
+            tokens: {
+                access_token: "access-token",
+                refresh_token: "refresh-token",
+            },
+        }), "utf8");
+        const state = await readLegacyState({
+            stateDir,
+            envsDir,
+            defaultHome,
+            now: "2026-06-16T01:02:03.000Z",
+        });
+        assert.deepEqual(state.envs.default.accounts.personal.authData, {
+            auth_mode: "chatgpt",
+            tokens: {
+                access_token: "access-token",
+                refresh_token: "refresh-token",
+            },
+        });
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
 test("legacy reader prefers persisted env metadata home path overrides", async () => {
     const root = await mkdtemp(join(tmpdir(), "codex-switcher-legacy-env-meta-"));
     const stateDir = join(root, ".codex-switcher");

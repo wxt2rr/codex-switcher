@@ -31,9 +31,10 @@ export function createCoreApi(options: CoreApiOptions) {
             accounts.listAccounts(state, { envName }).map((account) => ({
               envName,
               ...account,
-              apiKeyPreview: maskApiKey(
-                state.envs[envName]?.accounts[account.name]?.authData?.OPENAI_API_KEY,
-              ),
+              apiKeyPreview: maskApiKey(readAuthStringField(
+                state.envs[envName]?.accounts[account.name]?.authData,
+                "OPENAI_API_KEY",
+              )),
             })),
           ),
         recentTasks: state.tasks.recent,
@@ -52,9 +53,10 @@ export function createCoreApi(options: CoreApiOptions) {
           accounts.listAccounts(state, { envName }).map((account) => ({
             envName,
             ...account,
-            apiKeyPreview: maskApiKey(
-              state.envs[envName]?.accounts[account.name]?.authData?.OPENAI_API_KEY,
-            ),
+            apiKeyPreview: maskApiKey(readAuthStringField(
+              state.envs[envName]?.accounts[account.name]?.authData,
+              "OPENAI_API_KEY",
+            )),
           })),
         );
     },
@@ -159,7 +161,11 @@ function describeAuthExpiry(
   }
 
   try {
-    const tokens = JSON.parse(account.authData.tokens) as { access_token?: string };
+    const rawTokens = account.authData.tokens;
+    const tokens =
+      typeof rawTokens === "string"
+        ? (JSON.parse(rawTokens) as { access_token?: string })
+        : (rawTokens as { access_token?: string });
     const accessToken = tokens.access_token;
     if (!accessToken) {
       return "-";
@@ -212,4 +218,12 @@ function maskApiKey(value: string | undefined): string | undefined {
   }
 
   return `${value.slice(0, 3)}***${value.slice(-4)}`;
+}
+
+function readAuthStringField(
+  authData: SwitcherState["envs"][string]["accounts"][string]["authData"] | undefined,
+  field: string,
+): string | undefined {
+  const value = authData?.[field];
+  return typeof value === "string" && value.trim() ? value : undefined;
 }

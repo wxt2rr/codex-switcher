@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import {
   DEFAULT_SCHEMA_VERSION,
   type AccountState,
+  type AuthDataRecord,
   type AuthMode,
   type OpenAIBaseUrlMode,
   type PreferredAuthMethod,
@@ -260,21 +261,14 @@ async function readRuntimeRecord(path: string): Promise<LegacyRuntimeRecord> {
   }
 }
 
-async function readAuthRecord(path: string): Promise<Record<string, string> | undefined> {
+async function readAuthRecord(path: string): Promise<AuthDataRecord | undefined> {
   try {
     const raw = await readFile(path, "utf8");
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const stringEntries = Object.entries(parsed).flatMap(([key, value]) => {
-      if (typeof value === "string") {
-        return [[key, value] as const];
-      }
-      if (value && typeof value === "object") {
-        return [[key, JSON.stringify(value)] as const];
-      }
-      return [];
-    });
-
-    return stringEntries.length > 0 ? Object.fromEntries(stringEntries) : undefined;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return undefined;
+    }
+    return parsed as AuthDataRecord;
   } catch {
     return undefined;
   }

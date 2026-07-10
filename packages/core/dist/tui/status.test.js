@@ -19,6 +19,10 @@ test("buildStatusLines renders cli/app summaries and grouped accounts", () => {
             guard: "unknown",
             needReloginLastRun: "2",
         },
+        setup: {
+            summary: "Mismatch: current launcher PowerShell is not ready; target cmd is ready",
+            suggestion: "Suggestion: ready target available: cmd",
+        },
     }, [
         {
             envName: "default",
@@ -43,6 +47,8 @@ test("buildStatusLines renders cli/app summaries and grouped accounts", () => {
     ]);
     assert.match(lines.join("\n"), /CLI \[logged-in\]/);
     assert.match(lines.join("\n"), /APP \[logged-in\]/);
+    assert.match(lines.join("\n"), /SETUP         Mismatch: current launcher PowerShell is not ready; target cmd is ready/);
+    assert.match(lines.join("\n"), /ACTION        Suggestion: ready target available: cmd/);
     assert.match(lines.join("\n"), /personal \[app\]/);
     assert.match(lines.join("\n"), /api key: sk-\*\*\*7890/);
 });
@@ -64,6 +70,10 @@ test("renderStatusScreen applies offset and viewLines", () => {
             tokenRefresh: {
                 guard: "unknown",
                 needReloginLastRun: "0",
+            },
+            setup: {
+                summary: "",
+                suggestion: "",
             },
         },
         accounts: [],

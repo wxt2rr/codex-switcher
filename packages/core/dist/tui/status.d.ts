@@ -15,6 +15,10 @@ export interface StatusViewData {
         guard: string;
         needReloginLastRun: string;
     };
+    setup?: {
+        summary: string;
+        suggestion: string;
+    };
 }
 export interface StatusOverviewData {
     envName: string;

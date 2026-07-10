@@ -23,6 +23,13 @@ export function buildStatusLines(status, accounts) {
         `NEED RELOGIN  ${status.tokenRefresh.needReloginLastRun}`,
         "",
     ];
+    if (status.setup?.summary) {
+        lines.push(`SETUP         ${status.setup.summary}`);
+        if (status.setup.suggestion) {
+            lines.push(`ACTION        ${status.setup.suggestion}`);
+        }
+        lines.push("");
+    }
     const grouped = new Map();
     for (const account of accounts) {
         const list = grouped.get(account.envName) || [];

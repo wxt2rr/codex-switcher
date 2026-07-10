@@ -201,12 +201,12 @@ def extract_windows_from_usage_blob(blob: Dict[str, Any]) -> Dict[int, Dict[str,
     return windows
 
 
-def request_usage(access_token: str, account_id: str, usage_proxy: str, timeout_seconds: int) -> Optional[Dict[str, Any]]:
+def request_usage(access_token: str, account_id: str, usage_proxy: str, timeout_seconds: int) -> Dict[str, Any]:
     if not access_token:
-        return None
+        return {"ok": False, "error": "expired", "http_code": 0}
     cmd = [
         "curl",
-        "-fsS",
+        "-sS",
         "--connect-timeout",
         str(max(1, timeout_seconds)),
         "--max-time",
@@ -217,6 +217,8 @@ def request_usage(access_token: str, account_id: str, usage_proxy: str, timeout_
         "Accept: application/json",
         "-H",
         f"User-Agent: {DEFAULT_USER_AGENT}",
+        "-w",
+        "\n__CODEX_SWITCHER_HTTP_CODE__:%{http_code}",
     ]
     if account_id:
         cmd.extend(["-H", f"ChatGPT-Account-Id: {account_id}"])
@@ -236,16 +238,35 @@ def request_usage(access_token: str, account_id: str, usage_proxy: str, timeout_
             env=env,
         )
     except Exception:
-        return None
-    if result.returncode != 0 or not result.stdout.strip():
-        return None
-    try:
-        payload = json.loads(result.stdout)
-        if isinstance(payload, dict):
-            return payload
-    except Exception:
-        return None
-    return None
+        return {"ok": False, "error": "network-failed", "http_code": 0}
+    marker = "\n__CODEX_SWITCHER_HTTP_CODE__:"
+    stdout = result.stdout or ""
+    http_code = 0
+    body = stdout
+    if marker in stdout:
+        body, raw_code = stdout.rsplit(marker, 1)
+        try:
+            http_code = int(raw_code.strip() or "0")
+        except Exception:
+            http_code = 0
+    body = body.strip()
+    if http_code == 200 and body:
+        try:
+            payload = json.loads(body)
+            if isinstance(payload, dict):
+                return {"ok": True, "payload": payload, "http_code": http_code}
+        except Exception:
+            return {"ok": False, "error": "api-failed", "http_code": http_code}
+
+    if http_code in (401, 403):
+        return {"ok": False, "error": "unauthorized", "http_code": http_code}
+    if result.returncode in (6, 7, 28, 35, 52, 56):
+        return {"ok": False, "error": "network-failed", "http_code": http_code}
+    if http_code > 0:
+        return {"ok": False, "error": "api-failed", "http_code": http_code}
+    if result.returncode != 0:
+        return {"ok": False, "error": "network-failed", "http_code": http_code}
+    return {"ok": False, "error": "api-failed", "http_code": http_code}
 
 
 def format_usage(window: Optional[Dict[str, Any]]) -> str:
@@ -265,62 +286,19 @@ def format_last_activity(last_epoch: Optional[int]) -> str:
     return dt.datetime.fromtimestamp(last_epoch).strftime("%m-%d %H:%M")
 
 
-def collect_local_metrics(data_path: str) -> Dict[str, Any]:
-    sessions_dir = os.path.join(data_path, "sessions")
-    if not os.path.isdir(sessions_dir):
-        return {"source": "local"}
-
-    best: Optional[Dict[str, Any]] = None
-    for root, _, files in os.walk(sessions_dir):
-        for file_name in files:
-            if not file_name.endswith(".jsonl"):
-                continue
-            file_path = os.path.join(root, file_name)
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    for line in f:
-                        if '"rate_limits"' not in line:
-                            continue
-                        obj = json.loads(line)
-                        if not isinstance(obj, dict):
-                            continue
-                        payload = obj.get("payload")
-                        if not isinstance(payload, dict):
-                            continue
-                        rate_limits = payload.get("rate_limits")
-                        if not isinstance(rate_limits, dict):
-                            continue
-
-                        windows = extract_windows_from_usage_blob({"rate_limits": rate_limits})
-                        if not windows:
-                            continue
-
-                        timestamp = parse_timestamp(obj.get("timestamp")) or parse_timestamp(payload.get("timestamp"))
-                        plan = normalize_plan(rate_limits.get("plan_type"))
-                        candidate = {
-                            "windows": windows,
-                            "plan_type": plan,
-                            "last_activity_epoch": timestamp,
-                            "source": "local",
-                        }
-                        if best is None:
-                            best = candidate
-                        else:
-                            prev_ts = best.get("last_activity_epoch")
-                            if isinstance(timestamp, int) and (not isinstance(prev_ts, int) or timestamp > prev_ts):
-                                best = candidate
-            except Exception:
-                continue
-
-    if best:
-        return best
-    return {"source": "local"}
-
-
 def collect_api_metrics(access_token: str, account_id: str, usage_proxy: str, timeout_seconds: int) -> Optional[Dict[str, Any]]:
-    payload = request_usage(access_token, account_id, usage_proxy, timeout_seconds)
-    if not payload:
-        return None
+    result = request_usage(access_token, account_id, usage_proxy, timeout_seconds)
+    if not result.get("ok"):
+        return {
+            "windows": {},
+            "plan_type": "unknown",
+            "last_activity_epoch": None,
+            "source": "api",
+            "error": result.get("error") or "api-failed",
+            "http_code": result.get("http_code") or 0,
+        }
+
+    payload = result["payload"]
 
     windows = extract_windows_from_usage_blob(payload)
     nested_plan = None
@@ -338,14 +316,24 @@ def collect_api_metrics(access_token: str, account_id: str, usage_proxy: str, ti
         or payload.get("timestamp")
     )
 
-    if not windows and plan_type == "unknown" and last_activity is None:
-        return None
     return {
         "windows": windows,
         "plan_type": plan_type,
         "last_activity_epoch": last_activity,
         "source": "api",
+        "error": None,
+        "http_code": result.get("http_code") or 200,
     }
+
+
+def pick_error_usage_label(error: str) -> str:
+    if error == "expired":
+        return "expired"
+    if error == "unauthorized":
+        return "unauthorized"
+    if error == "network-failed":
+        return "network-failed"
+    return "api-failed"
 
 
 def main() -> int:
@@ -382,8 +370,14 @@ def main() -> int:
         )
 
     api_metrics = collect_api_metrics(access_token, account_id, args.usage_proxy, args.timeout_seconds)
-    local_metrics = collect_local_metrics(args.data_path)
-    metrics = api_metrics if api_metrics is not None else local_metrics
+    metrics = api_metrics if api_metrics is not None else {
+        "windows": {},
+        "plan_type": "unknown",
+        "last_activity_epoch": None,
+        "source": "api",
+        "error": "expired" if not access_token else "api-failed",
+        "http_code": 0,
+    }
 
     windows = metrics.get("windows")
     if not isinstance(windows, dict):
@@ -391,8 +385,14 @@ def main() -> int:
     window_5h = pick_window(windows, 300)
     window_week = pick_window(windows, 10080)
 
-    usage_5h = format_usage(window_5h)
-    usage_weekly = format_usage(window_week)
+    error = str(metrics.get("error") or "").strip()
+    if error:
+        error_label = pick_error_usage_label(error)
+        usage_5h = error_label
+        usage_weekly = error_label
+    else:
+        usage_5h = format_usage(window_5h)
+        usage_weekly = format_usage(window_week)
     plan = normalize_plan(metrics.get("plan_type"))
     if plan == "unknown":
         plan = plan_from_claims
@@ -400,16 +400,12 @@ def main() -> int:
         plan = "unknown"
 
     source = metrics.get("source")
-    if source not in ("api", "local"):
-        source = "local"
+    if source != "api":
+        source = "api"
 
     last_activity_epoch = metrics.get("last_activity_epoch")
     if not isinstance(last_activity_epoch, int):
-        fallback_last_activity = local_metrics.get("last_activity_epoch")
-        if isinstance(fallback_last_activity, int):
-            last_activity_epoch = fallback_last_activity
-        else:
-            last_activity_epoch = None
+        last_activity_epoch = None
     last_activity = format_last_activity(last_activity_epoch)
 
     if email:

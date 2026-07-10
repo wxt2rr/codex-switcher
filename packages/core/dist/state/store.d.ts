@@ -4,6 +4,8 @@ export type AuthMode = "auth" | "apikey" | "provider-profile";
 export type PreferredAuthMethod = "chatgpt" | "apikey";
 export type OpenAIBaseUrlMode = "default" | "custom";
 export type TaskStatus = "pending" | "running" | "succeeded" | "failed";
+export type AuthDataValue = string | number | boolean | null | Record<string, unknown> | unknown[];
+export type AuthDataRecord = Record<string, AuthDataValue>;
 export interface TargetPointer {
     env: string;
     account: string;
@@ -23,7 +25,7 @@ export interface AccountState {
     name: string;
     authMode: AuthMode;
     runtime: AccountRuntimeSettings;
-    authData?: Record<string, string>;
+    authData?: AuthDataRecord;
 }
 export interface EnvState {
     name: string;

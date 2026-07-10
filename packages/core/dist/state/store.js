@@ -118,7 +118,7 @@ function validateAccountState(name, value) {
         authMode: value.authMode,
         runtime: validateRuntimeSettings(name, value.runtime),
     };
-    if (isStringRecord(value.authData)) {
+    if (isAuthDataRecord(value.authData)) {
         accountState.authData = value.authData;
     }
     return accountState;
@@ -211,8 +211,19 @@ function isTaskStatus(value) {
         value === "succeeded" ||
         value === "failed");
 }
-function isStringRecord(value) {
-    return (isRecord(value) &&
-        Object.values(value).every((entry) => typeof entry === "string"));
+function isAuthDataRecord(value) {
+    return isRecord(value) && Object.values(value).every(isAuthDataValue);
+}
+function isAuthDataValue(value) {
+    if (value === null ||
+        typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean") {
+        return true;
+    }
+    if (Array.isArray(value)) {
+        return true;
+    }
+    return isRecord(value);
 }
 //# sourceMappingURL=store.js.map

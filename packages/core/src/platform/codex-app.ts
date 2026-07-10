@@ -153,7 +153,10 @@ async function defaultManagedAppStopper(pid: number): Promise<boolean> {
   try {
     await executeManagedAppStopPlan(
       buildManagedAppStopPlan({
-        platform: detectPlatform(process.env.CODEX_SWITCHER_TEST_PLATFORM || process.platform),
+        platform: detectPlatform(
+          (process.env.CODEX_SWITCHER_TEST_PLATFORM as NodeJS.Platform | undefined) ||
+            process.platform,
+        ),
         pid,
         preferAppQuit: true,
       }),

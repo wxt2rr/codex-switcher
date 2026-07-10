@@ -39,6 +39,7 @@ import {
   writeLegacyPointers,
   writeLegacyRuntime,
 } from "../packages/core/src/state/legacy.js";
+import type { AuthDataRecord } from "../packages/core/src/state/store.js";
 import { applyTargetHomeState } from "../packages/core/src/system/target-home.js";
 import { renderAccountsScreen } from "../packages/core/src/tui/accounts.js";
 import { APP_PAGE_ACTIONS, renderAppScreen } from "../packages/core/src/tui/app.js";
@@ -2404,9 +2405,18 @@ async function runProxyConnectivityTest(input: {
   }
 }
 
-function extractAccessToken(authData: Record<string, string>): string {
+function extractAccessToken(authData: AuthDataRecord): string {
   const raw = authData.tokens;
   if (!raw) {
+    return "";
+  }
+
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    const accessToken = raw.access_token;
+    return typeof accessToken === "string" ? accessToken.trim() : "";
+  }
+
+  if (typeof raw !== "string") {
     return "";
   }
 

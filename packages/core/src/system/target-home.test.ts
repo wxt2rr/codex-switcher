@@ -115,6 +115,105 @@ test("target-home writer appends managed custom model config for auth account wh
   }
 });
 
+test("target-home writer preserves object-shaped token payloads", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-token-object-"));
+  const homePath = join(root, "home");
+
+  const state: SwitcherState = {
+    schemaVersion: DEFAULT_SCHEMA_VERSION,
+    generatedAt: "2026-07-09T10:00:00.000Z",
+    targets: {
+      cli: { env: "default", account: "default" },
+      app: { env: "default", account: "default" },
+    },
+    envs: {
+      default: {
+        name: "default",
+        path: homePath,
+        accounts: {
+          default: {
+            name: "default",
+            authMode: "auth",
+            runtime: {
+              preferredAuthMethod: "chatgpt",
+              openaiBaseUrlMode: "default",
+            },
+            authData: {
+              auth_mode: "chatgpt",
+              tokens: {
+                access_token: "access-token",
+                refresh_token: "refresh-token",
+              },
+            },
+          },
+        },
+      },
+    },
+    tasks: { recent: [] },
+  };
+
+  try {
+    await applyTargetHomeState({ state, target: "cli" });
+
+    const auth = JSON.parse(await readFile(join(homePath, "auth.json"), "utf8")) as {
+      tokens?: { access_token?: string; refresh_token?: string };
+    };
+    assert.equal(typeof auth.tokens, "object");
+    assert.equal(auth.tokens?.access_token, "access-token");
+    assert.equal(auth.tokens?.refresh_token, "refresh-token");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("target-home writer upgrades stringified tokens into objects for Codex auth.json", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-token-string-"));
+  const homePath = join(root, "home");
+
+  const state: SwitcherState = {
+    schemaVersion: DEFAULT_SCHEMA_VERSION,
+    generatedAt: "2026-07-09T10:00:00.000Z",
+    targets: {
+      cli: { env: "default", account: "default" },
+      app: { env: "default", account: "default" },
+    },
+    envs: {
+      default: {
+        name: "default",
+        path: homePath,
+        accounts: {
+          default: {
+            name: "default",
+            authMode: "auth",
+            runtime: {
+              preferredAuthMethod: "chatgpt",
+              openaiBaseUrlMode: "default",
+            },
+            authData: {
+              auth_mode: "chatgpt",
+              tokens: "{\"access_token\":\"access-token\",\"refresh_token\":\"refresh-token\"}",
+            },
+          },
+        },
+      },
+    },
+    tasks: { recent: [] },
+  };
+
+  try {
+    await applyTargetHomeState({ state, target: "cli" });
+
+    const auth = JSON.parse(await readFile(join(homePath, "auth.json"), "utf8")) as {
+      tokens?: { access_token?: string; refresh_token?: string };
+    };
+    assert.equal(typeof auth.tokens, "object");
+    assert.equal(auth.tokens?.access_token, "access-token");
+    assert.equal(auth.tokens?.refresh_token, "refresh-token");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("target-home writer preserves unmanaged config and removes managed fields on clear", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-clear-"));
   const homePath = join(root, "home");

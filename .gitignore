@@ -27,9 +27,11 @@ yarn-error.log*
 tmp/
 temp/
 *.tmp
-apps/
+apps/desktop/node_modules/
+apps/desktop/dist/
+apps/desktop/electron-dist/
+apps/desktop/release/
 
 # Local Codex metadata
 .codex/
 .agents/
-

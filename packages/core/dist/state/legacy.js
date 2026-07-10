@@ -122,16 +122,10 @@ async function readAuthRecord(path) {
     try {
         const raw = await readFile(path, "utf8");
         const parsed = JSON.parse(raw);
-        const stringEntries = Object.entries(parsed).flatMap(([key, value]) => {
-            if (typeof value === "string") {
-                return [[key, value]];
-            }
-            if (value && typeof value === "object") {
-                return [[key, JSON.stringify(value)]];
-            }
-            return [];
-        });
-        return stringEntries.length > 0 ? Object.fromEntries(stringEntries) : undefined;
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            return undefined;
+        }
+        return parsed;
     }
     catch {
         return undefined;

@@ -29,7 +29,7 @@ export async function applyTargetHomeState(
   if (account.authData) {
     await writeFile(
       join(env.path, "auth.json"),
-      `${JSON.stringify(account.authData, null, 2)}\n`,
+      `${JSON.stringify(normalizeAuthDataForTargetHome(account.authData), null, 2)}\n`,
       "utf8",
     );
   } else {
@@ -151,6 +151,24 @@ function quoteTomlString(value: string): string {
 function normalizeProviderId(value: string | undefined): string {
   const trimmed = (value ?? "").trim();
   return trimmed || "custom";
+}
+
+function normalizeAuthDataForTargetHome(
+  authData: NonNullable<SwitcherState["envs"][string]["accounts"][string]["authData"]>,
+): NonNullable<SwitcherState["envs"][string]["accounts"][string]["authData"]> {
+  const normalized = { ...authData };
+  const tokens = normalized.tokens;
+  if (typeof tokens === "string") {
+    try {
+      const parsed = JSON.parse(tokens) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        normalized.tokens = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Keep the original string when it is not valid JSON.
+    }
+  }
+  return normalized;
 }
 
 async function readText(path: string): Promise<string> {
