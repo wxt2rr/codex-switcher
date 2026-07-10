@@ -38,8 +38,8 @@ GitHub Actions packaging:
 - To package a version automatically, make sure `apps/desktop/package.json` contains the intended version, then push a matching desktop tag:
 
 ```bash
-git tag desktop-v0.1.3
-git push origin desktop-v0.1.3
+git tag desktop-v0.1.4
+git push origin desktop-v0.1.4
 ```
 
 - Tag builds create a GitHub Pre-release containing the DMG, macOS ZIP, Windows EXE, and blockmap files.

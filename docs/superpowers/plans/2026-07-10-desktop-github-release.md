@@ -16,7 +16,7 @@
 - Both native jobs must succeed before publication starts.
 - Unsigned installers are published as a Pre-release.
 - Reruns replace duplicate assets instead of failing.
-- Desktop package version and release tag are `0.1.3` / `desktop-v0.1.3`.
+- Desktop package version and release tag are `0.1.4` / `desktop-v0.1.4`.
 
 ---
 
@@ -57,9 +57,9 @@ Expected: failure because the workflow has no release job.
 - Modify: `apps/desktop/README.md`
 
 **Interfaces:**
-- Produces: desktop version `0.1.3` and instructions that Releases contain installers while Actions Artifacts remain available.
+- Produces: desktop version `0.1.4` and instructions that Releases contain installers while Actions Artifacts remain available.
 
-- [ ] **Step 1: Update package and lockfile workspace versions to `0.1.3`.**
+- [ ] **Step 1: Update package and lockfile workspace versions to `0.1.4`.**
 - [ ] **Step 2: Document the Pre-release asset flow and unsigned status.**
 - [ ] **Step 3: Run desktop tests and production build.**
 
@@ -69,9 +69,9 @@ Expected: failure because the workflow has no release job.
 - Commit only the workflow, contract test, version, documentation, spec, and plan for this change.
 
 **Interfaces:**
-- Produces: tag `desktop-v0.1.3`, successful native jobs, and a GitHub Pre-release containing both platform installers.
+- Produces: tag `desktop-v0.1.4`, successful native jobs, and a GitHub Pre-release containing both platform installers.
 
 - [ ] **Step 1: Run `git diff --cached --check` and commit the scoped files.**
-- [ ] **Step 2: Create and push immutable tag `desktop-v0.1.3` with `main`.**
+- [ ] **Step 2: Create and push immutable tag `desktop-v0.1.4` with `main`.**
 - [ ] **Step 3: Watch the workflow until all jobs finish.**
 - [ ] **Step 4: Query the GitHub Release API and verify DMG, macOS ZIP, Windows EXE, and blockmap assets.**

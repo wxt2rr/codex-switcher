@@ -33,14 +33,15 @@ The release job starts only after both native package jobs succeed. Missing down
 
 ## Versioning
 
-The implementation increments the desktop package version to `0.1.3` and publishes tag `desktop-v0.1.3`. Earlier tags remain immutable historical records:
+The implementation increments the desktop package version to `0.1.4` and publishes tag `desktop-v0.1.4`. Earlier tags remain immutable historical records:
 
 - `desktop-v0.1.0` and `desktop-v0.1.1`: failed packaging attempts.
 - `desktop-v0.1.2`: successful Actions Artifacts without a GitHub Release.
-- `desktop-v0.1.3`: first automated GitHub Pre-release with macOS and Windows assets.
+- `desktop-v0.1.3`: successful packages but failed release publication because the release job did not identify the repository.
+- `desktop-v0.1.4`: first automated GitHub Pre-release with macOS and Windows assets.
 
 ## Verification
 
 - The workflow contract test asserts the release dependency, tag-only condition, job-level write permission, artifact download, generated notes, pre-release flag, and replace-on-rerun behavior.
 - YAML parsing, desktop tests, and desktop production build pass locally.
-- The implementation is complete only after the `desktop-v0.1.3` workflow succeeds and the GitHub Release API lists both platform assets.
+- The implementation is complete only after the `desktop-v0.1.4` workflow succeeds and the GitHub Release API lists both platform assets.

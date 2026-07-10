@@ -25,6 +25,7 @@ test("desktop packaging workflow builds native installers for version tags and m
     "needs: [package-macos, package-windows]",
     "startsWith(github.ref, 'refs/tags/desktop-v')",
     "contents: write",
+    "GH_REPO: ${{ github.repository }}",
     "actions/download-artifact@v8",
     "pattern: codex-switcher-*",
     "merge-multiple: true",
