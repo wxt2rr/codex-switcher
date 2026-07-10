@@ -38,13 +38,13 @@ GitHub Actions packaging:
 - To package a version automatically, make sure `apps/desktop/package.json` contains the intended version, then push a matching desktop tag:
 
 ```bash
-git tag desktop-v0.1.0
-git push origin desktop-v0.1.0
+git tag desktop-v0.1.3
+git push origin desktop-v0.1.3
 ```
 
-- Download `codex-switcher-macos-arm64` and `codex-switcher-windows-x64` from the completed workflow run.
-- Workflow artifacts are retained for 14 days.
-- GitHub Actions packages are unsigned and are not published to GitHub Releases. Signing, notarization, and public release publishing require a separate release configuration.
+- Tag builds create a GitHub Pre-release containing the DMG, macOS ZIP, Windows EXE, and blockmap files.
+- The workflow also keeps `codex-switcher-macos-arm64` and `codex-switcher-windows-x64` Actions artifacts for 14 days for build diagnostics.
+- GitHub Pre-release packages are unsigned. Signing and notarization require a separate release-hardening configuration.
 
 Verification status:
 - `npm run desktop:test`: passing

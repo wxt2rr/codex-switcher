@@ -21,6 +21,21 @@ test("desktop packaging workflow builds native installers for version tags and m
     "npm run desktop:package:win",
     "codex-switcher-macos-arm64",
     "codex-switcher-windows-x64",
+    "release:",
+    "needs: [package-macos, package-windows]",
+    "startsWith(github.ref, 'refs/tags/desktop-v')",
+    "contents: write",
+    "actions/download-artifact@v8",
+    "pattern: codex-switcher-*",
+    "merge-multiple: true",
+    "path: release-assets",
+    "gh release view",
+    "gh release upload",
+    "--clobber",
+    "gh release create",
+    "--verify-tag",
+    "--generate-notes",
+    "--prerelease",
   ];
 
   for (const content of requiredContent) {
@@ -31,5 +46,6 @@ test("desktop packaging workflow builds native installers for version tags and m
   assert.equal(workflow.match(/actions\/upload-artifact@v7/g)?.length, 2);
   assert.equal(workflow.match(/if-no-files-found: error/g)?.length, 2);
   assert.equal(workflow.match(/retention-days: 14/g)?.length, 2);
-  assert.doesNotMatch(workflow, /contents:\s*write/);
+  assert.equal(workflow.match(/contents: read/g)?.length, 1);
+  assert.equal(workflow.match(/contents: write/g)?.length, 1);
 });

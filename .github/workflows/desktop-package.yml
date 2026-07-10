@@ -81,3 +81,42 @@ jobs:
             apps/desktop/release/*.blockmap
           if-no-files-found: error
           retention-days: 14
+
+  release:
+    needs: [package-macos, package-windows]
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Download packaged installers
+        uses: actions/download-artifact@v8
+        with:
+          pattern: codex-switcher-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Validate release assets
+        shell: bash
+        run: |
+          test -n "$(find release-assets -maxdepth 1 -name '*.dmg' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.zip' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.exe' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.blockmap' -print -quit)"
+          find release-assets -maxdepth 1 -type f -print
+
+      - name: Create or update GitHub Pre-release
+        shell: bash
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release-assets/* \
+              --verify-tag \
+              --generate-notes \
+              --prerelease \
+              --title "$GITHUB_REF_NAME"
+          fi
