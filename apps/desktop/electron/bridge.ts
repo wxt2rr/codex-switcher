@@ -1566,9 +1566,9 @@ function buildSub2ApiAuthJson(data: Record<string, unknown>) {
 function resolveLogPath(kind: string): string {
   switch (kind) {
     case "switcher":
-      return process.env.CODEX_SWITCHER_SWITCH_LOG || `${getStateDir()}/switcher.log`;
+      return process.env.CODEX_SWITCHER_SWITCH_LOG || join(getStateDir(), "switcher.log");
     case "token-refresh":
-      return process.env.CODEX_SWITCHER_TOKEN_REFRESH_LOG || `${getStateDir()}/token-refresh.log`;
+      return process.env.CODEX_SWITCHER_TOKEN_REFRESH_LOG || join(getStateDir(), "token-refresh.log");
     default:
       throw new Error(`unsupported log kind: ${kind}`);
   }
