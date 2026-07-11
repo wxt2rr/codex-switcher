@@ -58,7 +58,11 @@ const appDir = dirname(currentDir);
 process.env.CODEX_SWITCHER_DESKTOP_RESOURCES_PATH = process.resourcesPath;
 
 function resolveDesktopLogoPath() {
+  const fileName = process.platform === "win32" ? "logo-win.png" : "logo.png";
   const candidatePaths = [
+    join(appDir, "..", "dist", fileName),
+    join(app.getAppPath(), "dist", fileName),
+    join(process.cwd(), "apps", "desktop", "public", fileName),
     join(appDir, "..", "dist", "logo.png"),
     join(app.getAppPath(), "dist", "logo.png"),
     join(process.cwd(), "apps", "desktop", "public", "logo.png"),

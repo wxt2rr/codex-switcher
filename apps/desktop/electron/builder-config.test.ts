@@ -23,6 +23,14 @@ const desktopPackage = JSON.parse(
       target?: string[];
       icon?: string;
     };
+    win?: {
+      target?: string[];
+      icon?: string;
+    };
+    nsis?: {
+      installerIcon?: string;
+      uninstallerIcon?: string;
+    };
   };
 };
 
@@ -51,4 +59,8 @@ test("desktop package defines electron packaging entrypoints", () => {
   ]);
   assert.deepEqual(desktopPackage.build.mac?.target, ["dmg", "zip", "dir"]);
   assert.equal(desktopPackage.build.mac?.icon, "build/icon.icns");
+  assert.deepEqual(desktopPackage.build.win?.target, ["nsis"]);
+  assert.equal(desktopPackage.build.win?.icon, "build/icon.ico");
+  assert.equal(desktopPackage.build.nsis?.installerIcon, "build/icon.ico");
+  assert.equal(desktopPackage.build.nsis?.uninstallerIcon, "build/icon.ico");
 });

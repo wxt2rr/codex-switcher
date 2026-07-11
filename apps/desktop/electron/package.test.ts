@@ -28,6 +28,7 @@ test("desktop build emits electron main entry and preload bundle", async () => {
   assert.match(mainSource, /setMenuBarVisibility\(false\)/);
   assert.match(mainSource, /setMenu\(null\)/);
   assert.match(mainSource, /setApplicationMenu\(null\)/);
+  assert.match(mainSource, /logo-win\.png/);
 
   const runtimePathsSource = await readFile(runtimePathsPath, "utf8");
   assert.match(runtimePathsSource, /CODEX_SWITCHER_DESKTOP_RESOURCES_PATH/);
@@ -39,8 +40,12 @@ test("desktop build emits electron main entry and preload bundle", async () => {
 
 test("desktop package defines packaged artifact verification script", async () => {
   const verifyScriptPath = join(desktopRoot, "scripts", "verify-package-artifact.mjs");
+  const windowsIconPath = join(desktopRoot, "build", "icon.ico");
+  const windowsRuntimeIconPath = join(desktopRoot, "public", "logo-win.png");
 
   await access(verifyScriptPath, constants.F_OK);
+  await access(windowsIconPath, constants.F_OK);
+  await access(windowsRuntimeIconPath, constants.F_OK);
 
   const verifySource = await readFile(verifyScriptPath, "utf8");
   assert.match(verifySource, /CFBundleDisplayName/);
