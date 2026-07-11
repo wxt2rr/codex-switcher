@@ -9,7 +9,7 @@ export type CodexToolKind = "cli" | "app";
 export type CodexToolSource = "manual" | "environment" | "path" | "candidate" | "missing";
 export interface CodexToolStatus { kind: CodexToolKind; path: string; detectedPath: string; manualPath: string; source: CodexToolSource; available: boolean; }
 interface DesktopSettings { cliPath?: string; appPath?: string; }
-export interface CodexToolPathOptions { settingsPath: string; env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; }
+export interface CodexToolPathOptions { settingsPath: string; env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; validateCli?: (path: string) => Promise<void>; }
 
 async function isExecutable(path: string) { try { const info = await stat(path); if (!info.isFile()) return false; await access(path, constants.X_OK); return true; } catch { return false; } }
 async function readSettings(path: string): Promise<DesktopSettings> { try { return JSON.parse(await readFile(path, "utf8")) as DesktopSettings; } catch { return {}; } }
@@ -52,7 +52,7 @@ export async function getCodexToolStatus(kind: CodexToolKind, options: CodexTool
 export async function listCodexToolStatuses(options: CodexToolPathOptions) { return Promise.all([getCodexToolStatus("cli", options), getCodexToolStatus("app", options)]); }
 export async function saveCodexToolPath(kind: CodexToolKind, path: string, options: CodexToolPathOptions) {
   const input = path.trim(); const value = input ? await normalizeManualPath(kind, input, options.platform ?? process.platform) : ""; if (!value) throw new Error(`${kind === "cli" ? "Codex CLI" : "Codex App"} path is not executable: ${input || "(empty)"}`);
-  if (kind === "cli") { try { await execFileAsync(value, ["--version"], { timeout: 10_000 }); } catch (error) { throw new Error(`Codex CLI validation failed: ${error instanceof Error ? error.message : String(error)}`); } }
+  if (kind === "cli") { try { if (options.validateCli) await options.validateCli(value); else if ((options.platform ?? process.platform) === "win32" && /\.(cmd|bat)$/i.test(value)) await execFileAsync("cmd.exe", ["/d", "/s", "/c", `"${value}" --version`], { timeout: 10_000 }); else await execFileAsync(value, ["--version"], { timeout: 10_000 }); } catch (error) { throw new Error(`Codex CLI validation failed: ${error instanceof Error ? error.message : String(error)}`); } }
   const settings = await readSettings(options.settingsPath); if (kind === "cli") settings.cliPath = value; else settings.appPath = value; await writeSettings(options.settingsPath, settings); return getCodexToolStatus(kind, options);
 }
 export async function resetCodexToolPath(kind: CodexToolKind, options: CodexToolPathOptions) { const settings = await readSettings(options.settingsPath); if (kind === "cli") delete settings.cliPath; else delete settings.appPath; await writeSettings(options.settingsPath, settings); return getCodexToolStatus(kind, options); }
