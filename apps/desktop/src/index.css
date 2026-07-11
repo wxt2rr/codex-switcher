@@ -428,6 +428,8 @@ body {
 .responsive-record-row:nth-child(4) { animation-delay: 75ms; }
 .responsive-record-row:nth-child(5) { animation-delay: 100ms; }
 
+.responsive-record-row:hover,
+.responsive-record-row:focus-within,
 .responsive-record-row:has([aria-expanded="true"]) {
   position: relative;
   z-index: 30;

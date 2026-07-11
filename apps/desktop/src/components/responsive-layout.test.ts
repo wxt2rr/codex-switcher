@@ -60,6 +60,8 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.match(css, /\[data-auth-refresh-input\]:focus-visible\s*\{[^}]*box-shadow:\s*none/s);
   assert.match(accounts, /aria-expanded=\{open\}/);
   assert.match(css, /\.responsive-record-row:has\(\[aria-expanded="true"\]\)/);
+  assert.match(css, /\.responsive-record-row:hover/);
+  assert.match(css, /\.responsive-record-row:focus-within/);
 });
 
 test("all management record cards opt into the single-row responsive contract", () => {
