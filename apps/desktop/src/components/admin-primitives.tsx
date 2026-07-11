@@ -196,7 +196,7 @@ export function EmptyTableState({
       <td colSpan={colSpan} className="px-6 py-10">
         <div
           className={cn(
-            "rounded-xl bg-neutral-50/60",
+            "rounded-lg bg-neutral-50/60",
             "px-6 py-8 text-center",
           )}
         >
@@ -394,7 +394,7 @@ export function SummaryPanel({
             </div>
           </div>
         ) : (
-          <div className="rounded-xl border border-dashed border-neutral-200 bg-neutral-50/60 px-4 py-8 text-sm text-neutral-400">
+          <div className="rounded-lg border border-dashed border-neutral-200 bg-neutral-50/60 px-4 py-8 text-sm text-neutral-400">
             {emptyLabel}
           </div>
         )}
@@ -405,7 +405,7 @@ export function SummaryPanel({
           </div>
           <pre
             className={cn(
-              "min-h-[240px] overflow-auto rounded-[16px]",
+              "min-h-[240px] overflow-auto rounded-lg",
               "bg-[#fafafa] p-4 text-xs leading-6 text-neutral-500",
               "font-mono",
             )}

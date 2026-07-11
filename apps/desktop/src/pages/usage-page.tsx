@@ -127,7 +127,7 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
           </div>
           <Button variant="ghost" className="size-8 p-0" onClick={() => void openPricing()} aria-label={zh ? "价格配置" : "Pricing settings"} title={zh ? "价格配置" : "Pricing settings"}><Settings2 className="size-4" /></Button>
         </div>
-        {error ? <div className="rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
+        {error ? <div className="border-l-2 border-rose-500 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
 
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <StatCard label={zh ? "请求数" : "Requests"} value={String(snapshot.summary.requests)} helper={snapshot.summary.requestsWithoutUsage ? `${snapshot.summary.requestsWithoutUsage} ${zh ? "条无用量数据" : "without usage"}` : zh ? "已记录响应" : "Recorded responses"} />
@@ -154,7 +154,7 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
             <Field label={zh ? "模型匹配" : "Model pattern"}><Input value={priceModel} onChange={(event) => setPriceModel(event.target.value)} placeholder="gpt-*" /></Field>
             <div className="grid grid-cols-2 gap-3"><Field label="Input / 1M"><Input type="number" value={priceInput} onChange={(event) => setPriceInput(event.target.value)} /></Field><Field label="Output / 1M"><Input type="number" value={priceOutput} onChange={(event) => setPriceOutput(event.target.value)} /></Field><Field label="Cache Creation / 1M"><Input type="number" value={priceCacheCreation} onChange={(event) => setPriceCacheCreation(event.target.value)} placeholder={priceInput || "-"} /></Field><Field label="Cache Read / 1M"><Input type="number" value={priceCacheRead} onChange={(event) => setPriceCacheRead(event.target.value)} placeholder={priceInput || "-"} /></Field></div>
             <Button className="w-full" onClick={() => void savePricing()}>{zh ? "保存并重算" : "Save and reprice"}</Button>
-            <div className="space-y-2 pt-2">{pricing.map((item) => <div key={`${item.kind}/${item.baseUrl}/${item.modelPattern}`} className="rounded-xl bg-slate-50 p-3 text-[12px]"><div className="flex justify-between"><b>{item.kind === "actual" ? (zh ? "实际" : "Actual") : (zh ? "标准" : "Standard")}</b><span>{item.modelPattern}</span></div><div className="mt-1 truncate text-slate-500">{item.baseUrl}</div><div className="mt-1 text-slate-500">Input ${item.inputPerMillion} · Output ${item.outputPerMillion}</div></div>)}</div>
+            <div className="divide-y divide-slate-200 border-y border-slate-200">{pricing.map((item) => <div key={`${item.kind}/${item.baseUrl}/${item.modelPattern}`} className="py-3 text-[12px]"><div className="flex justify-between"><b>{item.kind === "actual" ? (zh ? "实际" : "Actual") : (zh ? "标准" : "Standard")}</b><span>{item.modelPattern}</span></div><div className="mt-1 truncate text-slate-500">{item.baseUrl}</div><div className="mt-1 text-slate-500">Input ${item.inputPerMillion} · Output ${item.outputPerMillion}</div></div>)}</div>
           </div>
         </SidePanel>
       </div>

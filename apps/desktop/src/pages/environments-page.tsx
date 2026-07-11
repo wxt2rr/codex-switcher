@@ -457,7 +457,7 @@ export function EnvironmentsPage({
 
           <div className="max-h-[460px] space-y-3 overflow-auto pr-1">
             {historyGroups.length === 0 ? (
-              <div className="rounded-xl bg-[#f7f8fa] px-4 py-10 text-center text-sm text-slate-500">
+              <div className="rounded-lg bg-[#f7f8fa] px-4 py-10 text-center text-sm text-slate-500">
                 {language === "zh" ? "暂无修改历史" : "No history yet"}
               </div>
             ) : null}
@@ -469,7 +469,7 @@ export function EnvironmentsPage({
               return (
                 <div
                   key={group.key}
-                  className="rounded-2xl bg-[#f7f8fa] px-4 py-4"
+                  className="rounded-xl bg-[#f7f8fa] px-4 py-4"
                 >
                   <div className="flex items-start gap-3">
                     <input
@@ -495,7 +495,7 @@ export function EnvironmentsPage({
                         {(["config.toml", "auth.json"] as const).map((fileType) => {
                           const file = group.files[fileType];
                           return (
-                            <div key={fileType} className="rounded-xl bg-white px-3 py-3">
+                            <div key={fileType} className="rounded-lg bg-white px-3 py-3">
                               <div className="flex items-center gap-2 text-[12px] font-semibold text-neutral-900">
                                 <span>{fileType}</span>
                                 <span

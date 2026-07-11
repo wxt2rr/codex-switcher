@@ -867,7 +867,7 @@ function AccountListCard({
       </div>
 
       <div className="responsive-priority-tertiary min-w-0">
-        <div className="account-runtime-cell min-h-[52px] rounded-xl px-2 py-2">
+        <div className="account-runtime-cell min-h-[52px] px-2 py-2">
           <div className="min-w-0">
             {baseUrl ? (
               <span className="block truncate text-[14px] font-medium text-neutral-950 [font-variant-numeric:tabular-nums]">{baseUrl}</span>
@@ -898,7 +898,7 @@ function AccountListCard({
 
       <div className="responsive-priority-secondary min-w-0">
         {isAuth ? (
-          <div className="rounded-xl px-2 py-2">
+          <div className="px-2 py-2">
             <div className="space-y-1.5">
               <CardUsageRow
                 label={pageCopy.overview.usage5hColumn}
@@ -917,7 +917,7 @@ function AccountListCard({
             </div>
           </div>
         ) : (
-          <div className="flex min-h-[52px] items-center rounded-xl px-3 py-2">
+          <div className="flex min-h-[52px] items-center px-3 py-2">
             <div className="text-[12px] leading-5 text-slate-500">{getApiUsageHint(language)}</div>
           </div>
         )}
@@ -1093,7 +1093,7 @@ function RowActionMenu({
         <ChevronDown className={cn("responsive-action-label size-3.5 text-slate-400 transition", open && "rotate-180")} />
       </button>
       {open ? (
-        <div className="absolute right-0 top-[calc(100%+8px)] z-20 min-w-[188px] rounded-xl bg-white p-1.5 shadow-[0_18px_44px_rgba(15,23,42,0.14)] ring-1 ring-black/[0.05]">
+        <div className="absolute right-0 top-[calc(100%+8px)] z-20 min-w-[188px] rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md">
           {items.map((item) => (
             <button
               key={item.key}
@@ -1128,7 +1128,7 @@ function TooltipHint({ text }: { text: string }) {
       >
         <CircleHelp className="size-3" />
       </span>
-      <span className="pointer-events-none absolute left-1/2 top-[calc(100%+8px)] z-20 hidden w-[260px] -translate-x-1/2 rounded-xl bg-neutral-950 px-3 py-2 text-[11px] font-medium leading-5 text-white shadow-[0_18px_42px_rgba(15,23,42,0.22)] group-hover:block group-focus-within:block">
+      <span className="pointer-events-none absolute left-1/2 top-[calc(100%+8px)] z-20 hidden w-[260px] -translate-x-1/2 rounded-lg bg-neutral-950 px-3 py-2 text-[11px] font-medium leading-5 text-white shadow-md group-hover:block group-focus-within:block">
         {text}
       </span>
     </span>
@@ -1292,7 +1292,7 @@ function CardTargetButton({
       </div>
       {open ? (
         <div className="absolute right-0 top-full z-20 pt-2">
-          <div className="min-w-[172px] rounded-xl bg-white p-1.5 shadow-[0_18px_44px_rgba(15,23,42,0.14)] ring-1 ring-black/[0.05]">
+          <div className="min-w-[172px] rounded-lg border border-black/[0.08] bg-white p-1 shadow-md">
             {items.map((item) => (
               <button
                 key={item.key}

@@ -60,7 +60,7 @@ function SelectContent({
         className={cn(
           "bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out",
           "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
-          "relative z-50 max-h-80 min-w-[8rem] overflow-x-hidden overflow-y-auto rounded-xl border border-transparent bg-white shadow-[0_18px_48px_rgba(15,23,42,0.12)] dark:bg-[#161c24] dark:shadow-[0_18px_48px_rgba(0,0,0,0.32)]",
+          "relative z-50 max-h-80 min-w-[8rem] overflow-x-hidden overflow-y-auto rounded-lg border border-black/[0.08] bg-white shadow-md dark:border-white/[0.08] dark:bg-[#161c24]",
           position === "popper" &&
             "data-[side=bottom]:slide-in-from-top-1 data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1 data-[side=top]:slide-in-from-bottom-1",
           className,

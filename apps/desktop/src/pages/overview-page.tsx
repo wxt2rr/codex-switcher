@@ -161,21 +161,21 @@ export function OverviewPage({
         }
       />
 
-      <div className="grid gap-3 lg:grid-cols-3">
-        <ListCard>
-          <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">{pageCopy.overview.guard}</div>
-          <div className="mt-2 text-[18px] font-semibold text-neutral-950">
+      <div className="grid divide-y divide-black/[0.06] rounded-[14px] border border-black/[0.05] bg-white sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+        <div className="px-5 py-3">
+          <div className="text-[12px] font-medium text-slate-500">{pageCopy.overview.guard}</div>
+          <div className="mt-1 text-[20px] font-semibold text-neutral-950">
             {localizeGuard(overview.status.tokenRefresh.guard, language)}
           </div>
-        </ListCard>
-        <ListCard>
-          <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">{reloginLabel}</div>
-          <div className="mt-2 text-[18px] font-semibold text-neutral-950">{overview.status.tokenRefresh.needReloginLastRun}</div>
-        </ListCard>
-        <ListCard>
-          <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">{activeAccountsLabel}</div>
-          <div className="mt-2 text-[18px] font-semibold text-neutral-950">{activeAccounts.length}</div>
-        </ListCard>
+        </div>
+        <div className="px-5 py-3">
+          <div className="text-[12px] font-medium text-slate-500">{reloginLabel}</div>
+          <div className="mt-1 text-[20px] font-semibold text-neutral-950">{overview.status.tokenRefresh.needReloginLastRun}</div>
+        </div>
+        <div className="px-5 py-3">
+          <div className="text-[12px] font-medium text-slate-500">{activeAccountsLabel}</div>
+          <div className="mt-1 text-[20px] font-semibold text-neutral-950">{activeAccounts.length}</div>
+        </div>
       </div>
 
       <ListStack>
