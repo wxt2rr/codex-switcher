@@ -61,6 +61,10 @@ test("all management record cards opt into the single-row responsive contract", 
   assert.match(environments, /responsive-actions/);
   assert.match(overview, /responsive-actions/);
   assert.match(operations, /responsive-actions/);
+  assert.doesNotMatch(operations, /<AvatarTile/);
+  assert.doesNotMatch(operations, /<Pager/);
+  assert.doesNotMatch(operations, /<SoftBadge/);
+  assert.doesNotMatch(overview, /<AvatarTile/);
   assert.match(reactApp, /shouldAutoLoadProxy/);
   assert.match(reactApp, /proxyDraftDirtyRef/);
   assert.doesNotMatch(environments, />CODEX_HOME</);

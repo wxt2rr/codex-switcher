@@ -2,7 +2,6 @@ import { Monitor, RefreshCw, ShieldCheck, TerminalSquare } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
-  AvatarTile,
   IconActionButton,
   ListCard,
   ListPageFrame,
@@ -57,8 +56,7 @@ function StatusTargetCard({
 
   return (
     <ListCard className="responsive-record-row responsive-overview-row grid min-h-[110px] items-center gap-5">
-      <div className="flex min-w-0 items-center gap-4">
-        <AvatarTile label={target} index={target === "cli" ? 0 : 1} />
+      <div className="flex min-w-0 items-center">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-3">
             <h3 className="truncate text-[15px] font-semibold tracking-[-0.02em] text-neutral-950">{label}</h3>

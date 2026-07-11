@@ -24,6 +24,9 @@ test("desktop build emits electron main entry and preload bundle", async () => {
   assert.match(mainSource, /preload\.cjs/);
   assert.match(mainSource, /dist", "index\.html"/);
   assert.match(mainSource, /"\.\."/);
+  assert.match(mainSource, /autoHideMenuBar/);
+  assert.match(mainSource, /setMenuBarVisibility\(false\)/);
+  assert.match(mainSource, /setMenu\(null\)/);
 
   const runtimePathsSource = await readFile(runtimePathsPath, "utf8");
   assert.match(runtimePathsSource, /CODEX_SWITCHER_DESKTOP_RESOURCES_PATH/);

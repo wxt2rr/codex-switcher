@@ -76,6 +76,7 @@ async function createWindow() {
     titleBarStyle: "hiddenInset",
     backgroundColor: "#f2f2f7",
     icon: iconPath,
+    autoHideMenuBar: process.platform !== "darwin",
     webPreferences: {
       preload: join(currentDir, "preload.cjs"),
       contextIsolation: true,
@@ -83,6 +84,10 @@ async function createWindow() {
       sandbox: false
     }
   });
+  if (process.platform !== "darwin") {
+    window.setMenuBarVisibility(false);
+    window.setMenu(null);
+  }
 
   const devServerUrl = process.env.CODEX_SWITCHER_DESKTOP_DEV_SERVER_URL;
   if (devServerUrl) {

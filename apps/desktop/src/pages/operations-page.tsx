@@ -7,21 +7,18 @@ import {
   Wrench,
 } from "lucide-react";
 import {
-  AvatarTile,
   IconActionButton,
   ListCard,
   ListFilters,
   ListPageFrame,
   ListPageHeader,
   ListStack,
-  Pager,
   RunStatusBadge,
-  SoftBadge,
 } from "../components/account-list-primitives";
 import { Field, Input, Select } from "../components/form-primitives";
 import type { OverviewPayload } from "../desktop-model";
 import { getDesktopCopy } from "../desktop-copy";
-import { localizeGuard, localizeLogKind } from "../desktop-utils";
+import { localizeLogKind } from "../desktop-utils";
 import type { UiLanguage } from "../i18n";
 import type { CodexToolStatus } from "../bridge";
 
@@ -40,22 +37,17 @@ function pageSubtitle(language: UiLanguage) {
 function OperationCard({
   title,
   subtitle,
-  iconLabel,
-  index,
   badge,
   children,
 }: {
   title: string;
   subtitle: string;
-  iconLabel: string;
-  index: number;
   badge?: string;
   children: React.ReactNode;
 }) {
   return (
     <ListCard className="responsive-record-row responsive-operation-row grid min-h-[106px] items-center gap-5">
-      <div className="flex min-w-0 items-center gap-4">
-        <AvatarTile label={iconLabel} index={index} />
+      <div className="flex min-w-0 items-center">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-3">
             <h3 className="truncate text-[15px] font-semibold tracking-[-0.02em] text-neutral-950 dark:text-neutral-50">{title}</h3>
@@ -117,13 +109,10 @@ export function OperationsPage({
         <div className="flex h-8 items-center rounded-lg border border-neutral-200 bg-white px-3 text-[12px] font-medium text-slate-600 dark:border-white/[0.08] dark:bg-[#161c24] dark:text-slate-300">
           {pageCopy.common.appCurrent}: {overview.status.app.current}
         </div>
-        <div className="flex h-8 items-center rounded-lg border border-neutral-200 bg-white px-3 text-[12px] font-medium text-slate-600 dark:border-white/[0.08] dark:bg-[#161c24] dark:text-slate-300">
-          {pageCopy.operations.guard}: {localizeGuard(overview.status.tokenRefresh.guard, language)}
-        </div>
       </ListFilters>
 
       <ListStack>
-        {(["cli", "app"] as const).map((kind, index) => {
+        {(["cli", "app"] as const).map((kind) => {
           const status = toolStatuses.find((item) => item.kind === kind);
           const title = kind === "cli" ? "Codex CLI" : "Codex App";
           const available = status?.available ?? false;
@@ -132,8 +121,6 @@ export function OperationsPage({
               key={kind}
               title={title}
               subtitle={language === "zh" ? `${title} 安装路径，支持自动检测和手动设置` : `${title} installation path with automatic detection and manual override`}
-              iconLabel={kind === "cli" ? "C" : "A"}
-              index={index}
               badge={available ? (status?.source === "manual" ? (language === "zh" ? "手动设置" : "Manual") : (language === "zh" ? "已检测" : "Detected")) : (language === "zh" ? "未检测到" : "Missing")}
             >
               <div className="responsive-operation-controls">
@@ -156,8 +143,6 @@ export function OperationsPage({
         <OperationCard
           title={pageCopy.operations.proxyTitle}
           subtitle={pageCopy.operations.proxyPlaceholder}
-          iconLabel="P"
-          index={2}
           badge={pageCopy.operations.proxyTitle}
         >
           <div className="responsive-operation-controls">
@@ -177,8 +162,6 @@ export function OperationsPage({
         <OperationCard
           title={pageCopy.operations.advancedTitle}
           subtitle={pageCopy.operations.readLog}
-          iconLabel="L"
-          index={3}
           badge={localizeLogKind(logKind, language)}
         >
           <div className="responsive-operation-controls responsive-operation-controls-narrow">
@@ -199,13 +182,6 @@ export function OperationsPage({
         </OperationCard>
       </ListStack>
 
-      <div className="flex flex-wrap gap-2">
-        <SoftBadge tone="brand" label={pageCopy.operations.guard} />
-        <SoftBadge tone="neutral" label={localizeGuard(overview.status.tokenRefresh.guard, language)} />
-        <SoftBadge tone="neutral" label={overview.status.app.current} />
-      </div>
-
-      <Pager totalLabel={language === "zh" ? "共 4 组操作" : "4 operation groups"} />
     </ListPageFrame>
   );
 }
