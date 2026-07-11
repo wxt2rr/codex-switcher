@@ -1,6 +1,10 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, type IpcMainInvokeEvent } from "electron";
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
+import { promisify } from "node:util";
 
 import {
   createEnv,
@@ -45,16 +49,22 @@ import {
   updateRuntime,
   getEnvironmentRouteStatuses,
   getCodexToolPaths,
+  getCliAutoResumeSettings,
   detectCodexToolPaths,
   setCodexToolPath,
+  setCliAutoResumeSettings,
   clearCodexToolPath,
   toggleEnvironmentRoute,
   loadUsageSnapshot,
   listUsagePricing,
   saveUsagePricing,
+  getCliTerminalSettings,
+  scanCliTerminalSettings,
+  setCliTerminalSelection,
 } from "./bridge.js";
 
 const currentDir = __dirname;
+const execFileAsync = promisify(execFile);
 const appDir = dirname(currentDir);
 process.env.CODEX_SWITCHER_DESKTOP_RESOURCES_PATH = process.resourcesPath;
 
@@ -125,14 +135,46 @@ app.on("window-all-closed", () => {
 });
 
 function registerHandlers() {
+  async function readTerminalIcon(iconPath?: string) {
+    if (!iconPath) return undefined;
+    if (process.platform === "darwin" && iconPath.endsWith(".app")) {
+      const plist = await readFile(join(iconPath, "Contents", "Info.plist"), "utf8").catch(() => "");
+      const iconName = plist.match(/<key>CFBundleIconFile<\/key>\s*<string>([^<]+)<\/string>/)?.[1]?.trim();
+      const icnsPath = iconName ? join(iconPath, "Contents", "Resources", iconName.endsWith(".icns") ? iconName : `${iconName}.icns`) : "";
+      if (icnsPath && existsSync(icnsPath)) {
+        const pngPath = join(tmpdir(), `codex-switcher-${basename(iconPath, ".app").replace(/[^a-z0-9-]/gi, "-").toLowerCase()}-icon.png`);
+        await execFileAsync("/usr/bin/sips", ["-s", "format", "png", icnsPath, "--out", pngPath]);
+        const png = await readFile(pngPath).catch(() => undefined);
+        if (png?.length) return `data:image/png;base64,${png.toString("base64")}`;
+      }
+    }
+    return app.getFileIcon(iconPath, { size: "small" }).then((icon) => icon.toDataURL()).catch(() => undefined);
+  }
+  async function withTerminalIcons(settings: Awaited<ReturnType<typeof getCliTerminalSettings>>) {
+    return {
+      selectedId: settings.selectedId,
+      terminals: await Promise.all(settings.terminals.map(async ({ iconPath, ...terminal }) => ({
+        ...terminal,
+        iconUrl: await readTerminalIcon(iconPath),
+      }))),
+    };
+  }
   ipcMain.handle("desktop:loadOverview", () => loadOverview());
   ipcMain.handle("desktop:loadAuthMetrics", () => loadAuthMetrics());
   ipcMain.handle("desktop:getCodexToolPaths", () => getCodexToolPaths());
+  ipcMain.handle("desktop:getCliAutoResumeSettings", () => getCliAutoResumeSettings());
   ipcMain.handle("desktop:detectCodexToolPaths", () => detectCodexToolPaths());
   ipcMain.handle("desktop:setCodexToolPath", (_event, kind, path) => setCodexToolPath(kind, path));
   ipcMain.handle("desktop:clearCodexToolPath", (_event, kind) => clearCodexToolPath(kind));
+  ipcMain.handle("desktop:setCliAutoResumeSettings", (_event, value) => setCliAutoResumeSettings(value));
+  ipcMain.handle("desktop:getCliTerminalSettings", async () => withTerminalIcons(await getCliTerminalSettings()));
+  ipcMain.handle("desktop:scanCliTerminalSettings", async () => withTerminalIcons(await scanCliTerminalSettings()));
+  ipcMain.handle("desktop:setCliTerminalSelection", async (_event, id) => withTerminalIcons(await setCliTerminalSelection(id)));
   ipcMain.handle("desktop:getLanguage", () => getLanguage());
   ipcMain.handle("desktop:setLanguage", (_event: IpcMainInvokeEvent, language: string) => setLanguage(language));
+  ipcMain.handle("desktop:writeClipboardText", (_event: IpcMainInvokeEvent, value: string) => {
+    clipboard.writeText(value);
+  });
   ipcMain.handle("desktop:nativeLogin", (_event: IpcMainInvokeEvent, request) => nativeLogin(request));
   ipcMain.handle("desktop:switchEnv", (_event: IpcMainInvokeEvent, target: "cli" | "app", envName: string) =>
     switchEnv(target, envName)

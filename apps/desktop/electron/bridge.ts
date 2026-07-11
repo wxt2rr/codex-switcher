@@ -2,7 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { dirname, join } from "node:path";
 import { existsSync } from "node:fs";
-import { access, cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, appendFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { getUiLanguage, setUiLanguage, type UiLanguage } from "./ui-language.js";
 import {
@@ -34,7 +34,13 @@ import {
   resolveRuntimeResource,
   resolveRuntimeRoot,
 } from "./runtime-paths.js";
-import { readCodexProjects, type CodexProject } from "./codex-projects.js";
+import { findCodexResumeSession, readCodexProjects, type CodexProject } from "./codex-projects.js";
+import {
+  readCliAutoResumeSettings,
+  saveCliAutoResumeSettings,
+  type CliAutoResumeSettings,
+} from "./desktop-settings.js";
+import { getCliTerminalSettings as readCliTerminalSettings, saveCliTerminalSelection, type CliTerminalId, type CliTerminalSettings } from "./cli-terminal-settings.js";
 
 const execFileAsync = promisify(execFile);
 const currentDir = resolveCurrentDir();
@@ -87,6 +93,7 @@ const authMetricsCache = new Map<string, {
 }>();
 const authMetricsInflight = new Map<string, Promise<Awaited<ReturnType<typeof collectProfileMetrics>>>>();
 const terminalLaunchGate = createTerminalLaunchGate(2_000);
+let terminalLaunchSequence = 0;
 let desktopOperationsLoaderForTest:
   | (() => Promise<DesktopOperationsServiceLike>)
   | undefined;
@@ -436,11 +443,15 @@ export async function switchAccount(
   if (target === "app") {
     await launchAppTarget(next, runtime, strategy === "new-window" ? "new-window" : "replace-current");
   } else {
-    await openCommandInPreferredTerminal(
+    const warning = await openCommandInPreferredTerminal(
       ["cli", "launch-current"],
       strategy === "current-window" ? "current-window" : "new-window",
       workingDirectory,
     );
+    return {
+      message: `Switched ${target.toUpperCase()} account to ${next.targets[target].env}/${next.targets[target].account}${warning ? `. ${warning}` : ""}`,
+      output: `${next.targets[target].env}/${next.targets[target].account}\n`,
+    };
   }
   return {
     message: `Switched ${target.toUpperCase()} account to ${next.targets[target].env}/${next.targets[target].account}`,
@@ -829,6 +840,21 @@ export async function clearCodexToolPath(kind: CodexToolKind) {
   return resetCodexToolPath(kind, getCodexToolPathOptions());
 }
 
+export async function getCliAutoResumeSettings(): Promise<CliAutoResumeSettings> {
+  return readCliAutoResumeSettings(getCodexToolPathOptions().settingsPath);
+}
+
+export async function setCliAutoResumeSettings(value: CliAutoResumeSettings): Promise<CliAutoResumeSettings> {
+  return saveCliAutoResumeSettings(getCodexToolPathOptions().settingsPath, value);
+}
+
+export async function getCliTerminalSettings(): Promise<CliTerminalSettings> { return readCliTerminalSettings(getCodexToolPathOptions()); }
+export async function scanCliTerminalSettings(): Promise<CliTerminalSettings> { return readCliTerminalSettings(getCodexToolPathOptions()); }
+export async function setCliTerminalSelection(id: CliTerminalId): Promise<CliTerminalSettings> {
+  const current = await readCliTerminalSettings(getCodexToolPathOptions());
+  return saveCliTerminalSelection(getCodexToolPathOptions().settingsPath, id, current.terminals);
+}
+
 async function getEffectiveCodexEnv(): Promise<NodeJS.ProcessEnv> {
   return buildEffectiveCodexEnv(await getCodexToolPaths(), process.env);
 }
@@ -914,9 +940,9 @@ export async function importDefaultEnv(
 }
 
 export async function launchCliInTerminal(): Promise<DesktopActionResult> {
-  await openCommandInPreferredTerminal(["cli", "launch-current"]);
+  const warning = await openCommandInPreferredTerminal(["cli", "launch-current"]);
   return {
-    message: getCliLaunchSuccessMessage(),
+    message: `${getCliLaunchSuccessMessage()}${warning ? `. ${warning}` : ""}`,
   };
 }
 
@@ -960,43 +986,82 @@ async function openCommandInPreferredTerminal(
   commandArgs: string[],
   strategy: "current-window" | "new-window" = "new-window",
   workingDirectory?: string,
-): Promise<void> {
+): Promise<string | undefined> {
+  const launchId = `${process.pid}-${++terminalLaunchSequence}`;
   const launchKey = JSON.stringify([strategy, workingDirectory?.trim() || ""]);
-  return terminalLaunchGate.run(launchKey, () => openCommandInPreferredTerminalOnce(commandArgs, strategy, workingDirectory));
+  await appendTerminalLaunchDebug(launchId, "request", { commandArgs, strategy, workingDirectory, launchKey });
+  return terminalLaunchGate.run(launchKey, () => openCommandInPreferredTerminalOnce(commandArgs, strategy, workingDirectory, launchId));
 }
 
 async function openCommandInPreferredTerminalOnce(
   commandArgs: string[],
   strategy: "current-window" | "new-window",
   workingDirectory?: string,
-): Promise<void> {
+  launchId = "unknown",
+): Promise<string | undefined> {
   const repoRoot = getRepoRoot();
   const codexHome = await resolveCliTargetHome();
   const codexBin = await requireCodexCliPath();
   const launchDirectory = strategy === "current-window"
     ? undefined
     : await resolveCliWorkingDirectory(workingDirectory);
+  const effectiveWorkingDirectory = launchDirectory
+    ?? await resolveCurrentTerminalWorkingDirectory()
+    ?? await resolveCliWorkingDirectory(workingDirectory);
+  const requestedArgs = commandArgs[0] === "cli" && commandArgs[1] === "launch-current" ? [] : commandArgs;
+  const autoResume = await getCliAutoResumeSettings();
+  let codexArgs = requestedArgs;
+  let warning: string | undefined;
+  if (requestedArgs.length === 0 && autoResume.enabled) {
+    const session = await findCodexResumeSession(codexHome, effectiveWorkingDirectory, autoResume.sessionNumber);
+    if (session) codexArgs = ["resume", session.id];
+    else {
+      warning = `Auto resume skipped: session ${autoResume.sessionNumber} was not found for this project`;
+      await appendTerminalLaunchDebug(launchId, "auto-resume-warning", { message: warning });
+    }
+  }
+  const terminalSettings = await getCliTerminalSettings();
+  const launchEnv = terminalSettings.terminals.some((item) => item.id === "powershell7")
+    ? { ...process.env, CODEX_SWITCHER_WINDOWS_PWSH_AVAILABLE: "1" }
+    : process.env;
   const plan = buildCliTerminalLaunchPlan({
     repoRoot,
     workingDirectory: launchDirectory,
     codexHome,
     codexBin,
     platform: process.platform,
-    env: process.env,
+    env: launchEnv,
     launchMode: strategy,
-    args: commandArgs[0] === "cli" && commandArgs[1] === "launch-current" ? [] : commandArgs,
+    args: codexArgs,
+    terminalId: terminalSettings.selectedId,
+  });
+  await appendTerminalLaunchDebug(launchId, "plan", {
+    platform: plan.platform,
+    launchMode: plan.launchMode,
+    effectiveWorkingDirectory,
+    codexArgs,
+    attempts: plan.attempts.map((attempt) => ({ command: attempt.command, args: attempt.args })),
   });
 
   let lastError: unknown = null;
   for (const attempt of plan.attempts) {
     try {
-      await execFileAsync(attempt.command, attempt.args, {
+      const result = await execFileAsync(attempt.command, attempt.args, {
         cwd: repoRoot,
         env: process.env,
       });
-      return;
+      await appendTerminalLaunchDebug(launchId, "attempt-success", {
+        command: attempt.command,
+        stdout: result.stdout,
+        stderr: result.stderr,
+      });
+      return warning;
     } catch (error) {
       lastError = error;
+      await appendTerminalLaunchDebug(launchId, "attempt-error", {
+        command: attempt.command,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -1013,10 +1078,20 @@ async function openCommandInPreferredTerminalOnce(
   throw new Error("Unable to open CLI in a terminal on this platform");
 }
 
+async function appendTerminalLaunchDebug(
+  launchId: string,
+  stage: string,
+  details: Record<string, unknown>,
+): Promise<void> {
+  const path = join(getStateDir(), "terminal-launch-debug.log");
+  await mkdir(dirname(path), { recursive: true });
+  await appendFile(path, `${JSON.stringify({ at: new Date().toISOString(), launchId, stage, ...details })}\n`, "utf8");
+}
+
 function createTerminalLaunchGate(windowMs: number) {
-  let recent: { key: string; startedAt: number; result: Promise<void> } | undefined;
+  let recent: { key: string; startedAt: number; result: Promise<string | undefined> } | undefined;
   return {
-    run(key: string, launch: () => Promise<void>, now = Date.now()): Promise<void> {
+    run(key: string, launch: () => Promise<string | undefined>, now = Date.now()): Promise<string | undefined> {
       if (recent && recent.key === key && now - recent.startedAt < windowMs) return recent.result;
       const result = launch();
       recent = { key, startedAt: now, result };
@@ -1043,6 +1118,25 @@ async function resolveCliWorkingDirectory(value?: string): Promise<string> {
   return path;
 }
 
+async function resolveCurrentTerminalWorkingDirectory(): Promise<string | undefined> {
+  if (process.platform !== "darwin") return undefined;
+  const terminal = resolveMacOsTerminal(process.env);
+  if (terminal === "iterm") {
+    const script = `using terms from application "iTerm"
+tell application "iTerm"
+if (count of windows) is 0 then return ""
+tell current session of current window
+return variable named "session.path"
+end tell
+end tell
+end using terms from`;
+    const result = await execFileAsync("osascript", ["-e", script]).catch(() => undefined);
+    const path = result?.stdout.trim();
+    if (path && (await lstat(path).catch(() => null))?.isDirectory()) return path;
+  }
+  return undefined;
+}
+
 function buildCliTerminalLaunchPlan(input: {
   repoRoot: string;
   workingDirectory?: string;
@@ -1052,6 +1146,7 @@ function buildCliTerminalLaunchPlan(input: {
   env?: NodeJS.ProcessEnv;
   launchMode?: "current-window" | "new-window";
   args?: string[];
+  terminalId?: CliTerminalId;
 }): CliTerminalLaunchPlan {
   const platform = detectPlatformLocal(input.platform);
   const codexArgs = input.args ?? [];
@@ -1065,6 +1160,7 @@ function buildCliTerminalLaunchPlan(input: {
       codexBin: input.codexBin,
       env: input.env,
       args: codexArgs,
+      terminalId: input.terminalId,
     });
   }
 
@@ -1077,7 +1173,11 @@ function buildCliTerminalLaunchPlan(input: {
   });
 
   if (platform === "macos") {
-    const terminal = resolveMacOsTerminal(input.env);
+    const terminal = input.terminalId ?? resolveMacOsTerminal(input.env);
+    if (terminal === "warp" || terminal === "ghostty") {
+      const executable = terminal === "warp" ? "/Applications/Warp.app" : "/Applications/Ghostty.app";
+      return { platform, launchMode: "new-window", attempts: [{ command: "open", args: ["-na", executable, "--args", "-e", "/bin/zsh", "-lc", shellCommand] }] };
+    }
     const appleScript = terminal === "iterm"
       ? (launchMode === "current-window" ? buildCurrentITermAppleScript(shellCommand) : buildITermAppleScript(shellCommand))
       : (launchMode === "current-window" ? buildCurrentTerminalAppleScript(shellCommand) : buildTerminalAppleScript(shellCommand));
@@ -1119,11 +1219,13 @@ function buildWindowsCliTerminalLaunchPlan(input: {
   codexBin: string;
   env?: NodeJS.ProcessEnv;
   args: string[];
+  terminalId?: CliTerminalId;
 }): CliTerminalLaunchPlan {
-  const launcher = (input.env?.CODEX_SWITCHER_WINDOWS_CLI_LAUNCHER || "powershell").toLowerCase();
+  const launcher = input.terminalId ?? (input.env?.CODEX_SWITCHER_WINDOWS_CLI_LAUNCHER || "powershell").toLowerCase();
   const cmdCommand = buildWindowsCmdLaunchCommand(input);
   const powerShellCommand = buildWindowsPowerShellLaunchCommand(input);
   if (launcher === "wt" || launcher === "windows-terminal" || launcher === "wt.exe") {
+    const shell = input.env?.CODEX_SWITCHER_WINDOWS_PWSH_AVAILABLE === "1" ? "pwsh.exe" : "powershell.exe";
     return {
       platform: "windows",
       launchMode: "new-window",
@@ -1133,7 +1235,7 @@ function buildWindowsCliTerminalLaunchPlan(input: {
           args: [
             "-w",
             "new",
-            "powershell.exe",
+            shell,
             "-NoExit",
             "-ExecutionPolicy",
             "Bypass",
@@ -1145,7 +1247,14 @@ function buildWindowsCliTerminalLaunchPlan(input: {
     };
   }
 
-  if (launcher === "powershell" || launcher === "pwsh" || launcher === "powershell.exe") {
+  if (launcher === "powershell7" || launcher === "pwsh" || launcher === "pwsh.exe") {
+    return {
+      platform: "windows", launchMode: "new-window",
+      attempts: [{ command: "pwsh.exe", args: ["-NoProfile", "-NoExit", "-Command", powerShellCommand] }],
+    };
+  }
+
+  if (launcher === "windows-powershell" || launcher === "powershell" || launcher === "powershell.exe") {
     return {
       platform: "windows",
       launchMode: "new-window",
@@ -2020,12 +2129,22 @@ function buildPostSwitchActions(target: "cli" | "app"): Array<
 }
 
 function buildITermAppleScript(command: string): string {
-  return `tell application "iTerm"
-activate
+  return `set iTermWasRunning to application "iTerm" is running
+tell application "iTerm"
+if iTermWasRunning then
 create window with default profile
+else
+launch
+repeat 50 times
+if (count of windows) > 0 then exit repeat
+delay 0.1
+end repeat
+if (count of windows) is 0 then error "iTerm did not create its initial window"
+end if
 tell current session of current window
 write text ${quoteAppleScriptString(command)}
 end tell
+activate
 end tell`;
 }
 
@@ -2037,8 +2156,8 @@ create window with default profile
 end if
 set targetSession to current session of current window
 set targetTty to tty of targetSession
-${buildAppleScriptCurrentSessionRestart("tell targetSession to write text", "targetTty")}
-tell targetSession to write text ${quoteAppleScriptString(command)}
+${buildAppleScriptCurrentSessionRestart("targetTty")}
+tell targetSession to write text ${quoteAppleScriptString(command)} newline yes
 end tell`;
 }
 
@@ -2046,13 +2165,34 @@ function buildTerminalAppleScript(command: string): string {
   const quotedCommand = quoteAppleScriptString(command);
   return `set terminalWasRunning to application "Terminal" is running
 tell application "Terminal"
+set windowsBefore to count of windows
+set launchBranch to ""
+set targetTty to ""
 if terminalWasRunning then
+set targetTab to selected tab of front window
+set targetTty to tty of targetTab
+if busy of targetTab then
+set launchBranch to "warm-busy-new-window"
 do script ${quotedCommand}
 else
+set launchBranch to "warm-idle-current-tab"
+do script ${quotedCommand} in targetTab
+end if
+else
+set launchBranch to "cold-initial-tab"
 launch
-do script ${quotedCommand}
+repeat 50 times
+if exists front window then exit repeat
+delay 0.1
+end repeat
+if not (exists front window) then error "Terminal did not create its initial window"
+set targetTab to selected tab of front window
+set targetTty to tty of targetTab
+do script ${quotedCommand} in targetTab
 end if
 activate
+delay 0.2
+return "branch=" & launchBranch & ";runningBefore=" & terminalWasRunning & ";windowsBefore=" & windowsBefore & ";windowsAfter=" & (count of windows) & ";targetTty=" & targetTty
 end tell`;
 }
 
@@ -2064,26 +2204,27 @@ do script ${quoteAppleScriptString(command)}
 else
 set targetTab to selected tab of front window
 set targetTty to tty of targetTab
-${buildAppleScriptCurrentSessionRestart("do script", "targetTty", "in targetTab")}
+${buildAppleScriptCurrentSessionRestart("targetTty")}
 do script ${quoteAppleScriptString(command)} in targetTab
 end if
 end tell`;
 }
 
-function buildAppleScriptCurrentSessionRestart(
-  writeCommand: string,
-  ttyVariable: string,
-  writeSuffix = "",
-): string {
-  const exitCommand = `${writeCommand} ${quoteAppleScriptString("/exit")}${writeSuffix ? ` ${writeSuffix}` : ""}`;
-  return `set existingCodexProcesses to do shell script "ps -t " & quoted form of ${ttyVariable} & " -o command= | awk '$0 !~ /codex-switcher|codex-code-mode-host/ && ($1 ~ /\\/codex$/ || ($1 ~ /\\/node$/ && $2 ~ /\\/codex$/)) { print }'"
+function buildAppleScriptCurrentSessionRestart(ttyVariable: string): string {
+  const processQuerySuffix = quoteAppleScriptString(
+    " -o command= | awk '$0 !~ /codex-switcher|codex-code-mode-host/ && ($1 ~ /\\/codex$/ || ($1 ~ /\\/node$/ && $2 ~ /\\/codex$/)) { print }'",
+  );
+  const foregroundProcessGroupSuffix = quoteAppleScriptString(" -o tpgid= | awk 'NF { print $1; exit }'");
+  return `set existingCodexProcesses to do shell script ("ps -t " & quoted form of ${ttyVariable} & ${processQuerySuffix})
 if existingCodexProcesses is not "" then
-${exitCommand}
+set foregroundProcessGroup to do shell script ("ps -t " & quoted form of ${ttyVariable} & ${foregroundProcessGroupSuffix})
+if foregroundProcessGroup is "" or foregroundProcessGroup is "-1" then error "Unable to resolve the current terminal foreground process group"
+do shell script ("kill -TERM -- -" & foregroundProcessGroup)
 set codexExited to false
 repeat 50 times
 delay 0.1
 try
-set codexProcesses to do shell script "ps -t " & quoted form of ${ttyVariable} & " -o command= | awk '$0 !~ /codex-switcher|codex-code-mode-host/ && ($1 ~ /\\/codex$/ || ($1 ~ /\\/node$/ && $2 ~ /\\/codex$/)) { print }'"
+set codexProcesses to do shell script ("ps -t " & quoted form of ${ttyVariable} & ${processQuerySuffix})
 if codexProcesses is "" then
 set codexExited to true
 exit repeat

@@ -3,6 +3,10 @@ export interface DesktopActionResult {
   output?: string;
 }
 export interface CodexToolStatus { kind: "cli" | "app"; path: string; detectedPath: string; manualPath: string; source: "manual" | "environment" | "path" | "candidate" | "missing"; available: boolean; }
+export interface CliAutoResumeSettings { enabled: boolean; sessionNumber: number; }
+export type CliTerminalId = "iterm" | "terminal" | "warp" | "ghostty" | "windows-terminal" | "powershell7" | "windows-powershell" | "command-prompt";
+export interface CliTerminalOption { id: CliTerminalId; label: string; supportsCurrentWindow: boolean; iconUrl?: string; }
+export interface CliTerminalSettings { selectedId: CliTerminalId; terminals: CliTerminalOption[]; }
 
 export interface DesktopLogResult {
   kind: "switcher" | "token-refresh";
@@ -67,11 +71,17 @@ export interface DesktopElectronApi {
   loadOverview(): Promise<string>;
   loadAuthMetrics(): Promise<string>;
   getCodexToolPaths(): Promise<CodexToolStatus[]>;
+  getCliAutoResumeSettings(): Promise<CliAutoResumeSettings>;
   detectCodexToolPaths(): Promise<CodexToolStatus[]>;
   setCodexToolPath(kind: "cli" | "app", path: string): Promise<CodexToolStatus>;
   clearCodexToolPath(kind: "cli" | "app"): Promise<CodexToolStatus>;
+  setCliAutoResumeSettings(value: CliAutoResumeSettings): Promise<CliAutoResumeSettings>;
+  getCliTerminalSettings(): Promise<CliTerminalSettings>;
+  scanCliTerminalSettings(): Promise<CliTerminalSettings>;
+  setCliTerminalSelection(id: CliTerminalId): Promise<CliTerminalSettings>;
   getLanguage(): Promise<"zh" | "en" | "ja">;
   setLanguage(language: "zh" | "en" | "ja"): Promise<"zh" | "en" | "ja">;
+  writeClipboardText(value: string): Promise<void>;
   nativeLogin(request: DesktopNativeLoginRequest): Promise<DesktopActionResult>;
   switchEnv(target: "cli" | "app", envName: string): Promise<DesktopActionResult>;
   switchAccount(
@@ -126,11 +136,17 @@ export interface DesktopBridge {
   loadOverview(): Promise<string>;
   loadAuthMetrics(): Promise<string>;
   getCodexToolPaths(): Promise<CodexToolStatus[]>;
+  getCliAutoResumeSettings(): Promise<CliAutoResumeSettings>;
   detectCodexToolPaths(): Promise<CodexToolStatus[]>;
   setCodexToolPath(kind: "cli" | "app", path: string): Promise<CodexToolStatus>;
   clearCodexToolPath(kind: "cli" | "app"): Promise<CodexToolStatus>;
+  setCliAutoResumeSettings(value: CliAutoResumeSettings): Promise<CliAutoResumeSettings>;
+  getCliTerminalSettings(): Promise<CliTerminalSettings>;
+  scanCliTerminalSettings(): Promise<CliTerminalSettings>;
+  setCliTerminalSelection(id: CliTerminalId): Promise<CliTerminalSettings>;
   getLanguage(): Promise<"zh" | "en" | "ja">;
   setLanguage(language: "zh" | "en" | "ja"): Promise<"zh" | "en" | "ja">;
+  writeClipboardText(value: string): Promise<void>;
   nativeLogin(request: DesktopNativeLoginRequest): Promise<DesktopActionResult>;
   switchEnv(target: "cli" | "app", envName: string): Promise<DesktopActionResult>;
   switchAccount(
@@ -187,11 +203,17 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       loadOverview: unavailable,
       loadAuthMetrics: unavailable,
       getCodexToolPaths: unavailable,
+      getCliAutoResumeSettings: unavailable,
       detectCodexToolPaths: unavailable,
       setCodexToolPath: unavailable,
       clearCodexToolPath: unavailable,
+      setCliAutoResumeSettings: unavailable,
+      getCliTerminalSettings: unavailable,
+      scanCliTerminalSettings: unavailable,
+      setCliTerminalSelection: unavailable,
       getLanguage: unavailable,
       setLanguage: unavailable,
+      writeClipboardText: unavailable,
       nativeLogin: unavailable,
       switchEnv: unavailable,
       switchAccount: unavailable,
@@ -324,11 +346,17 @@ function createBrowserPreviewBridge(): DesktopBridge {
     loadOverview: browserPreviewLoadOverview,
     loadAuthMetrics: browserPreviewLoadAuthMetrics,
     getCodexToolPaths: async () => [],
+    getCliAutoResumeSettings: async () => ({ enabled: false, sessionNumber: 1 }),
     detectCodexToolPaths: async () => [],
     setCodexToolPath: async (kind, path) => ({ kind, path, detectedPath: "", manualPath: path, source: "manual", available: true }),
     clearCodexToolPath: async (kind) => ({ kind, path: "", detectedPath: "", manualPath: "", source: "missing", available: false }),
+    setCliAutoResumeSettings: async (value) => value,
+    getCliTerminalSettings: async () => ({ selectedId: "terminal", terminals: [{ id: "terminal", label: "Terminal", supportsCurrentWindow: true }] }),
+    scanCliTerminalSettings: async () => ({ selectedId: "terminal", terminals: [{ id: "terminal", label: "Terminal", supportsCurrentWindow: true }] }),
+    setCliTerminalSelection: async (id) => ({ selectedId: id, terminals: [{ id, label: id, supportsCurrentWindow: false }] }),
     getLanguage: browserPreviewLanguage,
     setLanguage: browserPreviewSetLanguage,
+    writeClipboardText: async () => undefined,
     nativeLogin: () => browserPreviewAction(),
     switchEnv: () => browserPreviewAction(),
     switchAccount: () => browserPreviewAction(),

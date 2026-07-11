@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { mergeAccountUsageMetrics, mergeOverviewWithAuthMetrics } from "@/auth-metrics";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/components/theme-provider";
-import type { CodexToolStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry } from "./bridge";
+import type { CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry } from "./bridge";
 import { DesktopShell } from "./components/desktop-shell";
 import type { AccountSummary, AuthMetricsPayload, EnvironmentRouteStatus, NavView, OverviewPayload } from "./desktop-model";
 import { resolveDesktopBridge } from "./bridge";
@@ -65,6 +65,11 @@ export function App() {
   const [selectedLogKind, setSelectedLogKind] = useState("switcher");
   const [toolStatuses, setToolStatuses] = useState<CodexToolStatus[]>([]);
   const [toolDrafts, setToolDrafts] = useState<Record<"cli" | "app", string>>({ cli: "", app: "" });
+  const [cliAutoResume, setCliAutoResume] = useState<CliAutoResumeSettings>({ enabled: false, sessionNumber: 1 });
+  const [savedCliAutoResume, setSavedCliAutoResume] = useState<CliAutoResumeSettings>({ enabled: false, sessionNumber: 1 });
+  const [autoResumeSaving, setAutoResumeSaving] = useState(false);
+  const [cliTerminalSettings, setCliTerminalSettings] = useState<CliTerminalSettings | null>(null);
+  const [cliTerminalSaving, setCliTerminalSaving] = useState(false);
   const [routeStatuses, setRouteStatuses] = useState<EnvironmentRouteStatus[]>([]);
   const authMetricsRequestRef = useRef(0);
   const authMetricsInFlightRef = useRef(false);
@@ -125,7 +130,29 @@ export function App() {
   useEffect(() => {
     if (view !== "operations") return;
     void loadCodexToolPaths();
+    void bridge.getCliAutoResumeSettings().then((settings) => {
+      setCliAutoResume(settings);
+      setSavedCliAutoResume(settings);
+    }).catch(setErrorMessage);
+    void bridge.getCliTerminalSettings().then(setCliTerminalSettings).catch(setErrorMessage);
   }, [view]);
+
+  async function handleCliTerminalSelection(id: CliTerminalId) {
+    const previous = cliTerminalSettings;
+    if (!previous) return;
+    setCliTerminalSettings({ ...previous, selectedId: id });
+    setCliTerminalSaving(true);
+    try { setCliTerminalSettings(await bridge.setCliTerminalSelection(id)); }
+    catch (error) { setCliTerminalSettings(previous); setErrorMessage(error); }
+    finally { setCliTerminalSaving(false); }
+  }
+
+  async function handleCliTerminalScan() {
+    setCliTerminalSaving(true);
+    try { setCliTerminalSettings(await bridge.scanCliTerminalSettings()); }
+    catch (error) { setErrorMessage(error); }
+    finally { setCliTerminalSaving(false); }
+  }
 
   async function loadCodexToolPaths(detect = false) {
     try {
@@ -147,6 +174,22 @@ export function App() {
       await loadCodexToolPaths(true);
       setSuccessMessage(language === "zh" ? `${kind === "cli" ? "Codex CLI" : "Codex App"} 路径已更新` : `${kind === "cli" ? "Codex CLI" : "Codex App"} path updated`);
     } catch (error) { setErrorMessage(error); } finally { setBusy(false); }
+  }
+
+  async function handleCliAutoResumeChange(next: CliAutoResumeSettings) {
+    const previous = savedCliAutoResume;
+    setCliAutoResume(next);
+    setAutoResumeSaving(true);
+    try {
+      const saved = await bridge.setCliAutoResumeSettings(next);
+      setCliAutoResume(saved);
+      setSavedCliAutoResume(saved);
+    } catch (error) {
+      setCliAutoResume(previous);
+      setErrorMessage(error);
+    } finally {
+      setAutoResumeSaving(false);
+    }
   }
 
   async function handleToggleEnvironmentRoute(envName: string, enabled: boolean) {
@@ -806,6 +849,11 @@ export function App() {
           onDeleteAccount={() => void handleAccountCommand("rm")}
           onUpdateRuntime={handleUpdateRuntime}
           onUpdateIndependentModel={handleUpdateIndependentModel}
+          onCopyApiKey={(value) => {
+            void bridge.writeClipboardText(value)
+              .then(() => setSuccessMessage(language === "zh" ? "API Key 已复制" : language === "ja" ? "API Key をコピーしました" : "API key copied"))
+              .catch(setErrorMessage);
+          }}
         />
       ) : null}
 
@@ -827,9 +875,15 @@ export function App() {
           toolStatuses={toolStatuses}
           toolDrafts={toolDrafts}
           onToolDraftChange={(kind, value) => setToolDrafts((current) => ({ ...current, [kind]: value }))}
-          onToolDetect={() => void loadCodexToolPaths(true)}
           onToolSave={(kind) => void handleToolPath(kind, "save")}
           onToolReset={(kind) => void handleToolPath(kind, "reset")}
+          cliAutoResume={cliAutoResume}
+          autoResumeSaving={autoResumeSaving}
+          onCliAutoResumeChange={(next) => void handleCliAutoResumeChange(next)}
+          cliTerminalSettings={cliTerminalSettings}
+          cliTerminalSaving={cliTerminalSaving}
+          onCliTerminalChange={(id) => void handleCliTerminalSelection(id)}
+          onCliTerminalScan={() => void handleCliTerminalScan()}
         />
       ) : null}
 

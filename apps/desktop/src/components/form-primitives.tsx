@@ -64,6 +64,7 @@ export function Select({
   placeholder,
   disabled,
   className,
+  openOnHover = true,
 }: {
   value?: string;
   onValueChange: (value: string) => void;
@@ -71,8 +72,10 @@ export function Select({
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  openOnHover?: boolean;
 }) {
   const normalizedItems = toSelectItems(items);
+  const selectedItem = normalizedItems.find((item) => item.value === value);
   const [open, setOpen] = useState(false);
   const closeTimerRef = useRef<number | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -85,7 +88,7 @@ export function Select({
     }
   }
 
-  function openOnHover() {
+  function handleHoverOpen() {
     if (disabled) return;
     cancelClose();
     setOpen(true);
@@ -105,7 +108,7 @@ export function Select({
   }
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !openOnHover) return;
     function handlePointerMove(event: PointerEvent) {
       if (isPointInsideHoverMenu(
         { x: event.clientX, y: event.clientY },
@@ -123,17 +126,19 @@ export function Select({
       document.removeEventListener("pointermove", handlePointerMove, true);
       cancelClose();
     };
-  }, [open]);
+  }, [open, openOnHover]);
 
   return (
     <UiSelect value={value} onValueChange={onValueChange} disabled={disabled} open={open} onOpenChange={setOpen}>
-      <SelectTrigger ref={triggerRef} className={className} onMouseEnter={openOnHover}>
-        <SelectValue placeholder={placeholder} />
+      <SelectTrigger ref={triggerRef} className={className} onMouseEnter={openOnHover ? handleHoverOpen : undefined}>
+        {selectedItem?.iconUrl ? (
+          <div className="flex min-w-0 items-center gap-2"><img src={selectedItem.iconUrl} alt="" className="size-[18px] shrink-0 object-contain" /><span className="truncate">{selectedItem.label}</span></div>
+        ) : <SelectValue placeholder={placeholder} />}
       </SelectTrigger>
       <SelectContent ref={contentRef}>
         {normalizedItems.map((item) => (
           <SelectItem key={item.value} value={item.value}>
-            {item.label}
+            <span className="flex min-w-0 items-center gap-2">{item.iconUrl ? <img src={item.iconUrl} alt="" className="size-[18px] shrink-0 object-contain" /> : null}<span className="truncate">{item.label}</span></span>
           </SelectItem>
         ))}
       </SelectContent>

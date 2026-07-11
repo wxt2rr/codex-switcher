@@ -9,6 +9,7 @@ test("desktop bridge falls back to browser-safe stub when electron api is unavai
   await assert.rejects(() => bridge.loadOverview(), /desktop bridge unavailable/);
   await assert.rejects(() => bridge.loadAuthMetrics(), /desktop bridge unavailable/);
   await assert.rejects(() => bridge.getLanguage(), /desktop bridge unavailable/);
+  await assert.rejects(() => bridge.writeClipboardText("secret"), /desktop bridge unavailable/);
   await assert.rejects(() => bridge.switchEnv("cli", "default"), /desktop bridge unavailable/);
   await assert.rejects(() => bridge.createEnv({ envName: "default", source: { kind: "default" } }), /desktop bridge unavailable/);
   await assert.rejects(() => bridge.deleteEnv("default"), /desktop bridge unavailable/);
@@ -43,9 +44,20 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       return "{\"accounts\":{},\"status\":{}}";
     },
     getCodexToolPaths: async () => [],
+    getCliAutoResumeSettings: async () => {
+      calls.push("getCliAutoResumeSettings");
+      return { enabled: false, sessionNumber: 1 };
+    },
     detectCodexToolPaths: async () => [],
     setCodexToolPath: async (kind, path) => ({ kind, path, detectedPath: "", manualPath: path, source: "manual", available: true }),
     clearCodexToolPath: async (kind) => ({ kind, path: "", detectedPath: "", manualPath: "", source: "missing", available: false }),
+    setCliAutoResumeSettings: async (value) => {
+      calls.push(`setCliAutoResumeSettings:${value.enabled}:${value.sessionNumber}`);
+      return value;
+    },
+    getCliTerminalSettings: async () => ({ selectedId: "terminal", terminals: [{ id: "terminal", label: "Terminal", supportsCurrentWindow: true }] }),
+    scanCliTerminalSettings: async () => ({ selectedId: "terminal", terminals: [{ id: "terminal", label: "Terminal", supportsCurrentWindow: true }] }),
+    setCliTerminalSelection: async (id) => ({ selectedId: id, terminals: [{ id, label: id, supportsCurrentWindow: false }] }),
     getLanguage: async () => {
       calls.push("getLanguage");
       return "zh";
@@ -53,6 +65,9 @@ test("desktop bridge forwards calls to injected electron api", async () => {
     setLanguage: async (language) => {
       calls.push(`setLanguage:${language}`);
       return language;
+    },
+    writeClipboardText: async (value) => {
+      calls.push(`writeClipboardText:${value}`);
     },
     nativeLogin: async (request) => {
       calls.push(`nativeLogin:${request.mode}:${request.account}:${request.envName}:${request.target}:${request.relogin ? "relogin" : "login"}`);
@@ -205,8 +220,11 @@ test("desktop bridge forwards calls to injected electron api", async () => {
 
   await bridge.loadOverview();
   await bridge.loadAuthMetrics();
+  await bridge.getCliAutoResumeSettings();
+  await bridge.setCliAutoResumeSettings({ enabled: true, sessionNumber: 2 });
   await bridge.getLanguage();
   await bridge.setLanguage("ja");
+  await bridge.writeClipboardText("sk-secret");
   await bridge.nativeLogin({
     mode: "auth",
     account: "personal",
@@ -254,8 +272,11 @@ test("desktop bridge forwards calls to injected electron api", async () => {
   assert.deepEqual(calls, [
     "loadOverview",
     "loadAuthMetrics",
+    "getCliAutoResumeSettings",
+    "setCliAutoResumeSettings:true:2",
     "getLanguage",
     "setLanguage:ja",
+    "writeClipboardText:sk-secret",
     "nativeLogin:auth:personal:default:cli:login",
     "switchEnv:cli:project",
     "switchAccount:app:project:personal",

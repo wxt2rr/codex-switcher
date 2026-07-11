@@ -24,8 +24,9 @@ import {
   parseUsageMetric,
 } from "@/account-usage";
 import { Button } from "@/components/ui/button";
-import { useAdaptiveMenuPlacement } from "@/components/adaptive-menu-placement";
+import { useAdaptiveMenuLayout } from "@/components/adaptive-menu-placement";
 import { cn } from "@/lib/utils";
+import { maskApiKeyForDisplay } from "../api-key-display";
 import {
   ConfirmDialog,
   SidePanel,
@@ -116,6 +117,7 @@ export function AccountsPage({
   onDeleteAccount,
   onUpdateRuntime,
   onUpdateIndependentModel,
+  onCopyApiKey,
 }: {
   overview: OverviewPayload;
   language: UiLanguage;
@@ -167,6 +169,7 @@ export function AccountsPage({
     apiKey: string,
     baseUrl: string,
   ) => Promise<boolean>;
+  onCopyApiKey: (value: string) => void;
 }) {
   const [envFilter, setEnvFilter] = useState("default");
   const [search, setSearch] = useState("");
@@ -456,6 +459,7 @@ export function AccountsPage({
                 setModelAccountKey(`${account.envName}/${account.name}`);
                 setModelConfigOpen(true);
               }}
+              onCopyApiKey={onCopyApiKey}
             />
           ))}
           </div>
@@ -483,6 +487,7 @@ export function AccountsPage({
               onValueChange={onAccountEnvDraftChange}
               items={overview.envs.map((env) => ({ value: env.name, label: env.name }))}
               placeholder={text.inputs.envName}
+              openOnHover={false}
             />
           </Field>
           <Field label={pageCopy.common.account}>
@@ -493,6 +498,7 @@ export function AccountsPage({
               <Select
                 value={accountModeDraft}
                 onValueChange={onAccountModeDraftChange}
+                openOnHover={false}
                 items={[
                   { value: "auth", label: localizeAuthMode("auth", language) },
                   { value: "apikey", label: localizeAuthMode("apikey", language) },
@@ -551,6 +557,7 @@ export function AccountsPage({
             <Select
               value={accountBaseUrlModeDraft}
               onValueChange={onAccountBaseUrlModeDraftChange}
+              openOnHover={false}
               items={[
                 { value: "default", label: pageCopy.accounts.defaultValue },
                 { value: "custom", label: pageCopy.accounts.custom },
@@ -610,6 +617,7 @@ export function AccountsPage({
               onValueChange={onRuntimeEnvDraftChange}
               items={overview.envs.map((env) => ({ value: env.name, label: env.name }))}
               placeholder={text.inputs.envName}
+              openOnHover={false}
             />
           </Field>
           <Field label={pageCopy.common.account}>
@@ -618,6 +626,7 @@ export function AccountsPage({
               onValueChange={onRuntimeAccountDraftChange}
               items={runtimeAccounts.map((account) => ({ value: account.name, label: account.name }))}
               placeholder={text.inputs.accountName}
+              openOnHover={false}
             />
           </Field>
           <Field label={pageCopy.accounts.baseUrlLabel}>
@@ -815,6 +824,7 @@ function AccountListCard({
   onLogoutIntent,
   onDelete,
   onModelConfig,
+  onCopyApiKey,
 }: {
   account: AccountSummary;
   index: number;
@@ -838,9 +848,12 @@ function AccountListCard({
   onLogoutIntent: () => void;
   onDelete: () => void;
   onModelConfig: () => void;
+  onCopyApiKey: (value: string) => void;
 }) {
   const isAuth = account.authMode === "auth";
   const baseUrl = account.route?.originalBaseUrl?.trim() || account.runtime.openaiBaseUrl?.trim() || "";
+  const apiKeyValue = account.apiKeyValue?.trim() || "";
+  const maskedApiKey = maskApiKeyForDisplay(apiKeyValue);
   const envLabel =
     account.envName === "default"
       ? language === "zh"
@@ -881,7 +894,7 @@ function AccountListCard({
 
       <div className="responsive-priority-tertiary min-w-0">
         <div className="account-runtime-cell min-h-[52px] px-2 py-2">
-          <div className="min-w-0">
+          <div className="min-w-0 space-y-1">
             {baseUrl ? (
               <span className="block truncate text-[14px] font-medium text-neutral-950 [font-variant-numeric:tabular-nums]">{baseUrl}</span>
             ) : (
@@ -889,9 +902,22 @@ function AccountListCard({
                 {language === "zh" ? "未配置 Base URL" : language === "ja" ? "Base URL 未設定" : "Base URL not set"}
               </span>
             )}
+            {maskedApiKey ? (
+              <span className="block truncate font-mono text-[12px] text-slate-500 [font-variant-numeric:tabular-nums]">{maskedApiKey}</span>
+            ) : null}
           </div>
           <div className="account-runtime-actions">
-            {baseUrl ? <Copy className="size-3.5 shrink-0 text-slate-400" /> : null}
+            {maskedApiKey ? (
+              <button
+                type="button"
+                className="inline-flex size-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white hover:text-neutral-900"
+                onClick={() => onCopyApiKey(apiKeyValue)}
+                aria-label={language === "zh" ? "复制 API Key" : language === "ja" ? "API Key をコピー" : "Copy API key"}
+                title={language === "zh" ? "复制完整 API Key" : language === "ja" ? "完全な API Key をコピー" : "Copy full API key"}
+              >
+                <Copy className="size-3.5" />
+              </button>
+            ) : null}
             {isAuth ? <TooltipHint text={getModelConfigHint(language)} /> : null}
             {isAuth ? (
               <button
@@ -1086,7 +1112,7 @@ function RowActionMenu({
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const placement = useAdaptiveMenuPlacement(open, rootRef, menuRef);
+  const { placement, availableHeight } = useAdaptiveMenuLayout(open, rootRef, menuRef);
 
   useEffect(() => {
     if (!open) {
@@ -1121,10 +1147,10 @@ function RowActionMenu({
           ref={menuRef}
           data-menu-placement={placement}
           className={cn(
-            "motion-popover-enter absolute right-0 z-20 min-w-[188px] rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md",
+            "motion-popover-enter absolute right-0 z-20 min-w-[188px] overflow-y-auto rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md",
             placement === "up" ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]",
           )}
-          style={{ transformOrigin: placement === "up" ? "bottom right" : "top right" }}
+          style={{ transformOrigin: placement === "up" ? "bottom right" : "top right", maxHeight: availableHeight }}
         >
           {items.map((item) => (
             <button
@@ -1276,7 +1302,14 @@ function CardTargetButton({
   const [projectsLoaded, setProjectsLoaded] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const placement = useAdaptiveMenuPlacement(open, rootRef, menuRef);
+  const projectTriggerRef = useRef<HTMLDivElement | null>(null);
+  const projectMenuRef = useRef<HTMLDivElement | null>(null);
+  const { placement, availableHeight } = useAdaptiveMenuLayout(open, rootRef, menuRef);
+  const { placement: projectPlacement, availableHeight: projectAvailableHeight } = useAdaptiveMenuLayout(
+    projectOpen,
+    projectTriggerRef,
+    projectMenuRef,
+  );
 
   useEffect(() => {
     if (!open) {
@@ -1315,17 +1348,14 @@ function CardTargetButton({
           disabled && "cursor-not-allowed opacity-55",
         )}
       >
-        <button
-          type="button"
-          className="responsive-action flex h-full min-w-[64px] items-center justify-center gap-1.5 px-3 text-[12px] font-medium"
-          onClick={() => onSelect(primaryStrategy)}
-          disabled={disabled}
+        <div
+          className="responsive-action flex h-full min-w-[64px] cursor-default items-center justify-center gap-1.5 px-3 text-[12px] font-medium"
           aria-label={label}
           title={label}
         >
           {icon}
           <span className="responsive-action-label">{label}</span>
-        </button>
+        </div>
         <button
           type="button"
           className={cn(
@@ -1344,21 +1374,27 @@ function CardTargetButton({
         <div
           ref={menuRef}
           data-menu-placement={placement}
-          className={cn("absolute right-0 z-20", placement === "up" ? "bottom-full pb-2" : "top-full pt-2")}
+          className={cn("absolute right-0 z-20 overflow-y-auto", placement === "up" ? "bottom-full pb-2" : "top-full pt-2")}
+          style={{ maxHeight: availableHeight }}
         >
           <div className="motion-popover-enter min-w-[172px] rounded-lg border border-black/[0.08] bg-white p-1 shadow-md">
             {items.map((item) => (
               <div
                 key={item.key}
+                ref={item.key === "new-window" ? projectTriggerRef : undefined}
                 className="relative"
                 onMouseEnter={() => {
-                  if (item.key !== "new-window" || !loadProjects) return;
+                  if (item.key !== "new-window" || !loadProjects) {
+                    setProjectOpen(false);
+                    return;
+                  }
                   setProjectOpen(true);
                   if (!projectsLoaded) {
                     setProjectsLoaded(true);
                     void loadProjects().then(setProjects).catch(() => setProjects([]));
                   }
                 }}
+                onMouseLeave={() => setProjectOpen(false)}
               >
                 <button
                   type="button"
@@ -1369,6 +1405,7 @@ function CardTargetButton({
                   onClick={() => {
                     if (item.key === "new-window" && loadProjects) return;
                     setOpen(false);
+                    setProjectOpen(false);
                     onSelect(item.key);
                   }}
                 >
@@ -1376,9 +1413,16 @@ function CardTargetButton({
                   {item.key === "new-window" && loadProjects ? <span className="text-slate-400">›</span> : null}
                 </button>
                 {item.key === "new-window" && projectOpen && loadProjects ? (
-                  <div className="absolute right-full top-[-4px] z-30 pr-2">
-                    <div className="motion-popover-enter w-[280px] rounded-lg border border-black/[0.08] bg-white p-1 shadow-md">
-                      <div className="max-h-64 overflow-y-auto overscroll-contain">
+                  <div
+                    ref={projectMenuRef}
+                    data-submenu-placement={projectPlacement}
+                    className={cn(
+                      "absolute right-full z-30 pr-2",
+                      projectPlacement === "up" ? "bottom-[-4px]" : "top-[-4px]",
+                    )}
+                  >
+                    <div className="motion-popover-enter flex w-[280px] flex-col overflow-hidden rounded-lg border border-black/[0.08] bg-white p-1 shadow-md" style={{ maxHeight: projectAvailableHeight }}>
+                      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                         {projects.map((project) => (
                           <button key={project.path} type="button" title={project.path} className="block w-full rounded-lg px-3 py-2 text-left transition hover:bg-[#f6f7f9]" onClick={() => { setOpen(false); setProjectOpen(false); onSelectProject?.(project.path); }}>
                             <span className="block truncate text-[12px] font-medium text-neutral-800">{project.name}</span>

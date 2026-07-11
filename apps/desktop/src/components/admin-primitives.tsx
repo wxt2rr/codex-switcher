@@ -1,13 +1,20 @@
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
 import { cn } from "@/lib/utils";
 
 const dialogOverlayClass =
-  "fixed inset-0 flex items-center justify-center bg-neutral-950/20 px-6 animate-fade-in";
+  "fixed inset-0 flex items-center justify-center bg-slate-950/[0.18] px-6 backdrop-blur-[2px] animate-fade-in";
 const dialogSurfaceClass =
-  "motion-popover-enter w-full border border-black/[0.06] bg-white p-5 shadow-[0_18px_48px_rgba(15,23,42,0.14)]";
+  "motion-popover-enter w-full border border-black/[0.07] bg-white p-6 shadow-[0_20px_42px_-14px_rgba(15,23,42,0.24),0_4px_12px_rgba(15,23,42,0.06)]";
+
+function DialogPortal({ children }: { children: ReactNode }) {
+  if (typeof document === "undefined") return children;
+  return createPortal(children, document.body);
+}
 
 /* ============================================================
    ADMIN PRIMITIVES
@@ -255,20 +262,22 @@ export function SidePanel({
   if (!open) return null;
 
   return (
-    <div className={cn(dialogOverlayClass, "z-40")}>
-      <div className={cn(dialogSurfaceClass, "max-w-[560px] overflow-auto rounded-[20px]")}>
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-neutral-950">{title}</h3>
-            {description ? <p className="mt-1 text-[13px] leading-6 text-neutral-500">{description}</p> : null}
+    <DialogPortal>
+      <div className={cn(dialogOverlayClass, "z-40")}>
+        <div className={cn(dialogSurfaceClass, "max-w-[520px] overflow-auto rounded-[16px]")}>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-neutral-950">{title}</h3>
+              {description ? <p className="mt-1 text-[13px] leading-6 text-neutral-500">{description}</p> : null}
+            </div>
+            <button type="button" onClick={onClose} aria-label={closeLabel} title={closeLabel} className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-black/[0.045] hover:text-neutral-800">
+              <X className="size-4" />
+            </button>
           </div>
-          <Button variant="outline" size="sm" onClick={onClose}>
-            {closeLabel}
-          </Button>
+          <div className="mt-6">{children}</div>
         </div>
-        <div className="mt-5 rounded-[16px] bg-[#f7f8fa] p-4">{children}</div>
       </div>
-    </div>
+    </DialogPortal>
   );
 }
 
@@ -298,28 +307,30 @@ export function ConfirmDialog({
   if (!open) return null;
 
   return (
-    <div className={cn(dialogOverlayClass, "z-50")}>
-      <div className={cn(dialogSurfaceClass, "max-w-[480px] rounded-[20px]")}>
-        <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-neutral-950">{title}</h3>
-        {description ? <p className="mt-2 text-[13px] leading-6 text-neutral-500">{description}</p> : null}
-        {impact && (
-          <div className="mt-4 rounded-[16px] bg-[#f5f6f8] p-4">
-            {impact}
+    <DialogPortal>
+      <div className={cn(dialogOverlayClass, "z-50")}>
+        <div className={cn(dialogSurfaceClass, "max-w-[460px] rounded-[16px]")}>
+          <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-neutral-950">{title}</h3>
+          {description ? <p className="mt-2 text-[13px] leading-6 text-neutral-500">{description}</p> : null}
+          {impact && (
+            <div className="mt-4 rounded-[10px] border border-black/[0.05] bg-[#fafbfc] p-4">
+              {impact}
+            </div>
+          )}
+          <div className="mt-5 flex justify-end gap-2.5">
+            <Button variant="outline" onClick={onCancel}>
+              {cancelLabel}
+            </Button>
+            <Button
+              variant={tone === "destructive" ? "destructive" : "default"}
+              onClick={onConfirm}
+            >
+              {confirmLabel}
+            </Button>
           </div>
-        )}
-        <div className="mt-5 flex justify-end gap-2.5">
-          <Button variant="outline" onClick={onCancel}>
-            {cancelLabel}
-          </Button>
-          <Button
-            variant={tone === "destructive" ? "destructive" : "default"}
-            onClick={onConfirm}
-          >
-            {confirmLabel}
-          </Button>
         </div>
       </div>
-    </div>
+    </DialogPortal>
   );
 }
 

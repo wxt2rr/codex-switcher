@@ -102,8 +102,14 @@ test("electron bridge builds macOS terminal launch attempts for the CLI", () => 
   assert.equal(plan.platform, "macos");
   assert.equal(plan.attempts.length, 1);
   assert.equal(plan.attempts[0]?.command, "osascript");
-  assert.match(plan.attempts[0]?.args[1] ?? "", /tell application "iTerm"/);
-  assert.match(plan.attempts[0]?.args[1] ?? "", /CODEX_HOME/);
+  const iTermScript = plan.attempts[0]?.args[1] ?? "";
+  assert.match(iTermScript, /set iTermWasRunning to application "iTerm" is running/);
+  assert.match(iTermScript, /if iTermWasRunning then\ncreate window with default profile/);
+  assert.match(iTermScript, /else\nlaunch\nrepeat 50 times/);
+  assert.match(iTermScript, /tell current session of current window/);
+  assert.equal((iTermScript.match(/create window with default profile/g) ?? []).length, 1);
+  assert.ok(iTermScript.indexOf("activate") > iTermScript.indexOf("write text"));
+  assert.match(iTermScript, /CODEX_HOME/);
 });
 
 test("electron bridge starts a new CLI window in the selected project directory", () => {
@@ -146,15 +152,32 @@ test("electron bridge selects Terminal without a side-effecting iTerm fallback",
   assert.doesNotMatch(terminalScript, /tell application "iTerm"/);
   assert.match(terminalScript, /set terminalWasRunning to application "Terminal" is running/);
   assert.match(terminalScript, /if terminalWasRunning then/);
-  assert.match(terminalScript, /else\nlaunch\ndo script/);
-  assert.doesNotMatch(terminalScript, /repeat 50 times/);
-  assert.equal((terminalScript.match(/do script/g) ?? []).length, 2);
+  assert.match(terminalScript, /set targetTab to selected tab of front window/);
+  assert.match(terminalScript, /if busy of targetTab then\nset launchBranch to "warm-busy-new-window"\ndo script/);
+  assert.match(terminalScript, /else\nset launchBranch to "warm-idle-current-tab"\ndo script .* in targetTab/);
+  assert.match(terminalScript, /else\nset launchBranch to "cold-initial-tab"\nlaunch\nrepeat 50 times/);
+  assert.match(terminalScript, /set targetTab to selected tab of front window/);
+  assert.match(terminalScript, /do script .* in targetTab/);
+  assert.match(terminalScript, /if not \(exists front window\) then error/);
+  assert.equal((terminalScript.match(/do script/g) ?? []).length, 3);
+});
+
+test("electron bridge launches Warp and Ghostty in new windows", () => {
+  for (const terminalId of ["warp", "ghostty"] as const) {
+    const plan = __testUtils.buildCliTerminalLaunchPlan({
+      repoRoot: "/Users/tester/work/codex-switcher", codexHome: "/Users/tester/.codex", codexBin: "/opt/homebrew/bin/codex",
+      platform: "darwin", launchMode: "current-window", terminalId,
+    });
+    assert.equal(plan.launchMode, "new-window");
+    assert.equal(plan.attempts[0]?.command, "open");
+    assert.match(plan.attempts[0]?.args.join(" ") ?? "", terminalId === "warp" ? /Warp\.app/ : /Ghostty\.app/);
+  }
 });
 
 test("electron bridge coalesces duplicate terminal launches within the debounce window", async () => {
   const gate = __testUtils.createTerminalLaunchGate(2_000);
   let launches = 0;
-  const launch = async () => { launches += 1; };
+  const launch = async () => { launches += 1; return undefined; };
 
   const first = gate.run("new-window:/project", launch, 1_000);
   const duplicate = gate.run("new-window:/project", launch, 1_500);
@@ -180,13 +203,16 @@ test("electron bridge restarts only the current macOS terminal session", () => {
   assert.doesNotMatch(iTermScript, /cd '\/Users\/tester\/work\/codex-switcher'/);
   assert.match(iTermScript, /set targetSession to current session of current window/);
   assert.match(iTermScript, /set targetTty to tty of targetSession/);
-  assert.match(iTermScript, /write text .*\/exit/);
+  assert.doesNotMatch(iTermScript, /write text .*\/exit/);
+  assert.match(iTermScript, /set foregroundProcessGroup to do shell script/);
+  assert.match(iTermScript, /kill -TERM -- -/);
   assert.match(iTermScript, /if existingCodexProcesses is not "" then/);
   assert.match(iTermScript, /ps -t/);
   assert.match(iTermScript, /codex-switcher\|codex-code-mode-host/);
   assert.match(iTermScript, /awk/);
   assert.match(iTermScript, /Codex CLI did not exit/);
   assert.doesNotMatch(iTermScript, /tell every session/);
+  assert.match(iTermScript, /tell targetSession to write text .*codex.* newline yes/);
 
   const terminalPlan = __testUtils.buildCliTerminalLaunchPlan({
     repoRoot: "/Users/tester/work/codex-switcher",
@@ -199,7 +225,8 @@ test("electron bridge restarts only the current macOS terminal session", () => {
   const terminalScript = terminalPlan.attempts[0]?.args[1] ?? "";
   assert.match(terminalScript, /set targetTab to selected tab of front window/);
   assert.match(terminalScript, /set targetTty to tty of targetTab/);
-  assert.match(terminalScript, /do script .*\/exit.* in targetTab/);
+  assert.doesNotMatch(terminalScript, /do script .*\/exit/);
+  assert.match(terminalScript, /kill -TERM -- -/);
   assert.match(terminalScript, /if existingCodexProcesses is not "" then/);
   assert.match(terminalScript, /ps -t/);
   assert.doesNotMatch(terminalScript, /every tab/);
@@ -230,6 +257,17 @@ test("electron bridge builds Windows Terminal launch attempts for the CLI", () =
   ]);
   assert.match(plan.attempts[0]?.args[7] ?? "", /\$env:CODEX_HOME/);
   assert.match(plan.attempts[0]?.args[7] ?? "", /codex\.exe/);
+});
+
+test("electron bridge honors persisted Windows terminal selections", () => {
+  const base = { repoRoot: "C:\\work", codexHome: "C:\\home", codexBin: "C:\\codex.exe", platform: "win32" as const };
+  const pwsh = __testUtils.buildCliTerminalLaunchPlan({ ...base, terminalId: "powershell7" });
+  assert.equal(pwsh.attempts[0]?.command, "pwsh.exe");
+  const cmd = __testUtils.buildCliTerminalLaunchPlan({ ...base, terminalId: "command-prompt" });
+  assert.equal(cmd.attempts[0]?.command, "cmd.exe");
+  const wt = __testUtils.buildCliTerminalLaunchPlan({ ...base, terminalId: "windows-terminal", env: { CODEX_SWITCHER_WINDOWS_PWSH_AVAILABLE: "1" } });
+  assert.equal(wt.attempts[0]?.command, "wt.exe");
+  assert.equal(wt.attempts[0]?.args[2], "pwsh.exe");
 });
 
 test("electron bridge builds PowerShell launch attempts for the CLI on Windows", () => {

@@ -4,11 +4,18 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   loadOverview: () => ipcRenderer.invoke("desktop:loadOverview"),
   loadAuthMetrics: () => ipcRenderer.invoke("desktop:loadAuthMetrics"),
   getCodexToolPaths: () => ipcRenderer.invoke("desktop:getCodexToolPaths"),
+  getCliAutoResumeSettings: () => ipcRenderer.invoke("desktop:getCliAutoResumeSettings"),
   detectCodexToolPaths: () => ipcRenderer.invoke("desktop:detectCodexToolPaths"),
   setCodexToolPath: (kind: "cli" | "app", path: string) => ipcRenderer.invoke("desktop:setCodexToolPath", kind, path),
   clearCodexToolPath: (kind: "cli" | "app") => ipcRenderer.invoke("desktop:clearCodexToolPath", kind),
+  setCliAutoResumeSettings: (value: { enabled: boolean; sessionNumber: number }) =>
+    ipcRenderer.invoke("desktop:setCliAutoResumeSettings", value),
+  getCliTerminalSettings: () => ipcRenderer.invoke("desktop:getCliTerminalSettings"),
+  scanCliTerminalSettings: () => ipcRenderer.invoke("desktop:scanCliTerminalSettings"),
+  setCliTerminalSelection: (id: string) => ipcRenderer.invoke("desktop:setCliTerminalSelection", id),
   getLanguage: () => ipcRenderer.invoke("desktop:getLanguage"),
   setLanguage: (language: "zh" | "en" | "ja") => ipcRenderer.invoke("desktop:setLanguage", language),
+  writeClipboardText: (value: string) => ipcRenderer.invoke("desktop:writeClipboardText", value),
   nativeLogin: (request: {
     mode: "auth" | "apikey" | "sub2api";
     account: string;

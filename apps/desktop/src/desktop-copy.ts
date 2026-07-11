@@ -339,7 +339,7 @@ const copy: Record<UiLanguage, DesktopCopy> = {
     },
     operations: {
       eyebrow: "系统工具",
-      title: "系统管理",
+      title: "设置",
       description: "",
       refreshStatus: "刷新状态",
       guard: "守护状态",
@@ -528,7 +528,7 @@ const copy: Record<UiLanguage, DesktopCopy> = {
     },
     operations: {
       eyebrow: "System Tools",
-      title: "System Management",
+      title: "Settings",
       description: "",
       refreshStatus: "Refresh Status",
       guard: "Refresh Guard",
@@ -717,7 +717,7 @@ const copy: Record<UiLanguage, DesktopCopy> = {
     },
     operations: {
       eyebrow: "システムツール",
-      title: "システム管理",
+      title: "設定",
       description: "",
       refreshStatus: "状態を更新",
       guard: "ガード",

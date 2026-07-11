@@ -2,20 +2,37 @@ import { useLayoutEffect, useState, type RefObject } from "react";
 
 export type AdaptiveMenuPlacement = "up" | "down";
 
-export function resolveAdaptiveMenuPlacement(input: {
+export type AdaptiveMenuLayout = {
+  placement: AdaptiveMenuPlacement;
+  availableHeight: number;
+};
+
+type AdaptiveMenuLayoutInput = {
   triggerTop: number;
   triggerBottom: number;
   boundaryTop: number;
   boundaryBottom: number;
   menuHeight: number;
   gap?: number;
-}): AdaptiveMenuPlacement {
+};
+
+export function resolveAdaptiveMenuLayout(input: AdaptiveMenuLayoutInput): AdaptiveMenuLayout {
   const gap = input.gap ?? 8;
-  const spaceAbove = input.triggerTop - input.boundaryTop - gap;
-  const spaceBelow = input.boundaryBottom - input.triggerBottom - gap;
-  if (spaceBelow >= input.menuHeight) return "down";
-  if (spaceAbove >= input.menuHeight) return "up";
-  return spaceAbove > spaceBelow ? "up" : "down";
+  const spaceAbove = Math.max(0, input.triggerTop - input.boundaryTop - gap);
+  const spaceBelow = Math.max(0, input.boundaryBottom - input.triggerBottom - gap);
+  const placement = spaceBelow >= input.menuHeight
+    ? "down"
+    : spaceAbove >= input.menuHeight || spaceAbove > spaceBelow
+      ? "up"
+      : "down";
+  return {
+    placement,
+    availableHeight: placement === "up" ? spaceAbove : spaceBelow,
+  };
+}
+
+export function resolveAdaptiveMenuPlacement(input: AdaptiveMenuLayoutInput): AdaptiveMenuPlacement {
+  return resolveAdaptiveMenuLayout(input).placement;
 }
 
 function findVerticalScrollBoundary(element: HTMLElement): HTMLElement | null {
@@ -30,12 +47,12 @@ function findVerticalScrollBoundary(element: HTMLElement): HTMLElement | null {
   return null;
 }
 
-export function useAdaptiveMenuPlacement(
+export function useAdaptiveMenuLayout(
   open: boolean,
   rootRef: RefObject<HTMLElement | null>,
   menuRef: RefObject<HTMLElement | null>,
-): AdaptiveMenuPlacement {
-  const [placement, setPlacement] = useState<AdaptiveMenuPlacement>("down");
+): AdaptiveMenuLayout {
+  const [layout, setLayout] = useState<AdaptiveMenuLayout>({ placement: "down", availableHeight: 320 });
 
   useLayoutEffect(() => {
     if (!open || !rootRef.current || !menuRef.current) return;
@@ -46,7 +63,7 @@ export function useAdaptiveMenuPlacement(
       if (!trigger || !menu) return;
       const boundaryElement = findVerticalScrollBoundary(rootRef.current!);
       const boundary = boundaryElement?.getBoundingClientRect();
-      setPlacement(resolveAdaptiveMenuPlacement({
+      setLayout(resolveAdaptiveMenuLayout({
         triggerTop: trigger.top,
         triggerBottom: trigger.bottom,
         boundaryTop: Math.max(0, boundary?.top ?? 0),
@@ -64,5 +81,13 @@ export function useAdaptiveMenuPlacement(
     };
   }, [open, rootRef, menuRef]);
 
-  return placement;
+  return layout;
+}
+
+export function useAdaptiveMenuPlacement(
+  open: boolean,
+  rootRef: RefObject<HTMLElement | null>,
+  menuRef: RefObject<HTMLElement | null>,
+): AdaptiveMenuPlacement {
+  return useAdaptiveMenuLayout(open, rootRef, menuRef).placement;
 }

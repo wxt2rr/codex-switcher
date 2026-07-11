@@ -12,6 +12,8 @@ const commonJsModules = [
   "runtime-paths",
   "codex-projects",
   "codex-tool-paths",
+  "desktop-settings",
+  "cli-terminal-settings",
   "env-file-history",
   "usage-routing-model",
   "usage-store",

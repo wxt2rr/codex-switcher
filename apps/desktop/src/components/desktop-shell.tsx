@@ -1,13 +1,17 @@
 import { useState, type ReactNode } from "react";
 import {
   Box,
-  ChartNoAxesCombined,
-  ClipboardList,
+  CircleCheck,
+  CircleX,
+  Gauge,
   Globe2,
+  Info,
   Languages,
   PanelLeftClose,
   PanelLeftOpen,
+  Settings,
   TerminalSquare,
+  TriangleAlert,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -61,19 +65,29 @@ export function DesktopShell({
     overview: <Box className="size-5" />,
     environments: <Globe2 className="size-5" />,
     accounts: <TerminalSquare className="size-5" />,
-    usage: <ChartNoAxesCombined className="size-5" />,
-    operations: <ClipboardList className="size-5" />,
+    usage: <Gauge className="size-5" />,
+    operations: <Settings className="size-5" />,
   };
 
-  /* message tone helper */
+  /* message tone helpers */
   const messageClass =
     message?.tone === "success"
-      ? "text-sky-700 dark:text-sky-200"
+      ? "text-emerald-700 dark:text-emerald-300"
       : message?.tone === "warning"
-        ? "text-neutral-800 dark:text-neutral-200"
+        ? "text-amber-700 dark:text-amber-300"
         : message?.tone === "error"
           ? "text-rose-700 dark:text-rose-200"
-          : "text-neutral-800 dark:text-neutral-200";
+          : "text-sky-700 dark:text-sky-300";
+  const messageIcon =
+    message?.tone === "success" ? (
+      <CircleCheck className="size-[18px] shrink-0 text-emerald-600" aria-hidden="true" />
+    ) : message?.tone === "error" ? (
+      <CircleX className="size-[18px] shrink-0 text-rose-600" aria-hidden="true" />
+    ) : message?.tone === "warning" ? (
+      <TriangleAlert className="size-[18px] shrink-0 text-amber-600" aria-hidden="true" />
+    ) : (
+      <Info className="size-[18px] shrink-0 text-sky-600" aria-hidden="true" />
+    );
   const isMacDesktop = platform === "MacIntel";
   const sidebarToggle = (
     <button
@@ -190,18 +204,20 @@ export function DesktopShell({
           </div>
 
           {message && (
-            <section
-              key={message.text}
-              className={cn(
-                "fixed right-8 top-20 z-50 min-w-[280px] max-w-[420px] rounded-lg border border-black/[0.08] bg-white px-4 py-3 text-sm font-medium",
-                "motion-notice-enter shadow-sm transition-all duration-200",
-                messageClass,
-              )}
-              role="status"
-              aria-live="polite"
-            >
-              {message.text}
-            </section>
+            <div key={message.text} className="pointer-events-none fixed inset-x-0 top-5 z-[60] flex justify-center px-6">
+              <section
+                className={cn(
+                  "motion-notice-enter flex min-w-[280px] max-w-[420px] items-center gap-2.5 rounded-xl border border-black/[0.08] bg-white px-4 py-3 text-sm font-medium shadow-[0_8px_28px_rgba(15,23,42,0.12)]",
+                  "pointer-events-auto transition-all duration-200 dark:border-white/[0.1] dark:bg-[#171b21]",
+                  messageClass,
+                )}
+                role={message.tone === "error" ? "alert" : "status"}
+                aria-live={message.tone === "error" ? "assertive" : "polite"}
+              >
+                {messageIcon}
+                <span>{message.text}</span>
+              </section>
+            </div>
           )}
 
           <main key={currentView} className="motion-page-enter relative z-10 min-h-0 flex-1 overflow-hidden">{children}</main>

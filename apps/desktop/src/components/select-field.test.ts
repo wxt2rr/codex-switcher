@@ -30,3 +30,7 @@ test("toSelectItems falls back to value when label is omitted", () => {
     ],
   );
 });
+
+test("toSelectItems preserves optional application icons", () => {
+  assert.deepEqual(toSelectItems([{ value: "iterm", label: "iTerm", iconUrl: "data:image/png;base64,abc" }]), [{ value: "iterm", label: "iTerm", iconUrl: "data:image/png;base64,abc" }]);
+});
