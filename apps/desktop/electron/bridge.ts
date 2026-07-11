@@ -2929,11 +2929,17 @@ async function cloneEnvHomeExcludingAuth(sourcePath: string, targetPath: string)
 }
 
 async function shouldCopyEnvClonePath(path: string, platform: NodeJS.Platform): Promise<boolean> {
-  if (platform !== "win32") return true;
   try {
-    return !(await lstat(path)).isSymbolicLink();
+    const info = await lstat(path);
+    if (info.isSocket() || info.isFIFO() || info.isCharacterDevice() || info.isBlockDevice()) {
+      return false;
+    }
+    if (platform === "win32" && info.isSymbolicLink()) {
+      return false;
+    }
+    return info.isFile() || info.isDirectory() || info.isSymbolicLink();
   } catch {
-    return true;
+    return false;
   }
 }
 

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { access, chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
@@ -174,6 +175,25 @@ test("Windows environment cloning skips symlinks that cannot be recreated withou
     assert.equal(await bridge.__testUtils.shouldCopyEnvClonePathForTest(link, "win32"), false);
     assert.equal(await bridge.__testUtils.shouldCopyEnvClonePathForTest(join(target, "value.txt"), "win32"), true);
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("macOS environment cloning skips Unix sockets and keeps regular files", async () => {
+  const root = await mkdtemp("/tmp/cs-socket-");
+  const socketPath = join(root, "fsmonitor--daemon.ipc");
+  const regularPath = join(root, "config.toml");
+  const server = createServer();
+  try {
+    await writeFile(regularPath, "model = 'gpt-5'\n", "utf8");
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(socketPath, resolve);
+    });
+    assert.equal(await bridge.__testUtils.shouldCopyEnvClonePathForTest(socketPath, "darwin"), false);
+    assert.equal(await bridge.__testUtils.shouldCopyEnvClonePathForTest(regularPath, "darwin"), true);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(root, { recursive: true, force: true });
   }
 });
