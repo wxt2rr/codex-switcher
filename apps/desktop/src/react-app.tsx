@@ -795,7 +795,7 @@ export function App() {
           onRuntimeEnvDraftChange={setRuntimeEnvDraft}
           onRuntimeAccountDraftChange={setRuntimeAccountDraft}
           onRuntimeBaseUrlDraftChange={setRuntimeBaseUrlDraft}
-          onSwitchAccount={(target, account) => void handleSwitchAccount(target, account)}
+          onSwitchAccount={(target, account, strategy) => void handleSwitchAccount(target, account, strategy)}
           onPrimeAccount={primeAccountDrafts}
           onLogin={() => handleNativeLogin("login")}
           onRelogin={() => handleNativeLogin("relogin")}

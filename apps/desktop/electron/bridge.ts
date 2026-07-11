@@ -1991,8 +1991,20 @@ end tell`;
 }
 
 function buildTerminalAppleScript(command: string): string {
-  return `tell application "Terminal"
-do script ${quoteAppleScriptString(command)}
+  const quotedCommand = quoteAppleScriptString(command);
+  return `set terminalWasRunning to application "Terminal" is running
+tell application "Terminal"
+if terminalWasRunning then
+do script ${quotedCommand}
+else
+activate
+repeat 50 times
+if exists front window then exit repeat
+delay 0.1
+end repeat
+if not (exists front window) then error "Terminal did not create its initial window"
+do script ${quotedCommand} in selected tab of front window
+end if
 activate
 end tell`;
 }
