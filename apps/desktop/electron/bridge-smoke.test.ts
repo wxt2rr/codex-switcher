@@ -106,6 +106,35 @@ test("electron bridge builds macOS terminal launch attempts for the CLI", () => 
   assert.match(plan.attempts[1]?.args[1] ?? "", /tell application "Terminal"/);
 });
 
+test("electron bridge restarts only the current macOS terminal session", () => {
+  const plan = __testUtils.buildCliTerminalLaunchPlan({
+    repoRoot: "/Users/tester/work/codex-switcher",
+    codexHome: "/Users/tester/.codex-envs/project/home",
+    codexBin: "/Applications/Codex.app/Contents/Resources/codex",
+    platform: "darwin",
+    launchMode: "current-window",
+  });
+
+  const iTermScript = plan.attempts[0]?.args[1] ?? "";
+  assert.match(iTermScript, /set targetSession to current session of current window/);
+  assert.match(iTermScript, /set targetTty to tty of targetSession/);
+  assert.match(iTermScript, /write text .*\/exit/);
+  assert.match(iTermScript, /if existingCodexProcesses is not "" then/);
+  assert.match(iTermScript, /ps -t/);
+  assert.match(iTermScript, /codex-switcher\|codex-code-mode-host/);
+  assert.match(iTermScript, /awk/);
+  assert.match(iTermScript, /Codex CLI did not exit/);
+  assert.doesNotMatch(iTermScript, /tell every session/);
+
+  const terminalScript = plan.attempts[1]?.args[1] ?? "";
+  assert.match(terminalScript, /set targetTab to selected tab of front window/);
+  assert.match(terminalScript, /set targetTty to tty of targetTab/);
+  assert.match(terminalScript, /do script .*\/exit.* in targetTab/);
+  assert.match(terminalScript, /if existingCodexProcesses is not "" then/);
+  assert.match(terminalScript, /ps -t/);
+  assert.doesNotMatch(terminalScript, /every tab/);
+});
+
 test("electron bridge builds Windows Terminal launch attempts for the CLI", () => {
   const plan = __testUtils.buildCliTerminalLaunchPlan({
     repoRoot: "C:\\Users\\tester\\codex-switcher",

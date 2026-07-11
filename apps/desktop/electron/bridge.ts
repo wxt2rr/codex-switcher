@@ -1976,9 +1976,10 @@ activate
 if (count of windows) is 0 then
 create window with default profile
 end if
-tell current session of current window
-write text ${quoteAppleScriptString(command)}
-end tell
+set targetSession to current session of current window
+set targetTty to tty of targetSession
+${buildAppleScriptCurrentSessionRestart("tell targetSession to write text", "targetTty")}
+tell targetSession to write text ${quoteAppleScriptString(command)}
 end tell`;
 }
 
@@ -1995,9 +1996,37 @@ activate
 if not (exists front window) then
 do script ${quoteAppleScriptString(command)}
 else
-do script ${quoteAppleScriptString(command)} in front window
+set targetTab to selected tab of front window
+set targetTty to tty of targetTab
+${buildAppleScriptCurrentSessionRestart("do script", "targetTty", "in targetTab")}
+do script ${quoteAppleScriptString(command)} in targetTab
 end if
 end tell`;
+}
+
+function buildAppleScriptCurrentSessionRestart(
+  writeCommand: string,
+  ttyVariable: string,
+  writeSuffix = "",
+): string {
+  const exitCommand = `${writeCommand} ${quoteAppleScriptString("/exit")}${writeSuffix ? ` ${writeSuffix}` : ""}`;
+  return `set existingCodexProcesses to do shell script "ps -t " & quoted form of ${ttyVariable} & " -o command= | awk '$0 !~ /codex-switcher|codex-code-mode-host/ && ($1 ~ /\\/codex$/ || ($1 ~ /\\/node$/ && $2 ~ /\\/codex$/)) { print }'"
+if existingCodexProcesses is not "" then
+${exitCommand}
+set codexExited to false
+repeat 50 times
+delay 0.1
+try
+set codexProcesses to do shell script "ps -t " & quoted form of ${ttyVariable} & " -o command= | awk '$0 !~ /codex-switcher|codex-code-mode-host/ && ($1 ~ /\\/codex$/ || ($1 ~ /\\/node$/ && $2 ~ /\\/codex$/)) { print }'"
+if codexProcesses is "" then
+set codexExited to true
+exit repeat
+end if
+end try
+end repeat
+if codexExited is false then error "Codex CLI did not exit in the current terminal session"
+end if
+`;
 }
 
 export const __testUtils = {
