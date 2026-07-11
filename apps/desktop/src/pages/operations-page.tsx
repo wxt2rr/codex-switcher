@@ -13,7 +13,6 @@ import {
   ListPageFrame,
   ListPageHeader,
   ListStack,
-  RunStatusBadge,
 } from "../components/account-list-primitives";
 import { Field, Input, Select } from "../components/form-primitives";
 import type { OverviewPayload } from "../desktop-model";
@@ -37,22 +36,17 @@ function pageSubtitle(language: UiLanguage) {
 function OperationCard({
   title,
   subtitle,
-  badge,
   children,
 }: {
   title: string;
   subtitle: string;
-  badge?: string;
   children: React.ReactNode;
 }) {
   return (
     <ListCard className="responsive-record-row responsive-operation-row grid min-h-[106px] items-center gap-5">
       <div className="flex min-w-0 items-center">
         <div className="min-w-0">
-          <div className="flex min-w-0 items-center gap-3">
-            <h3 className="truncate text-[15px] font-semibold tracking-[-0.02em] text-neutral-950 dark:text-neutral-50">{title}</h3>
-            {badge ? <RunStatusBadge label={badge} tone="success" /> : null}
-          </div>
+          <h3 className="truncate text-[15px] font-semibold tracking-[-0.02em] text-neutral-950 dark:text-neutral-50">{title}</h3>
           <p className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">{subtitle}</p>
         </div>
       </div>
@@ -115,13 +109,11 @@ export function OperationsPage({
         {(["cli", "app"] as const).map((kind) => {
           const status = toolStatuses.find((item) => item.kind === kind);
           const title = kind === "cli" ? "Codex CLI" : "Codex App";
-          const available = status?.available ?? false;
           return (
             <OperationCard
               key={kind}
               title={title}
               subtitle={language === "zh" ? `${title} 安装路径，支持自动检测和手动设置` : `${title} installation path with automatic detection and manual override`}
-              badge={available ? (status?.source === "manual" ? (language === "zh" ? "手动设置" : "Manual") : (language === "zh" ? "已检测" : "Detected")) : (language === "zh" ? "未检测到" : "Missing")}
             >
               <div className="responsive-operation-controls">
                 <Input
@@ -143,7 +135,6 @@ export function OperationsPage({
         <OperationCard
           title={pageCopy.operations.proxyTitle}
           subtitle={pageCopy.operations.proxyPlaceholder}
-          badge={pageCopy.operations.proxyTitle}
         >
           <div className="responsive-operation-controls">
             <Input
@@ -162,7 +153,6 @@ export function OperationsPage({
         <OperationCard
           title={pageCopy.operations.advancedTitle}
           subtitle={pageCopy.operations.readLog}
-          badge={localizeLogKind(logKind, language)}
         >
           <div className="responsive-operation-controls responsive-operation-controls-narrow">
             <Field label={pageCopy.operations.logKind}>
