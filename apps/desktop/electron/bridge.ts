@@ -103,12 +103,10 @@ export async function getEnvironmentRouteStatuses() {
   return getUsageRouterManager().getEnvironmentStatuses(Object.keys(state.envs).sort());
 }
 
-export async function toggleEnvironmentRoute(envName: string, enabled: boolean) {
-  const runtime = await loadCoreRuntime();
-  const state = await runtime.readLegacyState(getLegacyOptions());
+function getEnvironmentRouteAccounts(state: Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>, envName: string) {
   const env = state.envs[envName];
   if (!env) throw new Error(`Environment '${envName}' not found`);
-  const accounts = Object.entries(env.accounts).map(([accountName, account]) => ({
+  return Object.entries(env.accounts).map(([accountName, account]) => ({
     envName,
     accountName,
     authMode: account.authMode,
@@ -116,7 +114,13 @@ export async function toggleEnvironmentRoute(envName: string, enabled: boolean) 
       ? account.runtime.openaiBaseUrl
       : "default",
   }));
-  const updateBaseUrl = async (accountName: string, baseUrl: string) => {
+}
+
+function createEnvironmentRouteBaseUrlUpdater(
+  runtime: Awaited<ReturnType<typeof loadCoreRuntime>>,
+  envName: string,
+) {
+  return async (accountName: string, baseUrl: string) => {
     const currentState = await runtime.readLegacyState(getLegacyOptions());
     const current = currentState.envs[envName]?.accounts[accountName];
     if (!current) throw new Error(`Account '${envName}/${accountName}' not found`);
@@ -135,6 +139,23 @@ export async function toggleEnvironmentRoute(envName: string, enabled: boolean) 
     await runtime.writeLegacyRuntime({ stateDir: getStateDir(), envName, accountName, runtime: updated.runtime });
     await syncUpdatedAuthToActiveTargetsDirect(runtime, envName, accountName);
   };
+}
+
+async function syncEnvironmentRouteIfEnabled(envName: string): Promise<void> {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  await getUsageRouterManager().syncEnvironmentIfEnabled(
+    envName,
+    getEnvironmentRouteAccounts(state, envName),
+    createEnvironmentRouteBaseUrlUpdater(runtime, envName),
+  );
+}
+
+export async function toggleEnvironmentRoute(envName: string, enabled: boolean) {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const accounts = getEnvironmentRouteAccounts(state, envName);
+  const updateBaseUrl = createEnvironmentRouteBaseUrlUpdater(runtime, envName);
   return enabled
     ? getUsageRouterManager().enableEnvironment(envName, accounts, updateBaseUrl)
     : getUsageRouterManager().disableEnvironment(envName, updateBaseUrl);
@@ -1473,6 +1494,8 @@ async function saveAccountArtifacts(options: {
     await applyTargetHomeStateWithHistory(runtime, next, target, target === "cli" ? "switch-cli" : "switch-app");
     state = next;
   }
+
+  await syncEnvironmentRouteIfEnabled(options.envName);
 }
 
 function expandTargets(target: "cli" | "app" | "both"): Array<"cli" | "app"> {

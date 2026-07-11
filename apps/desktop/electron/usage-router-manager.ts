@@ -116,6 +116,19 @@ export class UsageRouterManager {
     return this.adminWithState<RouteTarget[]>(state, "/admin/routes");
   }
 
+  async isEnvironmentEnabled(envName: string): Promise<boolean> {
+    return (await this.listRoutesIfRunning()).some((route) => route.envName === envName && route.enabled);
+  }
+
+  async syncEnvironmentIfEnabled(
+    envName: string,
+    accounts: RoutableAccount[],
+    updateBaseUrl: (accountName: string, baseUrl: string) => Promise<void>,
+  ): Promise<EnvironmentRouteStatus | null> {
+    if (!await this.isEnvironmentEnabled(envName)) return null;
+    return this.enableEnvironment(envName, accounts, updateBaseUrl);
+  }
+
   async getEnvironmentStatuses(envNames: string[]): Promise<EnvironmentRouteStatus[]> {
     const state = await this.readState();
     if (!state || !await this.isHealthy(state)) {
