@@ -36,6 +36,8 @@ test("codexAppCandidatePaths exposes Windows desktop app locations", () => {
     assert.deepEqual(codexAppCandidatePaths({
         USERPROFILE: "C:\\Users\\alice",
     }, "win32"), [
+        join("C:\\Users\\alice", "AppData", "Local", "Microsoft", "WindowsApps", "ChatGPT.exe"),
+        join("C:\\Users\\alice", "AppData", "Local", "Programs", "ChatGPT", "ChatGPT.exe"),
         join("C:\\Users\\alice", "AppData", "Local", "Programs", "Codex", "Codex.exe"),
         join("C:\\Users\\alice", "AppData", "Local", "Programs", "Codex", "CodexApp.exe"),
     ]);
@@ -54,6 +56,14 @@ test("resolveCodexAppPath honors explicit app override", async () => {
     finally {
         await rm(root, { recursive: true, force: true });
     }
+});
+test("codexAppCandidatePaths includes merged ChatGPT Codex bundles on macOS", () => {
+    assert.deepEqual(codexAppCandidatePaths({ HOME: "/Users/alice" }, "darwin"), [
+        join("/Users/alice", "Applications", "ChatGPT.app", "Contents", "MacOS", "ChatGPT"),
+        join("/Users/alice", "Applications", "Codex.app", "Contents", "MacOS", "Codex"),
+        "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+        "/Applications/Codex.app/Contents/MacOS/Codex",
+    ]);
 });
 test("resolveWindowsLauncherCommands reports launcher executables from PATH on windows", async () => {
     const root = await mkdtemp(join(tmpdir(), "codex-switcher-launcher-discovery-"));

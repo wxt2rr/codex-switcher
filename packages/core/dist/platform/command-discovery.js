@@ -68,14 +68,19 @@ export function codexAppCandidatePaths(env = process.env, platform = process.pla
     const homeDir = resolveHomeDir(env, platform);
     const normalized = detectPlatform(platform);
     if (normalized === "windows") {
+        const localAppData = env.LOCALAPPDATA || join(homeDir, "AppData", "Local");
         return [
+            join(localAppData, "Microsoft", "WindowsApps", "ChatGPT.exe"),
+            join(localAppData, "Programs", "ChatGPT", "ChatGPT.exe"),
             join(homeDir, "AppData", "Local", "Programs", "Codex", "Codex.exe"),
             join(homeDir, "AppData", "Local", "Programs", "Codex", "CodexApp.exe"),
         ];
     }
     return [
-        "/Applications/Codex.app/Contents/MacOS/Codex",
+        join(homeDir, "Applications", "ChatGPT.app", "Contents", "MacOS", "ChatGPT"),
         join(homeDir, "Applications", "Codex.app", "Contents", "MacOS", "Codex"),
+        "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+        "/Applications/Codex.app/Contents/MacOS/Codex",
     ];
 }
 async function isExecutable(path) {

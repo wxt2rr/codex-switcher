@@ -23,14 +23,23 @@ function knownCandidates(kind: CodexToolKind, env: NodeJS.ProcessEnv, platform: 
   const localAppData = env.LOCALAPPDATA || join(home, "AppData", "Local");
   return platform === "win32"
     ? [
+        join(localAppData, "Microsoft", "WindowsApps", "ChatGPT.exe"),
         join(localAppData, "Microsoft", "WindowsApps", "Codex.exe"),
         join(localAppData, "Microsoft", "WindowsApps", "CodexApp.exe"),
+        join(localAppData, "Programs", "ChatGPT", "ChatGPT.exe"),
         join(localAppData, "Programs", "Codex", "Codex.exe"),
         join(localAppData, "Programs", "Codex", "CodexApp.exe"),
+        join(env.ProgramFiles || "C:\\Program Files", "ChatGPT", "ChatGPT.exe"),
+        join(env.ProgramFiles || "C:\\Program Files", "OpenAI", "ChatGPT", "ChatGPT.exe"),
         join(env.ProgramFiles || "C:\\Program Files", "Codex", "Codex.exe"),
         join(env.ProgramFiles || "C:\\Program Files", "OpenAI", "Codex", "Codex.exe"),
       ]
-    : ["/Applications/Codex.app", join(home, "Applications", "Codex.app")];
+    : [
+        join(home, "Applications", "ChatGPT.app"),
+        join(home, "Applications", "Codex.app"),
+        "/Applications/ChatGPT.app",
+        "/Applications/Codex.app",
+      ];
 }
 async function firstExecutable(items: string[]) { for (const item of items) if (item && await isExecutable(item)) return item; return ""; }
 async function resolveMacAppBundle(bundlePath: string): Promise<string> {
@@ -77,7 +86,7 @@ async function detectPath(kind: CodexToolKind, env: NodeJS.ProcessEnv, platform:
   const fromPath = kind === "cli"
     ? await firstExecutable(pathCandidates("codex", env, platform))
     : platform === "win32"
-      ? await firstExecutable(["Codex", "CodexApp", "OpenAI Codex"].flatMap((command) => pathCandidates(command, env, platform)))
+      ? await firstExecutable(["ChatGPT", "Codex", "CodexApp", "OpenAI Codex"].flatMap((command) => pathCandidates(command, env, platform)))
       : "";
   if (fromPath) return { path: fromPath, source: "path" };
   let candidate = "";

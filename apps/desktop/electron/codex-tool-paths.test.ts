@@ -44,3 +44,37 @@ test("Windows App detection resolves the WindowsApps execution alias", async () 
   assert.equal(status.path, app);
   assert.equal(status.source, "path");
 });
+
+test("macOS App detection supports the merged ChatGPT Codex bundle", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-tools-"));
+  const bundle = join(root, "Applications", "ChatGPT.app");
+  const app = join(bundle, "Contents", "MacOS", "ChatGPT");
+  await executable(app);
+  await writeFile(join(bundle, "Contents", "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.openai.codex</string><key>CFBundleExecutable</key><string>ChatGPT</string></dict></plist>`);
+
+  const status = await getCodexToolStatus("app", {
+    settingsPath: join(root, "settings.json"),
+    env: { HOME: root },
+    platform: "darwin",
+  });
+
+  assert.equal(status.path, app);
+  assert.equal(status.source, "candidate");
+});
+
+test("Windows App detection supports the merged ChatGPT execution alias", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-tools-"));
+  const aliasDir = join(root, "AppData", "Local", "Microsoft", "WindowsApps");
+  const app = join(aliasDir, "ChatGPT.exe");
+  await executable(app);
+
+  const status = await getCodexToolStatus("app", {
+    settingsPath: join(root, "settings.json"),
+    env: { USERPROFILE: root, LOCALAPPDATA: join(root, "AppData", "Local"), PATH: aliasDir },
+    platform: "win32",
+  });
+
+  assert.equal(status.path, app);
+  assert.equal(status.source, "path");
+});
