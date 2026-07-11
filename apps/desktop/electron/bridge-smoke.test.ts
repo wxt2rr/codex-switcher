@@ -116,8 +116,10 @@ test("electron bridge selects Terminal without a side-effecting iTerm fallback",
   });
 
   assert.equal(plan.attempts.length, 1);
-  assert.match(plan.attempts[0]?.args[1] ?? "", /tell application "Terminal"/);
-  assert.doesNotMatch(plan.attempts[0]?.args[1] ?? "", /tell application "iTerm"/);
+  const terminalScript = plan.attempts[0]?.args[1] ?? "";
+  assert.match(terminalScript, /tell application "Terminal"/);
+  assert.doesNotMatch(terminalScript, /tell application "iTerm"/);
+  assert.ok(terminalScript.indexOf("do script") < terminalScript.indexOf("activate"));
 });
 
 test("electron bridge restarts only the current macOS terminal session", () => {

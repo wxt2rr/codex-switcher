@@ -1992,8 +1992,8 @@ end tell`;
 
 function buildTerminalAppleScript(command: string): string {
   return `tell application "Terminal"
-activate
 do script ${quoteAppleScriptString(command)}
+activate
 end tell`;
 }
 
