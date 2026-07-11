@@ -23,15 +23,15 @@ import type { UiLanguage } from "../i18n";
 import type { CodexToolStatus } from "../bridge";
 
 function pageTitle(language: UiLanguage) {
-  if (language === "zh") return "运行操作";
-  if (language === "ja") return "操作";
-  return "Operations";
+  if (language === "zh") return "系统管理";
+  if (language === "ja") return "システム管理";
+  return "System Management";
 }
 
 function pageSubtitle(language: UiLanguage) {
-  if (language === "zh") return "管理代理、守护任务、App 状态和诊断工具";
-  if (language === "ja") return "プロキシ、ガード、App 状態、診断を管理";
-  return "Manage proxy, guards, App status, and diagnostics";
+  if (language === "zh") return "管理 Codex 安装路径、网络代理和运行日志";
+  if (language === "ja") return "Codex のインストールパス、ネットワークプロキシ、実行ログを管理";
+  return "Manage Codex installation paths, network proxy, and runtime logs";
 }
 
 function OperationCard({

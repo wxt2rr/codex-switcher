@@ -93,6 +93,8 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
     steps:
+      - uses: actions/checkout@v7
+
       - name: Download packaged installers
         uses: actions/download-artifact@v8
         with:
@@ -112,12 +114,21 @@ jobs:
       - name: Create or update GitHub Pre-release
         shell: bash
         run: |
+          NOTES_FILE=".github/release-notes/${GITHUB_REF_NAME}.md"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
           else
-            gh release create "$GITHUB_REF_NAME" release-assets/* \
-              --verify-tag \
-              --generate-notes \
-              --prerelease \
-              --title "$GITHUB_REF_NAME"
+            if test -f "$NOTES_FILE"; then
+              gh release create "$GITHUB_REF_NAME" release-assets/* \
+                --verify-tag \
+                --notes-file "$NOTES_FILE" \
+                --prerelease \
+                --title "$GITHUB_REF_NAME"
+            else
+              gh release create "$GITHUB_REF_NAME" release-assets/* \
+                --verify-tag \
+                --generate-notes \
+                --prerelease \
+                --title "$GITHUB_REF_NAME"
+            fi
           fi

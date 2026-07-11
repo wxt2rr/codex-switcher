@@ -13,6 +13,7 @@ const usage = readFileSync(new URL("../pages/usage-page.tsx", import.meta.url), 
 const select = readFileSync(new URL("./ui/select.tsx", import.meta.url), "utf8");
 const button = readFileSync(new URL("./ui/button.tsx", import.meta.url), "utf8");
 const dashboard = readFileSync(new URL("./dashboard-kit.tsx", import.meta.url), "utf8");
+const i18n = readFileSync(new URL("../i18n.ts", import.meta.url), "utf8");
 
 test("shared page layout uses the full content width and defines compact actions", () => {
   assert.match(primitives, /admin-page-content/);
@@ -99,4 +100,10 @@ test("data changes and contextual controls provide motion feedback", () => {
   assert.match(accounts, /group-hover:visible/);
   assert.match(accounts, /group-hover:opacity-100/);
   assert.match(select, /group-data-\[state=open\]:rotate-180/);
+});
+
+test("system tools use clear navigation and page naming", () => {
+  assert.match(i18n, /operations:\s*"系统"/);
+  assert.match(operations, /return "系统管理"/);
+  assert.match(operations, /管理 Codex 安装路径、网络代理和运行日志/);
 });

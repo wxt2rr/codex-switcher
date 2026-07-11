@@ -144,7 +144,7 @@ const translations: Record<UiLanguage, TranslationTree> = {
       environments: "环境",
       accounts: "账号",
       usage: "统计",
-      operations: "操作",
+      operations: "系统",
     },
     topbar: {
       cliTarget: "CLI 目标",
@@ -278,7 +278,7 @@ const translations: Record<UiLanguage, TranslationTree> = {
       environments: "Environments",
       accounts: "Accounts",
       usage: "Usage",
-      operations: "Operations",
+      operations: "System",
     },
     topbar: {
       cliTarget: "CLI Target",
@@ -412,7 +412,7 @@ const translations: Record<UiLanguage, TranslationTree> = {
       environments: "環境",
       accounts: "アカウント",
       usage: "使用統計",
-      operations: "操作",
+      operations: "システム",
     },
     topbar: {
       cliTarget: "CLI ターゲット",
