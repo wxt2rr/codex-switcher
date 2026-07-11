@@ -11,6 +11,7 @@ const operations = readFileSync(new URL("../pages/operations-page.tsx", import.m
 const reactApp = readFileSync(new URL("../react-app.tsx", import.meta.url), "utf8");
 const usage = readFileSync(new URL("../pages/usage-page.tsx", import.meta.url), "utf8");
 const select = readFileSync(new URL("./ui/select.tsx", import.meta.url), "utf8");
+const button = readFileSync(new URL("./ui/button.tsx", import.meta.url), "utf8");
 
 test("shared page layout uses the full content width and defines compact actions", () => {
   assert.match(primitives, /admin-page-content/);
@@ -76,4 +77,15 @@ test("all management record cards opt into the single-row responsive contract", 
   assert.match(usage, /REFRESH_INTERVAL_PRESETS/);
   assert.match(usage, /customRefreshEditing/);
   assert.match(usage, /shouldScheduleUsageRefresh/);
+});
+
+test("desktop motion is restrained and respects reduced-motion preferences", () => {
+  assert.match(css, /@keyframes page-enter/);
+  assert.match(css, /@keyframes record-enter/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(css, /\.motion-page-enter/);
+  assert.match(css, /\.responsive-record-row\s*\{[^}]*animation:\s*record-enter/s);
+  assert.match(button, /active:scale-\[0\.97\]/);
+  assert.match(accounts, /transition-\[width,background-color\] duration-300/);
+  assert.match(reactApp, /transition-\[width\] duration-300/);
 });

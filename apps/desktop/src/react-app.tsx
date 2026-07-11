@@ -675,7 +675,7 @@ export function App() {
           <div className="w-full max-w-[520px]">
             <div className="h-1.5 overflow-hidden rounded-full bg-neutral-200/70">
               <div
-                className="h-full rounded-full bg-primary transition-[width] duration-150 ease-out"
+                className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
                 style={{ width: `${initialLoadingProgress}%` }}
               />
             </div>

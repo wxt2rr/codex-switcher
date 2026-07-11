@@ -1093,7 +1093,7 @@ function RowActionMenu({
         <ChevronDown className={cn("responsive-action-label size-3.5 text-slate-400 transition", open && "rotate-180")} />
       </button>
       {open ? (
-        <div className="absolute right-0 top-[calc(100%+8px)] z-20 min-w-[188px] rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md">
+        <div className="motion-popover-enter absolute right-0 top-[calc(100%+8px)] z-20 min-w-[188px] rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md">
           {items.map((item) => (
             <button
               key={item.key}
@@ -1193,7 +1193,7 @@ function CardUsageRow({
       <div className="min-w-0">
         <div className="h-1.5 overflow-hidden rounded-full bg-slate-200/80">
           <div
-            className={cn("h-full rounded-full transition-colors", getUsageProgressClass(percent))}
+            className={cn("h-full rounded-full transition-[width,background-color] duration-300 ease-out", getUsageProgressClass(percent))}
             style={{ width: `${percent}%` }}
           />
         </div>
@@ -1292,7 +1292,7 @@ function CardTargetButton({
       </div>
       {open ? (
         <div className="absolute right-0 top-full z-20 pt-2">
-          <div className="min-w-[172px] rounded-lg border border-black/[0.08] bg-white p-1 shadow-md">
+          <div className="motion-popover-enter min-w-[172px] rounded-lg border border-black/[0.08] bg-white p-1 shadow-md">
             {items.map((item) => (
               <button
                 key={item.key}

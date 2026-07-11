@@ -191,9 +191,10 @@ export function DesktopShell({
 
           {message && (
             <section
+              key={message.text}
               className={cn(
                 "fixed right-8 top-20 z-50 min-w-[280px] max-w-[420px] rounded-lg border border-black/[0.08] bg-white px-4 py-3 text-sm font-medium",
-                "animate-fade-in shadow-sm transition-all duration-200",
+                "motion-notice-enter shadow-sm transition-all duration-200",
                 messageClass,
               )}
               role="status"
@@ -203,7 +204,7 @@ export function DesktopShell({
             </section>
           )}
 
-          <main className="relative z-10 min-h-0 flex-1 overflow-hidden animate-fade-in-up">{children}</main>
+          <main key={currentView} className="motion-page-enter relative z-10 min-h-0 flex-1 overflow-hidden">{children}</main>
         </div>
       </div>
     </div>

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   getDesktopShellBrandClass,
@@ -10,6 +11,8 @@ import {
   getDesktopShellSidebarBrandRowClass,
   getDesktopShellSidebarToggleClass,
 } from "./desktop-shell-layout.js";
+
+const shell = readFileSync(new URL("./desktop-shell.tsx", import.meta.url), "utf8");
 
 test("desktop shell reserves leading and top space on macOS for traffic lights", () => {
   assert.equal(getDesktopShellBrandClass("MacIntel"), "pl-[72px]");
@@ -44,4 +47,10 @@ test("desktop shell separates the macOS sidebar toggle from the lowered brand ro
   assert.match(getDesktopShellSidebarBrandRowClass("MacIntel"), /mt-3/);
   assert.doesNotMatch(getDesktopShellSidebarToggleClass("Win32", false), /absolute/);
   assert.match(getDesktopShellSidebarBrandRowClass("Win32"), /mt-8/);
+});
+
+test("desktop shell replays restrained page motion when the view changes", () => {
+  assert.match(shell, /key=\{currentView\}/);
+  assert.match(shell, /motion-page-enter/);
+  assert.match(shell, /motion-notice-enter/);
 });

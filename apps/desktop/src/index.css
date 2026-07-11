@@ -73,9 +73,9 @@
   --shadow-2xl: 0 25px 30px -5px rgb(0 0 0 / 0.08), 0 10px 15px -6px rgb(0 0 0 / 0.04);
 
   /* Animation durations */
-  --animate-duration-fast: 150ms;
-  --animate-duration-normal: 250ms;
-  --animate-duration-slow: 350ms;
+  --animate-duration-fast: 140ms;
+  --animate-duration-normal: 180ms;
+  --animate-duration-slow: 220ms;
 
   --radius: 0.875rem;
 }
@@ -251,6 +251,26 @@ body {
   }
 }
 
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes record-enter {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes popover-enter {
+  from { opacity: 0; transform: translateY(-3px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes notice-enter {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
 /* ===== Custom Utilities ===== */
 
 @utility animate-fade-in {
@@ -290,6 +310,19 @@ body {
 
 @utility animate-spin {
   animation: spin 1s linear infinite;
+}
+
+.motion-page-enter {
+  animation: page-enter var(--animate-duration-slow) cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.motion-popover-enter {
+  transform-origin: top right;
+  animation: popover-enter var(--animate-duration-fast) cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.motion-notice-enter {
+  animation: notice-enter var(--animate-duration-normal) cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @utility transition-base {
@@ -378,6 +411,39 @@ body {
 
 .responsive-record-row {
   width: 100%;
+  animation: record-enter var(--animate-duration-normal) cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.responsive-record-row:nth-child(2) { animation-delay: 25ms; }
+.responsive-record-row:nth-child(3) { animation-delay: 50ms; }
+.responsive-record-row:nth-child(4) { animation-delay: 75ms; }
+.responsive-record-row:nth-child(5) { animation-delay: 100ms; }
+
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  transform-origin: center;
+}
+
+button:not(:disabled):active,
+[role="button"]:not([aria-disabled="true"]):active {
+  scale: 0.97;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  button:not(:disabled):active,
+  [role="button"]:not([aria-disabled="true"]):active {
+    scale: none;
+  }
 }
 
 .responsive-account-row {
