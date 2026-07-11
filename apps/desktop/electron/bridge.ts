@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import { dirname, join } from "node:path";
 import { existsSync } from "node:fs";
 import { access, cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { getUiLanguage, setUiLanguage, type UiLanguage } from "./ui-language.js";
 import {
   loadCoreRuntime,
@@ -34,6 +34,7 @@ import {
   resolveRuntimeResource,
   resolveRuntimeRoot,
 } from "./runtime-paths.js";
+import { readCodexProjects, type CodexProject } from "./codex-projects.js";
 
 const execFileAsync = promisify(execFile);
 const currentDir = resolveCurrentDir();
@@ -413,6 +414,7 @@ export async function switchAccount(
   envName: string,
   accountName: string,
   strategy?: "replace-current" | "current-window" | "new-window",
+  workingDirectory?: string,
 ): Promise<DesktopActionResult> {
   const runtime = await loadCoreRuntime();
   const state = await runtime.readLegacyState(getLegacyOptions());
@@ -436,12 +438,21 @@ export async function switchAccount(
     await openCommandInPreferredTerminal(
       ["cli", "launch-current"],
       strategy === "current-window" ? "current-window" : "new-window",
+      workingDirectory,
     );
   }
   return {
     message: `Switched ${target.toUpperCase()} account to ${next.targets[target].env}/${next.targets[target].account}`,
     output: `${next.targets[target].env}/${next.targets[target].account}\n`,
   };
+}
+
+export async function listAccountProjects(envName: string, _accountName: string): Promise<CodexProject[]> {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const env = state.envs[envName];
+  if (!env) throw new Error(`Env '${envName}' not found`);
+  return readCodexProjects(env.path);
 }
 
 export async function createEnv(request: {
@@ -947,12 +958,17 @@ export async function readTokenRefreshLog(): Promise<{ kind: "token-refresh"; co
 async function openCommandInPreferredTerminal(
   commandArgs: string[],
   strategy: "current-window" | "new-window" = "new-window",
+  workingDirectory?: string,
 ): Promise<void> {
   const repoRoot = getRepoRoot();
   const codexHome = await resolveCliTargetHome();
   const codexBin = await requireCodexCliPath();
+  const launchDirectory = strategy === "current-window"
+    ? undefined
+    : await resolveCliWorkingDirectory(workingDirectory);
   const plan = buildCliTerminalLaunchPlan({
     repoRoot,
+    workingDirectory: launchDirectory,
     codexHome,
     codexBin,
     platform: process.platform,
@@ -998,8 +1014,16 @@ async function resolveCliTargetHome(): Promise<string> {
   return env.path;
 }
 
+async function resolveCliWorkingDirectory(value?: string): Promise<string> {
+  const path = value?.trim() || homedir();
+  const info = await lstat(path).catch(() => null);
+  if (!info?.isDirectory()) throw new Error(`CLI working directory does not exist: ${path}`);
+  return path;
+}
+
 function buildCliTerminalLaunchPlan(input: {
   repoRoot: string;
+  workingDirectory?: string;
   codexHome: string;
   codexBin: string;
   platform?: NodeJS.Platform;
@@ -1014,6 +1038,7 @@ function buildCliTerminalLaunchPlan(input: {
   if (platform === "windows") {
     return buildWindowsCliTerminalLaunchPlan({
       repoRoot: input.repoRoot,
+      workingDirectory: input.workingDirectory,
       codexHome: input.codexHome,
       codexBin: input.codexBin,
       env: input.env,
@@ -1023,6 +1048,7 @@ function buildCliTerminalLaunchPlan(input: {
 
   const shellCommand = buildUnixCliLaunchCommand({
     repoRoot: input.repoRoot,
+    workingDirectory: input.workingDirectory,
     codexHome: input.codexHome,
     codexBin: input.codexBin,
     args: codexArgs,
@@ -1066,6 +1092,7 @@ function resolveMacOsTerminal(env: NodeJS.ProcessEnv | undefined): "iterm" | "te
 
 function buildWindowsCliTerminalLaunchPlan(input: {
   repoRoot: string;
+  workingDirectory?: string;
   codexHome: string;
   codexBin: string;
   env?: NodeJS.ProcessEnv;
@@ -1130,26 +1157,28 @@ function buildWindowsCliTerminalLaunchPlan(input: {
 
 function buildUnixCliLaunchCommand(input: {
   repoRoot: string;
+  workingDirectory?: string;
   codexHome: string;
   codexBin: string;
   args: string[];
 }): string {
   const parts = [
-    `cd ${quoteShellArg(input.repoRoot)}`,
+    input.workingDirectory ? `cd ${quoteShellArg(input.workingDirectory)}` : "",
     `export CODEX_HOME=${quoteShellArg(input.codexHome)}`,
     [quoteShellArg(input.codexBin), ...input.args.map(quoteShellArg)].join(" "),
-  ];
+  ].filter(Boolean);
   return parts.join(" && ");
 }
 
 function buildWindowsCmdLaunchCommand(input: {
   repoRoot: string;
+  workingDirectory?: string;
   codexHome: string;
   codexBin: string;
   args: string[];
 }): string {
   return [
-    `cd /d "${escapeCmdDoubleQuoted(input.repoRoot)}"`,
+    `cd /d "${escapeCmdDoubleQuoted(input.workingDirectory ?? input.repoRoot)}"`,
     `set "CODEX_HOME=${escapeCmdDoubleQuoted(input.codexHome)}"`,
     [quoteCmdArg(input.codexBin), ...input.args.map(quoteCmdArg)].join(" "),
   ].join(" && ");
@@ -1157,6 +1186,7 @@ function buildWindowsCmdLaunchCommand(input: {
 
 function buildWindowsPowerShellLaunchCommand(input: {
   repoRoot: string;
+  workingDirectory?: string;
   codexHome: string;
   codexBin: string;
   args: string[];
@@ -1166,7 +1196,7 @@ function buildWindowsPowerShellLaunchCommand(input: {
     ...input.args.map((arg) => `'${escapePowerShellSingleQuoted(arg)}'`),
   ].join(" ");
   return [
-    `Set-Location '${escapePowerShellSingleQuoted(input.repoRoot)}'`,
+    `Set-Location '${escapePowerShellSingleQuoted(input.workingDirectory ?? input.repoRoot)}'`,
     `$env:CODEX_HOME='${escapePowerShellSingleQuoted(input.codexHome)}'`,
     invocation,
   ].join("; ");

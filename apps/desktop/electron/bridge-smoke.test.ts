@@ -106,6 +106,31 @@ test("electron bridge builds macOS terminal launch attempts for the CLI", () => 
   assert.match(plan.attempts[0]?.args[1] ?? "", /CODEX_HOME/);
 });
 
+test("electron bridge starts a new CLI window in the selected project directory", () => {
+  const macPlan = __testUtils.buildCliTerminalLaunchPlan({
+    repoRoot: "/Applications/codex-switcher.app/Contents/Resources",
+    workingDirectory: "/Users/tester/work/client's app",
+    codexHome: "/Users/tester/.codex-envs/project/home",
+    codexBin: "/opt/homebrew/bin/codex",
+    platform: "darwin",
+    env: { CODEX_SWITCHER_MACOS_TERMINAL: "terminal" },
+  });
+  const macScript = macPlan.attempts[0]?.args[1] ?? "";
+  assert.match(macScript, /cd '\/Users\/tester\/work\/client/);
+  assert.match(macScript, /s app/);
+  assert.doesNotMatch(macScript, /Applications\/codex-switcher\.app\/Contents\/Resources/);
+
+  const windowsPlan = __testUtils.buildCliTerminalLaunchPlan({
+    repoRoot: "C:\\Program Files\\codex-switcher\\resources",
+    workingDirectory: "D:\\Work\\Client App",
+    codexHome: "C:\\Users\\tester\\.codex",
+    codexBin: "C:\\Tools\\codex.exe",
+    platform: "win32",
+    env: { CODEX_SWITCHER_WINDOWS_CLI_LAUNCHER: "powershell" },
+  });
+  assert.match(windowsPlan.attempts[0]?.args.join(" ") ?? "", /Set-Location 'D:\\Work\\Client App'/);
+});
+
 test("electron bridge selects Terminal without a side-effecting iTerm fallback", () => {
   const plan = __testUtils.buildCliTerminalLaunchPlan({
     repoRoot: "/Users/tester/work/codex-switcher",
@@ -137,6 +162,7 @@ test("electron bridge restarts only the current macOS terminal session", () => {
   });
 
   const iTermScript = plan.attempts[0]?.args[1] ?? "";
+  assert.doesNotMatch(iTermScript, /cd '\/Users\/tester\/work\/codex-switcher'/);
   assert.match(iTermScript, /set targetSession to current session of current window/);
   assert.match(iTermScript, /set targetTty to tty of targetSession/);
   assert.match(iTermScript, /write text .*\/exit/);

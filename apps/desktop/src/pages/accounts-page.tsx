@@ -32,7 +32,7 @@ import {
 } from "../components/admin-primitives";
 import { Field, Input, Select, Textarea } from "../components/form-primitives";
 import type { AccountSummary, OverviewPayload } from "../desktop-model";
-import type { DesktopLaunchStrategy } from "../bridge";
+import type { CodexProject, DesktopLaunchStrategy } from "../bridge";
 import { getDesktopCopy } from "../desktop-copy";
 import { localizeAuthMode } from "../desktop-utils";
 import { getTranslations, type UiLanguage } from "../i18n";
@@ -107,6 +107,8 @@ export function AccountsPage({
   onRuntimeAccountDraftChange,
   onRuntimeBaseUrlDraftChange,
   onSwitchAccount,
+  onListAccountProjects,
+  onPickDirectory,
   onPrimeAccount,
   onLogin,
   onRelogin,
@@ -148,7 +150,10 @@ export function AccountsPage({
     target: "cli" | "app",
     account: AccountSummary,
     strategy?: DesktopLaunchStrategy,
+    workingDirectory?: string,
   ) => void;
+  onListAccountProjects: (account: AccountSummary) => Promise<CodexProject[]>;
+  onPickDirectory: () => Promise<string>;
   onPrimeAccount: (account?: AccountSummary) => void;
   onLogin: () => Promise<boolean>;
   onRelogin: () => Promise<boolean>;
@@ -441,6 +446,8 @@ export function AccountsPage({
               isWindowsDesktop={/win/i.test(globalThis.navigator?.platform ?? "")}
               onPrimeAccount={onPrimeAccount}
               onSwitchAccount={onSwitchAccount}
+              onListAccountProjects={onListAccountProjects}
+              onPickDirectory={onPickDirectory}
               onLogin={() => setLoginDrawerOpen(true)}
               onRelogin={onRelogin}
               onLogoutIntent={() => setLogoutOpen(true)}
@@ -801,6 +808,8 @@ function AccountListCard({
   isWindowsDesktop,
   onPrimeAccount,
   onSwitchAccount,
+  onListAccountProjects,
+  onPickDirectory,
   onLogin,
   onRelogin,
   onLogoutIntent,
@@ -820,7 +829,10 @@ function AccountListCard({
     target: "cli" | "app",
     account: AccountSummary,
     strategy?: DesktopLaunchStrategy,
+    workingDirectory?: string,
   ) => void;
+  onListAccountProjects: (account: AccountSummary) => Promise<CodexProject[]>;
+  onPickDirectory: () => Promise<string>;
   onLogin: () => void;
   onRelogin: () => Promise<boolean>;
   onLogoutIntent: () => void;
@@ -969,6 +981,14 @@ function AccountListCard({
             onPrimeAccount(account);
             onSwitchAccount("cli", account, strategy);
           }}
+          loadProjects={() => onListAccountProjects(account)}
+          onSelectProject={(path) => {
+            onPrimeAccount(account);
+            onSwitchAccount("cli", account, "new-window", path);
+          }}
+          onPickDirectory={onPickDirectory}
+          homeLabel={language === "zh" ? "用户主目录" : language === "ja" ? "ホームディレクトリ" : "Home directory"}
+          pickDirectoryLabel={language === "zh" ? "选择其他文件夹…" : language === "ja" ? "別のフォルダを選択…" : "Choose another folder…"}
         />
         <CardTargetButton
           active={account.isCurrentApp}
@@ -1228,6 +1248,11 @@ function CardTargetButton({
   primaryStrategy,
   items,
   onSelect,
+  loadProjects,
+  onSelectProject,
+  onPickDirectory,
+  homeLabel,
+  pickDirectoryLabel,
 }: {
   active: boolean;
   disabled: boolean;
@@ -1239,8 +1264,16 @@ function CardTargetButton({
     label: string;
   }>;
   onSelect: (strategy: DesktopLaunchStrategy) => void;
+  loadProjects?: () => Promise<CodexProject[]>;
+  onSelectProject?: (path: string) => void;
+  onPickDirectory?: () => Promise<string>;
+  homeLabel?: string;
+  pickDirectoryLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [projectOpen, setProjectOpen] = useState(false);
+  const [projects, setProjects] = useState<CodexProject[]>([]);
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const placement = useAdaptiveMenuPlacement(open, rootRef, menuRef);
@@ -1269,7 +1302,10 @@ function CardTargetButton({
           setOpen(true);
         }
       }}
-      onMouseLeave={() => setOpen(false)}
+      onMouseLeave={() => {
+        setOpen(false);
+        setProjectOpen(false);
+      }}
     >
       <div
         className={cn(
@@ -1312,20 +1348,52 @@ function CardTargetButton({
         >
           <div className="motion-popover-enter min-w-[172px] rounded-lg border border-black/[0.08] bg-white p-1 shadow-md">
             {items.map((item) => (
-              <button
+              <div
                 key={item.key}
-                type="button"
-                className={cn(
-                  "flex w-full items-center rounded-lg px-3 py-2 text-left text-[12px] font-medium text-neutral-700 transition hover:bg-[#f6f7f9] hover:text-neutral-950",
-                  item.key === primaryStrategy && "bg-[#f5f7fa] text-neutral-950",
-                )}
-                onClick={() => {
-                  setOpen(false);
-                  onSelect(item.key);
+                className="relative"
+                onMouseEnter={() => {
+                  if (item.key !== "new-window" || !loadProjects) return;
+                  setProjectOpen(true);
+                  if (!projectsLoaded) {
+                    setProjectsLoaded(true);
+                    void loadProjects().then(setProjects).catch(() => setProjects([]));
+                  }
                 }}
               >
-                {item.label}
-              </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[12px] font-medium text-neutral-700 transition hover:bg-[#f6f7f9] hover:text-neutral-950",
+                    item.key === primaryStrategy && "bg-[#f5f7fa] text-neutral-950",
+                  )}
+                  onClick={() => {
+                    if (item.key === "new-window" && loadProjects) return;
+                    setOpen(false);
+                    onSelect(item.key);
+                  }}
+                >
+                  {item.label}
+                  {item.key === "new-window" && loadProjects ? <span className="text-slate-400">›</span> : null}
+                </button>
+                {item.key === "new-window" && projectOpen && loadProjects ? (
+                  <div className="absolute right-full top-[-4px] z-30 pr-2">
+                    <div className="motion-popover-enter w-[280px] rounded-lg border border-black/[0.08] bg-white p-1 shadow-md">
+                      <div className="max-h-64 overflow-y-auto overscroll-contain">
+                        {projects.map((project) => (
+                          <button key={project.path} type="button" title={project.path} className="block w-full rounded-lg px-3 py-2 text-left transition hover:bg-[#f6f7f9]" onClick={() => { setOpen(false); setProjectOpen(false); onSelectProject?.(project.path); }}>
+                            <span className="block truncate text-[12px] font-medium text-neutral-800">{project.name}</span>
+                            <span className="block truncate text-[10px] text-slate-400">{project.path}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="mt-1 border-t border-black/[0.06] pt-1">
+                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[12px] text-neutral-700 hover:bg-[#f6f7f9]" onClick={() => { setOpen(false); onSelectProject?.(""); }}>{homeLabel}</button>
+                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[12px] text-neutral-700 hover:bg-[#f6f7f9]" onClick={() => { void onPickDirectory?.().then((path) => { if (path) { setOpen(false); onSelectProject?.(path); } }); }}>{pickDirectoryLabel}</button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             ))}
           </div>
         </div>

@@ -30,10 +30,10 @@
 - Produces: `readCodexProjects(codexHome: string): Promise<CodexProject[]>`.
 - `CodexProject` contains `path`, `name`, and optional `lastUsedAt`.
 
-- [ ] Write tests covering TOML project extraction, path de-duplication, missing-directory filtering, and session-index sorting.
-- [ ] Run the focused test and verify it fails before implementation.
-- [ ] Implement the parser with filesystem validation and tolerant session-index parsing.
-- [ ] Run the focused test and commit the task.
+- [x] Write tests covering TOML project extraction, path de-duplication, missing-directory filtering, and session-index sorting.
+- [x] Run the focused test and verify it fails before implementation.
+- [x] Implement the parser with filesystem validation and tolerant session-index parsing.
+- [x] Run the focused test and commit the task.
 
 ### Task 2: Bridge and working-directory launch
 
@@ -49,10 +49,10 @@
 - Extends `switchAccount` with optional `workingDirectory` when strategy is `new-window`.
 - Produces a directory-picker bridge operation.
 
-- [ ] Add failing tests for home-directory fallback and explicit working-directory quoting on macOS and Windows.
-- [ ] Implement project-list lookup, directory validation, IPC/preload types, and directory picker.
-- [ ] Pass the working directory to the Unix and Windows terminal launch builders.
-- [ ] Run bridge tests and commit the task.
+- [x] Add failing tests for home-directory fallback and explicit working-directory quoting on macOS and Windows.
+- [x] Implement project-list lookup, directory validation, IPC/preload types, and directory picker.
+- [x] Pass the working directory to the Unix and Windows terminal launch builders.
+- [x] Run bridge tests and commit the task.
 
 ### Task 3: Nested hover menu
 
@@ -66,18 +66,18 @@
 - Consumes: `bridge.listAccountProjects`, `bridge.pickDirectory`, and extended `switchAccount`.
 - Produces: nested “New window” submenu with selected project path.
 
-- [ ] Add structural regression assertions for a nested, scrollable project menu.
-- [ ] Load projects lazily when the CLI menu opens or the selected account changes.
-- [ ] Render a right-side submenu with project name/path, home directory, and folder picker.
-- [ ] Keep both menu levels open while moving the pointer and close them after selection.
-- [ ] Run renderer tests and commit the task.
+- [x] Add structural regression assertions for a nested, scrollable project menu.
+- [x] Load projects lazily when the CLI menu opens or the selected account changes.
+- [x] Render a nested submenu with project name/path, home directory, and folder picker.
+- [x] Keep both menu levels open while moving the pointer and close them after selection.
+- [x] Run renderer tests and commit the task.
 
 ### Task 4: Full verification
 
 **Files:**
 - Modify only files required by failures discovered during verification.
 
-- [ ] Run `npm run desktop:test` and confirm zero failures.
-- [ ] Run `npm run desktop:build` and confirm a successful production build.
-- [ ] Run `git diff --check` and inspect the scoped diff.
-- [ ] Commit any final focused corrections without publishing.
+- [x] Run `npm run desktop:test` and confirm zero failures.
+- [x] Run `npm run desktop:build` and confirm a successful production build.
+- [x] Run `git diff --check` and inspect the scoped diff.
+- [x] Commit any final focused corrections without publishing.

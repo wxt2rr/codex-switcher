@@ -28,7 +28,11 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     envName: string,
     accountName: string,
     strategy?: "replace-current" | "current-window" | "new-window",
-  ) => ipcRenderer.invoke("desktop:switchAccount", target, envName, accountName, strategy),
+    workingDirectory?: string,
+  ) => ipcRenderer.invoke("desktop:switchAccount", target, envName, accountName, strategy, workingDirectory),
+  listAccountProjects: (envName: string, accountName: string) =>
+    ipcRenderer.invoke("desktop:listAccountProjects", envName, accountName),
+  pickDirectory: () => ipcRenderer.invoke("desktop:pickDirectory"),
   createEnv: (request: {
     envName: string;
     source: {

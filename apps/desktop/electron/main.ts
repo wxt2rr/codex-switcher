@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, type IpcMainInvokeEvent } from "electron";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -14,6 +14,7 @@ import {
   logoutApp,
   importDefaultEnv,
   listOperations,
+  listAccountProjects,
   nativeLogin,
   readAppStatus,
   readSwitcherLog,
@@ -144,8 +145,16 @@ function registerHandlers() {
       envName: string,
       accountName: string,
       strategy?: "replace-current" | "current-window" | "new-window",
-    ) => switchAccount(target, envName, accountName, strategy)
+      workingDirectory?: string,
+    ) => switchAccount(target, envName, accountName, strategy, workingDirectory)
   );
+  ipcMain.handle("desktop:listAccountProjects", (_event, envName: string, accountName: string) =>
+    listAccountProjects(envName, accountName)
+  );
+  ipcMain.handle("desktop:pickDirectory", async () => {
+    const result = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
+    return result.canceled ? "" : result.filePaths[0] ?? "";
+  });
   ipcMain.handle("desktop:createEnv", (_event: IpcMainInvokeEvent, request) => createEnv(request));
   ipcMain.handle("desktop:deleteEnv", (_event: IpcMainInvokeEvent, envName: string) => deleteEnv(envName));
   ipcMain.handle(

@@ -45,6 +45,7 @@ export interface DesktopNativeLoginRequest {
 }
 
 export type DesktopLaunchStrategy = "replace-current" | "current-window" | "new-window";
+export interface CodexProject { path: string; name: string; lastUsedAt?: string; }
 
 export interface DesktopIndependentModelRequest {
   envName: string;
@@ -78,7 +79,10 @@ export interface DesktopElectronApi {
     envName: string,
     accountName: string,
     strategy?: DesktopLaunchStrategy,
+    workingDirectory?: string,
   ): Promise<DesktopActionResult>;
+  listAccountProjects(envName: string, accountName: string): Promise<CodexProject[]>;
+  pickDirectory(): Promise<string>;
   createEnv(request: DesktopCreateEnvRequest): Promise<DesktopActionResult>;
   deleteEnv(envName: string): Promise<DesktopActionResult>;
   updateEnv(envName: string, nextEnvName: string, homePath: string): Promise<DesktopActionResult>;
@@ -134,7 +138,10 @@ export interface DesktopBridge {
     envName: string,
     accountName: string,
     strategy?: DesktopLaunchStrategy,
+    workingDirectory?: string,
   ): Promise<DesktopActionResult>;
+  listAccountProjects(envName: string, accountName: string): Promise<CodexProject[]>;
+  pickDirectory(): Promise<string>;
   createEnv(request: DesktopCreateEnvRequest): Promise<DesktopActionResult>;
   deleteEnv(envName: string): Promise<DesktopActionResult>;
   updateEnv(envName: string, nextEnvName: string, homePath: string): Promise<DesktopActionResult>;
@@ -188,6 +195,8 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       nativeLogin: unavailable,
       switchEnv: unavailable,
       switchAccount: unavailable,
+      listAccountProjects: unavailable,
+      pickDirectory: unavailable,
       createEnv: unavailable,
       deleteEnv: unavailable,
       updateEnv: unavailable,
@@ -323,6 +332,8 @@ function createBrowserPreviewBridge(): DesktopBridge {
     nativeLogin: () => browserPreviewAction(),
     switchEnv: () => browserPreviewAction(),
     switchAccount: () => browserPreviewAction(),
+    listAccountProjects: async () => [],
+    pickDirectory: async () => "",
     createEnv: () => browserPreviewAction(),
     deleteEnv: () => browserPreviewAction(),
     updateEnv: () => browserPreviewAction(),

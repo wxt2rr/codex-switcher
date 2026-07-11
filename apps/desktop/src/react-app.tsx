@@ -295,10 +295,11 @@ export function App() {
     target: "cli" | "app",
     account: AccountSummary,
     strategy?: "replace-current" | "current-window" | "new-window",
+    workingDirectory?: string,
   ) {
     setBusy(true);
     try {
-      await bridge.switchAccount(target, account.envName, account.name, strategy);
+      await bridge.switchAccount(target, account.envName, account.name, strategy, workingDirectory);
       setMessage(buildDesktopNotice(language, "success", translate(copy.message.switchedAccount, { target: target.toUpperCase(), env: account.envName, account: account.name })));
       await refreshOverview({ loadMetrics: true });
     } catch (error) {
@@ -795,7 +796,9 @@ export function App() {
           onRuntimeEnvDraftChange={setRuntimeEnvDraft}
           onRuntimeAccountDraftChange={setRuntimeAccountDraft}
           onRuntimeBaseUrlDraftChange={setRuntimeBaseUrlDraft}
-          onSwitchAccount={(target, account, strategy) => void handleSwitchAccount(target, account, strategy)}
+          onSwitchAccount={(target, account, strategy, workingDirectory) => void handleSwitchAccount(target, account, strategy, workingDirectory)}
+          onListAccountProjects={(account) => bridge.listAccountProjects(account.envName, account.name)}
+          onPickDirectory={() => bridge.pickDirectory()}
           onPrimeAccount={primeAccountDrafts}
           onLogin={() => handleNativeLogin("login")}
           onRelogin={() => handleNativeLogin("relogin")}

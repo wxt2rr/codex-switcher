@@ -66,6 +66,8 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       calls.push(`switchAccount:${target}:${envName}:${accountName}`);
       return { message: "ok" };
     },
+    listAccountProjects: async () => [],
+    pickDirectory: async () => "",
     createEnv: async (request) => {
       calls.push(`createEnv:${request.envName}:${request.source.kind}:${request.source.envName ?? ""}`);
       return { message: "ok" };
