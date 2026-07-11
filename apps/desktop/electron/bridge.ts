@@ -86,6 +86,7 @@ const authMetricsCache = new Map<string, {
   value: Awaited<ReturnType<typeof collectProfileMetrics>>;
 }>();
 const authMetricsInflight = new Map<string, Promise<Awaited<ReturnType<typeof collectProfileMetrics>>>>();
+const terminalLaunchGate = createTerminalLaunchGate(2_000);
 let desktopOperationsLoaderForTest:
   | (() => Promise<DesktopOperationsServiceLike>)
   | undefined;
@@ -960,6 +961,15 @@ async function openCommandInPreferredTerminal(
   strategy: "current-window" | "new-window" = "new-window",
   workingDirectory?: string,
 ): Promise<void> {
+  const launchKey = JSON.stringify([strategy, workingDirectory?.trim() || ""]);
+  return terminalLaunchGate.run(launchKey, () => openCommandInPreferredTerminalOnce(commandArgs, strategy, workingDirectory));
+}
+
+async function openCommandInPreferredTerminalOnce(
+  commandArgs: string[],
+  strategy: "current-window" | "new-window",
+  workingDirectory?: string,
+): Promise<void> {
   const repoRoot = getRepoRoot();
   const codexHome = await resolveCliTargetHome();
   const codexBin = await requireCodexCliPath();
@@ -1001,6 +1011,18 @@ async function openCommandInPreferredTerminal(
   }
 
   throw new Error("Unable to open CLI in a terminal on this platform");
+}
+
+function createTerminalLaunchGate(windowMs: number) {
+  let recent: { key: string; startedAt: number; result: Promise<void> } | undefined;
+  return {
+    run(key: string, launch: () => Promise<void>, now = Date.now()): Promise<void> {
+      if (recent && recent.key === key && now - recent.startedAt < windowMs) return recent.result;
+      const result = launch();
+      recent = { key, startedAt: now, result };
+      return result;
+    },
+  };
 }
 
 async function resolveCliTargetHome(): Promise<string> {
@@ -2027,13 +2049,8 @@ tell application "Terminal"
 if terminalWasRunning then
 do script ${quotedCommand}
 else
-activate
-repeat 50 times
-if exists front window then exit repeat
-delay 0.1
-end repeat
-if not (exists front window) then error "Terminal did not create its initial window"
-do script ${quotedCommand} in selected tab of front window
+launch
+do script ${quotedCommand}
 end if
 activate
 end tell`;
@@ -2099,6 +2116,7 @@ export const __testUtils = {
   buildITermAppleScript,
   buildCurrentITermAppleScript,
   buildTerminalAppleScript,
+  createTerminalLaunchGate,
   buildCurrentTerminalAppleScript,
   readTextFileOrEmpty,
   writeTextFileRaw,

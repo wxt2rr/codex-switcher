@@ -146,9 +146,24 @@ test("electron bridge selects Terminal without a side-effecting iTerm fallback",
   assert.doesNotMatch(terminalScript, /tell application "iTerm"/);
   assert.match(terminalScript, /set terminalWasRunning to application "Terminal" is running/);
   assert.match(terminalScript, /if terminalWasRunning then/);
-  assert.match(terminalScript, /do script .*\nelse\nactivate/);
-  assert.match(terminalScript, /do script .* in selected tab of front window/);
-  assert.match(terminalScript, /if not \(exists front window\) then error/);
+  assert.match(terminalScript, /else\nlaunch\ndo script/);
+  assert.doesNotMatch(terminalScript, /repeat 50 times/);
+  assert.equal((terminalScript.match(/do script/g) ?? []).length, 2);
+});
+
+test("electron bridge coalesces duplicate terminal launches within the debounce window", async () => {
+  const gate = __testUtils.createTerminalLaunchGate(2_000);
+  let launches = 0;
+  const launch = async () => { launches += 1; };
+
+  const first = gate.run("new-window:/project", launch, 1_000);
+  const duplicate = gate.run("new-window:/project", launch, 1_500);
+  await Promise.all([first, duplicate]);
+  assert.equal(launches, 1);
+
+  await gate.run("new-window:/other", launch, 1_600);
+  await gate.run("new-window:/project", launch, 3_100);
+  assert.equal(launches, 3);
 });
 
 test("electron bridge restarts only the current macOS terminal session", () => {
