@@ -1128,7 +1128,7 @@ function TooltipHint({ text }: { text: string }) {
       >
         <CircleHelp className="size-3" />
       </span>
-      <span className="pointer-events-none absolute left-1/2 top-[calc(100%+8px)] z-20 hidden w-[260px] -translate-x-1/2 rounded-lg bg-neutral-950 px-3 py-2 text-[11px] font-medium leading-5 text-white shadow-md group-hover:block group-focus-within:block">
+      <span className="pointer-events-none invisible absolute left-1/2 top-[calc(100%+8px)] z-20 w-[260px] -translate-x-1/2 -translate-y-1 rounded-lg bg-neutral-950 px-3 py-2 text-[11px] font-medium leading-5 text-white opacity-0 shadow-md transition-[opacity,transform,visibility] duration-150 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100">
         {text}
       </span>
     </span>

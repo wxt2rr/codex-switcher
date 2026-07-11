@@ -67,7 +67,7 @@ export function MetricBlock({
   return (
     <div>
       <div className="text-[13px] font-medium text-neutral-400">{label}</div>
-      <div className="mt-2 text-[2rem] font-semibold leading-none tracking-tight text-neutral-800">{value}</div>
+      <div key={value} className="motion-value-update mt-2 text-[2rem] font-semibold leading-none tracking-tight text-neutral-800">{value}</div>
       {hint ? <div className="mt-2 text-[13px] text-neutral-400">{hint}</div> : null}
     </div>
   );
@@ -77,7 +77,7 @@ export function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-neutral-100 bg-neutral-50/80 px-4 py-3">
       <div className="text-[13px] font-medium text-neutral-400">{label}</div>
-      <div className="mt-1 text-sm font-medium text-neutral-700">{value}</div>
+      <div key={value} className="motion-value-update mt-1 text-sm font-medium text-neutral-700">{value}</div>
     </div>
   );
 }
@@ -85,7 +85,7 @@ export function InfoRow({ label, value }: { label: string; value: string }) {
 export function BigNumber({ value, label }: { value: string; label: string }) {
   return (
     <div className="rounded-lg border border-neutral-100 bg-neutral-50/80 px-4 py-5">
-      <div className="text-4xl font-semibold tracking-tight text-neutral-800">{value}</div>
+      <div key={value} className="motion-value-update text-4xl font-semibold tracking-tight text-neutral-800">{value}</div>
       <div className="mt-2 text-sm font-medium text-neutral-400">{label}</div>
     </div>
   );
@@ -95,7 +95,7 @@ export function StatCard({ label, value, helper }: { label: string; value: strin
   return (
     <div className="min-w-0 px-5 py-3">
       <div className="text-[12px] font-medium text-slate-500">{label}</div>
-      <div className="mt-1 text-[20px] font-semibold tracking-[-0.03em] text-neutral-950">{value}</div>
+      <div key={value} className="motion-value-update mt-1 text-[20px] font-semibold tracking-[-0.03em] text-neutral-950">{value}</div>
       <div className="mt-1 text-[11px] text-slate-500">{helper}</div>
     </div>
   );
