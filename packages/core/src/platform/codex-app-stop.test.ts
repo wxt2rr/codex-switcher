@@ -36,11 +36,40 @@ test("buildManagedAppStopPlan uses AppleScript quit before pid fallback on macos
       optional: true,
     },
     {
+      kind: "spawn",
+      command: "pkill",
+      args: ["-x", "Codex"],
+      optional: true,
+    },
+    {
       kind: "signal",
       pid: 9876,
       signal: "SIGTERM",
     },
   ]);
+});
+
+test("buildManagedAppStopPlan quits the configured merged ChatGPT app on macos", () => {
+  const plan = buildManagedAppStopPlan({
+    platform: "macos",
+    pid: 9876,
+    preferAppQuit: true,
+    applicationName: "ChatGPT",
+  });
+
+  assert.equal(plan[0]?.kind, "spawn");
+  assert.deepEqual(plan[0], {
+    kind: "spawn",
+    command: "osascript",
+    args: ["-e", 'tell application "ChatGPT" to quit'],
+    optional: true,
+  });
+  assert.deepEqual(plan[1], {
+    kind: "spawn",
+    command: "pkill",
+    args: ["-x", "ChatGPT"],
+    optional: true,
+  });
 });
 
 test("executeManagedAppStopPlan runs steps in order and tolerates optional failures", async () => {

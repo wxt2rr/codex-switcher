@@ -15,5 +15,5 @@ export declare function readLastManagedAppInstanceId(paths: ManagedAppStatePaths
 export declare function listManagedAppInstances(paths: ManagedAppStatePaths): Promise<ManagedAppInstanceRecord[]>;
 export declare function setManagedAppInstance(paths: ManagedAppStatePaths, input: ManagedAppInstanceRecord): Promise<void>;
 export declare function clearManagedAppInstance(paths: ManagedAppStatePaths, instanceId: string): Promise<void>;
-export type ManagedAppStopper = (pid: number) => Promise<boolean>;
-export declare function stopManagedAppPid(paths: ManagedAppStatePaths, stopper: ManagedAppStopper): Promise<boolean>;
+export type ManagedAppStopper = (pid: number, applicationName?: string) => Promise<boolean>;
+export declare function stopManagedAppPid(paths: ManagedAppStatePaths, stopper: ManagedAppStopper, applicationName?: string): Promise<boolean>;

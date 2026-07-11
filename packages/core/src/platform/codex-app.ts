@@ -42,6 +42,7 @@ export interface CodexAppLaunchSpec {
 
 export interface StopManagedCodexAppInput {
   stateDir: string;
+  applicationName?: string;
 }
 
 export async function launchCodexApp(
@@ -137,7 +138,7 @@ export async function stopManagedCodexApp(
   input: StopManagedCodexAppInput,
   stopper: ManagedAppStopper = defaultManagedAppStopper,
 ): Promise<boolean> {
-  return stopManagedAppPid(resolveManagedAppStatePaths(input.stateDir), stopper);
+  return stopManagedAppPid(resolveManagedAppStatePaths(input.stateDir), stopper, input.applicationName);
 }
 
 export async function restartCurrentCodexApp(
@@ -145,11 +146,12 @@ export async function restartCurrentCodexApp(
   runner: CodexAppRunner = defaultCodexAppRunner,
   stopper: ManagedAppStopper = defaultManagedAppStopper,
 ): Promise<CodexAppRunnerResult> {
-  await stopManagedCodexApp({ stateDir: input.stateDir }, stopper);
+  const applicationName = resolveMacOsApplicationName(input.env?.CODEX_SWITCHER_APP_BIN);
+  await stopManagedCodexApp({ stateDir: input.stateDir, applicationName }, stopper);
   return launchNewCodexApp(input, runner);
 }
 
-async function defaultManagedAppStopper(pid: number): Promise<boolean> {
+async function defaultManagedAppStopper(pid: number, applicationName?: string): Promise<boolean> {
   try {
     await executeManagedAppStopPlan(
       buildManagedAppStopPlan({
@@ -159,6 +161,7 @@ async function defaultManagedAppStopper(pid: number): Promise<boolean> {
         ),
         pid,
         preferAppQuit: true,
+        applicationName,
       }),
     );
     return true;
@@ -176,6 +179,12 @@ async function defaultManagedAppStopper(pid: number): Promise<boolean> {
     }
     throw error;
   }
+}
+
+function resolveMacOsApplicationName(appPath: string | undefined): string | undefined {
+  if (!appPath) return undefined;
+  const match = /\/([^/]+)\.app(?:\/|$)/.exec(appPath);
+  return match?.[1];
 }
 
 async function nextManagedAppInstanceId(

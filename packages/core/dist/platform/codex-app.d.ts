@@ -16,6 +16,7 @@ export interface CodexAppLaunchSpec {
 }
 export interface StopManagedCodexAppInput {
     stateDir: string;
+    applicationName?: string;
 }
 export declare function launchCodexApp(input: CodexAppLaunchInput, runner?: CodexAppRunner): Promise<CodexAppRunnerResult>;
 export declare function buildCodexAppLaunchSpec(appPath: string, env?: NodeJS.ProcessEnv, platform?: NodeJS.Platform): CodexAppLaunchSpec;

@@ -181,6 +181,32 @@ test("restartCurrentCodexApp replaces the managed app pid", async () => {
   }
 });
 
+test("restartCurrentCodexApp derives the macOS application name from the configured binary", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-app-chatgpt-restart-"));
+  const calls: string[] = [];
+
+  try {
+    await writeFile(join(root, "app.pid"), "2222\n", "utf8");
+    const result = await restartCurrentCodexApp(
+      {
+        codexHome: "/tmp/codex-home",
+        stateDir: root,
+        env: { CODEX_SWITCHER_APP_BIN: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT" },
+      },
+      async () => ({ pid: 3333 }),
+      async (_pid, applicationName) => {
+        calls.push(applicationName ?? "");
+        return true;
+      },
+    );
+
+    assert.equal(result.pid, 3333);
+    assert.deepEqual(calls, ["ChatGPT"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("stopManagedCodexApp clears pid file after stopping a managed process", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-app-stop-"));
   const calls: string[] = [];

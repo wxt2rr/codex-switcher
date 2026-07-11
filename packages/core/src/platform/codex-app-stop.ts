@@ -6,6 +6,7 @@ export interface ManagedAppStopPlanInput {
   platform: SwitcherPlatform;
   pid: number;
   preferAppQuit?: boolean;
+  applicationName?: string;
 }
 
 export type ManagedAppStopPlanStep =
@@ -42,10 +43,17 @@ export function buildManagedAppStopPlan(
   const steps: ManagedAppStopPlanStep[] = [];
 
   if (input.platform === "macos" && input.preferAppQuit) {
+    const applicationName = input.applicationName?.trim() || "Codex";
     steps.push({
       kind: "spawn",
       command: "osascript",
-      args: ["-e", 'tell application "Codex" to quit'],
+      args: ["-e", `tell application ${JSON.stringify(applicationName)} to quit`],
+      optional: true,
+    });
+    steps.push({
+      kind: "spawn",
+      command: "pkill",
+      args: ["-x", applicationName],
       optional: true,
     });
   }

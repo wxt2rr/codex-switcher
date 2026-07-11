@@ -3,6 +3,7 @@ export interface ManagedAppStopPlanInput {
     platform: SwitcherPlatform;
     pid: number;
     preferAppQuit?: boolean;
+    applicationName?: string;
 }
 export type ManagedAppStopPlanStep = {
     kind: "spawn";

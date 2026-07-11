@@ -11,10 +11,17 @@ export function buildManagedAppStopPlan(input) {
     }
     const steps = [];
     if (input.platform === "macos" && input.preferAppQuit) {
+        const applicationName = input.applicationName?.trim() || "Codex";
         steps.push({
             kind: "spawn",
             command: "osascript",
-            args: ["-e", 'tell application "Codex" to quit'],
+            args: ["-e", `tell application ${JSON.stringify(applicationName)} to quit`],
+            optional: true,
+        });
+        steps.push({
+            kind: "spawn",
+            command: "pkill",
+            args: ["-x", applicationName],
             optional: true,
         });
     }

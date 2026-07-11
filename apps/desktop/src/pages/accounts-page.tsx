@@ -24,6 +24,7 @@ import {
   parseUsageMetric,
 } from "@/account-usage";
 import { Button } from "@/components/ui/button";
+import { useAdaptiveMenuPlacement } from "@/components/adaptive-menu-placement";
 import { cn } from "@/lib/utils";
 import {
   ConfirmDialog,
@@ -1064,6 +1065,8 @@ function RowActionMenu({
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const placement = useAdaptiveMenuPlacement(open, rootRef, menuRef);
 
   useEffect(() => {
     if (!open) {
@@ -1094,7 +1097,15 @@ function RowActionMenu({
         <ChevronDown className={cn("responsive-action-label size-3.5 text-slate-400 transition", open && "rotate-180")} />
       </button>
       {open ? (
-        <div className="motion-popover-enter absolute right-0 top-[calc(100%+8px)] z-20 min-w-[188px] rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md">
+        <div
+          ref={menuRef}
+          data-menu-placement={placement}
+          className={cn(
+            "motion-popover-enter absolute right-0 z-20 min-w-[188px] rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md",
+            placement === "up" ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]",
+          )}
+          style={{ transformOrigin: placement === "up" ? "bottom right" : "top right" }}
+        >
           {items.map((item) => (
             <button
               key={item.key}
@@ -1231,6 +1242,8 @@ function CardTargetButton({
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const placement = useAdaptiveMenuPlacement(open, rootRef, menuRef);
 
   useEffect(() => {
     if (!open) {
@@ -1292,7 +1305,11 @@ function CardTargetButton({
         </button>
       </div>
       {open ? (
-        <div className="absolute right-0 top-full z-20 pt-2">
+        <div
+          ref={menuRef}
+          data-menu-placement={placement}
+          className={cn("absolute right-0 z-20", placement === "up" ? "bottom-full pb-2" : "top-full pt-2")}
+        >
           <div className="motion-popover-enter min-w-[172px] rounded-lg border border-black/[0.08] bg-white p-1 shadow-md">
             {items.map((item) => (
               <button

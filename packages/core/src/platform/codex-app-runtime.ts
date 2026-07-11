@@ -107,11 +107,12 @@ export async function clearManagedAppInstance(
   }
 }
 
-export type ManagedAppStopper = (pid: number) => Promise<boolean>;
+export type ManagedAppStopper = (pid: number, applicationName?: string) => Promise<boolean>;
 
 export async function stopManagedAppPid(
   paths: ManagedAppStatePaths,
   stopper: ManagedAppStopper,
+  applicationName?: string,
 ): Promise<boolean> {
   const lastInstanceId = await readLastManagedAppInstanceId(paths);
   const instances = await listManagedAppInstances(paths);
@@ -126,7 +127,7 @@ export async function stopManagedAppPid(
   }
 
   try {
-    await stopper(pid);
+    await stopper(pid, applicationName);
   } finally {
     if (selected) {
       await clearManagedAppInstance(paths, selected.instanceId);

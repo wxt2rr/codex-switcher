@@ -33,7 +33,10 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.doesNotMatch(accounts, /responsive-actions[^\n]*flex-wrap/);
   assert.match(accounts, /Pencil/);
   assert.match(accounts, /Ellipsis/);
-  assert.match(accounts, /absolute right-0 top-full z-20 pt-2/);
+  assert.match(accounts, /useAdaptiveMenuPlacement/);
+  assert.match(accounts, /data-menu-placement=\{placement\}/);
+  assert.match(accounts, /bottom-full pb-2/);
+  assert.match(accounts, /top-full pt-2/);
   assert.match(accounts, /account-runtime-cell/);
   assert.match(accounts, /account-runtime-actions/);
   assert.match(accounts, /account-usage-row/);

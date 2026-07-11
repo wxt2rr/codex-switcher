@@ -77,7 +77,7 @@ export async function clearManagedAppInstance(paths, instanceId) {
         await rm(paths.appLastInstanceFile, { force: true });
     }
 }
-export async function stopManagedAppPid(paths, stopper) {
+export async function stopManagedAppPid(paths, stopper, applicationName) {
     const lastInstanceId = await readLastManagedAppInstanceId(paths);
     const instances = await listManagedAppInstances(paths);
     const selected = (lastInstanceId
@@ -88,7 +88,7 @@ export async function stopManagedAppPid(paths, stopper) {
         return false;
     }
     try {
-        await stopper(pid);
+        await stopper(pid, applicationName);
     }
     finally {
         if (selected) {
