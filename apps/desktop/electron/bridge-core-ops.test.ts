@@ -179,7 +179,7 @@ test("Windows environment cloning skips symlinks that cannot be recreated withou
   }
 });
 
-test("macOS environment cloning skips Unix sockets and keeps regular files", async () => {
+test("macOS environment cloning skips Unix sockets and keeps regular files", { skip: process.platform !== "darwin" }, async () => {
   const root = await mkdtemp("/tmp/cs-socket-");
   const socketPath = join(root, "fsmonitor--daemon.ipc");
   const regularPath = join(root, "config.toml");
