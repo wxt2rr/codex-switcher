@@ -1,6 +1,11 @@
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  getConfiguredResourcesPath,
+  resolveRuntimeResource,
+  resolveRuntimeRoot,
+} from "./runtime-paths.js";
 
 export interface CoreRuntime {
   createCoreApi: typeof import("../../../packages/core/dist/api/core-api.js").createCoreApi;
@@ -55,9 +60,7 @@ let desktopOperationsModuleOverride:
 let coreSupportModulesPromise: Promise<CoreSupportModules> | undefined;
 
 export async function loadCoreRuntime(): Promise<CoreRuntime> {
-  const bundledCoreDist = getBundledCoreDist();
-  const workspaceCoreDist = getWorkspaceCoreDist();
-  const baseDir = existsSync(bundledCoreDist) ? bundledCoreDist : workspaceCoreDist;
+  const baseDir = getCoreDist();
 
   const [apiModule, legacyModule, targetHomeModule] = await Promise.all([
     importModule<CoreApiModule>(join(baseDir, "api", "core-api.js")),
@@ -83,14 +86,14 @@ export async function loadDesktopOperationsModule(): Promise<
     return desktopOperationsModuleOverride;
   }
 
-  const bundledCoreDist = getBundledCoreDist();
-  const workspaceCoreDist = getWorkspaceCoreDist();
-  const baseDir = existsSync(bundledCoreDist) ? bundledCoreDist : workspaceCoreDist;
+  const baseDir = getCoreDist();
 
-  const candidates = [
-    join(baseDir, "services", "desktop-operations.js"),
-    join(getRepoRoot(), "packages", "core", "src", "services", "desktop-operations.ts"),
-  ];
+  const candidates = [join(baseDir, "services", "desktop-operations.js")];
+  if (!existsSync(candidates[0])) {
+    candidates.push(
+      join(getRepoRoot(), "packages", "core", "src", "services", "desktop-operations.ts"),
+    );
+  }
 
   for (const candidate of candidates) {
     if (existsSync(candidate)) {
@@ -115,10 +118,18 @@ export async function loadCoreSupportModules(): Promise<CoreSupportModules> {
 }
 
 async function loadCoreSupportModulesImpl(): Promise<CoreSupportModules> {
-  const bundledCoreDist = getBundledCoreDist();
-  const workspaceCoreDist = getWorkspaceCoreDist();
-  const distBaseDir = existsSync(bundledCoreDist) ? bundledCoreDist : workspaceCoreDist;
-  const srcBaseDir = join(getRepoRoot(), "packages", "core", "src");
+  const distBaseDir = getCoreDist();
+  const srcBaseDir = existsSync(join(distBaseDir, "platform", "os.js"))
+    ? undefined
+    : join(getRepoRoot(), "packages", "core", "src");
+
+  const moduleCandidates = (distPath: string, srcPath: string): string[] => {
+    const candidates = [join(distBaseDir, distPath)];
+    if (srcBaseDir) {
+      candidates.push(join(srcBaseDir, srcPath));
+    }
+    return candidates;
+  };
 
   const [
     osModule,
@@ -131,42 +142,15 @@ async function loadCoreSupportModulesImpl(): Promise<CoreSupportModules> {
     codexAppRuntimeModule,
     runtimeModule,
   ] = await Promise.all([
-    importFirstExisting<OsModule>([
-      join(distBaseDir, "platform", "os.js"),
-      join(srcBaseDir, "platform", "os.ts"),
-    ]),
-    importFirstExisting<CommandDiscoveryModule>([
-      join(distBaseDir, "platform", "command-discovery.js"),
-      join(srcBaseDir, "platform", "command-discovery.ts"),
-    ]),
-    importFirstExisting<ProxyModule>([
-      join(distBaseDir, "platform", "proxy.js"),
-      join(srcBaseDir, "platform", "proxy.ts"),
-    ]),
-    importFirstExisting<TaskRunnerModule>([
-      join(distBaseDir, "tasks", "task-runner.js"),
-      join(srcBaseDir, "tasks", "task-runner.ts"),
-    ]),
-    importFirstExisting<AccountServiceModule>([
-      join(distBaseDir, "domain", "account-service.js"),
-      join(srcBaseDir, "domain", "account-service.ts"),
-    ]),
-    importFirstExisting<EnvServiceModule>([
-      join(distBaseDir, "domain", "env-service.js"),
-      join(srcBaseDir, "domain", "env-service.ts"),
-    ]),
-    importFirstExisting<CodexAppModule>([
-      join(distBaseDir, "platform", "codex-app.js"),
-      join(srcBaseDir, "platform", "codex-app.ts"),
-    ]),
-    importFirstExisting<CodexAppRuntimeModule>([
-      join(distBaseDir, "platform", "codex-app-runtime.js"),
-      join(srcBaseDir, "platform", "codex-app-runtime.ts"),
-    ]),
-    importFirstExisting<RuntimeModule>([
-      join(distBaseDir, "platform", "runtime.js"),
-      join(srcBaseDir, "platform", "runtime.ts"),
-    ]),
+    importFirstExisting<OsModule>(moduleCandidates("platform/os.js", "platform/os.ts")),
+    importFirstExisting<CommandDiscoveryModule>(moduleCandidates("platform/command-discovery.js", "platform/command-discovery.ts")),
+    importFirstExisting<ProxyModule>(moduleCandidates("platform/proxy.js", "platform/proxy.ts")),
+    importFirstExisting<TaskRunnerModule>(moduleCandidates("tasks/task-runner.js", "tasks/task-runner.ts")),
+    importFirstExisting<AccountServiceModule>(moduleCandidates("domain/account-service.js", "domain/account-service.ts")),
+    importFirstExisting<EnvServiceModule>(moduleCandidates("domain/env-service.js", "domain/env-service.ts")),
+    importFirstExisting<CodexAppModule>(moduleCandidates("platform/codex-app.js", "platform/codex-app.ts")),
+    importFirstExisting<CodexAppRuntimeModule>(moduleCandidates("platform/codex-app-runtime.js", "platform/codex-app-runtime.ts")),
+    importFirstExisting<RuntimeModule>(moduleCandidates("platform/runtime.js", "platform/runtime.ts")),
   ]);
 
   return {
@@ -235,34 +219,16 @@ function resolveCurrentFile(): string {
   throw new Error("Unable to resolve current bridge file path");
 }
 
-function getAppDir(): string {
-  return dirname(dirname(resolveCurrentFile()));
-}
-
-function resolveRepoRoot(): string {
-  const appDir = getAppDir();
-  let current = join(appDir, "..");
-
-  for (let index = 0; index < 10; index += 1) {
-    const packageJsonPath = join(current, "package.json");
-    const corePath = join(current, "packages", "core", "dist", "api", "core-api.js");
-    if (existsSync(packageJsonPath) && existsSync(corePath)) {
-      return current;
-    }
-    current = dirname(current);
-  }
-
-  throw new Error("Unable to resolve codex-switcher workspace root");
-}
-
 function getRepoRoot(): string {
-  return resolveRepoRoot();
+  return resolveRuntimeRoot({
+    currentFile: resolveCurrentFile(),
+    resourcesPath: getConfiguredResourcesPath(),
+  });
 }
 
-function getBundledCoreDist(): string {
-  return join(getAppDir(), "..", "packages", "core", "dist");
-}
-
-function getWorkspaceCoreDist(): string {
-  return join(getRepoRoot(), "packages", "core", "dist");
+function getCoreDist(): string {
+  return resolveRuntimeResource(join("packages", "core", "dist"), {
+    currentFile: resolveCurrentFile(),
+    resourcesPath: getConfiguredResourcesPath(),
+  });
 }

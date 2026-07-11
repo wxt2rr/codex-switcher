@@ -21,6 +21,11 @@ import {
 } from "./env-file-history.js";
 import { UsageRouterManager } from "./usage-router-manager.js";
 import type { PricingProfile, UsageFilter } from "./usage-routing-model.js";
+import {
+  getConfiguredResourcesPath,
+  resolveRuntimeResource,
+  resolveRuntimeRoot,
+} from "./runtime-paths.js";
 
 const execFileAsync = promisify(execFile);
 const currentDir = resolveCurrentDir();
@@ -1838,27 +1843,17 @@ function resolveLegacyOptions(
 }
 
 function resolveBundledPath(relativePath: string): string {
-  const appDir = getAppDir();
-  const repoRoot = getRepoRoot();
-  const bundledPath = join(appDir, "..", relativePath);
-  if (existsSync(bundledPath)) {
-    return bundledPath;
-  }
-
-  return join(repoRoot, relativePath);
+  return resolveRuntimeResource(relativePath, {
+    currentFile: join(currentDir, "bridge.cjs"),
+    resourcesPath: getConfiguredResourcesPath(),
+  });
 }
 
 function getRepoRoot(): string {
-  let current = join(currentDir, "..", "..");
-  for (let index = 0; index < 10; index += 1) {
-    const packageJsonPath = join(current, "package.json");
-    const corePath = join(current, "packages", "core", "dist", "api", "core-api.js");
-    if (existsSync(packageJsonPath) && existsSync(corePath)) {
-      return current;
-    }
-    current = dirname(current);
-  }
-  throw new Error("Unable to resolve codex-switcher workspace root");
+  return resolveRuntimeRoot({
+    currentFile: join(currentDir, "bridge.cjs"),
+    resourcesPath: getConfiguredResourcesPath(),
+  });
 }
 
 function getAppDir(): string {

@@ -9,6 +9,7 @@ const commonJsModules = [
   "bridge",
   "ui-language",
   "core-runtime",
+  "runtime-paths",
   "env-file-history",
   "usage-routing-model",
   "usage-store",

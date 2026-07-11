@@ -1,7 +1,7 @@
 {
   "name": "appsdesktop",
   "private": true,
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Electron desktop shell for codex-switcher",
   "author": "wangxt",
   "type": "module",
@@ -12,7 +12,7 @@
     "electron": "electron electron-dist/electron/main.cjs",
     "electron:dev": "concurrently -k \"vite\" \"wait-on tcp:1420 && cross-env CODEX_SWITCHER_DESKTOP_DEV_SERVER_URL=http://127.0.0.1:1420 electron electron-dist/electron/main.cjs\"",
     "preview": "vite preview",
-    "test:desktop": "tsx --test src/bridge.test.ts src/view-model.test.ts src/operation-result.test.ts src/desktop-feedback.test.ts src/account-usage.test.ts src/auth-metrics.test.ts src/proxy-status.test.ts src/refresh-policy.test.ts src/components/desktop-shell.test.ts src/components/responsive-layout.test.ts src/components/select-field.test.ts src/components/usage-trend-chart-model.test.ts electron/package.test.ts electron/builder-config.test.ts electron/bridge-smoke.test.ts electron/bridge-core-ops.test.ts electron/usage-routing-model.test.ts electron/usage-store.test.ts electron/usage-router-service.test.ts electron/usage-router-manager.test.ts",
+    "test:desktop": "tsx --test src/bridge.test.ts src/view-model.test.ts src/operation-result.test.ts src/desktop-feedback.test.ts src/account-usage.test.ts src/auth-metrics.test.ts src/proxy-status.test.ts src/refresh-policy.test.ts src/components/desktop-shell.test.ts src/components/responsive-layout.test.ts src/components/select-field.test.ts src/components/usage-trend-chart-model.test.ts electron/package.test.ts electron/builder-config.test.ts electron/bridge-smoke.test.ts electron/bridge-core-ops.test.ts electron/runtime-paths.test.ts electron/usage-routing-model.test.ts electron/usage-store.test.ts electron/usage-router-service.test.ts electron/usage-router-manager.test.ts",
     "package:mac": "electron-builder --mac dmg zip --arm64",
     "package:mac:dir": "electron-builder --mac dir --arm64",
     "package:win": "electron-builder --win nsis --x64",
@@ -67,8 +67,16 @@
         "to": "packages/core/dist"
       },
       {
+        "from": "../../packages/core/package.json",
+        "to": "packages/core/package.json"
+      },
+      {
         "from": "../../plugins/codex-switcher/scripts",
         "to": "plugins/codex-switcher/scripts"
+      },
+      {
+        "from": "../../scripts/bin",
+        "to": "scripts/bin"
       }
     ],
     "mac": {

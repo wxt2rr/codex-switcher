@@ -51,6 +51,7 @@ import {
 
 const currentDir = __dirname;
 const appDir = dirname(currentDir);
+process.env.CODEX_SWITCHER_DESKTOP_RESOURCES_PATH = process.resourcesPath;
 
 function resolveDesktopLogoPath() {
   const candidatePaths = [

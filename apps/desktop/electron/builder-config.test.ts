@@ -37,8 +37,16 @@ test("desktop package defines electron packaging entrypoints", () => {
       to: "packages/core/dist",
     },
     {
+      from: "../../packages/core/package.json",
+      to: "packages/core/package.json",
+    },
+    {
       from: "../../plugins/codex-switcher/scripts",
       to: "plugins/codex-switcher/scripts",
+    },
+    {
+      from: "../../scripts/bin",
+      to: "scripts/bin",
     },
   ]);
   assert.deepEqual(desktopPackage.build.mac?.target, ["dmg", "zip", "dir"]);
