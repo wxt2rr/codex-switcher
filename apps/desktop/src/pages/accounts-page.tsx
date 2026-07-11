@@ -97,7 +97,6 @@ export function AccountsPage({
   onAuthRefreshIntervalChange,
   onRefreshAuthMetrics,
   onAccountNameDraftChange,
-  onAccountTargetDraftChange,
   onAccountModeDraftChange,
   onAccountApiKeyDraftChange,
   onAccountBaseUrlModeDraftChange,
@@ -136,7 +135,6 @@ export function AccountsPage({
   onAuthRefreshIntervalChange: (seconds: number) => void;
   onRefreshAuthMetrics: () => void;
   onAccountNameDraftChange: (value: string) => void;
-  onAccountTargetDraftChange: (value: string) => void;
   onAccountModeDraftChange: (value: string) => void;
   onAccountApiKeyDraftChange: (value: string) => void;
   onAccountBaseUrlModeDraftChange: (value: string) => void;
@@ -228,7 +226,6 @@ export function AccountsPage({
       : accountTargetDraft === "app"
         ? text.labels.app
         : text.labels.cli;
-  const isEditingAccount = Boolean(selectedAccount);
   const refreshIntervalIsPreset = [1, 3, 5, 10].includes(authRefreshIntervalSeconds);
 
   function commitCustomRefreshInterval() {
@@ -483,20 +480,7 @@ export function AccountsPage({
           <Field label={pageCopy.common.account}>
             <Input value={accountNameDraft} onChange={(event) => onAccountNameDraftChange(event.target.value)} placeholder={text.inputs.accountName} />
           </Field>
-          <div className={cn("grid gap-3", isEditingAccount ? "sm:grid-cols-1" : "sm:grid-cols-2")}>
-            {!isEditingAccount ? (
-              <Field label={pageCopy.accounts.target}>
-                <Select
-                  value={accountTargetDraft}
-                  onValueChange={onAccountTargetDraftChange}
-                  items={[
-                    { value: "cli" },
-                    { value: "app" },
-                    { value: "both", label: pageCopy.accounts.both },
-                  ]}
-                />
-              </Field>
-            ) : null}
+          <div className="grid gap-3">
             <Field label={pageCopy.accounts.mode}>
               <Select
                 value={accountModeDraft}
@@ -595,7 +579,11 @@ export function AccountsPage({
                   : language === "ja"
                     ? "保存して更新"
                     : "Save changes"
-                : pageCopy.accounts.login}
+                : accountModeDraft === "apikey"
+                  ? language === "zh" ? "保存 API Key" : language === "ja" ? "API Key を保存" : "Save API Key"
+                  : accountModeDraft === "sub2api"
+                    ? language === "zh" ? "保存 sub2api" : language === "ja" ? "sub2api を保存" : "Save sub2api"
+                    : language === "zh" ? "授权登录" : language === "ja" ? "認証ログイン" : "Authorize login"}
             </Button>
           </div>
         </div>

@@ -2,7 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { dirname, join } from "node:path";
 import { existsSync } from "node:fs";
-import { access, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { getUiLanguage, setUiLanguage, type UiLanguage } from "./ui-language.js";
 import {
@@ -449,17 +449,23 @@ export async function createEnv(request: {
     throw new Error(`failed to create env '${request.envName}'`);
   }
 
-  await runtime.createLegacyEnv({
-    envsDir: getEnvsDir(),
-    envName: request.envName,
-  });
+  try {
+    await runtime.createLegacyEnv({
+      envsDir: getEnvsDir(),
+      envName: request.envName,
+    });
 
-  if (sourceEnvName) {
-    const sourcePath = state.envs[sourceEnvName]?.path;
-    if (!sourcePath) {
-      throw new Error(`source env '${sourceEnvName}' not found`);
+    if (sourceEnvName) {
+      const sourcePath = state.envs[sourceEnvName]?.path;
+      if (!sourcePath) {
+        throw new Error(`source env '${sourceEnvName}' not found`);
+      }
+      await cloneEnvHomeExcludingAuth(sourcePath, created.path);
     }
-    await cloneEnvHomeExcludingAuth(sourcePath, created.path);
+  } catch (error) {
+    await rm(join(getEnvsDir(), request.envName), { recursive: true, force: true });
+    await rm(join(getStateDir(), "env-accounts", request.envName), { recursive: true, force: true });
+    throw error;
   }
 
   return {
@@ -750,7 +756,7 @@ export async function nativeLogin(request: {
   mode: "auth" | "apikey" | "sub2api";
   account: string;
   envName: string;
-  target: "cli" | "app" | "both";
+  target: "cli" | "app" | "both" | "none";
   relogin: boolean;
   sync?: boolean;
   apiKey?: string;
@@ -1314,7 +1320,7 @@ function buildSwitcherExecutionPlan(input: {
 async function nativeAuthLogin(request: {
   account: string;
   envName: string;
-  target: "cli" | "app" | "both";
+  target: "cli" | "app" | "both" | "none";
   relogin: boolean;
   sync?: boolean;
 }): Promise<DesktopActionResult> {
@@ -1358,7 +1364,7 @@ async function nativeAuthLogin(request: {
 async function nativeApiKeyLogin(request: {
   account: string;
   envName: string;
-  target: "cli" | "app" | "both";
+  target: "cli" | "app" | "both" | "none";
   apiKey?: string;
   baseUrlMode?: "default" | "custom";
   baseUrl?: string;
@@ -1374,22 +1380,6 @@ async function nativeApiKeyLogin(request: {
     throw new Error(`Env '${request.envName}' not found`);
   }
 
-  await mkdir(env.path, { recursive: true });
-  const codexBin = await requireCodexCliPath();
-  const loginPlan = buildApiKeyLoginExecutionPlan({
-    repoRoot: getRepoRoot(),
-    codexHome: env.path,
-    codexBin,
-    apiKey: request.apiKey,
-    platform: process.platform,
-    env: process.env,
-  });
-  await executeCommandPlan(loginPlan, {
-    cwd: getRepoRoot(),
-  });
-
-  const authPath = join(env.path, "auth.json");
-  const authRaw = await readFile(authPath, "utf8");
   await saveAccountArtifacts({
     envName: request.envName,
     account: request.account,
@@ -1398,7 +1388,7 @@ async function nativeApiKeyLogin(request: {
       openaiBaseUrlMode: request.baseUrlMode === "custom" ? "custom" : "default",
       openaiBaseUrl: request.baseUrlMode === "custom" ? request.baseUrl?.trim() || undefined : undefined,
     },
-    authJsonContent: authRaw,
+    authJsonContent: `${JSON.stringify({ OPENAI_API_KEY: request.apiKey.trim() }, null, 2)}\n`,
     target: request.target,
   });
 
@@ -1411,7 +1401,7 @@ async function nativeApiKeyLogin(request: {
 async function nativeSub2ApiLogin(request: {
   account: string;
   envName: string;
-  target: "cli" | "app" | "both";
+  target: "cli" | "app" | "both" | "none";
   sub2apiPayload?: string;
 }): Promise<DesktopActionResult> {
   const payload = parseSub2ApiPayload(request.sub2apiPayload);
@@ -1443,7 +1433,7 @@ async function saveAccountArtifacts(options: {
     openaiBaseUrl?: string;
   };
   authJsonContent: string;
-  target: "cli" | "app" | "both";
+  target: "cli" | "app" | "both" | "none";
 }): Promise<void> {
   const runtime = await loadCoreRuntime();
   let state = await runtime.readLegacyState(getLegacyOptions());
@@ -1463,7 +1453,11 @@ async function saveAccountArtifacts(options: {
   });
 
   state = await runtime.readLegacyState(getLegacyOptions());
-  for (const target of expandTargets(options.target)) {
+  const activeTargets = (["cli", "app"] as const).filter((target) =>
+    state.targets[target].env === options.envName && state.targets[target].account === options.account,
+  );
+  const targets = options.target === "none" ? activeTargets : expandTargets(options.target);
+  for (const target of targets) {
     const next = runtime.createCoreApi({ getState: () => state }).selectAccount({
       envName: options.envName,
       accountName: options.account,
@@ -2007,6 +2001,7 @@ export const __testUtils = {
   buildCurrentTerminalAppleScript,
   readTextFileOrEmpty,
   writeTextFileRaw,
+  shouldCopyEnvClonePathForTest: shouldCopyEnvClonePath,
   setDesktopOperationsLoaderForTest(loader: typeof desktopOperationsLoaderForTest) {
     desktopOperationsLoaderForTest = loader;
   },
@@ -2928,7 +2923,17 @@ async function cloneEnvHomeExcludingAuth(sourcePath: string, targetPath: string)
     await cp(join(sourcePath, entry.name), join(targetPath, entry.name), {
       recursive: true,
       force: true,
+      filter: (path) => shouldCopyEnvClonePath(path, process.platform),
     });
+  }
+}
+
+async function shouldCopyEnvClonePath(path: string, platform: NodeJS.Platform): Promise<boolean> {
+  if (platform !== "win32") return true;
+  try {
+    return !(await lstat(path)).isSymbolicLink();
+  } catch {
+    return true;
   }
 }
 

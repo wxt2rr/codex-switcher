@@ -517,7 +517,7 @@ export function App() {
         mode: accountModeDraft === "apikey" || accountModeDraft === "sub2api" ? accountModeDraft : "auth",
         account: accountNameDraft.trim(),
         envName: accountEnvDraft.trim(),
-        target: accountTargetDraft === "app" || accountTargetDraft === "both" ? accountTargetDraft : "cli",
+        target: "none",
         relogin: action === "relogin",
         apiKey: accountApiKeyDraft,
         baseUrlMode: accountBaseUrlModeDraft === "custom" ? "custom" : "default",
@@ -786,7 +786,6 @@ export function App() {
             }
           }}
           onAccountNameDraftChange={setAccountNameDraft}
-          onAccountTargetDraftChange={setAccountTargetDraft}
           onAccountModeDraftChange={setAccountModeDraft}
           onAccountApiKeyDraftChange={setAccountApiKeyDraft}
           onAccountBaseUrlModeDraftChange={setAccountBaseUrlModeDraft}

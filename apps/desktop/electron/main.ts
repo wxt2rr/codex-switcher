@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, type IpcMainInvokeEvent } from "electron";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -100,6 +100,9 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  if (process.platform !== "darwin") {
+    Menu.setApplicationMenu(null);
+  }
   registerHandlers();
   await createWindow();
 

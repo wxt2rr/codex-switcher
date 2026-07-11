@@ -13,7 +13,7 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     mode: "auth" | "apikey" | "sub2api";
     account: string;
     envName: string;
-    target: "cli" | "app" | "both";
+    target: "cli" | "app" | "both" | "none";
     relogin: boolean;
     sync?: boolean;
     apiKey?: string;

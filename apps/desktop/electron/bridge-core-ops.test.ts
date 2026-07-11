@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
@@ -133,6 +133,47 @@ test("desktop bridge creates envs directly from core state and clones default ho
     );
   } finally {
     restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("desktop bridge saves an API key account without a Codex CLI or changing targets", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-api-key-"));
+  const previousEnv = { ...process.env };
+  try {
+    process.env.HOME = root;
+    process.env.PATH = "";
+    delete process.env.CODEX_SWITCHER_CODEX_BIN;
+    delete process.env.CODEX_BIN;
+    process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
+    process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
+    process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
+    await writeFileRecursive(join(root, "state", "current_cli_env"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_cli_account"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_app_env"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_app_account"), "default\n");
+
+    const result = await bridge.nativeLogin({ mode: "apikey", account: "key", envName: "default", target: "none", relogin: false, apiKey: "sk-test" });
+    assert.equal(result.message, "Saved API key for default/key");
+    assert.deepEqual(JSON.parse(await readFile(join(root, "state", "env-accounts", "default", "key", "auth.json"), "utf8")), { OPENAI_API_KEY: "sk-test" });
+    assert.equal(await readFile(join(root, "state", "current_cli_account"), "utf8"), "default\n");
+    assert.equal(await readFile(join(root, "state", "current_app_account"), "utf8"), "default\n");
+  } finally {
+    restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Windows environment cloning skips symlinks that cannot be recreated without privileges", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-symlink-"));
+  try {
+    const target = join(root, "target");
+    const link = join(root, "latest");
+    await writeFileRecursive(join(target, "value.txt"), "ok\n");
+    await symlink(target, link, process.platform === "win32" ? "junction" : "dir");
+    assert.equal(await bridge.__testUtils.shouldCopyEnvClonePathForTest(link, "win32"), false);
+    assert.equal(await bridge.__testUtils.shouldCopyEnvClonePathForTest(join(target, "value.txt"), "win32"), true);
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 });

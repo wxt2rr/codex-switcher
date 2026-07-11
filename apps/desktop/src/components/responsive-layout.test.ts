@@ -46,6 +46,9 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.match(accounts, /已开启代理/);
   assert.doesNotMatch(accounts, /text\.labels\.chatgptMode/);
   assert.doesNotMatch(accounts, /<RunStatusBadge/);
+  assert.doesNotMatch(accounts, /<Field label=\{pageCopy\.accounts\.target\}>/);
+  assert.match(accounts, /保存 API Key/);
+  assert.match(accounts, /保存 sub2api/);
   assert.doesNotMatch(environments, /<RunStatusBadge/);
   assert.doesNotMatch(select, /focus-visible:ring/);
   assert.match(css, /\[data-slot="select-trigger"\]:focus-visible\s*\{[^}]*box-shadow:\s*none/s);
