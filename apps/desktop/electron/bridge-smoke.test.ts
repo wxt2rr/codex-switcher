@@ -96,14 +96,28 @@ test("electron bridge builds macOS terminal launch attempts for the CLI", () => 
     codexHome: "/Users/tester/.codex-envs/project/home",
     codexBin: "/Applications/Codex.app/Contents/Resources/codex",
     platform: "darwin",
+    env: { CODEX_SWITCHER_MACOS_TERMINAL: "iterm" },
   });
 
   assert.equal(plan.platform, "macos");
-  assert.equal(plan.attempts.length, 2);
+  assert.equal(plan.attempts.length, 1);
   assert.equal(plan.attempts[0]?.command, "osascript");
   assert.match(plan.attempts[0]?.args[1] ?? "", /tell application "iTerm"/);
   assert.match(plan.attempts[0]?.args[1] ?? "", /CODEX_HOME/);
-  assert.match(plan.attempts[1]?.args[1] ?? "", /tell application "Terminal"/);
+});
+
+test("electron bridge selects Terminal without a side-effecting iTerm fallback", () => {
+  const plan = __testUtils.buildCliTerminalLaunchPlan({
+    repoRoot: "/Users/tester/work/codex-switcher",
+    codexHome: "/Users/tester/.codex-envs/project/home",
+    codexBin: "/Applications/Codex.app/Contents/Resources/codex",
+    platform: "darwin",
+    env: { CODEX_SWITCHER_MACOS_TERMINAL: "terminal" },
+  });
+
+  assert.equal(plan.attempts.length, 1);
+  assert.match(plan.attempts[0]?.args[1] ?? "", /tell application "Terminal"/);
+  assert.doesNotMatch(plan.attempts[0]?.args[1] ?? "", /tell application "iTerm"/);
 });
 
 test("electron bridge restarts only the current macOS terminal session", () => {
@@ -113,6 +127,7 @@ test("electron bridge restarts only the current macOS terminal session", () => {
     codexBin: "/Applications/Codex.app/Contents/Resources/codex",
     platform: "darwin",
     launchMode: "current-window",
+    env: { CODEX_SWITCHER_MACOS_TERMINAL: "iterm" },
   });
 
   const iTermScript = plan.attempts[0]?.args[1] ?? "";
@@ -126,7 +141,15 @@ test("electron bridge restarts only the current macOS terminal session", () => {
   assert.match(iTermScript, /Codex CLI did not exit/);
   assert.doesNotMatch(iTermScript, /tell every session/);
 
-  const terminalScript = plan.attempts[1]?.args[1] ?? "";
+  const terminalPlan = __testUtils.buildCliTerminalLaunchPlan({
+    repoRoot: "/Users/tester/work/codex-switcher",
+    codexHome: "/Users/tester/.codex-envs/project/home",
+    codexBin: "/Applications/Codex.app/Contents/Resources/codex",
+    platform: "darwin",
+    launchMode: "current-window",
+    env: { CODEX_SWITCHER_MACOS_TERMINAL: "terminal" },
+  });
+  const terminalScript = terminalPlan.attempts[0]?.args[1] ?? "";
   assert.match(terminalScript, /set targetTab to selected tab of front window/);
   assert.match(terminalScript, /set targetTty to tty of targetTab/);
   assert.match(terminalScript, /do script .*\/exit.* in targetTab/);

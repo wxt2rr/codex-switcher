@@ -1029,17 +1029,17 @@ function buildCliTerminalLaunchPlan(input: {
   });
 
   if (platform === "macos") {
+    const terminal = resolveMacOsTerminal(input.env);
+    const appleScript = terminal === "iterm"
+      ? (launchMode === "current-window" ? buildCurrentITermAppleScript(shellCommand) : buildITermAppleScript(shellCommand))
+      : (launchMode === "current-window" ? buildCurrentTerminalAppleScript(shellCommand) : buildTerminalAppleScript(shellCommand));
     return {
       platform,
       launchMode,
       attempts: [
         {
           command: "osascript",
-          args: ["-e", launchMode === "current-window" ? buildCurrentITermAppleScript(shellCommand) : buildITermAppleScript(shellCommand)],
-        },
-        {
-          command: "osascript",
-          args: ["-e", launchMode === "current-window" ? buildCurrentTerminalAppleScript(shellCommand) : buildTerminalAppleScript(shellCommand)],
+          args: ["-e", appleScript],
         },
       ],
     };
@@ -1055,6 +1055,13 @@ function buildCliTerminalLaunchPlan(input: {
       },
     ],
   };
+}
+
+function resolveMacOsTerminal(env: NodeJS.ProcessEnv | undefined): "iterm" | "terminal" {
+  const configured = env?.CODEX_SWITCHER_MACOS_TERMINAL?.trim().toLowerCase();
+  if (configured === "terminal" || configured === "apple-terminal") return "terminal";
+  if (configured === "iterm" || configured === "iterm2") return "iterm";
+  return existsSync("/Applications/iTerm.app") ? "iterm" : "terminal";
 }
 
 function buildWindowsCliTerminalLaunchPlan(input: {
