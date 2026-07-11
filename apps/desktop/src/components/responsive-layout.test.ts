@@ -109,7 +109,8 @@ test("shared selects open on hover without button press scaling", () => {
   assert.match(accounts, /<Select/);
   assert.match(select, /data-slot="select-trigger"/);
   assert.match(formPrimitives, /onMouseEnter=\{openOnHover\}/);
-  assert.match(formPrimitives, /onMouseLeave=\{scheduleClose\}/);
+  assert.match(formPrimitives, /isPointInsideHoverMenu/);
+  assert.doesNotMatch(formPrimitives, /onMouseLeave=\{scheduleClose\}/);
 });
 
 test("dialogs use a clear neutral overlay without background blur", () => {

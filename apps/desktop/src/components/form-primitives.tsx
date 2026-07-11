@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/select";
 import type { SelectFieldItem } from "./select-field";
 import { toSelectItems } from "./select-field";
+import { isPointInsideHoverMenu } from "./hover-menu-intent";
 
 export function Field({
   label,
@@ -74,6 +75,8 @@ export function Select({
   const normalizedItems = toSelectItems(items);
   const [open, setOpen] = useState(false);
   const closeTimerRef = useRef<number | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
 
   function cancelClose() {
     if (closeTimerRef.current !== null) {
@@ -88,19 +91,46 @@ export function Select({
     setOpen(true);
   }
 
-  function scheduleClose() {
+  function scheduleClose(point?: { x: number; y: number }) {
     cancelClose();
-    closeTimerRef.current = window.setTimeout(() => setOpen(false), 120);
+    closeTimerRef.current = window.setTimeout(() => {
+      if (point && isPointInsideHoverMenu(
+        point,
+        triggerRef.current?.getBoundingClientRect() ?? null,
+        contentRef.current?.getBoundingClientRect() ?? null,
+        8,
+      )) return;
+      setOpen(false);
+    }, 120);
   }
 
-  useEffect(() => () => cancelClose(), []);
+  useEffect(() => {
+    if (!open) return;
+    function handlePointerMove(event: PointerEvent) {
+      if (isPointInsideHoverMenu(
+        { x: event.clientX, y: event.clientY },
+        triggerRef.current?.getBoundingClientRect() ?? null,
+        contentRef.current?.getBoundingClientRect() ?? null,
+        8,
+      )) {
+        cancelClose();
+      } else {
+        scheduleClose({ x: event.clientX, y: event.clientY });
+      }
+    }
+    document.addEventListener("pointermove", handlePointerMove, true);
+    return () => {
+      document.removeEventListener("pointermove", handlePointerMove, true);
+      cancelClose();
+    };
+  }, [open]);
 
   return (
     <UiSelect value={value} onValueChange={onValueChange} disabled={disabled} open={open} onOpenChange={setOpen}>
-      <SelectTrigger className={className} onMouseEnter={openOnHover} onMouseLeave={scheduleClose}>
+      <SelectTrigger ref={triggerRef} className={className} onMouseEnter={openOnHover}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
-      <SelectContent onMouseEnter={cancelClose} onMouseLeave={scheduleClose}>
+      <SelectContent ref={contentRef}>
         {normalizedItems.map((item) => (
           <SelectItem key={item.value} value={item.value}>
             {item.label}
