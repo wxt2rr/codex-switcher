@@ -22,6 +22,14 @@ import {
 import { UsageRouterManager } from "./usage-router-manager.js";
 import type { PricingProfile, UsageFilter } from "./usage-routing-model.js";
 import {
+  buildEffectiveCodexEnv,
+  getCodexToolStatus,
+  listCodexToolStatuses,
+  resetCodexToolPath,
+  saveCodexToolPath,
+  type CodexToolKind,
+} from "./codex-tool-paths.js";
+import {
   getConfiguredResourcesPath,
   resolveRuntimeResource,
   resolveRuntimeRoot,
@@ -762,6 +770,36 @@ export async function nativeLogin(request: {
   }
 }
 
+function getCodexToolPathOptions() {
+  return { settingsPath: join(getStateDir(), "desktop-settings.json"), env: process.env, platform: process.platform };
+}
+
+export async function getCodexToolPaths() {
+  return listCodexToolStatuses(getCodexToolPathOptions());
+}
+
+export async function detectCodexToolPaths() {
+  return listCodexToolStatuses(getCodexToolPathOptions());
+}
+
+export async function setCodexToolPath(kind: CodexToolKind, path: string) {
+  return saveCodexToolPath(kind, path, getCodexToolPathOptions());
+}
+
+export async function clearCodexToolPath(kind: CodexToolKind) {
+  return resetCodexToolPath(kind, getCodexToolPathOptions());
+}
+
+async function getEffectiveCodexEnv(): Promise<NodeJS.ProcessEnv> {
+  return buildEffectiveCodexEnv(await getCodexToolPaths(), process.env);
+}
+
+async function requireCodexCliPath(): Promise<string> {
+  const status = await getCodexToolStatus("cli", getCodexToolPathOptions());
+  if (!status.available) throw new Error("Codex CLI not found. Configure its installation path on the Operations page.");
+  return status.path;
+}
+
 export async function logoutAccount(
   envName: string,
   accountName: string,
@@ -885,7 +923,7 @@ async function openCommandInPreferredTerminal(
 ): Promise<void> {
   const repoRoot = getRepoRoot();
   const codexHome = await resolveCliTargetHome();
-  const codexBin = resolveCodexBin();
+  const codexBin = await requireCodexCliPath();
   const plan = buildCliTerminalLaunchPlan({
     repoRoot,
     codexHome,
@@ -1288,7 +1326,7 @@ async function nativeAuthLogin(request: {
   }
 
   await mkdir(env.path, { recursive: true });
-  const codexBin = resolveCodexBin();
+  const codexBin = await requireCodexCliPath();
   await execFileAsync(codexBin, ["login"], {
     cwd: getRepoRoot(),
     env: {
@@ -1337,7 +1375,7 @@ async function nativeApiKeyLogin(request: {
   }
 
   await mkdir(env.path, { recursive: true });
-  const codexBin = resolveCodexBin();
+  const codexBin = await requireCodexCliPath();
   const loginPlan = buildApiKeyLoginExecutionPlan({
     repoRoot: getRepoRoot(),
     codexHome: env.path,
@@ -2421,12 +2459,13 @@ async function listOperationsDirect(): Promise<string> {
 }
 
 async function doctorDirect() {
-  const runtime = resolveRuntimePathsLocal(process.env, process.platform);
+  const effectiveEnv = await getEffectiveCodexEnv();
+  const runtime = resolveRuntimePathsLocal(effectiveEnv, process.platform);
   const state = await (await loadCoreRuntime()).readLegacyState(getLegacyOptions());
   const support = await loadCoreSupportModules();
   let issues = 0;
-  const codexCli = await support.resolveCommandPath("codex", process.env, process.platform);
-  const codexApp = await support.resolveCodexAppPath(process.env, process.platform);
+  const codexCli = await support.resolveCommandPath("codex", effectiveEnv, process.platform);
+  const codexApp = await support.resolveCodexAppPath(effectiveEnv, process.platform);
   const windowsReadiness = await support.getWindowsReadinessSnapshot(process.env, "win32");
   const launcher =
     detectPlatformLocal(process.platform) === "windows"
@@ -2698,13 +2737,8 @@ async function writeTokenRefreshLaunchdPlistDirect(
 }
 
 async function resolveCodexBinaryPathDirect(): Promise<string | null> {
-  const explicit = process.env.CODEX_BIN || process.env.CODEX_SWITCHER_CODEX_BIN;
-  if (explicit) {
-    return explicit;
-  }
-  const support = await loadCoreSupportModules();
-  const resolved = await support.resolveCommandPath("codex", process.env, process.platform);
-  return resolved?.path ?? null;
+  const status = await getCodexToolStatus("cli", getCodexToolPathOptions());
+  return status.available ? status.path : null;
 }
 
 function safeParseAuthJsonDirect(raw: string): {
@@ -2912,5 +2946,6 @@ async function launchAppTarget(
   await action({
     codexHome: env.path,
     stateDir: getStateDir(),
+    env: await getEffectiveCodexEnv(),
   });
 }

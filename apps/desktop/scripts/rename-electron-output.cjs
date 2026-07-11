@@ -10,6 +10,7 @@ const commonJsModules = [
   "ui-language",
   "core-runtime",
   "runtime-paths",
+  "codex-tool-paths",
   "env-file-history",
   "usage-routing-model",
   "usage-store",

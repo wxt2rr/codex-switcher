@@ -1,6 +1,9 @@
 import {
   Activity,
   FileSearch,
+  RefreshCw,
+  RotateCcw,
+  Save,
   Wrench,
 } from "lucide-react";
 import {
@@ -20,6 +23,7 @@ import type { OverviewPayload } from "../desktop-model";
 import { getDesktopCopy } from "../desktop-copy";
 import { localizeGuard, localizeLogKind } from "../desktop-utils";
 import type { UiLanguage } from "../i18n";
+import type { CodexToolStatus } from "../bridge";
 
 function pageTitle(language: UiLanguage) {
   if (language === "zh") return "运行操作";
@@ -76,6 +80,12 @@ export function OperationsPage({
   onProxyAutoDetect,
   onProxySet,
   onReadLog,
+  toolStatuses,
+  toolDrafts,
+  onToolDraftChange,
+  onToolDetect,
+  onToolSave,
+  onToolReset,
 }: {
   overview: OverviewPayload;
   language: UiLanguage;
@@ -87,6 +97,12 @@ export function OperationsPage({
   onProxyAutoDetect: () => void;
   onProxySet: () => void;
   onReadLog: () => void;
+  toolStatuses: CodexToolStatus[];
+  toolDrafts: Record<"cli" | "app", string>;
+  onToolDraftChange: (kind: "cli" | "app", value: string) => void;
+  onToolDetect: () => void;
+  onToolSave: (kind: "cli" | "app") => void;
+  onToolReset: (kind: "cli" | "app") => void;
 }) {
   const pageCopy = getDesktopCopy(language);
 
@@ -107,11 +123,41 @@ export function OperationsPage({
       </ListFilters>
 
       <ListStack>
+        {(["cli", "app"] as const).map((kind, index) => {
+          const status = toolStatuses.find((item) => item.kind === kind);
+          const title = kind === "cli" ? "Codex CLI" : "Codex App";
+          const available = status?.available ?? false;
+          return (
+            <OperationCard
+              key={kind}
+              title={title}
+              subtitle={language === "zh" ? `${title} 安装路径，支持自动检测和手动设置` : `${title} installation path with automatic detection and manual override`}
+              iconLabel={kind === "cli" ? "C" : "A"}
+              index={index}
+              badge={available ? (status?.source === "manual" ? (language === "zh" ? "手动设置" : "Manual") : (language === "zh" ? "已检测" : "Detected")) : (language === "zh" ? "未检测到" : "Missing")}
+            >
+              <div className="responsive-operation-controls">
+                <Input
+                  value={toolDrafts[kind]}
+                  onChange={(event) => onToolDraftChange(kind, event.target.value)}
+                  placeholder={status?.detectedPath || (language === "zh" ? `请输入 ${title} 安装目录或可执行文件路径` : `Enter ${title} installation directory or executable`)}
+                  className="h-9 rounded-lg border-neutral-200 bg-white text-[13px] shadow-none dark:border-white/[0.08] dark:bg-[#161c24]"
+                />
+                <div className="responsive-actions">
+                  <IconActionButton icon={<RefreshCw className="size-4" />} label={language === "zh" ? "重新检测" : "Detect again"} onClick={onToolDetect} disabled={busy} />
+                  <IconActionButton icon={<Save className="size-4" />} label={language === "zh" ? "保存路径" : "Save path"} onClick={() => onToolSave(kind)} disabled={busy} />
+                  <IconActionButton icon={<RotateCcw className="size-4" />} label={language === "zh" ? "恢复自动检测" : "Use automatic detection"} onClick={() => onToolReset(kind)} disabled={busy} />
+                </div>
+              </div>
+            </OperationCard>
+          );
+        })}
+
         <OperationCard
           title={pageCopy.operations.proxyTitle}
           subtitle={pageCopy.operations.proxyPlaceholder}
           iconLabel="P"
-          index={0}
+          index={2}
           badge={pageCopy.operations.proxyTitle}
         >
           <div className="responsive-operation-controls">
@@ -132,7 +178,7 @@ export function OperationsPage({
           title={pageCopy.operations.advancedTitle}
           subtitle={pageCopy.operations.readLog}
           iconLabel="L"
-          index={1}
+          index={3}
           badge={localizeLogKind(logKind, language)}
         >
           <div className="responsive-operation-controls responsive-operation-controls-narrow">
@@ -159,7 +205,7 @@ export function OperationsPage({
         <SoftBadge tone="neutral" label={overview.status.app.current} />
       </div>
 
-      <Pager totalLabel={language === "zh" ? "共 2 组操作" : "2 operation groups"} />
+      <Pager totalLabel={language === "zh" ? "共 4 组操作" : "4 operation groups"} />
     </ListPageFrame>
   );
 }

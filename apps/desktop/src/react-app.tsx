@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { mergeAccountUsageMetrics, mergeOverviewWithAuthMetrics } from "@/auth-metrics";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/components/theme-provider";
-import type { DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry } from "./bridge";
+import type { CodexToolStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry } from "./bridge";
 import { DesktopShell } from "./components/desktop-shell";
 import type { AccountSummary, AuthMetricsPayload, EnvironmentRouteStatus, NavView, OverviewPayload } from "./desktop-model";
 import { resolveDesktopBridge } from "./bridge";
@@ -63,6 +63,8 @@ export function App() {
   const [accountSub2ApiDraft, setAccountSub2ApiDraft] = useState("");
   const [proxyDraft, setProxyDraft] = useState("");
   const [selectedLogKind, setSelectedLogKind] = useState("switcher");
+  const [toolStatuses, setToolStatuses] = useState<CodexToolStatus[]>([]);
+  const [toolDrafts, setToolDrafts] = useState<Record<"cli" | "app", string>>({ cli: "", app: "" });
   const [routeStatuses, setRouteStatuses] = useState<EnvironmentRouteStatus[]>([]);
   const authMetricsRequestRef = useRef(0);
   const authMetricsInFlightRef = useRef(false);
@@ -119,6 +121,32 @@ export function App() {
     if (view !== "environments" || !overview) return;
     void bridge.getEnvironmentRouteStatuses().then(setRouteStatuses).catch(setErrorMessage);
   }, [view, overview?.generatedAt]);
+
+  useEffect(() => {
+    if (view !== "operations") return;
+    void loadCodexToolPaths();
+  }, [view]);
+
+  async function loadCodexToolPaths(detect = false) {
+    try {
+      const statuses = detect ? await bridge.detectCodexToolPaths() : await bridge.getCodexToolPaths();
+      setToolStatuses(statuses);
+      setToolDrafts({
+        cli: statuses.find((item) => item.kind === "cli")?.path || "",
+        app: statuses.find((item) => item.kind === "app")?.path || "",
+      });
+    } catch (error) { setErrorMessage(error); }
+  }
+
+  async function handleToolPath(kind: "cli" | "app", action: "save" | "reset") {
+    setBusy(true);
+    try {
+      const status = action === "save" ? await bridge.setCodexToolPath(kind, toolDrafts[kind]) : await bridge.clearCodexToolPath(kind);
+      setToolStatuses((current) => [...current.filter((item) => item.kind !== kind), status]);
+      setToolDrafts((current) => ({ ...current, [kind]: status.path }));
+      setSuccessMessage(language === "zh" ? `${kind === "cli" ? "Codex CLI" : "Codex App"} 路径已更新` : `${kind === "cli" ? "Codex CLI" : "Codex App"} path updated`);
+    } catch (error) { setErrorMessage(error); } finally { setBusy(false); }
+  }
 
   async function handleToggleEnvironmentRoute(envName: string, enabled: boolean) {
     setBusy(true);
@@ -793,6 +821,12 @@ export function App() {
           onProxyAutoDetect={() => void handleProxy("auto-detect")}
           onProxySet={() => void handleProxy("set")}
           onReadLog={() => void handleReadLog()}
+          toolStatuses={toolStatuses}
+          toolDrafts={toolDrafts}
+          onToolDraftChange={(kind, value) => setToolDrafts((current) => ({ ...current, [kind]: value }))}
+          onToolDetect={() => void loadCodexToolPaths(true)}
+          onToolSave={(kind) => void handleToolPath(kind, "save")}
+          onToolReset={(kind) => void handleToolPath(kind, "reset")}
         />
       ) : null}
 

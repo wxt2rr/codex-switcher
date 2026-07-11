@@ -3,6 +3,10 @@ import { contextBridge, ipcRenderer } from "electron";
 contextBridge.exposeInMainWorld("codexDesktop", {
   loadOverview: () => ipcRenderer.invoke("desktop:loadOverview"),
   loadAuthMetrics: () => ipcRenderer.invoke("desktop:loadAuthMetrics"),
+  getCodexToolPaths: () => ipcRenderer.invoke("desktop:getCodexToolPaths"),
+  detectCodexToolPaths: () => ipcRenderer.invoke("desktop:detectCodexToolPaths"),
+  setCodexToolPath: (kind: "cli" | "app", path: string) => ipcRenderer.invoke("desktop:setCodexToolPath", kind, path),
+  clearCodexToolPath: (kind: "cli" | "app") => ipcRenderer.invoke("desktop:clearCodexToolPath", kind),
   getLanguage: () => ipcRenderer.invoke("desktop:getLanguage"),
   setLanguage: (language: "zh" | "en" | "ja") => ipcRenderer.invoke("desktop:setLanguage", language),
   nativeLogin: (request: {

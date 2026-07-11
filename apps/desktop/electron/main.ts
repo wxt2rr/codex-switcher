@@ -43,6 +43,10 @@ import {
   updateIndependentModel,
   updateRuntime,
   getEnvironmentRouteStatuses,
+  getCodexToolPaths,
+  detectCodexToolPaths,
+  setCodexToolPath,
+  clearCodexToolPath,
   toggleEnvironmentRoute,
   loadUsageSnapshot,
   listUsagePricing,
@@ -110,6 +114,10 @@ app.on("window-all-closed", () => {
 function registerHandlers() {
   ipcMain.handle("desktop:loadOverview", () => loadOverview());
   ipcMain.handle("desktop:loadAuthMetrics", () => loadAuthMetrics());
+  ipcMain.handle("desktop:getCodexToolPaths", () => getCodexToolPaths());
+  ipcMain.handle("desktop:detectCodexToolPaths", () => detectCodexToolPaths());
+  ipcMain.handle("desktop:setCodexToolPath", (_event, kind, path) => setCodexToolPath(kind, path));
+  ipcMain.handle("desktop:clearCodexToolPath", (_event, kind) => clearCodexToolPath(kind));
   ipcMain.handle("desktop:getLanguage", () => getLanguage());
   ipcMain.handle("desktop:setLanguage", (_event: IpcMainInvokeEvent, language: string) => setLanguage(language));
   ipcMain.handle("desktop:nativeLogin", (_event: IpcMainInvokeEvent, request) => nativeLogin(request));

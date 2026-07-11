@@ -2,6 +2,7 @@ export interface DesktopActionResult {
   message: string;
   output?: string;
 }
+export interface CodexToolStatus { kind: "cli" | "app"; path: string; detectedPath: string; manualPath: string; source: "manual" | "environment" | "path" | "candidate" | "missing"; available: boolean; }
 
 export interface DesktopLogResult {
   kind: "switcher" | "token-refresh";
@@ -64,6 +65,10 @@ import type {
 export interface DesktopElectronApi {
   loadOverview(): Promise<string>;
   loadAuthMetrics(): Promise<string>;
+  getCodexToolPaths(): Promise<CodexToolStatus[]>;
+  detectCodexToolPaths(): Promise<CodexToolStatus[]>;
+  setCodexToolPath(kind: "cli" | "app", path: string): Promise<CodexToolStatus>;
+  clearCodexToolPath(kind: "cli" | "app"): Promise<CodexToolStatus>;
   getLanguage(): Promise<"zh" | "en" | "ja">;
   setLanguage(language: "zh" | "en" | "ja"): Promise<"zh" | "en" | "ja">;
   nativeLogin(request: DesktopNativeLoginRequest): Promise<DesktopActionResult>;
@@ -116,6 +121,10 @@ export interface DesktopElectronApi {
 export interface DesktopBridge {
   loadOverview(): Promise<string>;
   loadAuthMetrics(): Promise<string>;
+  getCodexToolPaths(): Promise<CodexToolStatus[]>;
+  detectCodexToolPaths(): Promise<CodexToolStatus[]>;
+  setCodexToolPath(kind: "cli" | "app", path: string): Promise<CodexToolStatus>;
+  clearCodexToolPath(kind: "cli" | "app"): Promise<CodexToolStatus>;
   getLanguage(): Promise<"zh" | "en" | "ja">;
   setLanguage(language: "zh" | "en" | "ja"): Promise<"zh" | "en" | "ja">;
   nativeLogin(request: DesktopNativeLoginRequest): Promise<DesktopActionResult>;
@@ -170,6 +179,10 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
     return {
       loadOverview: unavailable,
       loadAuthMetrics: unavailable,
+      getCodexToolPaths: unavailable,
+      detectCodexToolPaths: unavailable,
+      setCodexToolPath: unavailable,
+      clearCodexToolPath: unavailable,
       getLanguage: unavailable,
       setLanguage: unavailable,
       nativeLogin: unavailable,
@@ -301,6 +314,10 @@ function createBrowserPreviewBridge(): DesktopBridge {
   return {
     loadOverview: browserPreviewLoadOverview,
     loadAuthMetrics: browserPreviewLoadAuthMetrics,
+    getCodexToolPaths: async () => [],
+    detectCodexToolPaths: async () => [],
+    setCodexToolPath: async (kind, path) => ({ kind, path, detectedPath: "", manualPath: path, source: "manual", available: true }),
+    clearCodexToolPath: async (kind) => ({ kind, path: "", detectedPath: "", manualPath: "", source: "missing", available: false }),
     getLanguage: browserPreviewLanguage,
     setLanguage: browserPreviewSetLanguage,
     nativeLogin: () => browserPreviewAction(),

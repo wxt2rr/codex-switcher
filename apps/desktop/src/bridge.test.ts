@@ -42,6 +42,10 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       calls.push("loadAuthMetrics");
       return "{\"accounts\":{},\"status\":{}}";
     },
+    getCodexToolPaths: async () => [],
+    detectCodexToolPaths: async () => [],
+    setCodexToolPath: async (kind, path) => ({ kind, path, detectedPath: "", manualPath: path, source: "manual", available: true }),
+    clearCodexToolPath: async (kind) => ({ kind, path: "", detectedPath: "", manualPath: "", source: "missing", available: false }),
     getLanguage: async () => {
       calls.push("getLanguage");
       return "zh";
