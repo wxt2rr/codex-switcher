@@ -58,6 +58,8 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.match(accounts, /data-auth-refresh-input/);
   assert.match(accounts, /w-\[64px\]/);
   assert.match(css, /\[data-auth-refresh-input\]:focus-visible\s*\{[^}]*box-shadow:\s*none/s);
+  assert.match(accounts, /aria-expanded=\{open\}/);
+  assert.match(css, /\.responsive-record-row:has\(\[aria-expanded="true"\]\)/);
 });
 
 test("all management record cards opt into the single-row responsive contract", () => {
@@ -106,4 +108,22 @@ test("system tools use clear navigation and page naming", () => {
   assert.match(i18n, /operations:\s*"系统"/);
   assert.match(operations, /return "系统管理"/);
   assert.match(operations, /管理 Codex 安装路径、网络代理和运行日志/);
+});
+
+test("usage analytics uses semantic colors and destructive actions stay red", () => {
+  assert.match(usage, /text-blue-600/);
+  assert.match(usage, /text-emerald-600/);
+  assert.match(usage, /text-amber-600/);
+  assert.match(usage, /text-cyan-600/);
+  assert.match(usage, /text-violet-600/);
+  assert.match(environments, /variant="destructive"/);
+  assert.match(accounts, /text-rose-600 hover:bg-rose-50/);
+});
+
+test("successful mutations refresh their affected view state", () => {
+  assert.match(reactApp, /await refreshOverview\(\{ loadMetrics: true \}\)/);
+  assert.match(reactApp, /await refreshOverview\(\{ loadMetrics: false \}\)/);
+  assert.match(reactApp, /await loadCodexToolPaths\(true\)/);
+  assert.match(usage, /await refresh\(\)/);
+  assert.match(environments, /setHistoryEntries\(await onListEnvFileHistory\(historyEnvName\)\)/);
 });

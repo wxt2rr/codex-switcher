@@ -428,6 +428,11 @@ body {
 .responsive-record-row:nth-child(4) { animation-delay: 75ms; }
 .responsive-record-row:nth-child(5) { animation-delay: 100ms; }
 
+.responsive-record-row:has([aria-expanded="true"]) {
+  position: relative;
+  z-index: 30;
+}
+
 button:not(:disabled),
 [role="button"]:not([aria-disabled="true"]) {
   transform-origin: center;

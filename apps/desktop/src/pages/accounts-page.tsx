@@ -1087,6 +1087,7 @@ function RowActionMenu({
         className="responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[12px] font-medium text-neutral-700 ring-1 ring-black/[0.05] transition hover:bg-[#f3f4f6] hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-55"
         onClick={() => setOpen((value) => !value)}
         disabled={disabled}
+        aria-expanded={open}
       >
         <Ellipsis className="size-4" />
         <span className="responsive-action-label">{label}</span>

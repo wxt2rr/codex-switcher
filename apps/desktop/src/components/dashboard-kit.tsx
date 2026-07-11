@@ -91,11 +91,11 @@ export function BigNumber({ value, label }: { value: string; label: string }) {
   );
 }
 
-export function StatCard({ label, value, helper }: { label: string; value: string; helper: string }) {
+export function StatCard({ label, value, helper, valueClassName }: { label: string; value: string; helper: ReactNode; valueClassName?: string }) {
   return (
     <div className="min-w-0 px-5 py-3">
       <div className="text-[12px] font-medium text-slate-500">{label}</div>
-      <div key={value} className="motion-value-update mt-1 text-[20px] font-semibold tracking-[-0.03em] text-neutral-950">{value}</div>
+      <div key={value} className={cn("motion-value-update mt-1 text-[20px] font-semibold tracking-[-0.03em] text-neutral-950", valueClassName)}>{value}</div>
       <div className="mt-1 text-[11px] text-slate-500">{helper}</div>
     </div>
   );

@@ -131,8 +131,17 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
 
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <StatCard label={zh ? "请求数" : "Requests"} value={String(snapshot.summary.requests)} helper={snapshot.summary.requestsWithoutUsage ? `${snapshot.summary.requestsWithoutUsage} ${zh ? "条无用量数据" : "without usage"}` : zh ? "已记录响应" : "Recorded responses"} />
-          <StatCard label="Token" value={formatCompact(snapshot.summary.totalTokens)} helper={`Input ${formatCompact(snapshot.summary.inputTokens)} / Output ${formatCompact(snapshot.summary.outputTokens)}`} />
-          <StatCard label={zh ? "缓存命中率" : "Cache hit rate"} value={snapshot.summary.cacheHitRate === null ? "-" : `${(snapshot.summary.cacheHitRate * 100).toFixed(1)}%`} helper={`Cache Read ${formatCompact(snapshot.summary.cacheReadTokens)}`} />
+          <StatCard
+            label="Token"
+            value={formatCompact(snapshot.summary.totalTokens)}
+            helper={<><span className="text-blue-600">Input {formatCompact(snapshot.summary.inputTokens)}</span><span className="px-1 text-slate-300">/</span><span className="text-emerald-600">Output {formatCompact(snapshot.summary.outputTokens)}</span></>}
+          />
+          <StatCard
+            label={zh ? "缓存命中率" : "Cache hit rate"}
+            value={snapshot.summary.cacheHitRate === null ? "-" : `${(snapshot.summary.cacheHitRate * 100).toFixed(1)}%`}
+            valueClassName="text-violet-600"
+            helper={<><span className="text-cyan-600">Cache Read {formatCompact(snapshot.summary.cacheReadTokens)}</span><span className="px-1 text-slate-300">·</span><span className="text-amber-600">Creation {formatCompact(snapshot.summary.cacheCreationTokens)}</span></>}
+          />
           <StatCard label={zh ? "费用" : "Cost"} value={snapshot.summary.actualCost === null ? "-" : `$${snapshot.summary.actualCost.toFixed(4)}`} helper={`${zh ? "标准" : "Standard"}: ${snapshot.summary.standardCost === null ? "-" : `$${snapshot.summary.standardCost.toFixed(4)}`}`} />
         </div>
 
@@ -145,7 +154,7 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
           </section>
         </div>
         <section className="rounded-[18px] bg-white p-5 ring-1 ring-black/[0.04]"><h3 className="text-[16px] font-semibold">Base URL</h3>
-          <div className="mt-3 overflow-auto"><table className="w-full min-w-[720px] text-left text-[12px]"><thead className="text-slate-400"><tr><th className="py-2">Base URL</th><th>{zh ? "请求" : "Requests"}</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Token</th><th>{zh ? "标准费用" : "Standard cost"}</th></tr></thead><tbody>{snapshot.baseUrls.map((item) => <tr key={item.key} className="border-t border-slate-100"><td className="max-w-[360px] truncate py-3 font-medium">{item.baseUrl}</td><td>{item.requests}</td><td>{formatCompact(item.inputTokens)}</td><td>{formatCompact(item.outputTokens)}</td><td>{formatCompact(item.cacheReadTokens)}</td><td>{formatCompact(item.totalTokens)}</td><td>{item.standardCost === null ? "-" : `$${item.standardCost.toFixed(4)}`}</td></tr>)}</tbody></table></div>
+          <div className="mt-3 overflow-auto"><table className="w-full min-w-[720px] text-left text-[12px]"><thead className="text-slate-400"><tr><th className="py-2">Base URL</th><th>{zh ? "请求" : "Requests"}</th><th className="text-blue-600">Input</th><th className="text-emerald-600">Output</th><th className="text-cyan-600">Cache Read</th><th>Token</th><th>{zh ? "标准费用" : "Standard cost"}</th></tr></thead><tbody>{snapshot.baseUrls.map((item) => <tr key={item.key} className="border-t border-slate-100"><td className="max-w-[360px] truncate py-3 font-medium">{item.baseUrl}</td><td>{item.requests}</td><td className="text-blue-600">{formatCompact(item.inputTokens)}</td><td className="text-emerald-600">{formatCompact(item.outputTokens)}</td><td className="text-cyan-600">{formatCompact(item.cacheReadTokens)}</td><td className="font-medium text-neutral-900">{formatCompact(item.totalTokens)}</td><td>{item.standardCost === null ? "-" : `$${item.standardCost.toFixed(4)}`}</td></tr>)}</tbody></table></div>
         </section>
         <SidePanel open={pricingOpen} title={zh ? "价格配置" : "Pricing profiles"} description={zh ? "按 Base URL 和模型配置实际采购价或标准价，单位为每百万 Token。保存后会重算历史记录。" : "Configure actual or standard rates per million tokens. Historical records are repriced after saving."} onClose={() => setPricingOpen(false)} closeLabel={zh ? "关闭" : "Close"}>
           <div className="space-y-4">

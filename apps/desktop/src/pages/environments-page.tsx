@@ -151,7 +151,7 @@ function EnvCard({
         <IconActionButton icon={<History className="size-4" />} label={language === "zh" ? "历史" : "History"} onClick={onHistory} disabled={busy} />
         <button
           type="button"
-          className="flex size-9 items-center justify-center rounded-lg bg-[#f3f4f6] text-neutral-950 transition hover:bg-rose-50 hover:text-rose-600"
+          className="flex size-9 items-center justify-center rounded-lg bg-rose-50 text-rose-600 transition hover:bg-rose-100 hover:text-rose-700"
           onClick={onDelete}
           disabled={busy}
           aria-label={language === "zh" ? "删除" : "Delete"}
@@ -361,7 +361,7 @@ export function EnvironmentsPage({
           </Field>
           <div className="flex justify-end gap-2.5">
             <Button
-              variant="outline"
+              variant="destructive"
               onClick={() => onImportDefaultEnv(editEnvName)}
               disabled={busy || !editEnvName || editEnvName === "default"}
             >

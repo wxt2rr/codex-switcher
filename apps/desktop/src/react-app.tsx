@@ -144,6 +144,7 @@ export function App() {
       const status = action === "save" ? await bridge.setCodexToolPath(kind, toolDrafts[kind]) : await bridge.clearCodexToolPath(kind);
       setToolStatuses((current) => [...current.filter((item) => item.kind !== kind), status]);
       setToolDrafts((current) => ({ ...current, [kind]: status.path }));
+      await loadCodexToolPaths(true);
       setSuccessMessage(language === "zh" ? `${kind === "cli" ? "Codex CLI" : "Codex App"} 路径已更新` : `${kind === "cli" ? "Codex CLI" : "Codex App"} path updated`);
     } catch (error) { setErrorMessage(error); } finally { setBusy(false); }
   }
