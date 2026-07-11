@@ -4,6 +4,11 @@ import { Button } from "@/components/ui/button";
 
 import { cn } from "@/lib/utils";
 
+const dialogOverlayClass =
+  "fixed inset-0 flex items-center justify-center bg-neutral-950/20 px-6 animate-fade-in";
+const dialogSurfaceClass =
+  "motion-popover-enter w-full border border-black/[0.06] bg-white p-5 shadow-[0_18px_48px_rgba(15,23,42,0.14)]";
+
 /* ============================================================
    ADMIN PRIMITIVES
    Shared layout components for admin pages.
@@ -250,8 +255,8 @@ export function SidePanel({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(17,24,39,0.16)] px-6 backdrop-blur-[2px] animate-fade-in">
-      <div className="motion-popover-enter w-full max-w-[560px] overflow-auto rounded-[20px] bg-white p-5 shadow-[0_24px_80px_rgba(15,23,42,0.16)]">
+    <div className={cn(dialogOverlayClass, "z-40")}>
+      <div className={cn(dialogSurfaceClass, "max-w-[560px] overflow-auto rounded-[20px]")}>
         <div className="flex items-start justify-between gap-4">
           <div>
             <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-neutral-950">{title}</h3>
@@ -293,8 +298,8 @@ export function ConfirmDialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/28 px-6 animate-fade-in">
-      <div className="motion-popover-enter w-full max-w-[480px] rounded-[20px] bg-white p-5 shadow-[0_24px_80px_rgba(15,23,42,0.16)]">
+    <div className={cn(dialogOverlayClass, "z-50")}>
+      <div className={cn(dialogSurfaceClass, "max-w-[480px] rounded-[20px]")}>
         <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-neutral-950">{title}</h3>
         {description ? <p className="mt-2 text-[13px] leading-6 text-neutral-500">{description}</p> : null}
         {impact && (

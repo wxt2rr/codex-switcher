@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
 const primitives = readFileSync(new URL("./account-list-primitives.tsx", import.meta.url), "utf8");
+const adminPrimitives = readFileSync(new URL("./admin-primitives.tsx", import.meta.url), "utf8");
 const accounts = readFileSync(new URL("../pages/accounts-page.tsx", import.meta.url), "utf8");
 const environments = readFileSync(new URL("../pages/environments-page.tsx", import.meta.url), "utf8");
 const overview = readFileSync(new URL("../pages/overview-page.tsx", import.meta.url), "utf8");
@@ -109,6 +110,13 @@ test("shared selects open on hover without button press scaling", () => {
   assert.match(select, /data-slot="select-trigger"/);
   assert.match(formPrimitives, /onMouseEnter=\{openOnHover\}/);
   assert.match(formPrimitives, /onMouseLeave=\{scheduleClose\}/);
+});
+
+test("dialogs use a clear neutral overlay without background blur", () => {
+  assert.match(adminPrimitives, /dialogOverlayClass/);
+  assert.match(adminPrimitives, /bg-neutral-950\/20/);
+  assert.doesNotMatch(adminPrimitives, /backdrop-blur/);
+  assert.match(adminPrimitives, /dialogSurfaceClass/);
 });
 
 test("data changes and contextual controls provide motion feedback", () => {
