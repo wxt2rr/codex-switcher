@@ -128,7 +128,18 @@ function EnvCard({
             {env.isCurrentCli ? <SoftBadge tone="brand" label="CLI" /> : null}
             {env.isCurrentApp ? <SoftBadge tone="brand" label="App" /> : null}
             <SoftBadge tone="neutral" label={language === "zh" ? `${accountCount} 个账号` : `${accountCount} accounts`} />
-            {routeStatus?.enabled ? <SoftBadge tone="success" label={`127.0.0.1:${routeStatus.port} · ${routeStatus.routedAccounts}`} /> : null}
+            {routeStatus?.enabled ? (
+              <SoftBadge
+                tone="success"
+                label={
+                  language === "zh"
+                    ? `已开启路由 · 127.0.0.1:${routeStatus.port} · ${routeStatus.routedAccounts} 个账号`
+                    : language === "ja"
+                      ? `ルート有効 · 127.0.0.1:${routeStatus.port} · ${routeStatus.routedAccounts} アカウント`
+                      : `Routing enabled · 127.0.0.1:${routeStatus.port} · ${routeStatus.routedAccounts} accounts`
+                }
+              />
+            ) : null}
           </div>
         </div>
       </div>

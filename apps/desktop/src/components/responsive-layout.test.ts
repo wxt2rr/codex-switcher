@@ -79,6 +79,7 @@ test("all management record cards opt into the single-row responsive contract", 
   assert.match(reactApp, /proxyDraftDirtyRef/);
   assert.doesNotMatch(environments, />CODEX_HOME</);
   assert.doesNotMatch(environments, /language === "zh" \? "当前目标" : "Targets"/);
+  assert.match(environments, /已开启路由 · 127\.0\.0\.1:/);
   assert.match(usage, /buildUsageFilter/);
   assert.match(usage, /REFRESH_INTERVAL_PRESETS/);
   assert.match(usage, /customRefreshEditing/);
