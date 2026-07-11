@@ -10,3 +10,37 @@ test("manual CLI path persists and reset restores automatic detection", async ()
 test("invalid manual App path is rejected", async () => { const root = await mkdtemp(join(tmpdir(), "codex-tools-")); await assert.rejects(() => saveCodexToolPath("app", join(root, "missing"), { settingsPath: join(root, "settings.json"), env: { HOME: root }, platform: "darwin" }), /not executable/); });
 test("macOS App bundle directory resolves its internal executable", async () => { const root = await mkdtemp(join(tmpdir(), "codex-tools-")); const bundle = join(root, "Codex.app"); const app = join(bundle, "Contents", "MacOS", "Codex"); await executable(app); const status = await saveCodexToolPath("app", bundle, { settingsPath: join(root, "settings.json"), env: { HOME: root }, platform: "darwin" }); assert.equal(status.path, app); });
 test("Windows CLI detection resolves codex.exe from PATH", async () => { const root = await mkdtemp(join(tmpdir(), "codex-tools-")); const bin = join(root, "bin"); const cli = join(bin, "codex.exe"); await executable(cli); const status = await getCodexToolStatus("cli", { settingsPath: join(root, "settings.json"), env: { USERPROFILE: root, PATH: bin }, platform: "win32" }); assert.equal(status.path, cli); assert.equal(status.source, "path"); });
+
+test("macOS App detection reads the bundle executable from Info.plist", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-tools-"));
+  const bundle = join(root, "Applications", "Codex.app");
+  const app = join(bundle, "Contents", "MacOS", "Codex Desktop");
+  await executable(app);
+  await writeFile(join(bundle, "Contents", "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict><key>CFBundleExecutable</key><string>Codex Desktop</string></dict></plist>`);
+
+  const status = await getCodexToolStatus("app", {
+    settingsPath: join(root, "settings.json"),
+    env: { HOME: root },
+    platform: "darwin",
+  });
+
+  assert.equal(status.path, app);
+  assert.equal(status.source, "candidate");
+});
+
+test("Windows App detection resolves the WindowsApps execution alias", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-tools-"));
+  const aliasDir = join(root, "AppData", "Local", "Microsoft", "WindowsApps");
+  const app = join(aliasDir, "Codex.exe");
+  await executable(app);
+
+  const status = await getCodexToolStatus("app", {
+    settingsPath: join(root, "settings.json"),
+    env: { USERPROFILE: root, LOCALAPPDATA: join(root, "AppData", "Local"), PATH: aliasDir },
+    platform: "win32",
+  });
+
+  assert.equal(status.path, app);
+  assert.equal(status.source, "path");
+});

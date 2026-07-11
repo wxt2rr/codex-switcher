@@ -20,13 +20,45 @@ function knownCandidates(kind: CodexToolKind, env: NodeJS.ProcessEnv, platform: 
   if (kind === "cli") return platform === "win32"
     ? [join(home, "AppData", "Local", "Programs", "Codex", "codex.exe"), join(home, "AppData", "Roaming", "npm", "codex.cmd")]
     : ["/opt/homebrew/bin/codex", "/usr/local/bin/codex", join(home, ".local", "bin", "codex")];
+  const localAppData = env.LOCALAPPDATA || join(home, "AppData", "Local");
   return platform === "win32"
-    ? [join(home, "AppData", "Local", "Programs", "Codex", "Codex.exe"), join(home, "AppData", "Local", "Programs", "Codex", "CodexApp.exe")]
-    : ["/Applications/Codex.app/Contents/MacOS/Codex", join(home, "Applications", "Codex.app", "Contents", "MacOS", "Codex")];
+    ? [
+        join(localAppData, "Microsoft", "WindowsApps", "Codex.exe"),
+        join(localAppData, "Microsoft", "WindowsApps", "CodexApp.exe"),
+        join(localAppData, "Programs", "Codex", "Codex.exe"),
+        join(localAppData, "Programs", "Codex", "CodexApp.exe"),
+        join(env.ProgramFiles || "C:\\Program Files", "Codex", "Codex.exe"),
+        join(env.ProgramFiles || "C:\\Program Files", "OpenAI", "Codex", "Codex.exe"),
+      ]
+    : ["/Applications/Codex.app", join(home, "Applications", "Codex.app")];
 }
 async function firstExecutable(items: string[]) { for (const item of items) if (item && await isExecutable(item)) return item; return ""; }
+async function resolveMacAppBundle(bundlePath: string): Promise<string> {
+  try {
+    const info = await stat(bundlePath);
+    if (!info.isDirectory()) return "";
+    const executableName = await readFile(join(bundlePath, "Contents", "Info.plist"), "utf8")
+      .then((plist) => plist.match(/<key>CFBundleExecutable<\/key>\s*<string>([^<]+)<\/string>/)?.[1]?.trim() || "")
+      .catch(() => "");
+    if (executableName) {
+      const executable = join(bundlePath, "Contents", "MacOS", executableName);
+      if (await isExecutable(executable)) return executable;
+    }
+    return firstExecutable([
+      join(bundlePath, "Contents", "MacOS", "Codex"),
+      join(bundlePath, "Contents", "MacOS", "Codex Desktop"),
+    ]);
+  } catch {
+    return "";
+  }
+}
+async function normalizeAppCandidate(value: string, platform: NodeJS.Platform): Promise<string> {
+  if (await isExecutable(value)) return value;
+  return platform === "darwin" ? resolveMacAppBundle(value) : "";
+}
 async function normalizeManualPath(kind: CodexToolKind, value: string, platform: NodeJS.Platform): Promise<string> {
   if (await isExecutable(value)) return value;
+  if (kind === "app" && platform === "darwin") return resolveMacAppBundle(value);
   const nested = kind === "app"
     ? platform === "win32"
       ? [join(value, "Codex.exe"), join(value, "CodexApp.exe")]
@@ -38,10 +70,21 @@ async function normalizeManualPath(kind: CodexToolKind, value: string, platform:
 }
 async function detectPath(kind: CodexToolKind, env: NodeJS.ProcessEnv, platform: NodeJS.Platform): Promise<{ path: string; source: CodexToolSource }> {
   const explicit = kind === "cli" ? env.CODEX_SWITCHER_CODEX_BIN || env.CODEX_BIN : env.CODEX_SWITCHER_APP_BIN;
-  if (explicit?.trim() && await isExecutable(explicit.trim())) return { path: explicit.trim(), source: "environment" };
-  const fromPath = kind === "cli" ? await firstExecutable(pathCandidates("codex", env, platform)) : "";
+  if (explicit?.trim()) {
+    const resolved = kind === "app" ? await normalizeAppCandidate(explicit.trim(), platform) : await firstExecutable([explicit.trim()]);
+    if (resolved) return { path: resolved, source: "environment" };
+  }
+  const fromPath = kind === "cli"
+    ? await firstExecutable(pathCandidates("codex", env, platform))
+    : platform === "win32"
+      ? await firstExecutable(["Codex", "CodexApp", "OpenAI Codex"].flatMap((command) => pathCandidates(command, env, platform)))
+      : "";
   if (fromPath) return { path: fromPath, source: "path" };
-  const candidate = await firstExecutable(knownCandidates(kind, env, platform));
+  let candidate = "";
+  for (const item of knownCandidates(kind, env, platform)) {
+    candidate = kind === "app" ? await normalizeAppCandidate(item, platform) : await firstExecutable([item]);
+    if (candidate) break;
+  }
   return candidate ? { path: candidate, source: "candidate" } : { path: "", source: "missing" };
 }
 export async function getCodexToolStatus(kind: CodexToolKind, options: CodexToolPathOptions): Promise<CodexToolStatus> {
