@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from "react";
+import { useEffect, useRef, useState, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
 
 import { cn } from "@/lib/utils";
 import {
@@ -72,13 +72,35 @@ export function Select({
   className?: string;
 }) {
   const normalizedItems = toSelectItems(items);
+  const [open, setOpen] = useState(false);
+  const closeTimerRef = useRef<number | null>(null);
+
+  function cancelClose() {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }
+
+  function openOnHover() {
+    if (disabled) return;
+    cancelClose();
+    setOpen(true);
+  }
+
+  function scheduleClose() {
+    cancelClose();
+    closeTimerRef.current = window.setTimeout(() => setOpen(false), 120);
+  }
+
+  useEffect(() => () => cancelClose(), []);
 
   return (
-    <UiSelect value={value} onValueChange={onValueChange} disabled={disabled}>
-      <SelectTrigger className={className}>
+    <UiSelect value={value} onValueChange={onValueChange} disabled={disabled} open={open} onOpenChange={setOpen}>
+      <SelectTrigger className={className} onMouseEnter={openOnHover} onMouseLeave={scheduleClose}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent onMouseEnter={cancelClose} onMouseLeave={scheduleClose}>
         {normalizedItems.map((item) => (
           <SelectItem key={item.value} value={item.value}>
             {item.label}

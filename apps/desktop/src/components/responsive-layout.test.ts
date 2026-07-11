@@ -11,6 +11,7 @@ const operations = readFileSync(new URL("../pages/operations-page.tsx", import.m
 const reactApp = readFileSync(new URL("../react-app.tsx", import.meta.url), "utf8");
 const usage = readFileSync(new URL("../pages/usage-page.tsx", import.meta.url), "utf8");
 const select = readFileSync(new URL("./ui/select.tsx", import.meta.url), "utf8");
+const formPrimitives = readFileSync(new URL("./form-primitives.tsx", import.meta.url), "utf8");
 const button = readFileSync(new URL("./ui/button.tsx", import.meta.url), "utf8");
 const dashboard = readFileSync(new URL("./dashboard-kit.tsx", import.meta.url), "utf8");
 const i18n = readFileSync(new URL("../i18n.ts", import.meta.url), "utf8");
@@ -97,9 +98,17 @@ test("desktop motion is restrained and respects reduced-motion preferences", () 
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(css, /\.motion-page-enter/);
   assert.match(css, /\.responsive-record-row\s*\{[^}]*animation:\s*record-enter/s);
-  assert.match(button, /active:scale-\[0\.97\]/);
+  assert.doesNotMatch(button, /active:scale/);
+  assert.doesNotMatch(css, /button:not\(:disabled\):active[^{]*\{[^}]*scale:/s);
   assert.match(accounts, /transition-\[width,background-color\] duration-300/);
   assert.match(reactApp, /transition-\[width\] duration-300/);
+});
+
+test("shared selects open on hover without button press scaling", () => {
+  assert.match(accounts, /<Select/);
+  assert.match(select, /data-slot="select-trigger"/);
+  assert.match(formPrimitives, /onMouseEnter=\{openOnHover\}/);
+  assert.match(formPrimitives, /onMouseLeave=\{scheduleClose\}/);
 });
 
 test("data changes and contextual controls provide motion feedback", () => {
