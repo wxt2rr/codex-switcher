@@ -68,12 +68,12 @@ export function DesktopShell({
   /* message tone helper */
   const messageClass =
     message?.tone === "success"
-      ? "bg-sky-50 text-sky-700 dark:bg-sky-950/70 dark:text-sky-200"
+      ? "text-sky-700 dark:text-sky-200"
       : message?.tone === "warning"
-        ? "bg-amber-50/80 text-amber-700 dark:bg-amber-950/60 dark:text-amber-200"
+        ? "text-neutral-800 dark:text-neutral-200"
         : message?.tone === "error"
-          ? "bg-rose-50/80 text-rose-700 dark:bg-rose-950/60 dark:text-rose-200"
-          : "bg-sky-50/80 text-sky-700 dark:bg-sky-950/60 dark:text-sky-200";
+          ? "text-rose-700 dark:text-rose-200"
+          : "text-neutral-800 dark:text-neutral-200";
   const isMacDesktop = platform === "MacIntel";
   const sidebarToggle = (
     <button
@@ -93,11 +93,11 @@ export function DesktopShell({
   );
 
   return (
-    <div className="h-screen overflow-hidden bg-[linear-gradient(180deg,#fcfcfb_0%,#f7f8fa_100%)] text-neutral-900 dark:bg-[linear-gradient(180deg,#0b0d10_0%,#12161b_100%)] dark:text-neutral-100">
+    <div className="h-screen overflow-hidden bg-[#f7f8fa] text-neutral-900 dark:bg-[#0f1318] dark:text-neutral-100">
       <div className="flex h-full">
         <aside
           className={cn(
-            "relative flex shrink-0 flex-col bg-white/78 pb-7 pt-5 shadow-[18px_0_55px_rgba(31,41,55,0.035)] backdrop-blur-xl dark:bg-[#11151a]/88 dark:shadow-[18px_0_55px_rgba(0,0,0,0.25)]",
+            "relative flex shrink-0 flex-col border-r border-black/[0.06] bg-white pb-7 pt-5 dark:border-white/[0.07] dark:bg-[#11151a]",
             "transition-[width,padding] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
             sidebarExpanded ? "w-[208px] px-4" : "w-[78px] items-center px-3",
           )}
@@ -146,8 +146,8 @@ export function DesktopShell({
                     "flex h-11 items-center rounded-xl transition-all duration-150",
                     sidebarExpanded ? "w-full justify-start gap-3 px-3.5" : "size-11 justify-center",
                     isActive
-                      ? "bg-white text-neutral-950 shadow-[0_10px_24px_rgba(15,23,42,0.08)] dark:bg-[#1b2129] dark:text-white dark:shadow-[0_10px_24px_rgba(0,0,0,0.24)]"
-                      : "text-neutral-700 hover:bg-white/85 hover:text-neutral-950 hover:shadow-sm dark:text-slate-300 dark:hover:bg-[#171c23] dark:hover:text-white",
+                      ? "bg-[#f1f3f5] text-neutral-950 dark:bg-[#1b2129] dark:text-white"
+                      : "text-neutral-700 hover:bg-[#f6f7f8] hover:text-neutral-950 dark:text-slate-300 dark:hover:bg-[#171c23] dark:hover:text-white",
                   )}
                 >
                   {navIcons[item]}
@@ -166,7 +166,6 @@ export function DesktopShell({
         </aside>
 
         <div className="relative flex min-w-0 flex-1 flex-col">
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-[linear-gradient(180deg,rgba(255,255,255,0.88),rgba(255,255,255,0))] dark:bg-[linear-gradient(180deg,rgba(26,31,38,0.88),rgba(11,13,16,0))]" />
           {dragRegionClass ? (
             <>
               <div className={cn("absolute inset-x-0 top-0 z-10 h-[34px]", dragRegionClass)} />
@@ -183,7 +182,7 @@ export function DesktopShell({
                 const next = languageOptions[(currentIndex + 1) % languageOptions.length]?.value ?? language;
                 onChangeLanguage(next);
               }}
-              className="flex h-10 items-center gap-2 rounded-xl bg-white px-3.5 text-[12px] font-medium text-neutral-800 shadow-[0_8px_24px_rgba(15,23,42,0.08)] transition hover:bg-neutral-50 dark:bg-[#161b22] dark:text-slate-100 dark:shadow-[0_8px_24px_rgba(0,0,0,0.22)] dark:hover:bg-[#1c232c]"
+              className="flex h-10 items-center gap-2 rounded-lg border border-black/[0.06] bg-white px-3.5 text-[12px] font-medium text-neutral-800 transition hover:bg-neutral-50 dark:border-white/[0.08] dark:bg-[#161b22] dark:text-slate-100 dark:hover:bg-[#1c232c]"
             >
               <Languages className="size-4" />
               {languageOptions.find((item) => item.value === language)?.label ?? languageLabel}
@@ -193,8 +192,8 @@ export function DesktopShell({
           {message && (
             <section
               className={cn(
-                "fixed right-8 top-20 z-50 min-w-[280px] max-w-[420px] rounded-xl px-4 py-3 text-sm font-medium",
-                "animate-fade-in shadow-[0_18px_40px_rgba(15,23,42,0.10)] backdrop-blur-sm transition-all duration-200",
+                "fixed right-8 top-20 z-50 min-w-[280px] max-w-[420px] rounded-lg border border-black/[0.08] bg-white px-4 py-3 text-sm font-medium",
+                "animate-fade-in shadow-sm transition-all duration-200",
                 messageClass,
               )}
               role="status"

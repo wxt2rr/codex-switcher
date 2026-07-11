@@ -53,7 +53,7 @@ export function PageToolbar({
   return (
     <div
       className={cn(
-        "flex flex-col gap-2.5 rounded-[16px] bg-white px-3 py-2.5 shadow-[0_8px_28px_rgba(15,23,42,0.035)]",
+        "flex flex-col gap-2.5 rounded-[14px] border border-black/[0.05] bg-white px-3 py-2.5",
         "animate-fade-in-up",
         "lg:flex-row lg:items-center lg:justify-between",
       )}
@@ -89,7 +89,7 @@ export function TableCard({
   return (
     <section
       className={cn(
-        "overflow-hidden rounded-[18px] bg-white shadow-[0_12px_36px_rgba(15,23,42,0.045)] animate-fade-in-up",
+        "overflow-hidden rounded-[14px] border border-black/[0.05] bg-white animate-fade-in-up",
         className,
       )}
       style={{ animationDelay: "100ms" }}
@@ -351,7 +351,7 @@ export function SummaryPanel({
     summary?.tone === "ok"
       ? "border-primary/20 bg-primary/10 text-primary"
       : summary?.tone === "warn"
-        ? "border-amber-200/60 bg-amber-50/80 text-amber-700"
+        ? "border-neutral-200 bg-neutral-50 text-neutral-700"
         : "border-neutral-100 bg-neutral-50/60 text-neutral-700";
 
   return (

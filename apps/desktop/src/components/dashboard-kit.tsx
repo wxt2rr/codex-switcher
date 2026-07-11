@@ -19,8 +19,7 @@ export function DashboardCard({
   return (
     <article
       className={cn(
-        "rounded-2xl border border-border bg-white p-5",
-        "shadow-sm shadow-neutral-200/50",
+        "rounded-[14px] border border-border bg-white p-5",
         "animate-fade-in-up",
         className,
       )}
@@ -94,9 +93,9 @@ export function BigNumber({ value, label }: { value: string; label: string }) {
 
 export function StatCard({ label, value, helper }: { label: string; value: string; helper: string }) {
   return (
-    <div className="rounded-[18px] bg-white px-5 py-4 ring-1 ring-black/[0.04] shadow-[0_10px_30px_rgba(15,23,42,0.03)]">
-      <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">{label}</div>
-      <div className="mt-2 text-[18px] font-semibold tracking-[-0.03em] text-neutral-950">{value}</div>
+    <div className="min-w-0 px-5 py-3">
+      <div className="text-[12px] font-medium text-slate-500">{label}</div>
+      <div className="mt-1 text-[20px] font-semibold tracking-[-0.03em] text-neutral-950">{value}</div>
       <div className="mt-1 text-[11px] text-slate-500">{helper}</div>
     </div>
   );
@@ -115,7 +114,7 @@ export function StatusPill({
     tone === "ok"
       ? "border border-primary/20 bg-primary/10 text-primary"
       : tone === "warn"
-        ? "border border-amber-200/60 bg-amber-50 text-amber-600"
+        ? "border border-neutral-200 bg-neutral-50 text-neutral-700"
         : "border border-neutral-200/60 bg-neutral-100 text-neutral-500";
 
   return (

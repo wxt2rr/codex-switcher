@@ -402,7 +402,7 @@ export function AccountsPage({
           </div>
         </div>
 
-        <div className="shrink-0 grid gap-3 lg:grid-cols-3">
+        <div className="shrink-0 grid divide-y divide-black/[0.06] rounded-[14px] border border-black/[0.05] bg-white sm:grid-cols-3 sm:divide-x sm:divide-y-0">
           <StatCard
             label={language === "zh" ? "账号总数" : language === "ja" ? "アカウント総数" : "Accounts"}
             value={String(overview.accounts.length)}
@@ -420,7 +420,7 @@ export function AccountsPage({
           />
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[18px] bg-white ring-1 ring-black/[0.04] shadow-[0_12px_36px_rgba(15,23,42,0.035)]">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[14px] border border-black/[0.05] bg-white">
           <div className="min-h-0 flex-1 overflow-auto">
           {filteredAccounts.length === 0 ? (
             <div className="px-6 py-16 text-center text-sm font-medium text-neutral-500">
@@ -1138,7 +1138,7 @@ function TooltipHint({ text }: { text: string }) {
 function AvatarTile({ name, index }: { name: string; index: number }) {
   const palettes = [
     "bg-slate-100 text-slate-700",
-    "bg-stone-100 text-stone-700",
+    "bg-slate-100 text-slate-700",
     "bg-zinc-100 text-zinc-700",
     "bg-neutral-100 text-neutral-700",
     "bg-slate-200 text-slate-700",
@@ -1159,7 +1159,7 @@ function SoftBadge({ label, tone, title }: { label: string; tone: "brand" | "neu
         tone === "brand"
           ? "bg-slate-200 text-slate-800"
           : tone === "success"
-            ? "bg-emerald-50 text-emerald-700"
+            ? "bg-slate-100 text-emerald-700"
             : "bg-slate-100 text-slate-500",
       )}
       title={title}

@@ -257,7 +257,7 @@ export function EnvironmentsPage({
     <ListPageFrame className="overflow-hidden" contentClassName="h-full gap-3">
       <div className="shrink-0 flex flex-col gap-4">
         <div><h2 className="text-[28px] font-semibold tracking-[-0.04em] text-neutral-950">{pageTitle(language)}</h2><p className="mt-1 text-[13px] leading-6 text-slate-500">{pageSubtitle(language)}</p></div>
-        <div className="rounded-[18px] bg-white px-3 py-2.5 ring-1 ring-black/[0.04] shadow-[0_10px_30px_rgba(15,23,42,0.03)]">
+        <div className="rounded-[14px] border border-black/[0.05] bg-white px-3 py-2.5">
           <div className="responsive-toolbar flex items-center gap-2.5">
             <div className="inline-flex h-8 items-center gap-2 rounded-lg bg-[#f3f4f6] px-3 text-[12px] font-medium text-slate-500"><Command className="size-3.5" />K</div>
             <div className="relative min-w-[220px] flex-1"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={pageCopy.environments.searchPlaceholder} className="h-8 rounded-lg border-transparent bg-[#fbfbfc] pl-10 text-[12px] shadow-none" /></div>
@@ -271,14 +271,14 @@ export function EnvironmentsPage({
             </Button>
           </div>
         </div>
-        <div className="grid gap-3 lg:grid-cols-3">
+        <div className="grid divide-y divide-black/[0.06] rounded-[14px] border border-black/[0.05] bg-white sm:grid-cols-3 sm:divide-x sm:divide-y-0">
           <StatCard label={language === "zh" ? "环境总数" : "Environments"} value={String(overview.envs.length)} helper={language === "zh" ? `${filteredEnvs.length} 条当前结果` : `${filteredEnvs.length} shown`} />
           <StatCard label="CLI / App" value={`${overview.envs.find((env) => env.isCurrentCli)?.name ?? "-"} / ${overview.envs.find((env) => env.isCurrentApp)?.name ?? "-"}`} helper={language === "zh" ? "当前激活环境" : "Active environments"} />
           <StatCard label={language === "zh" ? "本地路由" : "Local routing"} value={`${routeStatuses.filter((item) => item.enabled).length}`} helper={language === "zh" ? `${routeStatuses.reduce((sum, item) => sum + item.routedAccounts, 0)} 个账号已接入` : `${routeStatuses.reduce((sum, item) => sum + item.routedAccounts, 0)} accounts routed`} />
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto rounded-[18px] bg-white ring-1 ring-black/[0.04] shadow-[0_12px_36px_rgba(15,23,42,0.035)]">
+      <div className="min-h-0 flex-1 overflow-auto rounded-[14px] border border-black/[0.05] bg-white">
           {filteredEnvs.length === 0 ? (
             <EmptyList title={overview.envs.length === 0 ? pageCopy.environments.emptyListTitle : pageCopy.environments.emptyFilterTitle} />
           ) : null}
