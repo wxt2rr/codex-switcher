@@ -13,11 +13,13 @@ test("desktop build emits electron main entry and preload bundle", async () => {
   const preloadPath = join(desktopRoot, "electron-dist", "electron", "preload.cjs");
   const runtimePathsPath = join(desktopRoot, "electron-dist", "electron", "runtime-paths.cjs");
   const codexToolPathsPath = join(desktopRoot, "electron-dist", "electron", "codex-tool-paths.cjs");
+  const codexProjectsPath = join(desktopRoot, "electron-dist", "electron", "codex-projects.cjs");
 
   await access(mainPath, constants.F_OK);
   await access(preloadPath, constants.F_OK);
   await access(runtimePathsPath, constants.F_OK);
   await access(codexToolPathsPath, constants.F_OK);
+  await access(codexProjectsPath, constants.F_OK);
 
   const mainSource = await readFile(mainPath, "utf8");
   assert.match(mainSource, /BrowserWindow/);
@@ -32,6 +34,10 @@ test("desktop build emits electron main entry and preload bundle", async () => {
 
   const runtimePathsSource = await readFile(runtimePathsPath, "utf8");
   assert.match(runtimePathsSource, /CODEX_SWITCHER_DESKTOP_RESOURCES_PATH/);
+
+  const bridgeSource = await readFile(join(desktopRoot, "electron-dist", "electron", "bridge.cjs"), "utf8");
+  assert.match(bridgeSource, /require\("\.\/codex-projects\.cjs"\)/);
+  assert.doesNotMatch(bridgeSource, /require\("\.\/codex-projects\.js"\)/);
 
   const htmlSource = await readFile(join(desktopRoot, "dist", "index.html"), "utf8");
   assert.doesNotMatch(htmlSource, /src="\/assets\//);
