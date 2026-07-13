@@ -3,7 +3,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
 
-import { resolveCodexAppPath } from "./command-discovery.js";
+import { isWindowsPackagedAppTarget, resolveCodexAppPath } from "./command-discovery.js";
 import {
   buildManagedAppStopPlan,
   executeManagedAppStopPlan,
@@ -33,6 +33,7 @@ export type CodexAppRunner = (
   command: string,
   args: string[],
   env: NodeJS.ProcessEnv,
+  options?: { acceptEarlyExit?: boolean },
 ) => Promise<CodexAppRunnerResult>;
 
 export interface CodexAppActionInput extends CodexAppLaunchInput {
@@ -43,6 +44,7 @@ export interface CodexAppActionInput extends CodexAppLaunchInput {
 export interface CodexAppLaunchSpec {
   command: string;
   args: string[];
+  acceptEarlyExit?: boolean;
 }
 
 export interface StopManagedCodexAppInput {
@@ -90,7 +92,9 @@ export async function launchCodexApp(
     process.platform,
     input.userDataDir,
   );
-  return runner(launchSpec.command, launchSpec.args, mergedEnv);
+  return runner(launchSpec.command, launchSpec.args, mergedEnv, {
+    acceptEarlyExit: launchSpec.acceptEarlyExit,
+  });
 }
 
 export function buildCodexAppLaunchSpec(
@@ -103,6 +107,14 @@ export function buildCodexAppLaunchSpec(
     return {
       command: appPath,
       args: userDataDir ? [`--user-data-dir=${userDataDir}`] : [],
+    };
+  }
+
+  if (isWindowsPackagedAppTarget(appPath)) {
+    return {
+      command: "explorer.exe",
+      args: [appPath],
+      acceptEarlyExit: true,
     };
   }
 
@@ -261,6 +273,7 @@ async function defaultCodexAppRunner(
   command: string,
   args: string[],
   env: NodeJS.ProcessEnv,
+  options?: { acceptEarlyExit?: boolean },
 ): Promise<CodexAppRunnerResult> {
   return new Promise<CodexAppRunnerResult>((resolve, reject) => {
     let settled = false;
@@ -286,6 +299,11 @@ async function defaultCodexAppRunner(
     });
     child.on("spawn", () => {
       child.unref();
+      if (options?.acceptEarlyExit) {
+        settled = true;
+        resolve({ pid: null });
+        return;
+      }
       setTimeout(() => {
         if (settled) return;
         settled = true;

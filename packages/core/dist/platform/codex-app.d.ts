@@ -7,7 +7,9 @@ export interface CodexAppLaunchInput {
 export interface CodexAppRunnerResult {
     pid: number | null;
 }
-export type CodexAppRunner = (command: string, args: string[], env: NodeJS.ProcessEnv) => Promise<CodexAppRunnerResult>;
+export type CodexAppRunner = (command: string, args: string[], env: NodeJS.ProcessEnv, options?: {
+    acceptEarlyExit?: boolean;
+}) => Promise<CodexAppRunnerResult>;
 export interface CodexAppActionInput extends CodexAppLaunchInput {
     stateDir: string;
     targetKey?: string;
@@ -15,6 +17,7 @@ export interface CodexAppActionInput extends CodexAppLaunchInput {
 export interface CodexAppLaunchSpec {
     command: string;
     args: string[];
+    acceptEarlyExit?: boolean;
 }
 export interface StopManagedCodexAppInput {
     stateDir: string;

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
-import { resolveCodexAppPath } from "./command-discovery.js";
+import { isWindowsPackagedAppTarget, resolveCodexAppPath } from "./command-discovery.js";
 import { buildManagedAppStopPlan, executeManagedAppStopPlan, waitForManagedAppExit, } from "./codex-app-stop.js";
 import { listManagedAppInstances, resolveManagedAppStatePaths, setManagedAppInstance, stopManagedAppPid, writeManagedAppPid, } from "./codex-app-runtime.js";
 import { detectPlatform } from "./os.js";
@@ -36,13 +36,22 @@ export async function launchCodexApp(input, runner = defaultCodexAppRunner) {
         CODEX_SWITCHER_MANAGED: "1",
     };
     const launchSpec = buildCodexAppLaunchSpec(resolved, mergedEnv, process.platform, input.userDataDir);
-    return runner(launchSpec.command, launchSpec.args, mergedEnv);
+    return runner(launchSpec.command, launchSpec.args, mergedEnv, {
+        acceptEarlyExit: launchSpec.acceptEarlyExit,
+    });
 }
 export function buildCodexAppLaunchSpec(appPath, env = process.env, platform = process.platform, userDataDir) {
     if (detectPlatform(platform) !== "windows") {
         return {
             command: appPath,
             args: userDataDir ? [`--user-data-dir=${userDataDir}`] : [],
+        };
+    }
+    if (isWindowsPackagedAppTarget(appPath)) {
+        return {
+            command: "explorer.exe",
+            args: [appPath],
+            acceptEarlyExit: true,
         };
     }
     const launcher = resolveWindowsAppLauncher(env);
@@ -161,7 +170,7 @@ async function nextManagedAppInstanceId(paths) {
     }
     return `instance-${max + 1}`;
 }
-async function defaultCodexAppRunner(command, args, env) {
+async function defaultCodexAppRunner(command, args, env, options) {
     return new Promise((resolve, reject) => {
         let settled = false;
         const child = spawn(command, args, {
@@ -181,6 +190,11 @@ async function defaultCodexAppRunner(command, args, env) {
         });
         child.on("spawn", () => {
             child.unref();
+            if (options?.acceptEarlyExit) {
+                settled = true;
+                resolve({ pid: null });
+                return;
+            }
             setTimeout(() => {
                 if (settled)
                     return;

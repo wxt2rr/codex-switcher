@@ -32,6 +32,14 @@ test("buildCodexAppLaunchSpec uses cmd start wrapper on windows by default", () 
         'start "" /b "C:\\Program Files\\Codex\\Codex.exe"',
     ]);
 });
+test("buildCodexAppLaunchSpec launches a Windows packaged AppID through Explorer", () => {
+    const spec = buildCodexAppLaunchSpec("shell:AppsFolder\\OpenAI.Codex_2p2nqsd0c76g0!App", {}, "win32");
+    assert.deepEqual(spec, {
+        command: "explorer.exe",
+        args: ["shell:AppsFolder\\OpenAI.Codex_2p2nqsd0c76g0!App"],
+        acceptEarlyExit: true,
+    });
+});
 test("buildCodexAppLaunchSpec isolates a non-Windows App instance with user-data-dir", () => {
     const spec = buildCodexAppLaunchSpec("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT", {}, "darwin", "/tmp/codex-switcher/app profile");
     assert.equal(spec.command, "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT");

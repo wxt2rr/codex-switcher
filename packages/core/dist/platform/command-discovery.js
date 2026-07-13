@@ -25,6 +25,9 @@ export async function resolveCommandPath(command, env = process.env, platform = 
 }
 export async function resolveCodexAppPath(env = process.env, platform = process.platform) {
     if (env.CODEX_SWITCHER_APP_BIN) {
+        if (detectPlatform(platform) === "windows" && isWindowsPackagedAppTarget(env.CODEX_SWITCHER_APP_BIN)) {
+            return env.CODEX_SWITCHER_APP_BIN;
+        }
         return (await isExecutable(env.CODEX_SWITCHER_APP_BIN)) ? env.CODEX_SWITCHER_APP_BIN : null;
     }
     for (const candidate of codexAppCandidatePaths(env, platform)) {
@@ -33,6 +36,9 @@ export async function resolveCodexAppPath(env = process.env, platform = process.
         }
     }
     return null;
+}
+export function isWindowsPackagedAppTarget(value) {
+    return /^shell:AppsFolder\\[A-Za-z0-9._-]+![A-Za-z0-9._-]+$/i.test(value.trim());
 }
 export async function resolveWindowsLauncherCommands(env = process.env, platform = process.platform) {
     const commands = ["wt", "powershell", "cmd"];

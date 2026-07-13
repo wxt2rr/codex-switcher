@@ -14,6 +14,7 @@ export interface WindowsReadinessSnapshot {
 }
 export declare function resolveCommandPath(command: string, env?: NodeJS.ProcessEnv, platform?: NodeJS.Platform): Promise<ResolvedCommand | null>;
 export declare function resolveCodexAppPath(env?: NodeJS.ProcessEnv, platform?: NodeJS.Platform): Promise<string | null>;
+export declare function isWindowsPackagedAppTarget(value: string): boolean;
 export declare function resolveWindowsLauncherCommands(env?: NodeJS.ProcessEnv, platform?: NodeJS.Platform): Promise<WindowsLauncherCommandStatus[]>;
 export declare function getWindowsReadinessSnapshot(env?: NodeJS.ProcessEnv, platform?: NodeJS.Platform): Promise<WindowsReadinessSnapshot>;
 export declare function codexCliCandidatePaths(env?: NodeJS.ProcessEnv, platform?: NodeJS.Platform): string[];

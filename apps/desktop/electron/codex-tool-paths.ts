@@ -9,7 +9,17 @@ export type CodexToolKind = "cli" | "app";
 export type CodexToolSource = "manual" | "environment" | "path" | "candidate" | "missing";
 export interface CodexToolStatus { kind: CodexToolKind; path: string; detectedPath: string; manualPath: string; source: CodexToolSource; available: boolean; }
 interface DesktopSettings { cliPath?: string; appPath?: string; }
-export interface CodexToolPathOptions { settingsPath: string; env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; validateCli?: (path: string) => Promise<void>; }
+export interface CodexToolPathOptions { settingsPath: string; env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; validateCli?: (path: string) => Promise<void>; detectWindowsPackagedApp?: () => Promise<string>; }
+
+const WINDOWS_PACKAGED_APP_PREFIX = "shell:AppsFolder\\";
+
+export function normalizeWindowsPackagedAppTarget(value: string): string {
+  const trimmed = value.trim();
+  const appId = trimmed.toLowerCase().startsWith(WINDOWS_PACKAGED_APP_PREFIX.toLowerCase())
+    ? trimmed.slice(WINDOWS_PACKAGED_APP_PREFIX.length)
+    : trimmed;
+  return /^[A-Za-z0-9._-]+![A-Za-z0-9._-]+$/.test(appId) ? `${WINDOWS_PACKAGED_APP_PREFIX}${appId}` : "";
+}
 
 async function isExecutable(path: string) { try { const info = await stat(path); if (!info.isFile()) return false; await access(path, constants.X_OK); return true; } catch { return false; } }
 async function readSettings(path: string): Promise<DesktopSettings> { try { return JSON.parse(await readFile(path, "utf8")) as DesktopSettings; } catch { return {}; } }
@@ -62,10 +72,18 @@ async function resolveMacAppBundle(bundlePath: string): Promise<string> {
   }
 }
 async function normalizeAppCandidate(value: string, platform: NodeJS.Platform): Promise<string> {
+  if (platform === "win32") {
+    const packagedTarget = normalizeWindowsPackagedAppTarget(value);
+    if (packagedTarget) return packagedTarget;
+  }
   if (await isExecutable(value)) return value;
   return platform === "darwin" ? resolveMacAppBundle(value) : "";
 }
 async function normalizeManualPath(kind: CodexToolKind, value: string, platform: NodeJS.Platform): Promise<string> {
+  if (kind === "app" && platform === "win32") {
+    const packagedTarget = normalizeWindowsPackagedAppTarget(value);
+    if (packagedTarget) return packagedTarget;
+  }
   if (await isExecutable(value)) return value;
   if (kind === "app" && platform === "darwin") return resolveMacAppBundle(value);
   const nested = kind === "app"
@@ -77,7 +95,24 @@ async function normalizeManualPath(kind: CodexToolKind, value: string, platform:
       : [join(value, "codex")];
   return firstExecutable(nested);
 }
-async function detectPath(kind: CodexToolKind, env: NodeJS.ProcessEnv, platform: NodeJS.Platform): Promise<{ path: string; source: CodexToolSource }> {
+async function detectWindowsPackagedApp(): Promise<string> {
+  const command = "$app = Get-StartApps | Where-Object { $_.Name -match '^(ChatGPT|Codex)$' -or $_.AppID -match '^OpenAI\\.(Codex|ChatGPT)_' } | Sort-Object @{ Expression = { if ($_.Name -eq 'ChatGPT') { 0 } else { 1 } } } | Select-Object -First 1; if ($app) { [Console]::Out.Write($app.AppID) }";
+  try {
+    const { stdout } = await execFileAsync("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      command,
+    ], { encoding: "utf8", timeout: 10_000, windowsHide: true });
+    return normalizeWindowsPackagedAppTarget(stdout);
+  } catch {
+    return "";
+  }
+}
+
+async function detectPath(kind: CodexToolKind, env: NodeJS.ProcessEnv, platform: NodeJS.Platform, packagedAppDetector: () => Promise<string>): Promise<{ path: string; source: CodexToolSource }> {
   const explicit = kind === "cli" ? env.CODEX_SWITCHER_CODEX_BIN || env.CODEX_BIN : env.CODEX_SWITCHER_APP_BIN;
   if (explicit?.trim()) {
     const resolved = kind === "app" ? await normalizeAppCandidate(explicit.trim(), platform) : await firstExecutable([explicit.trim()]);
@@ -94,11 +129,14 @@ async function detectPath(kind: CodexToolKind, env: NodeJS.ProcessEnv, platform:
     candidate = kind === "app" ? await normalizeAppCandidate(item, platform) : await firstExecutable([item]);
     if (candidate) break;
   }
+  if (!candidate && kind === "app" && platform === "win32") {
+    candidate = normalizeWindowsPackagedAppTarget(await packagedAppDetector());
+  }
   return candidate ? { path: candidate, source: "candidate" } : { path: "", source: "missing" };
 }
 export async function getCodexToolStatus(kind: CodexToolKind, options: CodexToolPathOptions): Promise<CodexToolStatus> {
   const env = options.env ?? process.env; const platform = options.platform ?? process.platform; const settings = await readSettings(options.settingsPath);
-  const manualPath = (kind === "cli" ? settings.cliPath : settings.appPath)?.trim() || ""; const detected = await detectPath(kind, env, platform); const manualAvailable = manualPath ? await isExecutable(manualPath) : false;
+  const manualPath = (kind === "cli" ? settings.cliPath : settings.appPath)?.trim() || ""; const detected = await detectPath(kind, env, platform, options.detectWindowsPackagedApp ?? detectWindowsPackagedApp); const manualAvailable = manualPath ? (kind === "app" && platform === "win32" && Boolean(normalizeWindowsPackagedAppTarget(manualPath))) || await isExecutable(manualPath) : false;
   return { kind, path: manualAvailable ? manualPath : detected.path, detectedPath: detected.path, manualPath, source: manualAvailable ? "manual" : detected.source, available: manualAvailable || Boolean(detected.path) };
 }
 export async function listCodexToolStatuses(options: CodexToolPathOptions) { return Promise.all([getCodexToolStatus("cli", options), getCodexToolStatus("app", options)]); }

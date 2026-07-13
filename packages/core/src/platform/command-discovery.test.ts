@@ -93,6 +93,14 @@ test("resolveCodexAppPath honors explicit app override", async () => {
   }
 });
 
+test("resolveCodexAppPath accepts a Windows packaged AppID target", async () => {
+  const target = "shell:AppsFolder\\OpenAI.Codex_2p2nqsd0c76g0!App";
+  assert.equal(
+    await resolveCodexAppPath({ CODEX_SWITCHER_APP_BIN: target }, "win32"),
+    target,
+  );
+});
+
 test("codexAppCandidatePaths includes merged ChatGPT Codex bundles on macOS", () => {
   assert.deepEqual(
     codexAppCandidatePaths({ HOME: "/Users/alice" }, "darwin"),

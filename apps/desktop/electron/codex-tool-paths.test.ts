@@ -78,3 +78,43 @@ test("Windows App detection supports the merged ChatGPT execution alias", async 
   assert.equal(status.path, app);
   assert.equal(status.source, "path");
 });
+
+test("Windows App detection falls back to the ChatGPT packaged AppID", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-tools-"));
+  const status = await getCodexToolStatus("app", {
+    settingsPath: join(root, "settings.json"),
+    env: { USERPROFILE: root, LOCALAPPDATA: join(root, "AppData", "Local"), PATH: "" },
+    platform: "win32",
+    detectWindowsPackagedApp: async () => "OpenAI.Codex_2p2nqsd0c76g0!App",
+  });
+
+  assert.equal(status.path, "shell:AppsFolder\\OpenAI.Codex_2p2nqsd0c76g0!App");
+  assert.equal(status.source, "candidate");
+  assert.equal(status.available, true);
+});
+
+test("Windows App settings accept a packaged AppID as a manual target", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-tools-"));
+  const status = await saveCodexToolPath("app", "OpenAI.Codex_2p2nqsd0c76g0!App", {
+    settingsPath: join(root, "settings.json"),
+    env: { USERPROFILE: root, LOCALAPPDATA: join(root, "AppData", "Local"), PATH: "" },
+    platform: "win32",
+    detectWindowsPackagedApp: async () => "",
+  });
+
+  assert.equal(status.path, "shell:AppsFolder\\OpenAI.Codex_2p2nqsd0c76g0!App");
+  assert.equal(status.source, "manual");
+});
+
+test("Windows App settings reject malformed packaged AppID targets", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-tools-"));
+  await assert.rejects(
+    () => saveCodexToolPath("app", "shell:AppsFolder\\OpenAI.Codex!App & calc.exe", {
+      settingsPath: join(root, "settings.json"),
+      env: { USERPROFILE: root, LOCALAPPDATA: join(root, "AppData", "Local"), PATH: "" },
+      platform: "win32",
+      detectWindowsPackagedApp: async () => "",
+    }),
+    /path is not executable/,
+  );
+});

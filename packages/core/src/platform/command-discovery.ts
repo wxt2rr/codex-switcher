@@ -55,6 +55,9 @@ export async function resolveCodexAppPath(
   platform = process.platform,
 ): Promise<string | null> {
   if (env.CODEX_SWITCHER_APP_BIN) {
+    if (detectPlatform(platform) === "windows" && isWindowsPackagedAppTarget(env.CODEX_SWITCHER_APP_BIN)) {
+      return env.CODEX_SWITCHER_APP_BIN;
+    }
     return (await isExecutable(env.CODEX_SWITCHER_APP_BIN)) ? env.CODEX_SWITCHER_APP_BIN : null;
   }
 
@@ -65,6 +68,10 @@ export async function resolveCodexAppPath(
   }
 
   return null;
+}
+
+export function isWindowsPackagedAppTarget(value: string): boolean {
+  return /^shell:AppsFolder\\[A-Za-z0-9._-]+![A-Za-z0-9._-]+$/i.test(value.trim());
 }
 
 export async function resolveWindowsLauncherCommands(

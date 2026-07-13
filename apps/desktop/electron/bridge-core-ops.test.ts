@@ -584,6 +584,49 @@ test("desktop bridge deleteEnv also removes lingering usage routes for that envi
   }
 });
 
+test("desktop bridge materializes environment route changes in the active config.toml", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-env-route-config-"));
+  const previousEnv = { ...process.env };
+  let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
+
+  try {
+    process.env.HOME = root;
+    process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
+    process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
+    process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
+    bridge.__testUtils.resetUsageRouterManagerForTest();
+
+    await writeFileRecursive(join(root, "state", "current_cli_env"), "project\n");
+    await writeFileRecursive(join(root, "state", "current_cli_account"), "key\n");
+    await writeFileRecursive(join(root, "state", "current_app_env"), "project\n");
+    await writeFileRecursive(join(root, "state", "current_app_account"), "key\n");
+    await writeFileRecursive(join(root, "envs", "project", "home", "config.toml"), "model = 'gpt-5'\n");
+    await writeFileRecursive(
+      join(root, "state", "env-accounts", "project", "key", "runtime.json"),
+      "{\n  \"preferred_auth_method\": \"apikey\",\n  \"openai_base_url_mode\": \"custom\",\n  \"openai_base_url\": \"https://api.example.com/v1\"\n}\n",
+    );
+    await writeFileRecursive(
+      join(root, "state", "env-accounts", "project", "key", "auth.json"),
+      "{\"OPENAI_API_KEY\":\"sk-test\"}\n",
+    );
+    service = await startUsageRouterService({ stateDir: join(root, "state", "usage-router") });
+
+    await bridge.toggleEnvironmentRoute("project", true);
+    const enabledConfig = await readFile(join(root, "envs", "project", "home", "config.toml"), "utf8");
+    assert.match(enabledConfig, new RegExp(`openai_base_url = \"http://127\\.0\\.0\\.1:${service.port}/routes/`));
+    assert.match(enabledConfig, /model = 'gpt-5'/);
+
+    await bridge.toggleEnvironmentRoute("project", false);
+    const disabledConfig = await readFile(join(root, "envs", "project", "home", "config.toml"), "utf8");
+    assert.match(disabledConfig, /openai_base_url = "https:\/\/api\.example\.com\/v1"/);
+  } finally {
+    await service?.close();
+    bridge.__testUtils.resetUsageRouterManagerForTest();
+    restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("desktop bridge loadOverview refreshes stale environment route ports after router restart", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-route-resync-"));
   const previousEnv = { ...process.env };
@@ -640,7 +683,8 @@ test("desktop bridge loadOverview refreshes stale environment route ports after 
     assert.match(runtime.openai_base_url ?? "", new RegExp(`^http://127\\.0\\.0\\.1:${secondService.port}/routes/`));
 
     const config = await readFile(join(root, "envs", "project", "home", "config.toml"), "utf8");
-    assert.equal(config, "model = 'gpt-5'\n");
+    assert.match(config, new RegExp(`openai_base_url = \"http://127\\.0\\.0\\.1:${secondService.port}/routes/`));
+    assert.match(config, /model = 'gpt-5'/);
   } finally {
     await firstService?.close();
     await secondService?.close();

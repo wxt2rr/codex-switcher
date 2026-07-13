@@ -182,7 +182,47 @@ function createEnvironmentRouteBaseUrlUpdater(
     const updated = next.envs[envName]?.accounts[accountName];
     if (!updated) throw new Error(`Unable to update '${envName}/${accountName}'`);
     await runtime.writeLegacyRuntime({ stateDir: getStateDir(), envName, accountName, runtime: updated.runtime });
+    try {
+      await applyEnvironmentRouteToActiveTarget(runtime, next, envName, accountName);
+    } catch (error) {
+      await runtime.writeLegacyRuntime({
+        stateDir: getStateDir(),
+        envName,
+        accountName,
+        runtime: current.runtime,
+      });
+      throw error;
+    }
   };
+}
+
+async function applyEnvironmentRouteToActiveTarget(
+  runtime: Awaited<ReturnType<typeof loadCoreRuntime>>,
+  state: Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>,
+  envName: string,
+  accountName: string,
+): Promise<void> {
+  const target = (["cli", "app"] as const).find((candidate) => (
+    state.targets[candidate].env === envName && state.targets[candidate].account === accountName
+  ));
+  if (!target) return;
+
+  const env = state.envs[envName];
+  if (!env) throw new Error(`Environment '${envName}' not found`);
+  const before = await readEnvFileSnapshot(env.path);
+  try {
+    await runtime.applyTargetHomeState({ state, target });
+  } catch (error) {
+    await restoreEnvFileSnapshot(env.path, before);
+    throw error;
+  }
+  const after = await readEnvFileSnapshot(env.path);
+  await recordEnvFileDiffHistory(
+    envName,
+    before,
+    after,
+    target === "cli" ? "switch-cli" : "switch-app",
+  );
 }
 
 async function syncEnvironmentRouteIfEnabled(envName: string): Promise<void> {
