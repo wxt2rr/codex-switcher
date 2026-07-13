@@ -70,19 +70,24 @@ export function useAdaptiveMenuLayout(
       const menu = menuElement.getBoundingClientRect();
       const boundaryElement = findVerticalScrollBoundary(root);
       const boundary = boundaryElement?.getBoundingClientRect();
-      setLayout(resolveAdaptiveMenuLayout({
+      const nextLayout = resolveAdaptiveMenuLayout({
         triggerTop: trigger.top,
         triggerBottom: trigger.bottom,
         boundaryTop: Math.max(0, boundary?.top ?? 0),
         boundaryBottom: Math.min(window.innerHeight, boundary?.bottom ?? window.innerHeight),
-        menuHeight: Math.max(menu.height, menuRef.current?.scrollHeight ?? 0),
-      }));
+        menuHeight: Math.max(menu.height, menuElement.scrollHeight),
+      });
+      setLayout((current) => (
+        current.placement === nextLayout.placement && current.availableHeight === nextLayout.availableHeight
+          ? current
+          : nextLayout
+      ));
     };
 
     update();
     const resizeObserver = new ResizeObserver(update);
-    resizeObserver.observe(rootRef.current);
-    resizeObserver.observe(menuRef.current);
+    resizeObserver.observe(root);
+    resizeObserver.observe(menuElement);
     window.addEventListener("resize", update);
     window.addEventListener("scroll", update, true);
     return () => {
@@ -90,7 +95,7 @@ export function useAdaptiveMenuLayout(
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
     };
-  }, [open, rootRef, menuRef]);
+  });
 
   return layout;
 }

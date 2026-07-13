@@ -23,10 +23,10 @@ const i18n = readFileSync(new URL("../i18n.ts", import.meta.url), "utf8");
 const adaptiveMenuPlacement = readFileSync(new URL("./adaptive-menu-placement.ts", import.meta.url), "utf8");
 
 test("adaptive menus remeasure their natural height when layout changes", () => {
-  assert.match(adaptiveMenuPlacement, /Math\.max\(menu\.height, menuRef\.current\?\.scrollHeight \?\? 0\)/);
+  assert.match(adaptiveMenuPlacement, /Math\.max\(menu\.height, menuElement\.scrollHeight\)/);
   assert.match(adaptiveMenuPlacement, /new ResizeObserver\(update\)/);
-  assert.match(adaptiveMenuPlacement, /resizeObserver\.observe\(rootRef\.current\)/);
-  assert.match(adaptiveMenuPlacement, /resizeObserver\.observe\(menuRef\.current\)/);
+  assert.match(adaptiveMenuPlacement, /resizeObserver\.observe\(root\)/);
+  assert.match(adaptiveMenuPlacement, /resizeObserver\.observe\(menuElement\)/);
   assert.match(adaptiveMenuPlacement, /resizeObserver\.disconnect\(\)/);
 });
 

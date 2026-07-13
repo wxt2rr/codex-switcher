@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -6,6 +7,8 @@ import {
   resolveAdaptiveMenuLayout,
   resolveAdaptiveMenuPlacement,
 } from "./adaptive-menu-placement";
+
+const source = readFileSync(new URL("./adaptive-menu-placement.ts", import.meta.url), "utf8");
 
 test("only scrolling overflow modes create vertical menu boundaries", () => {
   assert.equal(isVerticalScrollBoundary("auto"), true);
@@ -52,4 +55,13 @@ test("adaptive menu keeps an 8px inset from its visible boundary by default", ()
     boundaryBottom: 258,
     menuHeight: 84,
   }), { placement: "down", availableHeight: 90 });
+});
+
+test("adaptive menu remeasures after delayed content mounts and size changes", () => {
+  assert.match(source, /Math\.max\(menu\.height, menuElement\.scrollHeight\)/);
+  assert.match(source, /new ResizeObserver\(update\)/);
+  assert.match(source, /resizeObserver\.observe\(root\)/);
+  assert.match(source, /resizeObserver\.observe\(menuElement\)/);
+  assert.match(source, /resizeObserver\.disconnect\(\)/);
+  assert.doesNotMatch(source, /\}, \[open, rootRef, menuRef\]\);/);
 });
