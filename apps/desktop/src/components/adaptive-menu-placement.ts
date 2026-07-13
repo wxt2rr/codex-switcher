@@ -14,12 +14,14 @@ type AdaptiveMenuLayoutInput = {
   boundaryBottom: number;
   menuHeight: number;
   gap?: number;
+  boundaryPadding?: number;
 };
 
 export function resolveAdaptiveMenuLayout(input: AdaptiveMenuLayoutInput): AdaptiveMenuLayout {
   const gap = input.gap ?? 8;
-  const spaceAbove = Math.max(0, input.triggerTop - input.boundaryTop - gap);
-  const spaceBelow = Math.max(0, input.boundaryBottom - input.triggerBottom - gap);
+  const boundaryPadding = input.boundaryPadding ?? 8;
+  const spaceAbove = Math.max(0, input.triggerTop - input.boundaryTop - gap - boundaryPadding);
+  const spaceBelow = Math.max(0, input.boundaryBottom - input.triggerBottom - gap - boundaryPadding);
   const placement = spaceBelow >= input.menuHeight
     ? "down"
     : spaceAbove >= input.menuHeight || spaceAbove > spaceBelow
@@ -35,11 +37,15 @@ export function resolveAdaptiveMenuPlacement(input: AdaptiveMenuLayoutInput): Ad
   return resolveAdaptiveMenuLayout(input).placement;
 }
 
+export function isVerticalScrollBoundary(overflowY: string): boolean {
+  return overflowY === "auto" || overflowY === "scroll";
+}
+
 function findVerticalScrollBoundary(element: HTMLElement): HTMLElement | null {
   let current = element.parentElement;
   while (current) {
     const overflowY = window.getComputedStyle(current).overflowY;
-    if (overflowY === "auto" || overflowY === "scroll" || overflowY === "hidden" || overflowY === "clip") {
+    if (isVerticalScrollBoundary(overflowY)) {
       return current;
     }
     current = current.parentElement;
@@ -56,26 +62,31 @@ export function useAdaptiveMenuLayout(
 
   useLayoutEffect(() => {
     if (!open || !rootRef.current || !menuRef.current) return;
+    const root = rootRef.current;
+    const menuElement = menuRef.current;
 
     const update = () => {
-      const trigger = rootRef.current?.getBoundingClientRect();
-      const menu = menuRef.current?.getBoundingClientRect();
-      if (!trigger || !menu) return;
-      const boundaryElement = findVerticalScrollBoundary(rootRef.current!);
+      const trigger = root.getBoundingClientRect();
+      const menu = menuElement.getBoundingClientRect();
+      const boundaryElement = findVerticalScrollBoundary(root);
       const boundary = boundaryElement?.getBoundingClientRect();
       setLayout(resolveAdaptiveMenuLayout({
         triggerTop: trigger.top,
         triggerBottom: trigger.bottom,
         boundaryTop: Math.max(0, boundary?.top ?? 0),
         boundaryBottom: Math.min(window.innerHeight, boundary?.bottom ?? window.innerHeight),
-        menuHeight: menu.height,
+        menuHeight: Math.max(menu.height, menuRef.current?.scrollHeight ?? 0),
       }));
     };
 
     update();
+    const resizeObserver = new ResizeObserver(update);
+    resizeObserver.observe(rootRef.current);
+    resizeObserver.observe(menuRef.current);
     window.addEventListener("resize", update);
     window.addEventListener("scroll", update, true);
     return () => {
+      resizeObserver.disconnect();
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
     };

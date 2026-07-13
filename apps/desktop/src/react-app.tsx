@@ -3,14 +3,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { mergeAccountUsageMetrics, mergeOverviewWithAuthMetrics } from "@/auth-metrics";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/components/theme-provider";
-import type { CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry } from "./bridge";
+import type { CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry, EnvHistoryRetentionSettings, RouterLifecycleSettings, RouterPortSettings } from "./bridge";
 import { DesktopShell } from "./components/desktop-shell";
 import type { AccountSummary, AuthMetricsPayload, EnvironmentRouteStatus, NavView, OverviewPayload } from "./desktop-model";
 import { resolveDesktopBridge } from "./bridge";
 import { LANGUAGE_LABELS, SUPPORTED_LANGUAGES, DEFAULT_LANGUAGE, getTranslations, normalizeLanguage, translate, type UiLanguage } from "./i18n";
-import { AccountsPage } from "./pages/accounts-page";
+import { AccountsPage, type AccountProtocolSettings } from "./pages/accounts-page";
 import { EnvironmentsPage } from "./pages/environments-page";
 import { OperationsPage } from "./pages/operations-page";
+import { ModelsPage } from "./pages/models-page";
 import { UsagePage } from "./pages/usage-page";
 import { parseProxyStatusOutput, shouldAutoLoadProxy } from "./proxy-status";
 import {
@@ -30,7 +31,7 @@ function resolveInitialView(): NavView {
     return "accounts";
   }
   const view = new URLSearchParams(window.location.search).get("view");
-  if (view === "environments" || view === "accounts" || view === "usage" || view === "operations") {
+  if (view === "environments" || view === "accounts" || view === "models" || view === "usage" || view === "operations") {
     return view;
   }
   return "accounts";
@@ -44,9 +45,12 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [initialLoadingProgress, setInitialLoadingProgress] = useState(0);
+  const [initialLoadingStage, setInitialLoadingStage] = useState("loading-settings");
   const [authMetricsLoading, setAuthMetricsLoading] = useState(false);
   const [authRefreshIntervalSeconds, setAuthRefreshIntervalSeconds] = useState(5);
   const [message, setMessage] = useState<DesktopNotice | null>(null);
+  const [noticeVisible, setNoticeVisible] = useState(false);
+  const [noticePaused, setNoticePaused] = useState(false);
   const [envDraft, setEnvDraft] = useState("");
   const [envSourceDraft, setEnvSourceDraft] = useState("default");
   const [envDeleteDraft, setEnvDeleteDraft] = useState("");
@@ -68,47 +72,61 @@ export function App() {
   const [cliAutoResume, setCliAutoResume] = useState<CliAutoResumeSettings>({ enabled: false, sessionNumber: 1 });
   const [savedCliAutoResume, setSavedCliAutoResume] = useState<CliAutoResumeSettings>({ enabled: false, sessionNumber: 1 });
   const [autoResumeSaving, setAutoResumeSaving] = useState(false);
+  const [routerLifecycle, setRouterLifecycle] = useState<RouterLifecycleSettings>({ stopOnAppQuit: false });
+  const [routerLifecycleSaving, setRouterLifecycleSaving] = useState(false);
+  const [routerPort, setRouterPort] = useState<RouterPortSettings>({ preferredPort: 17832 });
+  const [routerPortSaving, setRouterPortSaving] = useState(false);
+  const [envHistoryRetention, setEnvHistoryRetention] = useState<EnvHistoryRetentionSettings>({ enabled: false, retentionDays: 30 });
+  const [envHistoryRetentionSaving, setEnvHistoryRetentionSaving] = useState(false);
   const [cliTerminalSettings, setCliTerminalSettings] = useState<CliTerminalSettings | null>(null);
   const [cliTerminalSaving, setCliTerminalSaving] = useState(false);
   const [routeStatuses, setRouteStatuses] = useState<EnvironmentRouteStatus[]>([]);
   const authMetricsRequestRef = useRef(0);
   const authMetricsInFlightRef = useRef(false);
   const proxyDraftDirtyRef = useRef(false);
+  const noticeRemainingRef = useRef(4000);
+  const noticeStartedAtRef = useRef(0);
 
   useEffect(() => {
-    void loadLanguage();
-    void refreshOverview({ loadMetrics: true });
+    void initializeApp();
   }, []);
 
   useEffect(() => {
     if (!message) {
+      setNoticeVisible(false);
       return;
     }
 
-    const timeoutId = window.setTimeout(() => {
-      setMessage((current) => (current === message ? null : current));
-    }, 2600);
-
-    return () => window.clearTimeout(timeoutId);
+    noticeRemainingRef.current = message.tone === "error" ? 8000 : 6000;
+    noticeStartedAtRef.current = Date.now();
+    setNoticePaused(false);
+    setNoticeVisible(true);
   }, [message]);
 
   useEffect(() => {
-    if (!initialLoading) {
-      return;
-    }
+    if (!message || !noticeVisible || noticePaused) return;
 
-    setInitialLoadingProgress(0);
-    const intervalId = window.setInterval(() => {
-      setInitialLoadingProgress((current) => {
-        if (current >= 92) {
-          return current;
-        }
-        return Math.min(current + Math.max(4, Math.round((100 - current) / 10)), 92);
-      });
-    }, 120);
+    noticeStartedAtRef.current = Date.now();
+    const timeoutId = window.setTimeout(() => {
+      setNoticeVisible(false);
+    }, noticeRemainingRef.current);
 
-    return () => window.clearInterval(intervalId);
-  }, [initialLoading]);
+    return () => {
+      window.clearTimeout(timeoutId);
+      noticeRemainingRef.current = Math.max(
+        0,
+        noticeRemainingRef.current - (Date.now() - noticeStartedAtRef.current),
+      );
+    };
+  }, [message, noticePaused, noticeVisible]);
+
+  useEffect(() => {
+    if (!message || noticeVisible) return;
+    const timeoutId = window.setTimeout(() => {
+      setMessage((current) => (current === message ? null : current));
+    }, 160);
+    return () => window.clearTimeout(timeoutId);
+  }, [message, noticeVisible]);
 
   const copy = useMemo(() => getTranslations(language), [language]);
   const loadingErrorTitle = copy.labels.loadFailed;
@@ -135,7 +153,19 @@ export function App() {
       setSavedCliAutoResume(settings);
     }).catch(setErrorMessage);
     void bridge.getCliTerminalSettings().then(setCliTerminalSettings).catch(setErrorMessage);
+    void bridge.getRouterLifecycleSettings().then(setRouterLifecycle).catch(setErrorMessage);
+    void bridge.getRouterPortSettings().then(setRouterPort).catch(setErrorMessage);
+    void bridge.getEnvHistoryRetentionSettings().then(setEnvHistoryRetention).catch(setErrorMessage);
   }, [view]);
+
+  async function initializeApp() {
+    setInitialLoadingProgress(12);
+    setInitialLoadingStage("loading-settings");
+    await loadLanguage();
+    setInitialLoadingProgress(32);
+    setInitialLoadingStage("restoring-routes");
+    await refreshOverview({ loadMetrics: true });
+  }
 
   async function handleCliTerminalSelection(id: CliTerminalId) {
     const previous = cliTerminalSettings;
@@ -189,6 +219,48 @@ export function App() {
       setErrorMessage(error);
     } finally {
       setAutoResumeSaving(false);
+    }
+  }
+
+  async function handleRouterLifecycleChange(next: RouterLifecycleSettings) {
+    const previous = routerLifecycle;
+    setRouterLifecycle(next);
+    setRouterLifecycleSaving(true);
+    try {
+      setRouterLifecycle(await bridge.setRouterLifecycleSettings(next));
+    } catch (error) {
+      setRouterLifecycle(previous);
+      setErrorMessage(error);
+    } finally {
+      setRouterLifecycleSaving(false);
+    }
+  }
+
+  async function handleRouterPortChange(next: RouterPortSettings) {
+    const previous = routerPort;
+    setRouterPort(next);
+    setRouterPortSaving(true);
+    try {
+      setRouterPort(await bridge.setRouterPortSettings(next));
+    } catch (error) {
+      setRouterPort(previous);
+      setErrorMessage(error);
+    } finally {
+      setRouterPortSaving(false);
+    }
+  }
+
+  async function handleEnvHistoryRetentionChange(next: EnvHistoryRetentionSettings) {
+    const previous = envHistoryRetention;
+    setEnvHistoryRetention(next);
+    setEnvHistoryRetentionSaving(true);
+    try {
+      setEnvHistoryRetention(await bridge.setEnvHistoryRetentionSettings(next));
+    } catch (error) {
+      setEnvHistoryRetention(previous);
+      setErrorMessage(error);
+    } finally {
+      setEnvHistoryRetentionSaving(false);
     }
   }
 
@@ -248,7 +320,10 @@ export function App() {
       const raw = await bridge.loadOverview();
       const nextOverview = JSON.parse(raw) as OverviewPayload;
       setOverview(nextOverview);
-      setMessage(null);
+      if (initialLoading) {
+        setInitialLoadingProgress(88);
+        setInitialLoadingStage("ready");
+      }
       if (options?.loadMetrics !== false) {
         void refreshAuthMetrics(nextOverview);
       }
@@ -344,6 +419,26 @@ export function App() {
     try {
       await bridge.switchAccount(target, account.envName, account.name, strategy, workingDirectory);
       setMessage(buildDesktopNotice(language, "success", translate(copy.message.switchedAccount, { target: target.toUpperCase(), env: account.envName, account: account.name })));
+      await refreshOverview({ loadMetrics: true });
+    } catch (error) {
+      setErrorMessage(error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCopyAccount(account: AccountSummary, targetEnvName: string) {
+    setBusy(true);
+    try {
+      const result = await bridge.copyAccount(account.envName, account.name, targetEnvName);
+      const destination = result.output?.trim() || targetEnvName;
+      setSuccessMessage(
+        language === "zh"
+          ? `账号已复制到 ${destination}`
+          : language === "ja"
+            ? `アカウントを ${destination} に複製しました`
+            : `Account copied to ${destination}`,
+      );
       await refreshOverview({ loadMetrics: true });
     } catch (error) {
       setErrorMessage(error);
@@ -550,11 +645,27 @@ export function App() {
     }
   }
 
-  async function handleNativeLogin(action: "login" | "relogin"): Promise<boolean> {
+  async function handleNativeLogin(
+    action: "login" | "relogin",
+    protocolSettings?: AccountProtocolSettings,
+  ): Promise<boolean> {
     if (!accountEnvDraft.trim() || !accountNameDraft.trim()) {
       setValidationMessage("runtime-requires-input");
       return false;
     }
+
+    const existingAccount = overview?.accounts.find(
+      (account) => account.envName === accountEnvDraft.trim() && account.name === accountNameDraft.trim(),
+    );
+    const effectiveProtocolSettings: AccountProtocolSettings = protocolSettings ?? {
+      apiProtocol: existingAccount?.runtime.apiProtocol ?? "responses",
+      compatibilityEnabled: existingAccount?.runtime.compatibilityRouteEnabled === true,
+      upstreamModel: existingAccount?.runtime.compatibilityUpstreamModel,
+      reasoningProfile: existingAccount?.runtime.compatibilityReasoningProfile ?? "auto",
+      longConversationStrategy: existingAccount?.runtime.compatibilityLongConversationStrategy ?? "safe",
+      instructionRole: existingAccount?.runtime.compatibilityInstructionRole ?? "auto",
+      requestOverrides: existingAccount?.runtime.compatibilityRequestOverrides,
+    };
 
     setBusy(true);
     try {
@@ -568,6 +679,13 @@ export function App() {
         baseUrlMode: accountBaseUrlModeDraft === "custom" ? "custom" : "default",
         baseUrl: accountBaseUrlDraft.trim() || undefined,
         sub2apiPayload: accountSub2ApiDraft,
+        apiProtocol: effectiveProtocolSettings.apiProtocol,
+        compatibilityEnabled: effectiveProtocolSettings.compatibilityEnabled,
+        upstreamModel: effectiveProtocolSettings.upstreamModel,
+        reasoningProfile: effectiveProtocolSettings.reasoningProfile,
+        longConversationStrategy: effectiveProtocolSettings.longConversationStrategy,
+        instructionRole: effectiveProtocolSettings.instructionRole,
+        requestOverrides: effectiveProtocolSettings.requestOverrides,
       });
       setTranslatedSuccessMessage(action === "relogin" ? copy.message.reloginCompleted : copy.message.loginCompleted, {
         env: accountEnvDraft.trim(),
@@ -692,7 +810,7 @@ export function App() {
     setAccountModeDraft(account.authMode === "apikey" || account.authMode === "sub2api" ? account.authMode : "auth");
     setAccountApiKeyDraft(account.apiKeyValue ?? "");
     setAccountBaseUrlModeDraft(account.runtime.openaiBaseUrlMode);
-    setAccountBaseUrlDraft(account.runtime.openaiBaseUrl ?? "");
+    setAccountBaseUrlDraft(account.route?.originalBaseUrl ?? account.runtime.openaiBaseUrl ?? "");
     setRuntimeEnvDraft(account.envName);
     setRuntimeAccountDraft(account.name);
     setRuntimeBaseUrlDraft(account.runtime.openaiBaseUrl ?? "");
@@ -705,25 +823,31 @@ export function App() {
         nav={[
           { view: "accounts", label: copy.nav.accounts },
           { view: "environments", label: copy.nav.environments },
+          { view: "models", label: copy.nav.models },
           { view: "usage", label: copy.nav.usage },
           { view: "operations", label: copy.nav.operations },
         ]}
         currentView={view}
         onChangeView={setView}
-        language={language}
-        languageLabel={copy.topbar.language}
-        languageOptions={SUPPORTED_LANGUAGES.map((item) => ({ value: item, label: LANGUAGE_LABELS[item] }))}
-        onChangeLanguage={(item) => void handleSetLanguage(normalizeLanguage(item))}
         message={message}
+        noticeVisible={noticeVisible}
+        onNoticePauseChange={setNoticePaused}
       >
         <section className="flex min-h-[calc(100vh-140px)] items-center justify-center">
           <div className="w-full max-w-[520px]">
             <div className="h-1.5 overflow-hidden rounded-full bg-neutral-200/70">
               <div
-                className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
-                style={{ width: `${initialLoadingProgress}%` }}
+                className="h-full origin-left rounded-full bg-primary transition-transform duration-[220ms] ease-[cubic-bezier(0.23,1,0.32,1)]"
+                style={{ transform: `scaleX(${initialLoadingProgress / 100})` }}
               />
             </div>
+            <p className="mt-3 text-center text-[12px] text-slate-500">
+              {language === "zh"
+                ? initialLoadingStage === "loading-settings" ? "正在加载界面设置" : initialLoadingStage === "restoring-routes" ? "正在恢复本地配置与代理路由" : "启动就绪"
+                : language === "ja"
+                  ? initialLoadingStage === "loading-settings" ? "画面設定を読み込み中" : initialLoadingStage === "restoring-routes" ? "設定とプロキシルートを復元中" : "起動準備完了"
+                  : initialLoadingStage === "loading-settings" ? "Loading interface settings" : initialLoadingStage === "restoring-routes" ? "Restoring configuration and proxy routes" : "Ready"}
+            </p>
           </div>
         </section>
       </DesktopShell>
@@ -737,16 +861,15 @@ export function App() {
         nav={[
           { view: "accounts", label: copy.nav.accounts },
           { view: "environments", label: copy.nav.environments },
+          { view: "models", label: copy.nav.models },
           { view: "usage", label: copy.nav.usage },
           { view: "operations", label: copy.nav.operations },
         ]}
         currentView={view}
         onChangeView={setView}
-        language={language}
-        languageLabel={copy.topbar.language}
-        languageOptions={SUPPORTED_LANGUAGES.map((item) => ({ value: item, label: LANGUAGE_LABELS[item] }))}
-        onChangeLanguage={(item) => void handleSetLanguage(normalizeLanguage(item))}
         message={message}
+        noticeVisible={noticeVisible}
+        onNoticePauseChange={setNoticePaused}
       >
         <section className="flex min-h-[calc(100vh-140px)] items-center justify-center">
           <div className="flex flex-col items-center gap-4">
@@ -766,16 +889,15 @@ export function App() {
       nav={[
         { view: "accounts", label: copy.nav.accounts },
         { view: "environments", label: copy.nav.environments },
+        { view: "models", label: copy.nav.models },
         { view: "usage", label: copy.nav.usage },
         { view: "operations", label: copy.nav.operations },
       ]}
       currentView={view}
       onChangeView={setView}
-      language={language}
-      languageLabel={copy.topbar.language}
-      languageOptions={SUPPORTED_LANGUAGES.map((item) => ({ value: item, label: LANGUAGE_LABELS[item] }))}
-      onChangeLanguage={(item) => void handleSetLanguage(normalizeLanguage(item))}
       message={message}
+      noticeVisible={noticeVisible}
+      onNoticePauseChange={setNoticePaused}
     >
       {view === "environments" ? (
         <EnvironmentsPage
@@ -843,10 +965,11 @@ export function App() {
           onListAccountProjects={(account) => bridge.listAccountProjects(account.envName, account.name)}
           onPickDirectory={() => bridge.pickDirectory()}
           onPrimeAccount={primeAccountDrafts}
-          onLogin={() => handleNativeLogin("login")}
+          onLogin={(settings) => handleNativeLogin("login", settings)}
           onRelogin={() => handleNativeLogin("relogin")}
           onLogout={() => void handleAccountCommand("logout")}
           onDeleteAccount={() => void handleAccountCommand("rm")}
+          onCopyAccount={(account, targetEnvName) => void handleCopyAccount(account, targetEnvName)}
           onUpdateRuntime={handleUpdateRuntime}
           onUpdateIndependentModel={handleUpdateIndependentModel}
           onCopyApiKey={(value) => {
@@ -857,10 +980,21 @@ export function App() {
         />
       ) : null}
 
-      {view === "operations" ? (
-        <OperationsPage
+      {view === "models" ? (
+        <ModelsPage
           overview={overview}
           language={language}
+          bridge={bridge}
+          onSuccess={setSuccessMessage}
+          onError={setErrorMessage}
+        />
+      ) : null}
+
+      {view === "operations" ? (
+        <OperationsPage
+          language={language}
+          languageOptions={SUPPORTED_LANGUAGES.map((item) => ({ value: item, label: LANGUAGE_LABELS[item] }))}
+          onLanguageChange={(item) => void handleSetLanguage(normalizeLanguage(item))}
           busy={busy}
           proxyDraft={proxyDraft}
           logKind={selectedLogKind}
@@ -884,6 +1018,15 @@ export function App() {
           cliTerminalSaving={cliTerminalSaving}
           onCliTerminalChange={(id) => void handleCliTerminalSelection(id)}
           onCliTerminalScan={() => void handleCliTerminalScan()}
+          routerLifecycle={routerLifecycle}
+          routerLifecycleSaving={routerLifecycleSaving}
+          onRouterLifecycleChange={(next) => void handleRouterLifecycleChange(next)}
+          routerPort={routerPort}
+          routerPortSaving={routerPortSaving}
+          onRouterPortChange={(next) => void handleRouterPortChange(next)}
+          envHistoryRetention={envHistoryRetention}
+          envHistoryRetentionSaving={envHistoryRetentionSaving}
+          onEnvHistoryRetentionChange={(next) => void handleEnvHistoryRetentionChange(next)}
         />
       ) : null}
 

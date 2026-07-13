@@ -3,6 +3,10 @@ export type TargetName = "cli" | "app";
 export type AuthMode = "auth" | "apikey" | "provider-profile";
 export type PreferredAuthMethod = "chatgpt" | "apikey";
 export type OpenAIBaseUrlMode = "default" | "custom";
+export type AccountApiProtocol = "responses" | "chat_completions";
+export type ReasoningProfile = "auto" | "standard" | "reasoning_content" | "think_tags";
+export type LongConversationStrategy = "safe" | "continuity";
+export type CompatibilityInstructionRole = "auto" | "system" | "developer";
 export type TaskStatus = "pending" | "running" | "succeeded" | "failed";
 export type AuthDataValue = string | number | boolean | null | Record<string, unknown> | unknown[];
 export type AuthDataRecord = Record<string, AuthDataValue>;
@@ -20,6 +24,16 @@ export interface AccountRuntimeSettings {
     independentModelProviderId?: string;
     independentModelApiKey?: string;
     independentModelBaseUrl?: string;
+    apiProtocol?: AccountApiProtocol;
+    compatibilityRouteEnabled?: boolean;
+    compatibilityRouteBaseUrl?: string;
+    compatibilityRouteToken?: string;
+    compatibilityRouteProviderId?: string;
+    compatibilityUpstreamModel?: string;
+    compatibilityReasoningProfile?: ReasoningProfile;
+    compatibilityLongConversationStrategy?: LongConversationStrategy;
+    compatibilityInstructionRole?: CompatibilityInstructionRole;
+    compatibilityRequestOverrides?: Record<string, unknown>;
 }
 export interface AccountState {
     name: string;

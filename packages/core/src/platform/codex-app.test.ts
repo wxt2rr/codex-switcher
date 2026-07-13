@@ -17,6 +17,7 @@ import {
   readLastManagedAppInstanceId,
   readManagedAppPid,
   resolveManagedAppStatePaths,
+  setManagedAppInstance,
 } from "./codex-app-runtime.js";
 
 test("launchCodexApp passes CODEX_HOME and managed marker to the runner", async () => {
@@ -62,6 +63,18 @@ test("buildCodexAppLaunchSpec uses cmd start wrapper on windows by default", () 
     "/c",
     'start "" /b "C:\\Program Files\\Codex\\Codex.exe"',
   ]);
+});
+
+test("buildCodexAppLaunchSpec isolates a non-Windows App instance with user-data-dir", () => {
+  const spec = buildCodexAppLaunchSpec(
+    "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+    {},
+    "darwin",
+    "/tmp/codex-switcher/app profile",
+  );
+
+  assert.equal(spec.command, "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT");
+  assert.deepEqual(spec.args, ["--user-data-dir=/tmp/codex-switcher/app profile"]);
 });
 
 test("buildCodexAppLaunchSpec supports PowerShell launcher on windows", () => {
@@ -113,7 +126,10 @@ test("launchNewCodexApp records the managed app pid", async () => {
           CODEX_SWITCHER_APP_BIN: "/tmp/Codex",
         },
       },
-      async () => ({ pid: 2222 }),
+      async (_command, args) => {
+        assert.deepEqual(args, [`--user-data-dir=${join(root, "app-profiles", "instance-1")}`]);
+        return { pid: 2222 };
+      },
     );
 
     assert.equal(result.pid, 2222);
@@ -129,6 +145,39 @@ test("launchNewCodexApp records the managed app pid", async () => {
       await listManagedAppInstances(resolveManagedAppStatePaths(root)),
       [{ instanceId: "instance-1", pid: 2222 }],
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("managed app launches are serialized so instance profiles cannot collide", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-app-launch-serialized-"));
+  const profileArgs: string[] = [];
+  let nextPid = 3000;
+  try {
+    const input = {
+      codexHome: "/tmp/codex-home",
+      stateDir: root,
+      env: { CODEX_SWITCHER_APP_BIN: "/tmp/Codex" },
+    };
+    await Promise.all([
+      launchNewCodexApp(input, async (_command, args) => {
+        profileArgs.push(args[0] ?? "");
+        return { pid: nextPid++ };
+      }),
+      launchNewCodexApp(input, async (_command, args) => {
+        profileArgs.push(args[0] ?? "");
+        return { pid: nextPid++ };
+      }),
+    ]);
+    assert.deepEqual(profileArgs, [
+      `--user-data-dir=${join(root, "app-profiles", "instance-1")}`,
+      `--user-data-dir=${join(root, "app-profiles", "instance-2")}`,
+    ]);
+    assert.deepEqual(await listManagedAppInstances(resolveManagedAppStatePaths(root)), [
+      { instanceId: "instance-1", pid: 3000 },
+      { instanceId: "instance-2", pid: 3001 },
+    ]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -181,7 +230,41 @@ test("restartCurrentCodexApp replaces the managed app pid", async () => {
   }
 });
 
-test("restartCurrentCodexApp derives the macOS application name from the configured binary", async () => {
+test("restartCurrentCodexApp continues when the recorded process is no longer manageable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-app-restart-stale-"));
+  const calls: string[] = [];
+  try {
+    const paths = resolveManagedAppStatePaths(root);
+    await setManagedAppInstance(paths, { instanceId: "instance-1", pid: 2222, targetKey: "env/account" });
+
+    const result = await restartCurrentCodexApp(
+      {
+        codexHome: "/tmp/codex-home",
+        stateDir: root,
+        targetKey: "env/account",
+        env: { CODEX_SWITCHER_APP_BIN: "/tmp/Codex" },
+      },
+      async () => {
+        calls.push("launch");
+        return { pid: 3333 };
+      },
+      async (pid) => {
+        calls.push(`stale:${pid}`);
+        return false;
+      },
+    );
+
+    assert.equal(result.pid, 3333);
+    assert.deepEqual(calls, ["stale:2222", "launch"]);
+    assert.deepEqual(await listManagedAppInstances(paths), [
+      { instanceId: "instance-1", pid: 3333, targetKey: "env/account" },
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("restartCurrentCodexApp avoids application-wide quit when replacing one instance", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-app-chatgpt-restart-"));
   const calls: string[] = [];
 
@@ -201,10 +284,29 @@ test("restartCurrentCodexApp derives the macOS application name from the configu
     );
 
     assert.equal(result.pid, 3333);
-    assert.deepEqual(calls, ["ChatGPT"]);
+    assert.deepEqual(calls, [""]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("restartCurrentCodexApp stops only the instance bound to its target account", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-app-target-restart-"));
+  const stopped: number[] = [];
+  try {
+    const paths = resolveManagedAppStatePaths(root);
+    await setManagedAppInstance(paths, { instanceId: "instance-1", pid: 1111, targetKey: "env-a/account-a" });
+    await setManagedAppInstance(paths, { instanceId: "instance-2", pid: 2222, targetKey: "env-b/account-b" });
+    await restartCurrentCodexApp({ codexHome: "/tmp/a", stateDir: root, targetKey: "env-a/account-a",
+      env: { CODEX_SWITCHER_APP_BIN: "/tmp/Codex" } }, async () => ({ pid: 3333 }), async (pid) => {
+      stopped.push(pid); return true;
+    });
+    assert.deepEqual(stopped, [1111]);
+    assert.deepEqual(await listManagedAppInstances(paths), [
+      { instanceId: "instance-2", pid: 2222, targetKey: "env-b/account-b" },
+      { instanceId: "instance-3", pid: 3333, targetKey: "env-a/account-a" },
+    ]);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("stopManagedCodexApp clears pid file after stopping a managed process", async () => {

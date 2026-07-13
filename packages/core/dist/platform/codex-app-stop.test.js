@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildManagedAppStopPlan, executeManagedAppStopPlan, } from "./codex-app-stop.js";
+import { buildManagedAppStopPlan, executeManagedAppStopPlan, waitForManagedAppExit, } from "./codex-app-stop.js";
 test("buildManagedAppStopPlan uses taskkill tree termination on windows", () => {
     const plan = buildManagedAppStopPlan({
         platform: "windows",
@@ -35,10 +35,24 @@ test("buildManagedAppStopPlan uses AppleScript quit before pid fallback on macos
         },
         {
             kind: "signal",
-            pid: 9876,
+            pid: -9876,
             signal: "SIGTERM",
         },
     ]);
+});
+test("waitForManagedAppExit force-kills only the isolated process group after timeout", async () => {
+    const signals = [];
+    let runningChecks = 0;
+    await waitForManagedAppExit({ platform: "macos", pid: 9876, gracefulTimeoutMs: 2, forceTimeoutMs: 2, pollMs: 1 }, {
+        async isRunning(pid) {
+            assert.equal(pid, -9876);
+            runningChecks += 1;
+            return runningChecks < 4;
+        },
+        async signal(pid, signal) { signals.push({ pid, signal }); },
+        async delay() { },
+    });
+    assert.deepEqual(signals, [{ pid: -9876, signal: "SIGKILL" }]);
 });
 test("buildManagedAppStopPlan quits the configured merged ChatGPT app on macos", () => {
     const plan = buildManagedAppStopPlan({
@@ -89,6 +103,39 @@ test("executeManagedAppStopPlan runs steps in order and tolerates optional failu
         'spawn:osascript -e tell application "Codex" to quit',
         "signal:1111:SIGTERM",
     ]);
+});
+test("executeManagedAppStopPlan falls back to the main pid when process-group signaling is denied", async () => {
+    const calls = [];
+    const result = await executeManagedAppStopPlan([{ kind: "signal", pid: -4321, signal: "SIGTERM" }], {
+        async spawn() { },
+        async signal(pid, signal) {
+            calls.push(`${pid}:${signal}`);
+            if (pid < 0) {
+                const error = new Error("kill EPERM");
+                error.code = "EPERM";
+                throw error;
+            }
+        },
+    });
+    assert.equal(result, true);
+    assert.deepEqual(calls, ["-4321:SIGTERM", "4321:SIGTERM"]);
+});
+test("waitForManagedAppExit checks the main pid when process-group inspection is denied", async () => {
+    const checked = [];
+    await waitForManagedAppExit({ platform: "macos", pid: 4321, gracefulTimeoutMs: 1, pollMs: 1 }, {
+        async isRunning(pid) {
+            checked.push(pid);
+            if (pid < 0) {
+                const error = new Error("kill EPERM");
+                error.code = "EPERM";
+                throw error;
+            }
+            return false;
+        },
+        async signal() { },
+        async delay() { },
+    });
+    assert.deepEqual(checked, [-4321, 4321]);
 });
 test("executeManagedAppStopPlan tolerates missing windows taskkill target", async () => {
     const calls = [];

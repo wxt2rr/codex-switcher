@@ -4,11 +4,12 @@ import { Check, RefreshCw, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/form-primitives";
 import type { DesktopBridge } from "../bridge";
-import type { OverviewPayload, UsagePricingProfile, UsageSnapshot } from "../desktop-model";
+import type { OverviewPayload, UsageFilter, UsagePricingProfile, UsageSnapshot } from "../desktop-model";
 import type { UiLanguage } from "../i18n";
 import { StatCard } from "../components/dashboard-kit";
 import { UsageDonut, UsageTrendChart, formatCompact } from "../components/usage-charts";
 import { SidePanel } from "../components/admin-primitives";
+import { PageScrollArea } from "../components/account-list-primitives";
 import { cn } from "../lib/utils";
 import {
   buildUsageFilter,
@@ -17,6 +18,7 @@ import {
   shouldScheduleUsageRefresh,
   type UsageRange,
 } from "../refresh-policy";
+import { UsageRequestDetailsPage } from "./usage-request-details-page";
 
 const emptySnapshot: UsageSnapshot = {
   generatedAt: 0,
@@ -44,6 +46,7 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
   const [priceCacheCreation, setPriceCacheCreation] = useState("");
   const [priceCacheRead, setPriceCacheRead] = useState("");
   const [refreshIntervalSeconds, setRefreshIntervalSeconds] = useState(5);
+  const [requestDetails, setRequestDetails] = useState<{ baseUrl: string; filter: UsageFilter } | null>(null);
   const [customRefreshEditing, setCustomRefreshEditing] = useState(false);
   const [customRefreshDraft, setCustomRefreshDraft] = useState("5");
   const requestInFlightRef = useRef(false);
@@ -58,13 +61,14 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
     finally { requestInFlightRef.current = false; setLoading(false); }
   }
 
-  useEffect(() => { void refresh(); }, [range, envName, accountName, baseUrl, model]);
+  useEffect(() => { if (!requestDetails) void refresh(); }, [range, envName, accountName, baseUrl, model, requestDetails]);
   useEffect(() => {
+    if (requestDetails) return;
     const timer = window.setInterval(() => {
       if (shouldScheduleUsageRefresh(document.visibilityState, requestInFlightRef.current)) void refresh();
     }, refreshIntervalSeconds * 1000);
     return () => window.clearInterval(timer);
-  }, [range, envName, accountName, baseUrl, model, refreshIntervalSeconds]);
+  }, [range, envName, accountName, baseUrl, model, refreshIntervalSeconds, requestDetails]);
 
   const accounts = overview.accounts.filter((item) => envName === "all" || item.envName === envName);
   const zh = language === "zh";
@@ -91,9 +95,15 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
     setPricing(await bridge.listUsagePricing());
     await refresh();
   }
+  if (requestDetails) {
+    return <UsageRequestDetailsPage language={language} bridge={bridge} baseUrl={requestDetails.baseUrl}
+      initialFilter={requestDetails.filter} environmentNames={overview.envs.map((env) => env.name)}
+      accounts={overview.accounts} onBack={() => setRequestDetails(null)} />;
+  }
   return (
-    <section className="h-full min-h-0 overflow-auto px-6 pb-6 pt-6 xl:px-8 xl:pb-8 xl:pt-8">
-      <div className="admin-page-content flex min-h-full flex-col gap-3">
+    <section className="h-full min-h-0 overflow-hidden px-6 pb-6 pt-6 xl:px-8 xl:pb-8 xl:pt-8">
+      <PageScrollArea>
+        <div className="admin-page-content flex min-h-full flex-col gap-3">
         <div className="flex items-start justify-between gap-6">
           <div><h2 className="text-[28px] font-semibold tracking-[-0.04em]">{zh ? "使用统计" : "Usage Analytics"}</h2>
             <p className="mt-1 text-[13px] leading-6 text-slate-500">{zh ? "按环境、账号、Base URL 和模型近实时统计路由请求的 Token 使用量。" : "Near-real-time routed token usage by environment, account, Base URL, and model."}</p></div>
@@ -107,7 +117,7 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
           <Select value={baseUrl} onValueChange={setBaseUrl} items={[{ value: "all", label: "Base URL" }, ...snapshot.baseUrls.map((item) => ({ value: item.baseUrl ?? item.key, label: item.baseUrl ?? item.key }))]} className="h-8 min-w-[150px] max-w-[240px] border-transparent bg-[#f7f8fa]" />
           <Select value={model} onValueChange={setModel} items={[{ value: "all", label: zh ? "全部模型" : "All models" }, ...snapshot.models.map((item) => ({ value: item.model ?? item.key, label: item.model ?? item.key }))]} className="h-8 w-[130px] border-transparent bg-[#f7f8fa]" />
           <div className="ml-auto flex h-8 items-center overflow-hidden rounded-lg bg-[#f3f4f6]">
-            <button type="button" className="flex size-8 shrink-0 items-center justify-center text-slate-500 transition hover:bg-[#ebeef2] hover:text-neutral-800 disabled:cursor-wait" onClick={() => void refresh()} disabled={loading} aria-label={zh ? "立即刷新" : "Refresh now"} title={zh ? "立即刷新" : "Refresh now"}><RefreshCw className={cn("size-3.5", loading && "animate-spin")} /></button>
+            <button type="button" className="motion-interactive-color flex size-8 shrink-0 items-center justify-center text-slate-500 hover:bg-[#ebeef2] hover:text-neutral-800 disabled:cursor-wait" onClick={() => void refresh()} disabled={loading} aria-label={zh ? "立即刷新" : "Refresh now"} title={zh ? "立即刷新" : "Refresh now"}><RefreshCw className={cn("size-3.5", loading && "animate-spin")} /></button>
             {customRefreshEditing ? (
               <div className="flex items-center border-l border-black/[0.05]">
                 <Input data-usage-refresh-input type="number" min={1} max={3600} value={customRefreshDraft}
@@ -154,7 +164,7 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
           </section>
         </div>
         <section className="rounded-[18px] bg-white p-5 ring-1 ring-black/[0.04]"><h3 className="text-[16px] font-semibold">Base URL</h3>
-          <div className="mt-3 overflow-auto"><table className="w-full min-w-[720px] text-left text-[12px]"><thead className="text-slate-400"><tr><th className="py-2">Base URL</th><th>{zh ? "请求" : "Requests"}</th><th className="text-blue-600">Input</th><th className="text-emerald-600">Output</th><th className="text-cyan-600">Cache Read</th><th>Token</th><th>{zh ? "标准费用" : "Standard cost"}</th></tr></thead><tbody>{snapshot.baseUrls.map((item) => <tr key={item.key} className="border-t border-slate-100"><td className="max-w-[360px] truncate py-3 font-medium">{item.baseUrl}</td><td>{item.requests}</td><td className="text-blue-600">{formatCompact(item.inputTokens)}</td><td className="text-emerald-600">{formatCompact(item.outputTokens)}</td><td className="text-cyan-600">{formatCompact(item.cacheReadTokens)}</td><td className="font-medium text-neutral-900">{formatCompact(item.totalTokens)}</td><td>{item.standardCost === null ? "-" : `$${item.standardCost.toFixed(4)}`}</td></tr>)}</tbody></table></div>
+          <div className="mt-3 overflow-auto"><table className="w-full min-w-[720px] text-left text-[12px]"><thead className="text-slate-400"><tr><th className="py-2">Base URL</th><th>{zh ? "请求" : "Requests"}</th><th className="text-blue-600">Input</th><th className="text-emerald-600">Output</th><th className="text-cyan-600">Cache Read</th><th>Token</th><th>{zh ? "标准费用" : "Standard cost"}</th></tr></thead><tbody>{snapshot.baseUrls.map((item) => <tr key={item.key} className="border-t border-slate-100"><td className="max-w-[360px] py-3"><button type="button" className="block max-w-full truncate text-left font-medium underline-offset-4 hover:text-blue-600 hover:underline" title={item.baseUrl} onClick={() => setRequestDetails({ baseUrl: item.baseUrl ?? item.key, filter: buildUsageFilter({ range, envName, accountName, baseUrl: item.baseUrl ?? item.key, model }, Date.now()) })}>{item.baseUrl}</button></td><td>{item.requests}</td><td className="text-blue-600">{formatCompact(item.inputTokens)}</td><td className="text-emerald-600">{formatCompact(item.outputTokens)}</td><td className="text-cyan-600">{formatCompact(item.cacheReadTokens)}</td><td className="font-medium text-neutral-900">{formatCompact(item.totalTokens)}</td><td>{item.standardCost === null ? "-" : `$${item.standardCost.toFixed(4)}`}</td></tr>)}</tbody></table></div>
         </section>
         <SidePanel open={pricingOpen} title={zh ? "价格配置" : "Pricing profiles"} description={zh ? "按 Base URL 和模型配置实际采购价或标准价，单位为每百万 Token。保存后会重算历史记录。" : "Configure actual or standard rates per million tokens. Historical records are repriced after saving."} onClose={() => setPricingOpen(false)} closeLabel={zh ? "关闭" : "Close"}>
           <div className="space-y-4">
@@ -166,7 +176,8 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
             <div className="divide-y divide-slate-200 border-y border-slate-200">{pricing.map((item) => <div key={`${item.kind}/${item.baseUrl}/${item.modelPattern}`} className="py-3 text-[12px]"><div className="flex justify-between"><b>{item.kind === "actual" ? (zh ? "实际" : "Actual") : (zh ? "标准" : "Standard")}</b><span>{item.modelPattern}</span></div><div className="mt-1 truncate text-slate-500">{item.baseUrl}</div><div className="mt-1 text-slate-500">Input ${item.inputPerMillion} · Output ${item.outputPerMillion}</div></div>)}</div>
           </div>
         </SidePanel>
-      </div>
+        </div>
+      </PageScrollArea>
     </section>
   );
 }

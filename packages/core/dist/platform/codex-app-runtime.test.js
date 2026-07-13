@@ -1,9 +1,47 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { listManagedAppInstances, readLastManagedAppInstanceId, readManagedAppPid, resolveManagedAppStatePaths, setManagedAppInstance, stopManagedAppPid, writeManagedAppPid, } from "./codex-app-runtime.js";
+import { clearManagedAppInstance, listManagedAppInstances, readLastManagedAppInstanceId, readManagedAppPid, removeManagedAppProfile, resolveManagedAppStatePaths, setManagedAppInstance, stopManagedAppPid, writeManagedAppPid, } from "./codex-app-runtime.js";
+test("profile removal retries transient Chromium directory races", async () => {
+    let attempts = 0;
+    await removeManagedAppProfile("/tmp/profile", {
+        maxRetries: 3,
+        retryDelayMs: 1,
+        async remove() {
+            attempts += 1;
+            if (attempts < 3) {
+                const error = new Error("directory not empty");
+                error.code = "ENOTEMPTY";
+                throw error;
+            }
+        },
+        async delay() { },
+    });
+    assert.equal(attempts, 3);
+});
+test("instance metadata remains recoverable when profile cleanup fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-app-runtime-cleanup-failure-"));
+    try {
+        const paths = resolveManagedAppStatePaths(root);
+        await setManagedAppInstance(paths, { instanceId: "instance-1", pid: 2468, targetKey: "env/account" });
+        await assert.rejects(() => clearManagedAppInstance(paths, "instance-1", {
+            maxRetries: 0,
+            async remove() {
+                const error = new Error("directory not empty");
+                error.code = "ENOTEMPTY";
+                throw error;
+            },
+        }), /directory not empty/);
+        assert.deepEqual(await listManagedAppInstances(paths), [
+            { instanceId: "instance-1", pid: 2468, targetKey: "env/account" },
+        ]);
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
 test("managed app pid round-trips through the state file", async () => {
     const root = await mkdtemp(join(tmpdir(), "codex-switcher-app-runtime-"));
     try {
@@ -85,6 +123,7 @@ test("stopManagedAppPid falls back to the previous managed instance when others 
             instanceId: "instance-2",
             pid: 2222,
         });
+        await mkdir(join(paths.appProfilesDir, "instance-2"), { recursive: true });
         const stopped = await stopManagedAppPid(paths, async (pid) => {
             calls.push(pid);
             return true;
@@ -99,6 +138,60 @@ test("stopManagedAppPid falls back to the previous managed instance when others 
                 pid: 1111,
             },
         ]);
+        await assert.rejects(access(join(paths.appProfilesDir, "instance-2")));
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+test("stopManagedAppPid replaces only the latest instance for the requested account scope", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-app-runtime-scope-"));
+    const calls = [];
+    try {
+        const paths = resolveManagedAppStatePaths(root);
+        await setManagedAppInstance(paths, { instanceId: "instance-1", pid: 1111, targetKey: "env-a/account-a" });
+        await setManagedAppInstance(paths, { instanceId: "instance-2", pid: 2222, targetKey: "env-b/account-b" });
+        await setManagedAppInstance(paths, { instanceId: "instance-3", pid: 3333, targetKey: "env-a/account-a" });
+        const stopped = await stopManagedAppPid(paths, async (pid) => { calls.push(pid); return true; }, undefined, "env-a/account-a");
+        assert.equal(stopped, true);
+        assert.deepEqual(calls, [3333]);
+        assert.deepEqual(await listManagedAppInstances(paths), [
+            { instanceId: "instance-1", pid: 1111, targetKey: "env-a/account-a" },
+            { instanceId: "instance-2", pid: 2222, targetKey: "env-b/account-b" },
+        ]);
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+test("stopManagedAppPid preserves instance state when process termination fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-app-runtime-stop-failure-"));
+    try {
+        const paths = resolveManagedAppStatePaths(root);
+        await setManagedAppInstance(paths, { instanceId: "instance-1", pid: 1111, targetKey: "env/account" });
+        await mkdir(join(paths.appProfilesDir, "instance-1"), { recursive: true });
+        await assert.rejects(() => stopManagedAppPid(paths, async () => {
+            throw new Error("process group still running");
+        }), /still running/);
+        assert.deepEqual(await listManagedAppInstances(paths), [
+            { instanceId: "instance-1", pid: 1111, targetKey: "env/account" },
+        ]);
+        await access(join(paths.appProfilesDir, "instance-1"));
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+test("stopManagedAppPid clears stale instance state when the stopper cannot manage its pid", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-app-runtime-stale-permission-"));
+    try {
+        const paths = resolveManagedAppStatePaths(root);
+        await setManagedAppInstance(paths, { instanceId: "instance-1", pid: 1111, targetKey: "env/account" });
+        await mkdir(join(paths.appProfilesDir, "instance-1"), { recursive: true });
+        assert.equal(await stopManagedAppPid(paths, async () => false, undefined, "env/account"), true);
+        assert.deepEqual(await listManagedAppInstances(paths), []);
+        assert.equal(await readManagedAppPid(paths), null);
+        await assert.rejects(access(join(paths.appProfilesDir, "instance-1")));
     }
     finally {
         await rm(root, { recursive: true, force: true });

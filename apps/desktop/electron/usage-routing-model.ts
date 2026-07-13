@@ -1,4 +1,9 @@
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
+
+export type RouteProtocol = "responses" | "chat_completions";
+export type ReasoningProfile = "auto" | "standard" | "reasoning_content" | "think_tags";
+export type LongConversationStrategy = "safe" | "continuity";
+export type CompatibilityInstructionRole = "auto" | "system" | "developer";
 
 export interface RouteTarget {
   routeId: string;
@@ -6,9 +11,29 @@ export interface RouteTarget {
   accountName: string;
   upstreamBaseUrl: string;
   originalBaseUrl: string;
+  protocol: RouteProtocol;
+  upstreamModel?: string;
+  reasoningProfile: ReasoningProfile;
+  longConversationStrategy?: LongConversationStrategy;
+  instructionRole?: CompatibilityInstructionRole;
+  requestOverrides?: Record<string, unknown>;
   enabled: boolean;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface RouteRuntimeSecret {
+  routeId: string;
+  upstreamApiKey: string;
+  localRouteToken: string;
+  hydratedAt: number;
+}
+
+export function authorizeRouteToken(header: string | undefined, expected: string): boolean {
+  const actual = header?.replace(/^Bearer\s+/i, "") ?? "";
+  const left = Buffer.from(actual);
+  const right = Buffer.from(expected);
+  return left.length === right.length && timingSafeEqual(left, right);
 }
 
 export interface ExtractedTokenUsage {
@@ -42,6 +67,31 @@ export interface UsageFilter {
   accountName?: string;
   baseUrl?: string;
   model?: string;
+}
+
+export interface UsageRequestQuery extends UsageFilter {
+  page: number;
+  pageSize: number;
+  endpoint?: string;
+  status?: "success" | "error";
+  search?: string;
+}
+
+export interface UsageRequestFacets {
+  envNames: string[];
+  accountNames: string[];
+  models: string[];
+  endpoints: string[];
+}
+
+export interface UsageRequestPage {
+  generatedAt: number;
+  items: UsageRequest[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  facets: UsageRequestFacets;
 }
 
 export interface UsageSummary {
@@ -118,6 +168,16 @@ export function createRouteId(envName: string, accountName: string, upstreamBase
 
 export function buildLocalRouteBaseUrl(port: number, routeId: string): string {
   return `http://127.0.0.1:${port}/routes/${encodeURIComponent(routeId)}`;
+}
+
+export function selectCompatibilityUpstreamBaseUrl(
+  routes: RouteTarget[],
+  envName: string,
+  accountName: string,
+  runtimeBaseUrl: string,
+): string {
+  return routes.find((route) => route.envName === envName && route.accountName === accountName)?.originalBaseUrl
+    || runtimeBaseUrl;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

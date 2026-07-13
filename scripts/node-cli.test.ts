@@ -1323,6 +1323,8 @@ test("node-cli doctor reports platform paths and binary discovery", async () => 
       CODEX_SWITCHER_DEFAULT_HOME: defaultHome,
       CODEX_SWITCHER_APP_BIN: appPath,
       CODEX_SWITCHER_WINDOWS_APP_LAUNCHER: "wt",
+      CODEX_BIN: "",
+      CODEX_SWITCHER_CODEX_BIN: "",
     };
 
     const doctor = await execFileAsync(

@@ -20,7 +20,7 @@ import {
   type EnvFileHistorySource,
 } from "./env-file-history.js";
 import { UsageRouterManager } from "./usage-router-manager.js";
-import type { PricingProfile, UsageFilter } from "./usage-routing-model.js";
+import { selectCompatibilityUpstreamBaseUrl, type PricingProfile, type UsageFilter, type UsageRequestQuery } from "./usage-routing-model.js";
 import {
   buildEffectiveCodexEnv,
   getCodexToolStatus,
@@ -37,10 +37,28 @@ import {
 import { findCodexResumeSession, readCodexProjects, type CodexProject } from "./codex-projects.js";
 import {
   readCliAutoResumeSettings,
+  readEnvHistoryRetentionSettings,
+  readRouterLifecycleSettings,
+  readRouterPortSettings,
   saveCliAutoResumeSettings,
+  saveEnvHistoryRetentionSettings,
+  saveRouterLifecycleSettings,
+  saveRouterPortSettings,
   type CliAutoResumeSettings,
+  type EnvHistoryRetentionSettings,
+  type RouterLifecycleSettings,
+  type RouterPortSettings,
 } from "./desktop-settings.js";
+import { runEnvHistoryCleanupIfDue } from "./env-history-retention.js";
 import { getCliTerminalSettings as readCliTerminalSettings, saveCliTerminalSelection, type CliTerminalId, type CliTerminalSettings } from "./cli-terminal-settings.js";
+import {
+  createModelCatalogStore,
+  type SaveCustomModelInput,
+} from "./model-catalog-store.js";
+import {
+  loadBundledModelCatalog,
+  synchronizeAccountModelCatalog,
+} from "./account-model-catalog.js";
 
 const execFileAsync = promisify(execFile);
 const currentDir = resolveCurrentDir();
@@ -98,16 +116,24 @@ let desktopOperationsLoaderForTest:
   | (() => Promise<DesktopOperationsServiceLike>)
   | undefined;
 let usageRouterManager: UsageRouterManager | undefined;
+let usageRouterManagerStateDir: string | undefined;
+let envHistoryCleanupQueue: Promise<void> = Promise.resolve();
 
 function getUsageRouterManager(): UsageRouterManager {
-  usageRouterManager ??= new UsageRouterManager({
-    stateDir: getStateDir(),
-    serviceEntryPath: join(currentDir, "usage-router-service-main.cjs"),
-  });
+  const stateDir = getStateDir();
+  if (!usageRouterManager || usageRouterManagerStateDir !== stateDir) {
+    usageRouterManager = new UsageRouterManager({
+      stateDir,
+      serviceEntryPath: join(currentDir, "usage-router-service-main.cjs"),
+      preferredPort: async () => (await readRouterPortSettings(getCodexToolPathOptions().settingsPath)).preferredPort,
+    });
+    usageRouterManagerStateDir = stateDir;
+  }
   return usageRouterManager;
 }
 
 export async function getEnvironmentRouteStatuses() {
+  await synchronizeEnabledEnvironmentRoutes();
   const state = await (await loadCoreRuntime()).readLegacyState(getLegacyOptions());
   return getUsageRouterManager().getEnvironmentStatuses(Object.keys(state.envs).sort());
 }
@@ -123,6 +149,16 @@ function getEnvironmentRouteAccounts(state: Awaited<ReturnType<Awaited<ReturnTyp
       ? account.runtime.openaiBaseUrl
       : "default",
   }));
+}
+
+async function resolveAccountUpstreamBaseUrl(
+  envName: string,
+  accountName: string,
+  runtime: { openaiBaseUrlMode: string; openaiBaseUrl?: string },
+): Promise<string> {
+  const routes = await getUsageRouterManager().listRoutesIfRunning().catch(() => []);
+  const runtimeBaseUrl = runtime.openaiBaseUrlMode === "custom" && runtime.openaiBaseUrl ? runtime.openaiBaseUrl : "default";
+  return selectCompatibilityUpstreamBaseUrl(routes, envName, accountName, runtimeBaseUrl);
 }
 
 function createEnvironmentRouteBaseUrlUpdater(
@@ -146,7 +182,6 @@ function createEnvironmentRouteBaseUrlUpdater(
     const updated = next.envs[envName]?.accounts[accountName];
     if (!updated) throw new Error(`Unable to update '${envName}/${accountName}'`);
     await runtime.writeLegacyRuntime({ stateDir: getStateDir(), envName, accountName, runtime: updated.runtime });
-    await syncUpdatedAuthToActiveTargetsDirect(runtime, envName, accountName);
   };
 }
 
@@ -158,6 +193,73 @@ async function syncEnvironmentRouteIfEnabled(envName: string): Promise<void> {
     getEnvironmentRouteAccounts(state, envName),
     createEnvironmentRouteBaseUrlUpdater(runtime, envName),
   );
+}
+
+async function synchronizeEnabledEnvironmentRoutes(): Promise<void> {
+  const routes = await getUsageRouterManager().listRoutesIfRunning().catch(() => []);
+  const envNames = Array.from(new Set(
+    routes
+      .filter((route) => route.enabled && route.protocol === "responses")
+      .map((route) => route.envName),
+  ));
+  for (const envName of envNames) {
+    await syncEnvironmentRouteIfEnabled(envName).catch(() => undefined);
+  }
+}
+
+async function restoreEnabledRoutes(): Promise<void> {
+  const manager = getUsageRouterManager();
+  const routes = (await manager.listPersistedRoutes()).filter((route) => route.enabled);
+  if (!routes.length) return;
+
+  const runtime = await loadCoreRuntime();
+  const initialState = await runtime.readLegacyState(getLegacyOptions());
+  const responseEnvNames = Array.from(new Set(
+    routes.filter((route) => route.protocol === "responses").map((route) => route.envName),
+  ));
+  for (const envName of responseEnvNames) {
+    if (!initialState.envs[envName]) {
+      await manager.removeEnvironmentRoutes(envName);
+      continue;
+    }
+    await manager.enableEnvironment(
+      envName,
+      getEnvironmentRouteAccounts(initialState, envName),
+      createEnvironmentRouteBaseUrlUpdater(runtime, envName),
+    );
+  }
+
+  for (const route of routes.filter((item) => item.protocol === "chat_completions")) {
+    const latestState = await runtime.readLegacyState(getLegacyOptions());
+    const account = latestState.envs[route.envName]?.accounts[route.accountName];
+    if (!account) {
+      await manager.removeAccountRoutes(route.envName, route.accountName);
+      continue;
+    }
+    const apiKey = readAuthStringField(account.authData, "OPENAI_API_KEY");
+    if (!apiKey) throw new Error(`Compatibility route for '${route.envName}/${route.accountName}' has no API key`);
+    await manager.enableAccountCompatibility({
+      envName: route.envName,
+      accountName: route.accountName,
+      authMode: account.authMode,
+      baseUrl: route.originalBaseUrl || account.runtime.openaiBaseUrl || "default",
+      apiKey,
+      upstreamModel: account.runtime.compatibilityUpstreamModel ?? route.upstreamModel,
+      reasoningProfile: account.runtime.compatibilityReasoningProfile ?? route.reasoningProfile,
+      longConversationStrategy: account.runtime.compatibilityLongConversationStrategy ?? route.longConversationStrategy,
+      instructionRole: account.runtime.compatibilityInstructionRole ?? route.instructionRole,
+      requestOverrides: account.runtime.compatibilityRequestOverrides ?? route.requestOverrides,
+    }, async ({ baseUrl, localRouteToken, providerId }) => {
+      await writeCompatibilityRuntime(runtime, route.envName, route.accountName, {
+        ...account.runtime,
+        apiProtocol: "chat_completions",
+        compatibilityRouteEnabled: true,
+        compatibilityRouteBaseUrl: baseUrl,
+        compatibilityRouteToken: localRouteToken,
+        compatibilityRouteProviderId: providerId,
+      });
+    });
+  }
 }
 
 export async function toggleEnvironmentRoute(envName: string, enabled: boolean) {
@@ -172,6 +274,10 @@ export async function toggleEnvironmentRoute(envName: string, enabled: boolean) 
 
 export async function loadUsageSnapshot(filter: UsageFilter) {
   return getUsageRouterManager().queryUsage(filter);
+}
+
+export async function loadUsageRequests(query: UsageRequestQuery) {
+  return getUsageRouterManager().queryUsageRequests(query);
 }
 
 export async function listUsagePricing() {
@@ -303,6 +409,7 @@ function resolveCurrentDir(): string {
 }
 
 export async function loadOverview(): Promise<string> {
+  await restoreEnabledRoutes();
   const runtime = await loadCoreRuntime();
   const state = await runtime.readLegacyState(getLegacyOptions());
   const api = runtime.createCoreApi({
@@ -334,6 +441,7 @@ export async function loadOverview(): Promise<string> {
             enabled: true as const,
             originalBaseUrl: route.originalBaseUrl,
             localBaseUrl: account?.runtime.openaiBaseUrl ?? "",
+            protocol: route.protocol,
           }
         : undefined,
     };
@@ -404,13 +512,13 @@ export async function switchEnv(target: "cli" | "app", envName: string): Promise
     now: new Date().toISOString(),
   });
 
+  await applyTargetHomeStateWithHistory(runtime, next, target, target === "cli" ? "switch-cli" : "switch-app");
   await runtime.writeLegacyPointers({
     stateDir: getStateDir(),
     target,
     env: next.targets[target].env,
     account: next.targets[target].account,
   });
-  await applyTargetHomeStateWithHistory(runtime, next, target, target === "cli" ? "switch-cli" : "switch-app");
   return {
     message: `Switched ${target.toUpperCase()} env to ${next.targets[target].env}`,
     output: `${next.targets[target].env}/${next.targets[target].account}\n`,
@@ -426,6 +534,33 @@ export async function switchAccount(
 ): Promise<DesktopActionResult> {
   const runtime = await loadCoreRuntime();
   const state = await runtime.readLegacyState(getLegacyOptions());
+  const selected = state.envs[envName]?.accounts[accountName];
+  if (selected?.runtime.apiProtocol === "chat_completions" && selected.runtime.compatibilityRouteEnabled) {
+    let [status] = await getUsageRouterManager().getAccountCompatibilityStatuses([`${envName}/${accountName}`]);
+    if (!status || status.state !== "ready") {
+      const apiKey = readAuthStringField(selected.authData, "OPENAI_API_KEY");
+      const baseUrl = await resolveAccountUpstreamBaseUrl(envName, accountName, selected.runtime);
+      if (apiKey) {
+        await getUsageRouterManager().enableAccountCompatibility({ envName, accountName, authMode: selected.authMode,
+          baseUrl, apiKey, upstreamModel: selected.runtime.compatibilityUpstreamModel,
+          reasoningProfile: selected.runtime.compatibilityReasoningProfile,
+          longConversationStrategy: selected.runtime.compatibilityLongConversationStrategy,
+          instructionRole: selected.runtime.compatibilityInstructionRole,
+          requestOverrides: selected.runtime.compatibilityRequestOverrides },
+        async ({ baseUrl: localBaseUrl, localRouteToken, providerId }) => {
+          await writeCompatibilityRuntime(runtime, envName, accountName, {
+            ...selected.runtime, apiProtocol: "chat_completions", compatibilityRouteEnabled: true,
+            compatibilityRouteBaseUrl: localBaseUrl, compatibilityRouteToken: localRouteToken,
+            compatibilityRouteProviderId: providerId,
+          });
+        });
+        [status] = await getUsageRouterManager().getAccountCompatibilityStatuses([`${envName}/${accountName}`]);
+      }
+    }
+    if (!status || status.state !== "ready") {
+      throw new Error(`Compatibility route for '${envName}/${accountName}' is not ready. Re-enable or check the route before launch.`);
+    }
+  }
   const next = runtime.createCoreApi({ getState: () => state }).selectAccount({
     envName,
     accountName,
@@ -433,13 +568,13 @@ export async function switchAccount(
     now: new Date().toISOString(),
   });
 
+  await applyTargetHomeStateWithHistory(runtime, next, target, target === "cli" ? "switch-cli" : "switch-app");
   await runtime.writeLegacyPointers({
     stateDir: getStateDir(),
     target,
     env: next.targets[target].env,
     account: next.targets[target].account,
   });
-  await applyTargetHomeStateWithHistory(runtime, next, target, target === "cli" ? "switch-cli" : "switch-app");
   if (target === "app") {
     await launchAppTarget(next, runtime, strategy === "new-window" ? "new-window" : "replace-current");
   } else {
@@ -457,6 +592,82 @@ export async function switchAccount(
     message: `Switched ${target.toUpperCase()} account to ${next.targets[target].env}/${next.targets[target].account}`,
     output: `${next.targets[target].env}/${next.targets[target].account}\n`,
   };
+}
+
+async function writeCompatibilityRuntime(
+  runtime: Awaited<ReturnType<typeof loadCoreRuntime>>,
+  envName: string,
+  accountName: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const current = state.envs[envName]?.accounts[accountName];
+  if (!current) throw new Error(`Account '${envName}/${accountName}' not found`);
+  const next = runtime.createCoreApi({ getState: () => state }).updateAccountRuntime({
+    envName, accountName, runtime: { ...current.runtime, ...patch }, now: new Date().toISOString(),
+  });
+  const updated = next.envs[envName]?.accounts[accountName];
+  if (!updated) throw new Error(`Unable to update '${envName}/${accountName}'`);
+  await runtime.writeLegacyRuntime({ stateDir: getStateDir(), envName, accountName, runtime: updated.runtime });
+  await syncUpdatedAuthToActiveTargetsDirect(runtime, envName, accountName);
+}
+
+export async function enableAccountCompatibility(input: {
+  envName: string;
+  accountName: string;
+  upstreamModel?: string;
+  reasoningProfile?: "auto" | "standard" | "reasoning_content" | "think_tags";
+  longConversationStrategy?: "safe" | "continuity";
+  instructionRole?: "auto" | "system" | "developer";
+  requestOverrides?: Record<string, unknown>;
+}) {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const account = state.envs[input.envName]?.accounts[input.accountName];
+  if (!account) throw new Error(`Account '${input.envName}/${input.accountName}' not found`);
+  const apiKey = readAuthStringField(account.authData, "OPENAI_API_KEY");
+  const baseUrl = await resolveAccountUpstreamBaseUrl(input.envName, input.accountName, account.runtime);
+  return getUsageRouterManager().enableAccountCompatibility({
+    envName: input.envName, accountName: input.accountName, authMode: account.authMode,
+    baseUrl, apiKey, upstreamModel: input.upstreamModel,
+    reasoningProfile: input.reasoningProfile, requestOverrides: input.requestOverrides,
+    longConversationStrategy: input.longConversationStrategy,
+    instructionRole: input.instructionRole,
+  }, async ({ baseUrl: localBaseUrl, localRouteToken, providerId }) => {
+    await writeCompatibilityRuntime(runtime, input.envName, input.accountName, {
+      apiProtocol: "chat_completions", compatibilityRouteEnabled: true,
+      compatibilityRouteBaseUrl: localBaseUrl, compatibilityRouteToken: localRouteToken,
+      compatibilityRouteProviderId: providerId, compatibilityUpstreamModel: input.upstreamModel,
+      compatibilityReasoningProfile: input.reasoningProfile ?? "auto",
+      compatibilityLongConversationStrategy: input.longConversationStrategy ?? "safe",
+      compatibilityInstructionRole: input.instructionRole ?? "auto",
+      compatibilityRequestOverrides: input.requestOverrides,
+    });
+  });
+}
+
+export async function disableAccountCompatibility(envName: string, accountName: string) {
+  const runtime = await loadCoreRuntime();
+  return getUsageRouterManager().disableAccountCompatibility(envName, accountName, async (originalBaseUrl) => {
+    await writeCompatibilityRuntime(runtime, envName, accountName, {
+      apiProtocol: "responses", compatibilityRouteEnabled: false,
+      compatibilityRouteBaseUrl: undefined, compatibilityRouteToken: undefined,
+      compatibilityRouteProviderId: undefined, compatibilityUpstreamModel: undefined,
+      compatibilityReasoningProfile: "auto", compatibilityRequestOverrides: undefined,
+      compatibilityLongConversationStrategy: "safe",
+      compatibilityInstructionRole: "auto",
+      openaiBaseUrlMode: originalBaseUrl === "default" ? "default" : "custom",
+      openaiBaseUrl: originalBaseUrl === "default" ? undefined : originalBaseUrl,
+    });
+  });
+}
+
+export async function getAccountCompatibilityStatuses(accountKeys: string[]) {
+  return getUsageRouterManager().getAccountCompatibilityStatuses(accountKeys);
+}
+
+export async function checkAccountCompatibility(envName: string, accountName: string) {
+  return getUsageRouterManager().checkAccountCompatibility(envName, accountName);
 }
 
 export async function listAccountProjects(envName: string, _accountName: string): Promise<CodexProject[]> {
@@ -807,6 +1018,13 @@ export async function nativeLogin(request: {
   baseUrlMode?: "default" | "custom";
   baseUrl?: string;
   sub2apiPayload?: string;
+  apiProtocol?: "responses" | "chat_completions";
+  compatibilityEnabled?: boolean;
+  upstreamModel?: string;
+  reasoningProfile?: "auto" | "standard" | "reasoning_content" | "think_tags";
+  longConversationStrategy?: "safe" | "continuity";
+  instructionRole?: "auto" | "system" | "developer";
+  requestOverrides?: Record<string, unknown>;
 }): Promise<DesktopActionResult> {
   switch (request.mode) {
     case "auth":
@@ -844,6 +1062,49 @@ export async function getCliAutoResumeSettings(): Promise<CliAutoResumeSettings>
   return readCliAutoResumeSettings(getCodexToolPathOptions().settingsPath);
 }
 
+export async function getRouterLifecycleSettings(): Promise<RouterLifecycleSettings> {
+  return readRouterLifecycleSettings(getCodexToolPathOptions().settingsPath);
+}
+
+export async function getRouterPortSettings(): Promise<RouterPortSettings> {
+  return readRouterPortSettings(getCodexToolPathOptions().settingsPath);
+}
+
+export async function getEnvHistoryRetentionSettings(): Promise<EnvHistoryRetentionSettings> {
+  return readEnvHistoryRetentionSettings(getCodexToolPathOptions().settingsPath);
+}
+
+export async function setRouterLifecycleSettings(value: RouterLifecycleSettings): Promise<RouterLifecycleSettings> {
+  return saveRouterLifecycleSettings(getCodexToolPathOptions().settingsPath, value);
+}
+
+export async function setRouterPortSettings(value: RouterPortSettings): Promise<RouterPortSettings> {
+  return saveRouterPortSettings(getCodexToolPathOptions().settingsPath, value);
+}
+
+export async function setEnvHistoryRetentionSettings(
+  value: EnvHistoryRetentionSettings,
+): Promise<EnvHistoryRetentionSettings> {
+  const saved = await saveEnvHistoryRetentionSettings(getCodexToolPathOptions().settingsPath, value);
+  void runEnvHistoryRetentionCleanup(true).catch(() => undefined);
+  return saved;
+}
+
+export function runEnvHistoryRetentionCleanup(force = false) {
+  const options = getCodexToolPathOptions();
+  const cleanup = envHistoryCleanupQueue.then(() => runEnvHistoryCleanupIfDue({
+      stateDir: getStateDir(),
+      settingsPath: options.settingsPath,
+      force,
+    }));
+  envHistoryCleanupQueue = cleanup.then(() => undefined, () => undefined);
+  return cleanup;
+}
+
+export async function stopUsageRouter(): Promise<boolean> {
+  return getUsageRouterManager().stopService();
+}
+
 export async function setCliAutoResumeSettings(value: CliAutoResumeSettings): Promise<CliAutoResumeSettings> {
   return saveCliAutoResumeSettings(getCodexToolPathOptions().settingsPath, value);
 }
@@ -853,6 +1114,54 @@ export async function scanCliTerminalSettings(): Promise<CliTerminalSettings> { 
 export async function setCliTerminalSelection(id: CliTerminalId): Promise<CliTerminalSettings> {
   const current = await readCliTerminalSettings(getCodexToolPathOptions());
   return saveCliTerminalSelection(getCodexToolPathOptions().settingsPath, id, current.terminals);
+}
+
+function getModelCatalogStore() {
+  return createModelCatalogStore(join(getStateDir(), "custom-model-catalogs.json"));
+}
+
+export async function listCustomModels() {
+  return getModelCatalogStore().load();
+}
+
+export async function saveCustomModel(input: SaveCustomModelInput) {
+  await getModelCatalogStore().saveModel(input);
+  await resynchronizeActiveModelCatalogs();
+  return getModelCatalogStore().load();
+}
+
+export async function deleteCustomModel(id: string) {
+  await getModelCatalogStore().deleteModel(id);
+  await resynchronizeActiveModelCatalogs();
+  return getModelCatalogStore().load();
+}
+
+export async function setAccountModelBindings(accountKey: string, modelIds: string[]) {
+  const snapshot = await getModelCatalogStore().setAccountBindings(accountKey, modelIds);
+  await resynchronizeActiveModelCatalogs(accountKey);
+  return snapshot;
+}
+
+export async function setModelAccountBindings(modelId: string, accountKeys: string[]) {
+  const snapshot = await getModelCatalogStore().setModelBindings(modelId, accountKeys);
+  await resynchronizeActiveModelCatalogs();
+  return snapshot;
+}
+
+async function resynchronizeActiveModelCatalogs(accountKey?: string): Promise<void> {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  for (const target of ["cli", "app"] as const) {
+    const pointer = state.targets[target];
+    if (!accountKey || `${pointer.env}/${pointer.account}` === accountKey) {
+      await applyTargetHomeStateWithHistory(
+        runtime,
+        state,
+        target,
+        target === "cli" ? "switch-cli" : "switch-app",
+      );
+    }
+  }
 }
 
 async function getEffectiveCodexEnv(): Promise<NodeJS.ProcessEnv> {
@@ -882,6 +1191,117 @@ export async function deleteAccount(envName: string, accountName: string): Promi
     envName,
     accountName,
   });
+}
+
+function resolveCopiedAccountName(
+  existingNames: string[],
+  sourceAccountName: string,
+  preserveOriginalName: boolean,
+): string {
+  const existing = new Set(existingNames);
+  if (preserveOriginalName && !existing.has(sourceAccountName)) return sourceAccountName;
+  const base = `${sourceAccountName}-copy`;
+  if (!existing.has(base)) return base;
+  let suffix = 2;
+  while (existing.has(`${base}-${suffix}`)) suffix += 1;
+  return `${base}-${suffix}`;
+}
+
+export async function copyAccount(
+  sourceEnvName: string,
+  sourceAccountName: string,
+  targetEnvName: string,
+): Promise<DesktopActionResult> {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const source = state.envs[sourceEnvName]?.accounts[sourceAccountName];
+  if (!source) throw new Error(`Account '${sourceEnvName}/${sourceAccountName}' not found`);
+  const targetEnv = state.envs[targetEnvName];
+  if (!targetEnv) throw new Error(`Env '${targetEnvName}' not found`);
+
+  const targetAccountRoot = join(getStateDir(), "env-accounts", targetEnvName);
+  const onDiskAccountNames = await readdir(targetAccountRoot).catch(() => []);
+  const targetAccountName = resolveCopiedAccountName(
+    [...Object.keys(targetEnv.accounts), ...onDiskAccountNames],
+    sourceAccountName,
+    targetEnvName !== sourceEnvName,
+  );
+  const sourceKey = `${sourceEnvName}/${sourceAccountName}`;
+  const targetKey = `${targetEnvName}/${targetAccountName}`;
+  const sourceDir = join(getStateDir(), "env-accounts", sourceEnvName, sourceAccountName);
+  const targetDir = join(targetAccountRoot, targetAccountName);
+  const routes = await getUsageRouterManager().listRoutesIfRunning().catch(() => []);
+  const compatibilityEnabled = source.runtime.compatibilityRouteEnabled === true;
+  const sourceRoute = routes.find((route) =>
+    route.envName === sourceEnvName
+      && route.accountName === sourceAccountName
+      && (!compatibilityEnabled || route.protocol === "chat_completions"),
+  );
+  if (compatibilityEnabled && sourceRoute?.protocol !== "chat_completions") {
+    throw new Error("The source compatibility route is unavailable. Reopen it before copying this account.");
+  }
+  const originalBaseUrl = sourceRoute?.originalBaseUrl
+    ?? (source.runtime.openaiBaseUrlMode === "custom" ? source.runtime.openaiBaseUrl : "default")
+    ?? "default";
+  const copiedRuntime = {
+    ...source.runtime,
+    openaiBaseUrlMode: originalBaseUrl === "default" ? "default" as const : "custom" as const,
+    openaiBaseUrl: originalBaseUrl === "default" ? undefined : originalBaseUrl,
+    apiProtocol: compatibilityEnabled ? "responses" as const : source.runtime.apiProtocol,
+    compatibilityRouteEnabled: false,
+    compatibilityRouteBaseUrl: undefined,
+    compatibilityRouteToken: undefined,
+    compatibilityRouteProviderId: undefined,
+  };
+  const sourceDirExists = await lstat(sourceDir).then((entry) => entry.isDirectory()).catch(() => false);
+  const sourceAuthFile = await resolveAuthFile(sourceEnvName, sourceAccountName, state.envs[sourceEnvName]!.path);
+  const sourceAuthContent = sourceAuthFile ? await readFile(sourceAuthFile, "utf8") : undefined;
+
+  try {
+    if (sourceDirExists) {
+      await cp(sourceDir, targetDir, { recursive: true, errorOnExist: true, force: false });
+    } else {
+      await mkdir(targetDir, { recursive: false });
+    }
+    if (sourceAuthContent) {
+      await writeFile(join(targetDir, "auth.json"), sourceAuthContent, "utf8");
+    }
+    await runtime.writeLegacyRuntime({
+      stateDir: getStateDir(),
+      envName: targetEnvName,
+      accountName: targetAccountName,
+      runtime: copiedRuntime,
+    });
+
+    const catalog = await getModelCatalogStore().load();
+    await getModelCatalogStore().setAccountBindings(
+      targetKey,
+      catalog.accountBindings[sourceKey] ?? [],
+    );
+
+    await syncEnvironmentRouteIfEnabled(targetEnvName);
+    if (compatibilityEnabled) {
+      await enableAccountCompatibility({
+        envName: targetEnvName,
+        accountName: targetAccountName,
+        upstreamModel: source.runtime.compatibilityUpstreamModel,
+        reasoningProfile: source.runtime.compatibilityReasoningProfile,
+        longConversationStrategy: source.runtime.compatibilityLongConversationStrategy,
+        instructionRole: source.runtime.compatibilityInstructionRole,
+        requestOverrides: source.runtime.compatibilityRequestOverrides,
+      });
+    }
+  } catch (error) {
+    await getUsageRouterManager().removeAccountRoutes(targetEnvName, targetAccountName).catch(() => undefined);
+    await getModelCatalogStore().setAccountBindings(targetKey, []).catch(() => undefined);
+    await rm(targetDir, { recursive: true, force: true });
+    throw error;
+  }
+
+  return {
+    message: `Copied account to ${targetKey}`,
+    output: `${targetKey}\n`,
+  };
 }
 
 export async function showProxy(): Promise<DesktopActionResult> {
@@ -940,6 +1360,9 @@ export async function importDefaultEnv(
 }
 
 export async function launchCliInTerminal(): Promise<DesktopActionResult> {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  await applyTargetHomeStateWithHistory(runtime, state, "cli", "switch-cli");
   const warning = await openCommandInPreferredTerminal(["cli", "launch-current"]);
   return {
     message: `${getCliLaunchSuccessMessage()}${warning ? `. ${warning}` : ""}`,
@@ -1296,9 +1719,16 @@ function buildUnixCliLaunchCommand(input: {
   const parts = [
     input.workingDirectory ? `cd ${quoteShellArg(input.workingDirectory)}` : "",
     `export CODEX_HOME=${quoteShellArg(input.codexHome)}`,
+    buildUnixApiKeyExport(input.codexHome),
     [quoteShellArg(input.codexBin), ...input.args.map(quoteShellArg)].join(" "),
   ].filter(Boolean);
   return parts.join(" && ");
+}
+
+function buildUnixApiKeyExport(codexHome: string): string {
+  const script = 'const fs=require("node:fs");const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8")).OPENAI_API_KEY||"";process.stdout.write(String(value));';
+  const command = ["node", "-e", quoteShellArg(script), quoteShellArg(join(codexHome, "auth.json"))].join(" ");
+  return `export OPENAI_API_KEY="$(${command})"`;
 }
 
 function buildWindowsCmdLaunchCommand(input: {
@@ -1311,6 +1741,7 @@ function buildWindowsCmdLaunchCommand(input: {
   return [
     `cd /d "${escapeCmdDoubleQuoted(input.workingDirectory ?? input.repoRoot)}"`,
     `set "CODEX_HOME=${escapeCmdDoubleQuoted(input.codexHome)}"`,
+    `for /f "usebackq delims=" %A in (\`powershell.exe -NoProfile -Command "(Get-Content -Raw '${escapePowerShellSingleQuoted(join(input.codexHome, "auth.json"))}' | ConvertFrom-Json).OPENAI_API_KEY"\`) do set "OPENAI_API_KEY=%A"`,
     [quoteCmdArg(input.codexBin), ...input.args.map(quoteCmdArg)].join(" "),
   ].join(" && ");
 }
@@ -1329,6 +1760,7 @@ function buildWindowsPowerShellLaunchCommand(input: {
   return [
     `Set-Location '${escapePowerShellSingleQuoted(input.workingDirectory ?? input.repoRoot)}'`,
     `$env:CODEX_HOME='${escapePowerShellSingleQuoted(input.codexHome)}'`,
+    `$env:OPENAI_API_KEY=(Get-Content -Raw '${escapePowerShellSingleQuoted(join(input.codexHome, "auth.json"))}' | ConvertFrom-Json).OPENAI_API_KEY`,
     invocation,
   ].join("; ");
 }
@@ -1355,9 +1787,42 @@ async function applyTargetHomeStateWithHistory(
   }
 
   const before = await readEnvFileSnapshot(env.path);
-  await runtime.applyTargetHomeState({ state, target });
+  try {
+    await runtime.applyTargetHomeState({ state, target });
+    const pointer = state.targets[target];
+    const cliStatus = await getCodexToolStatus("cli", getCodexToolPathOptions());
+    await synchronizeAccountModelCatalog({
+      envName: pointer.env,
+      accountName: pointer.account,
+      homePath: env.path,
+      store: getModelCatalogStore(),
+      loadBundledCatalog: async () => {
+        if (!cliStatus.available) {
+          throw new Error("Codex CLI is required to generate the merged model catalog");
+        }
+        return loadBundledModelCatalog(cliStatus.path);
+      },
+    });
+  } catch (error) {
+    await restoreEnvFileSnapshot(env.path, before);
+    throw error;
+  }
   const after = await readEnvFileSnapshot(env.path);
   await recordEnvFileDiffHistory(envName, before, after, source);
+}
+
+async function restoreEnvFileSnapshot(
+  homePath: string,
+  snapshot: { configToml: string; authJson: string },
+): Promise<void> {
+  for (const [fileName, content] of [
+    ["config.toml", snapshot.configToml],
+    ["auth.json", snapshot.authJson],
+  ] as const) {
+    const path = join(homePath, fileName);
+    if (content) await writeTextFileRaw(path, content);
+    else await rm(path, { force: true });
+  }
 }
 
 async function recordEnvFileDiffHistory(
@@ -1557,6 +2022,13 @@ async function nativeApiKeyLogin(request: {
   apiKey?: string;
   baseUrlMode?: "default" | "custom";
   baseUrl?: string;
+  apiProtocol?: "responses" | "chat_completions";
+  compatibilityEnabled?: boolean;
+  upstreamModel?: string;
+  reasoningProfile?: "auto" | "standard" | "reasoning_content" | "think_tags";
+  longConversationStrategy?: "safe" | "continuity";
+  instructionRole?: "auto" | "system" | "developer";
+  requestOverrides?: Record<string, unknown>;
 }): Promise<DesktopActionResult> {
   if (!request.apiKey?.trim()) {
     throw new Error("API key is required");
@@ -1569,17 +2041,51 @@ async function nativeApiKeyLogin(request: {
     throw new Error(`Env '${request.envName}' not found`);
   }
 
+  const existing = state.envs[request.envName]?.accounts[request.account];
+  const existingRoutes = await getUsageRouterManager().listRoutesIfRunning().catch(() => []);
+  const existingCompatibilityRoute = existingRoutes.find((route) =>
+    route.envName === request.envName
+      && route.accountName === request.account
+      && route.protocol === "chat_completions",
+  );
+  const requestedBaseUrl = request.baseUrl?.trim() || undefined;
+  const effectiveBaseUrl = requestedBaseUrl && requestedBaseUrl === existing?.runtime.compatibilityRouteBaseUrl
+    ? existingCompatibilityRoute?.originalBaseUrl ?? requestedBaseUrl
+    : requestedBaseUrl;
+  if (existing?.runtime.compatibilityRouteEnabled === true || existingCompatibilityRoute) {
+    await disableAccountCompatibility(request.envName, request.account);
+  }
+
   await saveAccountArtifacts({
     envName: request.envName,
     account: request.account,
     runtime: {
       preferredAuthMethod: "apikey",
       openaiBaseUrlMode: request.baseUrlMode === "custom" ? "custom" : "default",
-      openaiBaseUrl: request.baseUrlMode === "custom" ? request.baseUrl?.trim() || undefined : undefined,
+      openaiBaseUrl: request.baseUrlMode === "custom" ? effectiveBaseUrl : undefined,
+      apiProtocol: "responses",
+      compatibilityRouteEnabled: false,
+      compatibilityUpstreamModel: request.upstreamModel?.trim() || undefined,
+      compatibilityReasoningProfile: request.reasoningProfile ?? "auto",
+      compatibilityLongConversationStrategy: request.longConversationStrategy ?? "safe",
+      compatibilityInstructionRole: request.instructionRole ?? "auto",
+      compatibilityRequestOverrides: request.requestOverrides,
     },
     authJsonContent: `${JSON.stringify({ OPENAI_API_KEY: request.apiKey.trim() }, null, 2)}\n`,
     target: request.target,
   });
+
+  if (request.apiProtocol === "chat_completions" && request.compatibilityEnabled === true) {
+    await enableAccountCompatibility({
+      envName: request.envName,
+      accountName: request.account,
+      upstreamModel: request.upstreamModel?.trim() || undefined,
+      reasoningProfile: request.reasoningProfile ?? "auto",
+      longConversationStrategy: request.longConversationStrategy ?? "safe",
+      instructionRole: request.instructionRole ?? "auto",
+      requestOverrides: request.requestOverrides,
+    });
+  }
 
   return {
     message: `Saved API key for ${request.envName}/${request.account}`,
@@ -1620,6 +2126,13 @@ async function saveAccountArtifacts(options: {
     preferredAuthMethod: "chatgpt" | "apikey";
     openaiBaseUrlMode: "default" | "custom";
     openaiBaseUrl?: string;
+    apiProtocol?: "responses" | "chat_completions";
+    compatibilityRouteEnabled?: boolean;
+    compatibilityUpstreamModel?: string;
+    compatibilityReasoningProfile?: "auto" | "standard" | "reasoning_content" | "think_tags";
+    compatibilityLongConversationStrategy?: "safe" | "continuity";
+    compatibilityInstructionRole?: "auto" | "system" | "developer";
+    compatibilityRequestOverrides?: Record<string, unknown>;
   };
   authJsonContent: string;
   target: "cli" | "app" | "both" | "none";
@@ -2265,6 +2778,10 @@ export const __testUtils = {
   setDesktopOperationsLoaderForTest(loader: typeof desktopOperationsLoaderForTest) {
     desktopOperationsLoaderForTest = loader;
   },
+  resetUsageRouterManagerForTest() {
+    usageRouterManager = undefined;
+    usageRouterManagerStateDir = undefined;
+  },
 };
 
 async function loadDesktopOperationsService(): Promise<DesktopOperationsServiceLike> {
@@ -2318,6 +2835,8 @@ async function removeAccountDirect(
     now: new Date().toISOString(),
   });
 
+  await getUsageRouterManager().removeAccountRoutes(input.envName, input.accountName);
+
   await rm(join(getStateDir(), "env-accounts", input.envName, input.accountName), {
     recursive: true,
     force: true,
@@ -2340,6 +2859,8 @@ async function removeEnvDirect(runtime: CoreRuntime, envName: string): Promise<v
   const next = support.createEnvService().removeEnv(state, {
     envName,
   });
+
+  await getUsageRouterManager().removeEnvironmentRoutes(envName);
 
   await rm(join(getEnvsDir(), envName), { recursive: true, force: true });
   await rm(join(getStateDir(), "env-accounts", envName), {
@@ -3214,9 +3735,14 @@ async function launchAppTarget(
   }
   const support = await loadCoreSupportModules();
   const action = strategy === "new-window" ? support.launchNewCodexApp : support.restartCurrentCodexApp;
+  const account = state.envs[state.targets.app.env]?.accounts[state.targets.app.account];
+  const apiKey = account?.runtime.apiProtocol === "chat_completions" && account.runtime.compatibilityRouteEnabled
+    ? account.runtime.compatibilityRouteToken
+    : readAuthStringField(account?.authData, "OPENAI_API_KEY");
   await action({
     codexHome: env.path,
     stateDir: getStateDir(),
-    env: await getEffectiveCodexEnv(),
+    targetKey: `${state.targets.app.env}/${state.targets.app.account}`,
+    env: { ...await getEffectiveCodexEnv(), ...(apiKey ? { OPENAI_API_KEY: apiKey } : {}) },
   });
 }

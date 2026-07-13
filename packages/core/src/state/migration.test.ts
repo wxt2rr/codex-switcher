@@ -82,6 +82,11 @@ test("migration restores previous core state when persistence fails", async () =
             runtime: {
               preferredAuthMethod: "chatgpt",
               openaiBaseUrlMode: "default",
+              apiProtocol: "responses",
+              compatibilityRouteEnabled: false,
+              compatibilityReasoningProfile: "auto",
+              compatibilityLongConversationStrategy: "safe",
+              compatibilityInstructionRole: "auto",
             },
           },
         },

@@ -5,11 +5,20 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   loadAuthMetrics: () => ipcRenderer.invoke("desktop:loadAuthMetrics"),
   getCodexToolPaths: () => ipcRenderer.invoke("desktop:getCodexToolPaths"),
   getCliAutoResumeSettings: () => ipcRenderer.invoke("desktop:getCliAutoResumeSettings"),
+  getEnvHistoryRetentionSettings: () => ipcRenderer.invoke("desktop:getEnvHistoryRetentionSettings"),
+  getRouterLifecycleSettings: () => ipcRenderer.invoke("desktop:getRouterLifecycleSettings"),
+  getRouterPortSettings: () => ipcRenderer.invoke("desktop:getRouterPortSettings"),
   detectCodexToolPaths: () => ipcRenderer.invoke("desktop:detectCodexToolPaths"),
   setCodexToolPath: (kind: "cli" | "app", path: string) => ipcRenderer.invoke("desktop:setCodexToolPath", kind, path),
   clearCodexToolPath: (kind: "cli" | "app") => ipcRenderer.invoke("desktop:clearCodexToolPath", kind),
   setCliAutoResumeSettings: (value: { enabled: boolean; sessionNumber: number }) =>
     ipcRenderer.invoke("desktop:setCliAutoResumeSettings", value),
+  setEnvHistoryRetentionSettings: (value: { enabled: boolean; retentionDays: number }) =>
+    ipcRenderer.invoke("desktop:setEnvHistoryRetentionSettings", value),
+  setRouterLifecycleSettings: (value: { stopOnAppQuit: boolean }) =>
+    ipcRenderer.invoke("desktop:setRouterLifecycleSettings", value),
+  setRouterPortSettings: (value: { preferredPort: number }) =>
+    ipcRenderer.invoke("desktop:setRouterPortSettings", value),
   getCliTerminalSettings: () => ipcRenderer.invoke("desktop:getCliTerminalSettings"),
   scanCliTerminalSettings: () => ipcRenderer.invoke("desktop:scanCliTerminalSettings"),
   setCliTerminalSelection: (id: string) => ipcRenderer.invoke("desktop:setCliTerminalSelection", id),
@@ -27,6 +36,13 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     baseUrlMode?: "default" | "custom";
     baseUrl?: string;
     sub2apiPayload?: string;
+    apiProtocol?: "responses" | "chat_completions";
+    compatibilityEnabled?: boolean;
+    upstreamModel?: string;
+    reasoningProfile?: "auto" | "standard" | "reasoning_content" | "think_tags";
+    longConversationStrategy?: "safe" | "continuity";
+    instructionRole?: "auto" | "system" | "developer";
+    requestOverrides?: Record<string, unknown>;
   }) => ipcRenderer.invoke("desktop:nativeLogin", request),
   switchEnv: (target: "cli" | "app", envName: string) =>
     ipcRenderer.invoke("desktop:switchEnv", target, envName),
@@ -71,10 +87,20 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     apiKey?: string;
     baseUrl?: string;
   }) => ipcRenderer.invoke("desktop:updateIndependentModel", request),
+  listCustomModels: () => ipcRenderer.invoke("desktop:listCustomModels"),
+  saveCustomModel: (request: { id?: string; entry: Record<string, unknown> }) =>
+    ipcRenderer.invoke("desktop:saveCustomModel", request),
+  deleteCustomModel: (id: string) => ipcRenderer.invoke("desktop:deleteCustomModel", id),
+  setAccountModelBindings: (accountKey: string, modelIds: string[]) =>
+    ipcRenderer.invoke("desktop:setAccountModelBindings", accountKey, modelIds),
+  setModelAccountBindings: (modelId: string, accountKeys: string[]) =>
+    ipcRenderer.invoke("desktop:setModelAccountBindings", modelId, accountKeys),
   logoutAccount: (envName: string, accountName: string, target: "cli" | "app" | "both") =>
     ipcRenderer.invoke("desktop:logoutAccount", envName, accountName, target),
   deleteAccount: (envName: string, accountName: string) =>
     ipcRenderer.invoke("desktop:deleteAccount", envName, accountName),
+  copyAccount: (sourceEnvName: string, sourceAccountName: string, targetEnvName: string) =>
+    ipcRenderer.invoke("desktop:copyAccount", sourceEnvName, sourceAccountName, targetEnvName),
   showProxy: () => ipcRenderer.invoke("desktop:showProxy"),
   setProxy: (value: string) => ipcRenderer.invoke("desktop:setProxy", value),
   disableProxy: () => ipcRenderer.invoke("desktop:disableProxy"),
@@ -97,7 +123,19 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   getEnvironmentRouteStatuses: () => ipcRenderer.invoke("desktop:getEnvironmentRouteStatuses"),
   toggleEnvironmentRoute: (envName: string, enabled: boolean) =>
     ipcRenderer.invoke("desktop:toggleEnvironmentRoute", envName, enabled),
+  toggleAccountCompatibility: (input: {
+    envName: string; accountName: string; enabled: boolean; upstreamModel?: string;
+    reasoningProfile?: "auto" | "standard" | "reasoning_content" | "think_tags";
+    longConversationStrategy?: "safe" | "continuity";
+    instructionRole?: "auto" | "system" | "developer";
+    requestOverrides?: Record<string, unknown>;
+  }) => ipcRenderer.invoke("desktop:toggleAccountCompatibility", input),
+  getAccountCompatibilityStatuses: (accountKeys: string[]) =>
+    ipcRenderer.invoke("desktop:getAccountCompatibilityStatuses", accountKeys),
+  checkAccountCompatibility: (envName: string, accountName: string) =>
+    ipcRenderer.invoke("desktop:checkAccountCompatibility", envName, accountName),
   loadUsageSnapshot: (filter: unknown) => ipcRenderer.invoke("desktop:loadUsageSnapshot", filter),
+  loadUsageRequests: (query: unknown) => ipcRenderer.invoke("desktop:loadUsageRequests", query),
   listUsagePricing: () => ipcRenderer.invoke("desktop:listUsagePricing"),
   saveUsagePricing: (profile: unknown) => ipcRenderer.invoke("desktop:saveUsagePricing", profile),
 });

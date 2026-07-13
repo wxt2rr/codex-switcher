@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 
 import {
   createEnv,
+  copyAccount,
   deleteAccount,
   deleteEnv,
   getLanguage,
@@ -46,21 +47,39 @@ import {
   restoreEnvFileHistory,
   deleteEnvFileHistory,
   updateIndependentModel,
+  enableAccountCompatibility,
+  disableAccountCompatibility,
+  getAccountCompatibilityStatuses,
+  checkAccountCompatibility,
   updateRuntime,
   getEnvironmentRouteStatuses,
   getCodexToolPaths,
   getCliAutoResumeSettings,
+  getEnvHistoryRetentionSettings,
+  getRouterLifecycleSettings,
+  getRouterPortSettings,
   detectCodexToolPaths,
   setCodexToolPath,
   setCliAutoResumeSettings,
+  setEnvHistoryRetentionSettings,
+  setRouterLifecycleSettings,
+  setRouterPortSettings,
   clearCodexToolPath,
   toggleEnvironmentRoute,
   loadUsageSnapshot,
+  loadUsageRequests,
   listUsagePricing,
   saveUsagePricing,
   getCliTerminalSettings,
   scanCliTerminalSettings,
   setCliTerminalSelection,
+  listCustomModels,
+  saveCustomModel,
+  deleteCustomModel,
+  setAccountModelBindings,
+  setModelAccountBindings,
+  stopUsageRouter,
+  runEnvHistoryRetentionCleanup,
 } from "./bridge.js";
 
 const currentDir = __dirname;
@@ -120,12 +139,42 @@ app.whenReady().then(async () => {
   }
   registerHandlers();
   await createWindow();
+  startEnvHistoryCleanupSchedule();
 
   app.on("activate", async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       await createWindow();
     }
   });
+});
+
+let envHistoryCleanupTimer: NodeJS.Timeout | undefined;
+
+function startEnvHistoryCleanupSchedule() {
+  if (envHistoryCleanupTimer) return;
+  void runEnvHistoryRetentionCleanup().catch(() => undefined);
+  envHistoryCleanupTimer = setInterval(() => {
+    void runEnvHistoryRetentionCleanup().catch(() => undefined);
+  }, 60 * 60 * 1_000);
+  envHistoryCleanupTimer.unref();
+}
+
+let quitCleanupStarted = false;
+let quitCleanupFinished = false;
+app.on("before-quit", (event) => {
+  if (quitCleanupFinished) return;
+  event.preventDefault();
+  if (quitCleanupStarted) return;
+  quitCleanupStarted = true;
+  void getRouterLifecycleSettings()
+    .then(async (settings) => {
+      if (settings.stopOnAppQuit) await stopUsageRouter();
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      quitCleanupFinished = true;
+      app.quit();
+    });
 });
 
 app.on("window-all-closed", () => {
@@ -163,10 +212,16 @@ function registerHandlers() {
   ipcMain.handle("desktop:loadAuthMetrics", () => loadAuthMetrics());
   ipcMain.handle("desktop:getCodexToolPaths", () => getCodexToolPaths());
   ipcMain.handle("desktop:getCliAutoResumeSettings", () => getCliAutoResumeSettings());
+  ipcMain.handle("desktop:getEnvHistoryRetentionSettings", () => getEnvHistoryRetentionSettings());
+  ipcMain.handle("desktop:getRouterLifecycleSettings", () => getRouterLifecycleSettings());
+  ipcMain.handle("desktop:getRouterPortSettings", () => getRouterPortSettings());
   ipcMain.handle("desktop:detectCodexToolPaths", () => detectCodexToolPaths());
   ipcMain.handle("desktop:setCodexToolPath", (_event, kind, path) => setCodexToolPath(kind, path));
   ipcMain.handle("desktop:clearCodexToolPath", (_event, kind) => clearCodexToolPath(kind));
   ipcMain.handle("desktop:setCliAutoResumeSettings", (_event, value) => setCliAutoResumeSettings(value));
+  ipcMain.handle("desktop:setEnvHistoryRetentionSettings", (_event, value) => setEnvHistoryRetentionSettings(value));
+  ipcMain.handle("desktop:setRouterLifecycleSettings", (_event, value) => setRouterLifecycleSettings(value));
+  ipcMain.handle("desktop:setRouterPortSettings", (_event, value) => setRouterPortSettings(value));
   ipcMain.handle("desktop:getCliTerminalSettings", async () => withTerminalIcons(await getCliTerminalSettings()));
   ipcMain.handle("desktop:scanCliTerminalSettings", async () => withTerminalIcons(await scanCliTerminalSettings()));
   ipcMain.handle("desktop:setCliTerminalSelection", async (_event, id) => withTerminalIcons(await setCliTerminalSelection(id)));
@@ -233,11 +288,33 @@ function registerHandlers() {
   ipcMain.handle("desktop:updateIndependentModel", (_event: IpcMainInvokeEvent, request) =>
     updateIndependentModel(request)
   );
+  ipcMain.handle("desktop:listCustomModels", () => listCustomModels());
+  ipcMain.handle("desktop:saveCustomModel", (_event: IpcMainInvokeEvent, request) =>
+    saveCustomModel(request)
+  );
+  ipcMain.handle("desktop:deleteCustomModel", (_event: IpcMainInvokeEvent, id: string) =>
+    deleteCustomModel(id)
+  );
+  ipcMain.handle(
+    "desktop:setAccountModelBindings",
+    (_event: IpcMainInvokeEvent, accountKey: string, modelIds: string[]) =>
+      setAccountModelBindings(accountKey, modelIds),
+  );
+  ipcMain.handle(
+    "desktop:setModelAccountBindings",
+    (_event: IpcMainInvokeEvent, modelId: string, accountKeys: string[]) =>
+      setModelAccountBindings(modelId, accountKeys),
+  );
   ipcMain.handle("desktop:logoutAccount", (_event: IpcMainInvokeEvent, envName: string, accountName: string, target: "cli" | "app" | "both") =>
     logoutAccount(envName, accountName, target)
   );
   ipcMain.handle("desktop:deleteAccount", (_event: IpcMainInvokeEvent, envName: string, accountName: string) =>
     deleteAccount(envName, accountName)
+  );
+  ipcMain.handle(
+    "desktop:copyAccount",
+    (_event: IpcMainInvokeEvent, sourceEnvName: string, sourceAccountName: string, targetEnvName: string) =>
+      copyAccount(sourceEnvName, sourceAccountName, targetEnvName),
   );
   ipcMain.handle("desktop:showProxy", () => showProxy());
   ipcMain.handle("desktop:setProxy", (_event: IpcMainInvokeEvent, value: string) => setProxy(value));
@@ -264,7 +341,14 @@ function registerHandlers() {
   ipcMain.handle("desktop:getEnvironmentRouteStatuses", () => getEnvironmentRouteStatuses());
   ipcMain.handle("desktop:toggleEnvironmentRoute", (_event: IpcMainInvokeEvent, envName: string, enabled: boolean) =>
     toggleEnvironmentRoute(envName, enabled));
+  ipcMain.handle("desktop:toggleAccountCompatibility", (_event: IpcMainInvokeEvent, input) =>
+    input.enabled ? enableAccountCompatibility(input) : disableAccountCompatibility(input.envName, input.accountName));
+  ipcMain.handle("desktop:getAccountCompatibilityStatuses", (_event: IpcMainInvokeEvent, accountKeys: string[]) =>
+    getAccountCompatibilityStatuses(accountKeys));
+  ipcMain.handle("desktop:checkAccountCompatibility", (_event: IpcMainInvokeEvent, envName: string, accountName: string) =>
+    checkAccountCompatibility(envName, accountName));
   ipcMain.handle("desktop:loadUsageSnapshot", (_event: IpcMainInvokeEvent, filter) => loadUsageSnapshot(filter));
+  ipcMain.handle("desktop:loadUsageRequests", (_event: IpcMainInvokeEvent, query) => loadUsageRequests(query));
   ipcMain.handle("desktop:listUsagePricing", () => listUsagePricing());
   ipcMain.handle("desktop:saveUsagePricing", (_event: IpcMainInvokeEvent, profile) => saveUsagePricing(profile));
 }

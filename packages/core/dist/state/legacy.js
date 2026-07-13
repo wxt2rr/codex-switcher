@@ -47,6 +47,16 @@ export async function writeLegacyRuntime(options) {
         independent_model_provider_id: options.runtime.independentModelProviderId ?? "custom",
         independent_model_api_key: options.runtime.independentModelApiKey ?? "",
         independent_model_base_url: options.runtime.independentModelBaseUrl ?? "",
+        api_protocol: options.runtime.apiProtocol ?? "responses",
+        compatibility_route_enabled: options.runtime.compatibilityRouteEnabled ?? false,
+        compatibility_route_base_url: options.runtime.compatibilityRouteBaseUrl ?? "",
+        compatibility_route_token: options.runtime.compatibilityRouteToken ?? "",
+        compatibility_route_provider_id: options.runtime.compatibilityRouteProviderId ?? "",
+        compatibility_upstream_model: options.runtime.compatibilityUpstreamModel ?? "",
+        compatibility_reasoning_profile: options.runtime.compatibilityReasoningProfile ?? "auto",
+        compatibility_long_conversation_strategy: options.runtime.compatibilityLongConversationStrategy ?? "safe",
+        compatibility_instruction_role: options.runtime.compatibilityInstructionRole ?? "auto",
+        compatibility_request_overrides: options.runtime.compatibilityRequestOverrides ?? {},
     }, null, 2)}\n`, "utf8");
 }
 export async function createLegacyEnv(options) {
@@ -102,6 +112,25 @@ async function readLegacyAccountState(accountRoot, accountName) {
             independentModelProviderId: runtimeRecord.independent_model_provider_id || "custom",
             independentModelApiKey: runtimeRecord.independent_model_api_key || undefined,
             independentModelBaseUrl: runtimeRecord.independent_model_base_url || undefined,
+            apiProtocol: runtimeRecord.api_protocol === "chat_completions" ? "chat_completions" : "responses",
+            compatibilityRouteEnabled: runtimeRecord.compatibility_route_enabled === true,
+            compatibilityRouteBaseUrl: runtimeRecord.compatibility_route_base_url || undefined,
+            compatibilityRouteToken: runtimeRecord.compatibility_route_token || undefined,
+            compatibilityRouteProviderId: runtimeRecord.compatibility_route_provider_id || undefined,
+            compatibilityUpstreamModel: runtimeRecord.compatibility_upstream_model || undefined,
+            compatibilityReasoningProfile: runtimeRecord.compatibility_reasoning_profile === "standard" ||
+                runtimeRecord.compatibility_reasoning_profile === "reasoning_content" ||
+                runtimeRecord.compatibility_reasoning_profile === "think_tags"
+                ? runtimeRecord.compatibility_reasoning_profile
+                : "auto",
+            compatibilityLongConversationStrategy: runtimeRecord.compatibility_long_conversation_strategy === "continuity"
+                ? "continuity"
+                : "safe",
+            compatibilityInstructionRole: runtimeRecord.compatibility_instruction_role === "system" ||
+                runtimeRecord.compatibility_instruction_role === "developer"
+                ? runtimeRecord.compatibility_instruction_role
+                : "auto",
+            compatibilityRequestOverrides: runtimeRecord.compatibility_request_overrides,
         },
     };
     if (authData) {

@@ -27,6 +27,11 @@ yarn-error.log*
 tmp/
 temp/
 *.tmp
+**/__pycache__/
+*.py[cod]
+.workbuddy/
+.worktrees/
+release-win-verify/
 apps/desktop/node_modules/
 apps/desktop/dist/
 apps/desktop/electron-dist/

@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import test from "node:test";
 
 import * as bridge from "./bridge.js";
+import { UsageRouterManager } from "./usage-router-manager.js";
+import { startUsageRouterService } from "./usage-router-service.js";
 
 async function writeFileRecursive(path: string, content: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
@@ -165,6 +167,100 @@ test("desktop bridge saves an API key account without a Codex CLI or changing ta
   }
 });
 
+test("desktop bridge saves Chat compatibility settings through the account update flow", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-account-chat-save-"));
+  const previousEnv = { ...process.env };
+  let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
+  try {
+    process.env.HOME = root;
+    process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
+    process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
+    process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
+    await writeFileRecursive(join(root, "state", "current_cli_env"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_cli_account"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_app_env"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_app_account"), "default\n");
+    bridge.__testUtils.resetUsageRouterManagerForTest();
+    service = await startUsageRouterService({ stateDir: join(root, "state", "usage-router") });
+
+    await bridge.nativeLogin({
+      mode: "apikey",
+      account: "chat",
+      envName: "default",
+      target: "none",
+      relogin: false,
+      apiKey: "sk-chat",
+      baseUrlMode: "custom",
+      baseUrl: "https://chat.example.com/v1",
+      apiProtocol: "chat_completions",
+      compatibilityEnabled: true,
+      upstreamModel: "deepseek-chat",
+      reasoningProfile: "reasoning_content",
+      longConversationStrategy: "continuity",
+      instructionRole: "system",
+      requestOverrides: { top_p: 0.9 },
+    });
+
+    const enabledRuntime = JSON.parse(await readFile(
+      join(root, "state", "env-accounts", "default", "chat", "runtime.json"),
+      "utf8",
+    )) as Record<string, unknown>;
+    assert.equal(enabledRuntime.api_protocol, "chat_completions");
+    assert.equal(enabledRuntime.compatibility_route_enabled, true);
+    assert.equal(enabledRuntime.compatibility_upstream_model, "deepseek-chat");
+    assert.equal(enabledRuntime.compatibility_reasoning_profile, "reasoning_content");
+    assert.equal(enabledRuntime.compatibility_long_conversation_strategy, "continuity");
+    assert.equal(enabledRuntime.compatibility_instruction_role, "system");
+    assert.deepEqual(enabledRuntime.compatibility_request_overrides, { top_p: 0.9 });
+
+    const manager = new UsageRouterManager({ stateDir: join(root, "state"), serviceEntryPath: "unused" });
+    assert.equal((await manager.listRoutes()).filter((route) => route.protocol === "chat_completions").length, 1);
+
+    await bridge.nativeLogin({
+      mode: "apikey",
+      account: "chat",
+      envName: "default",
+      target: "none",
+      relogin: false,
+      apiKey: "sk-chat",
+      baseUrlMode: "custom",
+      baseUrl: String(enabledRuntime.compatibility_route_base_url),
+      apiProtocol: "chat_completions",
+      compatibilityEnabled: true,
+      upstreamModel: "deepseek-chat",
+    });
+    const rebuiltRoute = (await manager.listRoutes()).find((route) => route.protocol === "chat_completions");
+    assert.equal(rebuiltRoute?.originalBaseUrl, "https://chat.example.com/v1");
+
+    await bridge.nativeLogin({
+      mode: "apikey",
+      account: "chat",
+      envName: "default",
+      target: "none",
+      relogin: false,
+      apiKey: "sk-chat",
+      baseUrlMode: "custom",
+      baseUrl: "https://responses.example.com/v1",
+      apiProtocol: "responses",
+      compatibilityEnabled: false,
+    });
+
+    const disabledRuntime = JSON.parse(await readFile(
+      join(root, "state", "env-accounts", "default", "chat", "runtime.json"),
+      "utf8",
+    )) as Record<string, unknown>;
+    assert.equal(disabledRuntime.api_protocol, "responses");
+    assert.equal(disabledRuntime.compatibility_route_enabled, false);
+    assert.equal(disabledRuntime.openai_base_url, "https://responses.example.com/v1");
+    assert.equal((await manager.listRoutes()).filter((route) => route.protocol === "chat_completions").length, 0);
+  } finally {
+    await service?.close();
+    bridge.__testUtils.resetUsageRouterManagerForTest();
+    restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Windows environment cloning skips symlinks that cannot be recreated without privileges", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-symlink-"));
   try {
@@ -225,6 +321,330 @@ test("desktop bridge deletes envs directly from core state and resets pointers",
     await assert.rejects(access(join(root, "envs", "project", "home", "config.toml")));
     assert.equal(await readFile(join(root, "state", "current_cli_env"), "utf8"), "default\n");
   } finally {
+    restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("desktop bridge deleteAccount also removes lingering usage routes for that account", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-account-route-delete-"));
+  const previousEnv = { ...process.env };
+  let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
+
+  try {
+    process.env.HOME = root;
+    process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
+    process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
+    process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
+
+    await writeFileRecursive(join(root, "state", "current_cli_env"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_cli_account"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_app_env"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_app_account"), "default\n");
+    await writeFileRecursive(
+      join(root, "state", "env-accounts", "default", "default", "runtime.json"),
+      "{\n  \"preferred_auth_method\": \"chatgpt\",\n  \"openai_base_url_mode\": \"default\"\n}\n",
+    );
+    await writeFileRecursive(join(root, "envs", "project", "home", "config.toml"), "model = 'gpt-5'\n");
+    await writeFileRecursive(
+      join(root, "state", "env-accounts", "project", "key", "runtime.json"),
+      "{\n  \"preferred_auth_method\": \"apikey\",\n  \"openai_base_url_mode\": \"custom\",\n  \"openai_base_url\": \"https://api.example.com/v1\"\n}\n",
+    );
+    await writeFileRecursive(
+      join(root, "state", "env-accounts", "project", "key", "auth.json"),
+      "{\"OPENAI_API_KEY\":\"sk-test\"}\n",
+    );
+
+    const manager = new UsageRouterManager({
+      stateDir: join(root, "state"),
+      serviceEntryPath: "unused",
+      launchService: async () => { service = await startUsageRouterService({ stateDir: join(root, "state", "usage-router") }); },
+    });
+    await manager.enableEnvironment("project", [
+      { envName: "project", accountName: "key", authMode: "apikey", baseUrl: "https://api.example.com/v1" },
+    ], async () => undefined);
+
+    const result = await bridge.deleteAccount("project", "key");
+
+    assert.equal(result.message, "Removed account project/key");
+    assert.deepEqual(await manager.listRoutes(), []);
+    await assert.rejects(access(join(root, "state", "env-accounts", "project", "key", "runtime.json")));
+  } finally {
+    await service?.close();
+    restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("desktop bridge copies complete account data, model bindings, and resolves name conflicts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-account-copy-"));
+  const previousEnv = { ...process.env };
+
+  try {
+    process.env.HOME = root;
+    process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
+    process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
+    process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
+    bridge.__testUtils.resetUsageRouterManagerForTest();
+
+    await writeFileRecursive(join(root, "state", "current_cli_env"), "source\n");
+    await writeFileRecursive(join(root, "state", "current_cli_account"), "key\n");
+    await writeFileRecursive(join(root, "state", "current_app_env"), "source\n");
+    await writeFileRecursive(join(root, "state", "current_app_account"), "key\n");
+    await writeFileRecursive(join(root, "envs", "source", "home", "config.toml"), "model = 'gpt-5'\n");
+    await writeFileRecursive(join(root, "envs", "target", "home", "config.toml"), "model = 'gpt-5'\n");
+    await writeFileRecursive(
+      join(root, "state", "env-accounts", "source", "key", "runtime.json"),
+      `${JSON.stringify({
+        preferred_auth_method: "apikey",
+        openai_base_url_mode: "custom",
+        openai_base_url: "https://api.example.com/v1",
+        independent_model_enabled: true,
+        independent_model_provider_id: "custom-provider",
+        independent_model_api_key: "model-secret",
+        independent_model_base_url: "https://model.example.com/v1",
+        api_protocol: "responses",
+      }, null, 2)}\n`,
+    );
+    await writeFileRecursive(
+      join(root, "state", "env-accounts", "source", "key", "auth.json"),
+      "{\"OPENAI_API_KEY\":\"sk-source\"}\n",
+    );
+    await writeFileRecursive(
+      join(root, "state", "custom-model-catalogs.json"),
+      `${JSON.stringify({
+        version: 1,
+        models: [{ id: "model-1", entry: { slug: "custom-model", display_name: "Custom Model" }, createdAt: "2026-07-13T00:00:00.000Z", updatedAt: "2026-07-13T00:00:00.000Z" }],
+        accountBindings: { "source/key": ["model-1"] },
+      }, null, 2)}\n`,
+    );
+
+    const copiedToTarget = await bridge.copyAccount("source", "key", "target");
+    assert.equal(copiedToTarget.output, "target/key\n");
+    assert.equal(
+      await readFile(join(root, "state", "env-accounts", "target", "key", "auth.json"), "utf8"),
+      "{\"OPENAI_API_KEY\":\"sk-source\"}\n",
+    );
+    const targetRuntime = JSON.parse(await readFile(
+      join(root, "state", "env-accounts", "target", "key", "runtime.json"),
+      "utf8",
+    )) as Record<string, unknown>;
+    assert.equal(targetRuntime.independent_model_provider_id, "custom-provider");
+    assert.equal(targetRuntime.independent_model_api_key, "model-secret");
+
+    assert.equal((await bridge.copyAccount("source", "key", "source")).output, "source/key-copy\n");
+    assert.equal((await bridge.copyAccount("source", "key", "source")).output, "source/key-copy-2\n");
+
+    const catalog = JSON.parse(await readFile(join(root, "state", "custom-model-catalogs.json"), "utf8")) as {
+      accountBindings: Record<string, string[]>;
+    };
+    assert.deepEqual(catalog.accountBindings["target/key"], ["model-1"]);
+    assert.deepEqual(catalog.accountBindings["source/key-copy"], ["model-1"]);
+    assert.deepEqual(catalog.accountBindings["source/key-copy-2"], ["model-1"]);
+  } finally {
+    bridge.__testUtils.resetUsageRouterManagerForTest();
+    restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("desktop bridge recreates Chat compatibility routing for the copied account", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-account-copy-chat-"));
+  const previousEnv = { ...process.env };
+  let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
+
+  try {
+    process.env.HOME = root;
+    process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
+    process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
+    process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
+    bridge.__testUtils.resetUsageRouterManagerForTest();
+
+    await writeFileRecursive(join(root, "state", "current_cli_env"), "source\n");
+    await writeFileRecursive(join(root, "state", "current_cli_account"), "chat\n");
+    await writeFileRecursive(join(root, "state", "current_app_env"), "source\n");
+    await writeFileRecursive(join(root, "state", "current_app_account"), "chat\n");
+    await writeFileRecursive(join(root, "envs", "source", "home", "config.toml"), "model = 'gpt-5'\n");
+    await writeFileRecursive(join(root, "envs", "target", "home", "config.toml"), "model = 'gpt-5'\n");
+    await writeFileRecursive(
+      join(root, "state", "env-accounts", "source", "chat", "auth.json"),
+      "{\"OPENAI_API_KEY\":\"sk-chat\"}\n",
+    );
+    await writeFileRecursive(
+      join(root, "state", "env-accounts", "source", "chat", "runtime.json"),
+      "{\n  \"preferred_auth_method\": \"apikey\",\n  \"openai_base_url_mode\": \"custom\",\n  \"openai_base_url\": \"https://chat.example.com/v1\",\n  \"api_protocol\": \"responses\"\n}\n",
+    );
+
+    const manager = new UsageRouterManager({
+      stateDir: join(root, "state"),
+      serviceEntryPath: "unused",
+      launchService: async () => {
+        service = await startUsageRouterService({ stateDir: join(root, "state", "usage-router") });
+      },
+    });
+    await manager.enableAccountCompatibility({
+      envName: "source",
+      accountName: "chat",
+      authMode: "apikey",
+      baseUrl: "https://chat.example.com/v1",
+      apiKey: "sk-chat",
+      upstreamModel: "deepseek-chat",
+    }, async ({ baseUrl, localRouteToken, providerId }) => {
+      await writeFileRecursive(
+        join(root, "state", "env-accounts", "source", "chat", "runtime.json"),
+        `${JSON.stringify({
+          preferred_auth_method: "apikey",
+          openai_base_url_mode: "custom",
+          openai_base_url: "https://chat.example.com/v1",
+          api_protocol: "chat_completions",
+          compatibility_route_enabled: true,
+          compatibility_route_base_url: baseUrl,
+          compatibility_route_token: localRouteToken,
+          compatibility_route_provider_id: providerId,
+          compatibility_upstream_model: "deepseek-chat",
+          compatibility_reasoning_profile: "reasoning_content",
+          compatibility_long_conversation_strategy: "continuity",
+          compatibility_instruction_role: "system",
+        }, null, 2)}\n`,
+      );
+    });
+
+    const result = await bridge.copyAccount("source", "chat", "target");
+    assert.equal(result.output, "target/chat\n");
+    const routes = await manager.listRoutes();
+    const sourceRoute = routes.find((route) => route.envName === "source" && route.accountName === "chat");
+    const targetRoute = routes.find((route) => route.envName === "target" && route.accountName === "chat");
+    assert.ok(sourceRoute);
+    assert.ok(targetRoute);
+    assert.notEqual(targetRoute.routeId, sourceRoute.routeId);
+    assert.equal(targetRoute.originalBaseUrl, "https://chat.example.com/v1");
+    assert.equal(targetRoute.upstreamModel, "deepseek-chat");
+    assert.equal(targetRoute.reasoningProfile, "reasoning_content");
+    assert.equal(targetRoute.longConversationStrategy, "continuity");
+    assert.equal(targetRoute.instructionRole, "system");
+
+    const targetRuntime = JSON.parse(await readFile(
+      join(root, "state", "env-accounts", "target", "chat", "runtime.json"),
+      "utf8",
+    )) as Record<string, unknown>;
+    assert.equal(targetRuntime.compatibility_route_enabled, true);
+    assert.equal(targetRuntime.compatibility_route_provider_id, `codex_switcher_${targetRoute.routeId}`);
+    assert.match(String(targetRuntime.compatibility_route_base_url), new RegExp(`/routes/${targetRoute.routeId}$`));
+  } finally {
+    await service?.close();
+    bridge.__testUtils.resetUsageRouterManagerForTest();
+    restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("desktop bridge deleteEnv also removes lingering usage routes for that environment", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-env-route-delete-"));
+  const previousEnv = { ...process.env };
+  let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
+
+  try {
+    process.env.HOME = root;
+    process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
+    process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
+    process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
+
+    await writeFileRecursive(join(root, "state", "current_cli_env"), "project\n");
+    await writeFileRecursive(join(root, "state", "current_cli_account"), "key\n");
+    await writeFileRecursive(join(root, "state", "current_app_env"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_app_account"), "default\n");
+    await writeFileRecursive(
+      join(root, "state", "env-accounts", "default", "default", "runtime.json"),
+      "{\n  \"preferred_auth_method\": \"chatgpt\",\n  \"openai_base_url_mode\": \"default\"\n}\n",
+    );
+    await writeFileRecursive(join(root, "envs", "project", "home", "config.toml"), "model = 'gpt-5'\n");
+    await writeFileRecursive(
+      join(root, "state", "env-accounts", "project", "key", "runtime.json"),
+      "{\n  \"preferred_auth_method\": \"apikey\",\n  \"openai_base_url_mode\": \"custom\",\n  \"openai_base_url\": \"https://api.example.com/v1\"\n}\n",
+    );
+
+    const manager = new UsageRouterManager({
+      stateDir: join(root, "state"),
+      serviceEntryPath: "unused",
+      launchService: async () => { service = await startUsageRouterService({ stateDir: join(root, "state", "usage-router") }); },
+    });
+    await manager.enableEnvironment("project", [
+      { envName: "project", accountName: "key", authMode: "apikey", baseUrl: "https://api.example.com/v1" },
+    ], async () => undefined);
+
+    const result = await bridge.deleteEnv("project");
+
+    assert.equal(result.message, "Removed env project");
+    assert.deepEqual(await manager.listRoutes(), []);
+    await assert.rejects(access(join(root, "envs", "project", "home", "config.toml")));
+  } finally {
+    await service?.close();
+    restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("desktop bridge loadOverview refreshes stale environment route ports after router restart", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-route-resync-"));
+  const previousEnv = { ...process.env };
+  let firstService: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
+  let secondService: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
+
+  try {
+    process.env.HOME = root;
+    process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
+    process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
+    process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
+    bridge.__testUtils.resetUsageRouterManagerForTest();
+
+    await writeFileRecursive(join(root, "state", "current_cli_env"), "project\n");
+    await writeFileRecursive(join(root, "state", "current_cli_account"), "key\n");
+    await writeFileRecursive(join(root, "state", "current_app_env"), "project\n");
+    await writeFileRecursive(join(root, "state", "current_app_account"), "key\n");
+    await writeFileRecursive(join(root, "envs", "project", "home", "config.toml"), "model = 'gpt-5'\n");
+    await writeFileRecursive(
+      join(root, "state", "env-accounts", "project", "key", "runtime.json"),
+      "{\n  \"preferred_auth_method\": \"apikey\",\n  \"openai_base_url_mode\": \"custom\",\n  \"openai_base_url\": \"https://api.example.com/v1\"\n}\n",
+    );
+    await writeFileRecursive(
+      join(root, "state", "env-accounts", "project", "key", "auth.json"),
+      "{\"OPENAI_API_KEY\":\"sk-test\"}\n",
+    );
+
+    const manager = new UsageRouterManager({
+      stateDir: join(root, "state"),
+      serviceEntryPath: "unused",
+      launchService: async () => undefined,
+    });
+    firstService = await startUsageRouterService({ stateDir: join(root, "state", "usage-router") });
+    const firstPort = firstService.port;
+    await manager.enableEnvironment("project", [
+      { envName: "project", accountName: "key", authMode: "apikey", baseUrl: "https://api.example.com/v1" },
+    ], async (accountName, baseUrl) => {
+      const runtimePath = join(root, "state", "env-accounts", "project", accountName, "runtime.json");
+      await writeFileRecursive(
+        runtimePath,
+        `{\n  "preferred_auth_method": "apikey",\n  "openai_base_url_mode": "custom",\n  "openai_base_url": "${baseUrl}"\n}\n`,
+      );
+    });
+    await firstService.close();
+    firstService = undefined;
+
+    secondService = await startUsageRouterService({ stateDir: join(root, "state", "usage-router") });
+    assert.notEqual(secondService.port, firstPort);
+
+    await bridge.loadOverview();
+
+    const runtimeRaw = await readFile(join(root, "state", "env-accounts", "project", "key", "runtime.json"), "utf8");
+    const runtime = JSON.parse(runtimeRaw) as { openai_base_url?: string };
+    assert.match(runtime.openai_base_url ?? "", new RegExp(`^http://127\\.0\\.0\\.1:${secondService.port}/routes/`));
+
+    const config = await readFile(join(root, "envs", "project", "home", "config.toml"), "utf8");
+    assert.equal(config, "model = 'gpt-5'\n");
+  } finally {
+    await firstService?.close();
+    await secondService?.close();
+    bridge.__testUtils.resetUsageRouterManagerForTest();
     restoreEnv(previousEnv);
     await rm(root, { recursive: true, force: true });
   }

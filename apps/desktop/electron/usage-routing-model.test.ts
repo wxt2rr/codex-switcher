@@ -2,11 +2,29 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  authorizeRouteToken,
   buildLocalRouteBaseUrl,
   createRouteId,
   extractTokenUsage,
   normalizeUpstreamBaseUrl,
+  selectCompatibilityUpstreamBaseUrl,
 } from "./usage-routing-model.js";
+
+test("route bearer tokens require an exact Bearer match", () => {
+  assert.equal(authorizeRouteToken("Bearer local-secret", "local-secret"), true);
+  assert.equal(authorizeRouteToken("bearer local-secret", "local-secret"), true);
+  assert.equal(authorizeRouteToken("Bearer wrong", "local-secret"), false);
+  assert.equal(authorizeRouteToken(undefined, "local-secret"), false);
+});
+
+test("compatibility routing unwraps an existing local usage route to its real upstream", () => {
+  const route = { routeId: "route", envName: "work", accountName: "deepseek",
+    upstreamBaseUrl: "https://api.deepseek.com", originalBaseUrl: "https://api.deepseek.com",
+    protocol: "responses" as const, reasoningProfile: "auto" as const,
+    enabled: true, createdAt: 1, updatedAt: 1 };
+  assert.equal(selectCompatibilityUpstreamBaseUrl([route], "work", "deepseek",
+    "http://127.0.0.1:61923/routes/route"), "https://api.deepseek.com");
+});
 
 test("route identity is stable and preserves the upstream Base URL dimension", () => {
   assert.equal(normalizeUpstreamBaseUrl("https://api.example.com/v1/"), "https://api.example.com/v1");

@@ -110,6 +110,8 @@ test("electron bridge builds macOS terminal launch attempts for the CLI", () => 
   assert.equal((iTermScript.match(/create window with default profile/g) ?? []).length, 1);
   assert.ok(iTermScript.indexOf("activate") > iTermScript.indexOf("write text"));
   assert.match(iTermScript, /CODEX_HOME/);
+  assert.match(iTermScript, /OPENAI_API_KEY/);
+  assert.match(iTermScript, /auth\.json/);
 });
 
 test("electron bridge starts a new CLI window in the selected project directory", () => {
@@ -256,6 +258,7 @@ test("electron bridge builds Windows Terminal launch attempts for the CLI", () =
     "-Command",
   ]);
   assert.match(plan.attempts[0]?.args[7] ?? "", /\$env:CODEX_HOME/);
+  assert.match(plan.attempts[0]?.args[7] ?? "", /\$env:OPENAI_API_KEY/);
   assert.match(plan.attempts[0]?.args[7] ?? "", /codex\.exe/);
 });
 
@@ -285,6 +288,7 @@ test("electron bridge builds PowerShell launch attempts for the CLI on Windows",
   assert.equal(plan.attempts[0]?.command, "powershell.exe");
   assert.match(plan.attempts[0]?.args.join(" "), /Set-Location/);
   assert.match(plan.attempts[0]?.args.join(" "), /\$env:CODEX_HOME/);
+  assert.match(plan.attempts[0]?.args.join(" "), /\$env:OPENAI_API_KEY/);
   assert.match(plan.attempts[0]?.args.join(" "), /codex\.exe/);
 });
 
@@ -301,6 +305,7 @@ test("electron bridge defaults to PowerShell for CLI launch on Windows", () => {
   assert.equal(plan.attempts[0]?.command, "powershell.exe");
   assert.match(plan.attempts[0]?.args.join(" "), /Set-Location/);
   assert.match(plan.attempts[0]?.args.join(" "), /\$env:CODEX_HOME/);
+  assert.match(plan.attempts[0]?.args.join(" "), /\$env:OPENAI_API_KEY/);
   assert.match(plan.attempts[0]?.args.join(" "), /codex\.exe/);
 });
 

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   CircleHelp,
+  CircleCheck,
+  CircleX,
   Check,
-  Command,
   Copy,
   ChevronDown,
+  ChevronRight,
   Eye,
   EyeOff,
   Ellipsis,
@@ -13,6 +15,7 @@ import {
   Plus,
   Search,
   RefreshCw,
+  LoaderCircle,
   Settings2,
   TerminalSquare,
 } from "lucide-react";
@@ -24,16 +27,20 @@ import {
   parseUsageMetric,
 } from "@/account-usage";
 import { Button } from "@/components/ui/button";
+import { StatCard } from "@/components/dashboard-kit";
+import { Tooltip } from "@/components/ui/tooltip";
 import { useAdaptiveMenuLayout } from "@/components/adaptive-menu-placement";
+import { useDelayedUnmount } from "@/components/use-delayed-unmount";
 import { cn } from "@/lib/utils";
 import { maskApiKeyForDisplay } from "../api-key-display";
+import { EmptyList, ListCard, ListStack } from "../components/account-list-primitives";
 import {
   ConfirmDialog,
   SidePanel,
 } from "../components/admin-primitives";
 import { Field, Input, Select, Textarea } from "../components/form-primitives";
 import type { AccountSummary, OverviewPayload } from "../desktop-model";
-import type { CodexProject, DesktopLaunchStrategy } from "../bridge";
+import { resolveDesktopBridge, type AccountCompatibilityStatus, type CodexProject, type DesktopLaunchStrategy } from "../bridge";
 import { getDesktopCopy } from "../desktop-copy";
 import { localizeAuthMode } from "../desktop-utils";
 import { getTranslations, type UiLanguage } from "../i18n";
@@ -77,6 +84,16 @@ function getApiUsageHint(language: UiLanguage) {
   return "Billed upstream. Remote usage is not shown here.";
 }
 
+export interface AccountProtocolSettings {
+  apiProtocol: "responses" | "chat_completions";
+  compatibilityEnabled: boolean;
+  upstreamModel?: string;
+  reasoningProfile: "auto" | "standard" | "reasoning_content" | "think_tags";
+  longConversationStrategy: "safe" | "continuity";
+  instructionRole: "auto" | "system" | "developer";
+  requestOverrides?: Record<string, unknown>;
+}
+
 export function AccountsPage({
   overview,
   language,
@@ -115,6 +132,7 @@ export function AccountsPage({
   onRelogin,
   onLogout,
   onDeleteAccount,
+  onCopyAccount,
   onUpdateRuntime,
   onUpdateIndependentModel,
   onCopyApiKey,
@@ -157,10 +175,11 @@ export function AccountsPage({
   onListAccountProjects: (account: AccountSummary) => Promise<CodexProject[]>;
   onPickDirectory: () => Promise<string>;
   onPrimeAccount: (account?: AccountSummary) => void;
-  onLogin: () => Promise<boolean>;
+  onLogin: (settings: AccountProtocolSettings) => Promise<boolean>;
   onRelogin: () => Promise<boolean>;
   onLogout: () => void;
   onDeleteAccount: () => void;
+  onCopyAccount: (account: AccountSummary, targetEnvName: string) => void;
   onUpdateRuntime: () => Promise<boolean>;
   onUpdateIndependentModel: (
     account: AccountSummary,
@@ -185,6 +204,16 @@ export function AccountsPage({
   const [independentModelApiKeyDraft, setIndependentModelApiKeyDraft] = useState("");
   const [independentModelBaseUrlDraft, setIndependentModelBaseUrlDraft] = useState("");
   const [showApiKeyDraft, setShowApiKeyDraft] = useState(false);
+  const [apiProtocolDraft, setApiProtocolDraft] = useState<"responses" | "chat_completions">("responses");
+  const [compatibilityEnabled, setCompatibilityEnabled] = useState(false);
+  const [compatibilityStatus, setCompatibilityStatus] = useState<AccountCompatibilityStatus | null>(null);
+  const [compatibilityModel, setCompatibilityModel] = useState("");
+  const [compatibilityReasoning, setCompatibilityReasoning] = useState<"auto" | "standard" | "reasoning_content" | "think_tags">("auto");
+  const [compatibilityLongConversationStrategy, setCompatibilityLongConversationStrategy] = useState<"safe" | "continuity">("safe");
+  const [compatibilityInstructionRole, setCompatibilityInstructionRole] = useState<"auto" | "system" | "developer">("auto");
+  const [compatibilityOverrides, setCompatibilityOverrides] = useState("");
+  const [compatibilityBusy, setCompatibilityBusy] = useState(false);
+  const [compatibilityCheck, setCompatibilityCheck] = useState<{ ok: boolean; message: string } | null>(null);
   const [customRefreshEditing, setCustomRefreshEditing] = useState(false);
   const [customRefreshDraft, setCustomRefreshDraft] = useState(String(authRefreshIntervalSeconds));
   const pageCopy = getDesktopCopy(language);
@@ -271,6 +300,69 @@ export function AccountsPage({
     }
   }, [loginDrawerOpen]);
 
+  useEffect(() => {
+    if (!selectedAccount) {
+      setApiProtocolDraft("responses");
+      setCompatibilityEnabled(false);
+      setCompatibilityStatus(null);
+      setCompatibilityLongConversationStrategy("safe");
+      setCompatibilityInstructionRole("auto");
+      return;
+    }
+    const protocol = selectedAccount.runtime.apiProtocol ?? "responses";
+    setApiProtocolDraft(protocol);
+    setCompatibilityEnabled(selectedAccount.runtime.compatibilityRouteEnabled === true);
+    setCompatibilityModel(selectedAccount.runtime.compatibilityUpstreamModel ?? "");
+    setCompatibilityReasoning(selectedAccount.runtime.compatibilityReasoningProfile ?? "auto");
+    setCompatibilityLongConversationStrategy(selectedAccount.runtime.compatibilityLongConversationStrategy ?? "safe");
+    setCompatibilityInstructionRole(selectedAccount.runtime.compatibilityInstructionRole ?? "auto");
+    setCompatibilityOverrides(selectedAccount.runtime.compatibilityRequestOverrides
+      ? JSON.stringify(selectedAccount.runtime.compatibilityRequestOverrides, null, 2) : "");
+    void resolveDesktopBridge().getAccountCompatibilityStatuses([`${selectedAccount.envName}/${selectedAccount.name}`])
+      .then(([status]) => setCompatibilityStatus(status ?? null)).catch(() => setCompatibilityStatus(null));
+  }, [selectedAccount]);
+
+  function buildProtocolSettings(): AccountProtocolSettings | null {
+    try {
+      let requestOverrides: Record<string, unknown> | undefined;
+      if (compatibilityOverrides.trim()) {
+        const parsed = JSON.parse(compatibilityOverrides) as unknown;
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Overrides must be a JSON object");
+        requestOverrides = parsed as Record<string, unknown>;
+      }
+      return {
+        apiProtocol: apiProtocolDraft,
+        compatibilityEnabled: apiProtocolDraft === "chat_completions" && compatibilityEnabled,
+        upstreamModel: compatibilityModel.trim() || undefined,
+        reasoningProfile: compatibilityReasoning,
+        longConversationStrategy: compatibilityLongConversationStrategy,
+        instructionRole: compatibilityInstructionRole,
+        requestOverrides,
+      };
+    } catch (error) {
+      setCompatibilityStatus({ envName: selectedAccount?.envName ?? accountEnvDraft, accountName: selectedAccount?.name ?? accountNameDraft,
+        enabled: compatibilityEnabled, state: "degraded", message: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  }
+
+  function toggleCompatibility() {
+    const next = !compatibilityEnabled;
+    setCompatibilityEnabled(next);
+    if (next) setApiProtocolDraft("chat_completions");
+    setCompatibilityCheck(null);
+  }
+
+  async function runCompatibilityCheck() {
+    if (!selectedAccount) return;
+    setCompatibilityBusy(true); setCompatibilityCheck(null);
+    try {
+      const result = await resolveDesktopBridge().checkAccountCompatibility(selectedAccount.envName, selectedAccount.name);
+      setCompatibilityCheck({ ok: result.ok, message: result.message });
+    } catch (error) { setCompatibilityCheck({ ok: false, message: error instanceof Error ? error.message : String(error) }); }
+    finally { setCompatibilityBusy(false); }
+  }
+
   return (
     <section className="h-full min-h-0 overflow-hidden px-6 pb-6 pt-6 xl:px-8 xl:pb-8 xl:pt-8">
       <div className="admin-page-content flex h-full w-full flex-col gap-3">
@@ -288,17 +380,14 @@ export function AccountsPage({
 
           <div className="rounded-[18px] bg-white px-3 py-2.5 ring-1 ring-black/[0.04] shadow-[0_10px_30px_rgba(15,23,42,0.03)]">
             <div className="responsive-toolbar flex items-center gap-2.5">
-              <div className="inline-flex h-8 items-center gap-2 rounded-lg bg-[#f3f4f6] px-3 text-[12px] font-medium text-slate-500">
-                <Command className="size-3.5" />
-                K
-              </div>
               <div className="relative min-w-[220px] flex-1">
                 <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
                 <Input
+                  data-account-search-input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder={language === "zh" ? "搜索账号、环境或 Base URL" : pageCopy.accounts.searchPlaceholder}
-                className="h-8 rounded-lg border-transparent bg-[#fbfbfc] pl-10 text-[12px] shadow-none"
+                  className="h-8 rounded-lg border-transparent bg-[#fbfbfc] pl-10 text-[12px] shadow-none focus:border-transparent focus:ring-0"
                 />
               </div>
               <Select
@@ -333,7 +422,7 @@ export function AccountsPage({
               <div className="flex h-8 items-center overflow-hidden rounded-lg bg-[#f3f4f6]">
                 <button
                   type="button"
-                  className="flex size-8 shrink-0 items-center justify-center text-slate-500 transition hover:bg-[#ebeef2] hover:text-neutral-800 disabled:cursor-wait"
+                  className="motion-interactive-color flex size-8 shrink-0 items-center justify-center text-slate-500 hover:bg-[#ebeef2] hover:text-neutral-800 disabled:cursor-wait"
                   aria-label={language === "zh" ? "立即刷新用量" : "Refresh usage now"}
                   title={language === "zh" ? "立即刷新用量" : "Refresh usage now"}
                   onClick={onRefreshAuthMetrics}
@@ -429,18 +518,15 @@ export function AccountsPage({
           />
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[14px] border border-black/[0.05] bg-white">
-          <div className="min-h-0 flex-1 overflow-auto">
+        <div className="page-scroll-gutter min-h-0 flex-1">
+          <ListStack className="mt-0 min-h-full">
           {filteredAccounts.length === 0 ? (
-            <div className="px-6 py-16 text-center text-sm font-medium text-neutral-500">
-              {overview.accounts.length === 0 ? pageCopy.accounts.emptyListTitle : pageCopy.accounts.emptyFilterTitle}
-            </div>
+            <EmptyList title={overview.accounts.length === 0 ? pageCopy.accounts.emptyListTitle : pageCopy.accounts.emptyFilterTitle} />
           ) : null}
-          {filteredAccounts.map((account, index) => (
+          {filteredAccounts.map((account) => (
             <AccountListCard
               key={`${account.envName}/${account.name}`}
               account={account}
-              index={index}
               language={language}
               busy={busy}
               pageCopy={pageCopy}
@@ -455,6 +541,10 @@ export function AccountsPage({
               onRelogin={onRelogin}
               onLogoutIntent={() => setLogoutOpen(true)}
               onDelete={() => setDeleteOpen(true)}
+              onCopyAccount={(targetEnvName) => onCopyAccount(account, targetEnvName)}
+              copyTargetEnvironments={overview.envs
+                .filter((env) => env.name !== account.envName)
+                .map((env) => env.name)}
               onModelConfig={() => {
                 setModelAccountKey(`${account.envName}/${account.name}`);
                 setModelConfigOpen(true);
@@ -462,7 +552,7 @@ export function AccountsPage({
               onCopyApiKey={onCopyApiKey}
             />
           ))}
-          </div>
+          </ListStack>
         </div>
       </div>
 
@@ -519,7 +609,7 @@ export function AccountsPage({
                 />
                 <button
                   type="button"
-                  className="absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 transition hover:bg-[#eef1f4] hover:text-neutral-700"
+                  className="motion-interactive-color absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 hover:bg-[#eef1f4] hover:text-neutral-700"
                   onClick={() => setShowApiKeyDraft((value) => !value)}
                   aria-label={
                     showApiKeyDraft
@@ -573,6 +663,88 @@ export function AccountsPage({
               />
             </Field>
           ) : null}
+          {loginModeNeedsApiKey ? (
+            <Field label={language === "zh" ? "API 协议" : language === "ja" ? "API プロトコル" : "API protocol"}>
+              <Select value={apiProtocolDraft} onValueChange={(value) => {
+                const protocol = value as typeof apiProtocolDraft;
+                setApiProtocolDraft(protocol);
+                if (protocol === "responses") setCompatibilityEnabled(false);
+              }}
+                openOnHover={false} items={[
+                  { value: "responses", label: "Responses (native)" },
+                  { value: "chat_completions", label: "Chat Completions (compatibility)" },
+                ]} />
+            </Field>
+          ) : null}
+          {loginModeNeedsApiKey && (apiProtocolDraft === "chat_completions" || compatibilityEnabled) && selectedAccount ? (
+            <div className="space-y-3 border-t border-neutral-200/80 pt-4">
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-neutral-900">{language === "zh" ? "兼容路由" : "Compatibility route"}</div>
+                  <div className="mt-0.5 text-xs text-slate-500">{language === "zh" ? "仅为此账号转换 Responses 与 Chat Completions" : "Convert Responses and Chat Completions for this account only"}</div>
+                </div>
+                <button type="button" role="switch" aria-checked={compatibilityEnabled} disabled={compatibilityBusy}
+                  onClick={toggleCompatibility}
+                  className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:opacity-60 ${compatibilityEnabled ? "bg-[#34C759]" : "bg-[#d1d1d6]"}`}>
+                  <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${compatibilityEnabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
+                </button>
+              </div>
+              <Field label={language === "zh" ? "上游模型（可选）" : "Upstream model (optional)"}>
+                <Input value={compatibilityModel} onChange={(event) => setCompatibilityModel(event.target.value)} placeholder="provider-model-id" />
+              </Field>
+              <Field label={language === "zh" ? "推理内容格式" : "Reasoning format"}>
+                <Select value={compatibilityReasoning} onValueChange={(value) => setCompatibilityReasoning(value as typeof compatibilityReasoning)}
+                  openOnHover={false} items={[
+                    { value: "auto", label: "Auto" }, { value: "standard", label: "Standard" },
+                    { value: "reasoning_content", label: "reasoning_content" }, { value: "think_tags", label: "<think> tags" },
+                  ]} />
+              </Field>
+              <Field label={language === "zh" ? "长会话处理" : "Long conversation handling"}>
+                <Select value={compatibilityLongConversationStrategy}
+                  onValueChange={(value) => setCompatibilityLongConversationStrategy(value as typeof compatibilityLongConversationStrategy)}
+                  openOnHover={false} items={[
+                    { value: "safe", label: language === "zh" ? "安全压缩（推荐）" : "Safe compaction (recommended)" },
+                    { value: "continuity", label: language === "zh" ? "连续性优先" : "Prioritize continuity" },
+                  ]} />
+                <div className="mt-1 text-xs leading-5 text-slate-500">
+                  {compatibilityLongConversationStrategy === "safe"
+                    ? (language === "zh" ? "自动整理长会话；遇到无法转换的压缩历史时提示新建会话。" : "Summarizes long chats and asks for a new chat when history cannot be converted.")
+                    : (language === "zh" ? "尽量继续当前会话，但部分早期内容可能丢失。" : "Keeps the current chat when possible, but early context may be lost.")}
+                </div>
+              </Field>
+              <Field label={language === "zh" ? "指令角色" : "Instruction role"}>
+                <Select value={compatibilityInstructionRole}
+                  onValueChange={(value) => setCompatibilityInstructionRole(value as typeof compatibilityInstructionRole)}
+                  openOnHover={false} items={[
+                    { value: "auto", label: language === "zh" ? "自动（推荐）" : "Auto (recommended)" },
+                    { value: "system", label: "system" },
+                    { value: "developer", label: "developer" },
+                  ]} />
+                <div className="mt-1 text-xs leading-5 text-slate-500">
+                  {language === "zh" ? "自动使用兼容性更高的 system；仅在上游支持时选择 developer。" : "Auto uses the broadly compatible system role; choose developer only when supported upstream."}
+                </div>
+              </Field>
+              <Field label={language === "zh" ? "请求覆盖（JSON，可选）" : "Request overrides (JSON, optional)"}>
+                <Textarea value={compatibilityOverrides} onChange={(event) => setCompatibilityOverrides(event.target.value)} placeholder='{"top_p": 0.9}' />
+              </Field>
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <div className="flex min-w-0 items-center gap-1.5 text-slate-500">
+                  {compatibilityBusy ? <LoaderCircle className="size-3.5 animate-spin" />
+                    : compatibilityStatus?.state === "ready" ? <CircleCheck className="size-3.5 text-emerald-600" />
+                      : compatibilityStatus?.state === "degraded" ? <CircleX className="size-3.5 text-red-600" /> : null}
+                  <span className="truncate">{compatibilityCheck?.message ?? compatibilityStatus?.message ??
+                    (compatibilityStatus?.state === "ready" ? (language === "zh" ? "路由已就绪" : "Route ready") :
+                      language === "zh" ? "路由未启用" : "Route disabled")}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button type="button" variant="secondary" onClick={runCompatibilityCheck}
+                    disabled={selectedAccount.runtime.compatibilityRouteEnabled !== true || compatibilityBusy || !compatibilityModel.trim()}>
+                    {language === "zh" ? "检查兼容性" : "Check compatibility"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : null}
           {loginModeNeedsSub2Api ? (
             <Field label={pageCopy.accounts.sub2api}>
               <Textarea value={accountSub2ApiDraft} onChange={(event) => onAccountSub2ApiDraftChange(event.target.value)} placeholder='{"apiKey":"..."}' />
@@ -581,7 +753,8 @@ export function AccountsPage({
           <div className="grid gap-3 sm:grid-cols-2">
             <Button
               onClick={async () => {
-                if (await onLogin()) {
+                const settings = buildProtocolSettings();
+                if (settings && await onLogin(settings)) {
                   setLoginDrawerOpen(false);
                 }
               }}
@@ -796,19 +969,8 @@ export function AccountsPage({
   );
 }
 
-function StatCard({ label, value, helper }: { label: string; value: string; helper: string }) {
-  return (
-    <div className="rounded-[16px] bg-white px-5 py-3.5 ring-1 ring-black/[0.04] shadow-[0_8px_24px_rgba(15,23,42,0.02)]">
-      <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">{label}</div>
-      <div className="mt-2 text-[18px] font-semibold tracking-[-0.03em] text-neutral-950 [font-variant-numeric:tabular-nums]">{value}</div>
-      <div className="mt-1 text-[11px] font-medium text-slate-500">{helper}</div>
-    </div>
-  );
-}
-
 function AccountListCard({
   account,
-  index,
   language,
   busy,
   pageCopy,
@@ -823,11 +985,12 @@ function AccountListCard({
   onRelogin,
   onLogoutIntent,
   onDelete,
+  onCopyAccount,
+  copyTargetEnvironments,
   onModelConfig,
   onCopyApiKey,
 }: {
   account: AccountSummary;
-  index: number;
   language: UiLanguage;
   busy: boolean;
   pageCopy: ReturnType<typeof getDesktopCopy>;
@@ -847,6 +1010,8 @@ function AccountListCard({
   onRelogin: () => Promise<boolean>;
   onLogoutIntent: () => void;
   onDelete: () => void;
+  onCopyAccount: (targetEnvName: string) => void;
+  copyTargetEnvironments: string[];
   onModelConfig: () => void;
   onCopyApiKey: (value: string) => void;
 }) {
@@ -864,32 +1029,33 @@ function AccountListCard({
       : account.envName;
 
   return (
-    <article
+    <ListCard
       className={cn(
-        "responsive-record-row responsive-account-row grid min-h-[92px] items-start gap-4 border-t border-black/[0.04] px-5 py-4 transition",
-        index === 0 ? "border-t-transparent" : "",
-        index % 2 === 0 ? "bg-white" : "bg-[#fbfbfc]",
-        "hover:bg-[#f7f8fa]",
+        "responsive-record-row responsive-account-row grid min-h-[92px] items-start gap-4",
       )}
     >
-      <div className="flex min-w-0 items-center gap-3.5">
-        <AvatarTile name={account.name} index={index} />
-        <div className="min-w-0">
+      <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
             <h3 className="truncate text-[15px] font-semibold tracking-[-0.02em] text-neutral-950">{account.name}</h3>
           </div>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             <SoftBadge tone={isAuth ? "brand" : "neutral"} label={formatAccountAuthLabel(account.authMode)} />
             <SoftBadge tone="neutral" label={envLabel} />
-            {account.route?.enabled ? (
+            {account.route?.enabled && account.route.protocol !== "chat_completions" ? (
               <SoftBadge
                 tone="success"
                 label={language === "zh" ? "已开启代理" : language === "ja" ? "プロキシ有効" : "Routed"}
                 title={account.route?.localBaseUrl}
               />
             ) : null}
+            {account.runtime.apiProtocol === "chat_completions" && account.runtime.compatibilityRouteEnabled ? (
+              <SoftBadge
+                tone="success"
+                label={language === "zh" ? "Chat 兼容" : language === "ja" ? "Chat 互換" : "Chat compatible"}
+                title={account.runtime.compatibilityRouteBaseUrl}
+              />
+            ) : null}
           </div>
-        </div>
       </div>
 
       <div className="responsive-priority-tertiary min-w-0">
@@ -910,7 +1076,7 @@ function AccountListCard({
             {maskedApiKey ? (
               <button
                 type="button"
-                className="inline-flex size-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white hover:text-neutral-900"
+                className="motion-interactive-color inline-flex size-8 items-center justify-center rounded-lg text-slate-400 hover:bg-white hover:text-neutral-900"
                 onClick={() => onCopyApiKey(apiKeyValue)}
                 aria-label={language === "zh" ? "复制 API Key" : language === "ja" ? "API Key をコピー" : "Copy API key"}
                 title={language === "zh" ? "复制完整 API Key" : language === "ja" ? "完全な API Key をコピー" : "Copy full API key"}
@@ -922,7 +1088,7 @@ function AccountListCard({
             {isAuth ? (
               <button
                 type="button"
-                className="inline-flex size-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white hover:text-neutral-900"
+                className="motion-interactive-color inline-flex size-8 items-center justify-center rounded-lg text-slate-500 hover:bg-white hover:text-neutral-900"
                 onClick={onModelConfig}
                 disabled={busy}
                 aria-label={pageCopy.accounts.modelConfigTitle}
@@ -1049,7 +1215,7 @@ function AccountListCard({
         />
         <button
           type="button"
-          className="responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[12px] font-medium text-neutral-700 ring-1 ring-black/[0.05] transition hover:bg-[#f3f4f6] hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-55"
+          className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[12px] font-medium text-neutral-700 ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-55"
           onClick={() => {
             onPrimeAccount(account);
             onLogin();
@@ -1063,6 +1229,20 @@ function AccountListCard({
           label={language === "zh" ? "操作" : language === "ja" ? "操作" : "Actions"}
           disabled={busy}
           items={[
+            {
+              key: "copy",
+              label: language === "zh" ? "复制" : language === "ja" ? "複製" : "Duplicate",
+              onSelect: () => onCopyAccount(account.envName),
+            },
+            ...(copyTargetEnvironments.length > 0 ? [{
+              key: "copy-to",
+              label: language === "zh" ? "复制到" : language === "ja" ? "別の環境に複製" : "Copy to",
+              children: copyTargetEnvironments.map((envName) => ({
+                key: envName,
+                label: envName,
+                onSelect: () => onCopyAccount(envName),
+              })),
+            }] : []),
             {
               key: "relogin",
               label: pageCopy.accounts.relogin,
@@ -1091,7 +1271,7 @@ function AccountListCard({
           ]}
         />
       </div>
-    </article>
+    </ListCard>
   );
 }
 
@@ -1106,13 +1286,15 @@ function RowActionMenu({
     key: string;
     label: string;
     tone?: "default" | "danger";
-    onSelect: () => void;
+    onSelect?: () => void;
+    children?: Array<{ key: string; label: string; onSelect: () => void }>;
   }>;
 }) {
   const [open, setOpen] = useState(false);
+  const menuMounted = useDelayedUnmount(open, 140);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const { placement, availableHeight } = useAdaptiveMenuLayout(open, rootRef, menuRef);
+  const { placement, availableHeight } = useAdaptiveMenuLayout(menuMounted, rootRef, menuRef);
 
   useEffect(() => {
     if (!open) {
@@ -1133,40 +1315,37 @@ function RowActionMenu({
     <div ref={rootRef} className="relative">
       <button
         type="button"
-        className="responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[12px] font-medium text-neutral-700 ring-1 ring-black/[0.05] transition hover:bg-[#f3f4f6] hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-55"
+        className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[12px] font-medium text-neutral-700 ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-55"
         onClick={() => setOpen((value) => !value)}
         disabled={disabled}
         aria-expanded={open}
       >
         <Ellipsis className="size-4" />
         <span className="responsive-action-label">{label}</span>
-        <ChevronDown className={cn("responsive-action-label size-3.5 text-slate-400 transition", open && "rotate-180")} />
+        <ChevronDown className={cn("motion-chevron responsive-action-label size-3.5 text-slate-400", open && "rotate-180")} />
       </button>
-      {open ? (
+      {menuMounted ? (
         <div
           ref={menuRef}
+          data-state={open ? "open" : "closed"}
           data-menu-placement={placement}
           className={cn(
-            "motion-popover-enter absolute right-0 z-20 min-w-[188px] overflow-y-auto rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md",
+            "motion-popover-enter absolute right-0 z-20 min-w-[188px] overflow-visible rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md",
             placement === "up" ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]",
           )}
           style={{ transformOrigin: placement === "up" ? "bottom right" : "top right", maxHeight: availableHeight }}
         >
-          {items.map((item) => (
-            <button
+          {items.map((item) => item.children ? (
+            <RowActionSubmenu
               key={item.key}
-              type="button"
-              className={cn(
-                "flex w-full items-center rounded-lg px-3 py-2 text-left text-[12px] font-medium transition",
-                item.tone === "danger"
-                  ? "text-rose-600 hover:bg-rose-50"
-                  : "text-neutral-700 hover:bg-[#f6f7f9]",
-              )}
-              onClick={() => {
-                setOpen(false);
-                item.onSelect();
-              }}
-            >
+              item={{ label: item.label, children: item.children }}
+              onClose={() => setOpen(false)}
+            />
+          ) : (
+            <button key={item.key} type="button"
+              className={cn("motion-interactive-color flex w-full items-center rounded-lg px-3 py-2 text-left text-[12px] font-medium",
+                item.tone === "danger" ? "text-rose-600 hover:bg-rose-50" : "text-neutral-700 hover:bg-[#f6f7f9]")}
+              onClick={() => { setOpen(false); item.onSelect?.(); }}>
               {item.label}
             </button>
           ))}
@@ -1176,36 +1355,59 @@ function RowActionMenu({
   );
 }
 
+function RowActionSubmenu({
+  item,
+  onClose,
+}: {
+  item: {
+    label: string;
+    children: Array<{ key: string; label: string; onSelect: () => void }>;
+  };
+  onClose: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const mounted = useDelayedUnmount(open, 140);
+  const triggerRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const { placement, availableHeight } = useAdaptiveMenuLayout(mounted, triggerRef, menuRef);
+
+  return (
+    <div ref={triggerRef} className="relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button type="button" className="motion-interactive-color flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[12px] font-medium text-neutral-700 hover:bg-[#f6f7f9]"
+        aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <span>{item.label}</span>
+        <ChevronRight className="size-3.5 text-slate-400" />
+      </button>
+      {mounted ? (
+        <div ref={menuRef} data-state={open ? "open" : "closed"} data-submenu-placement={placement}
+          className={cn("absolute right-full z-30 pr-2", placement === "up" ? "bottom-[-4px]" : "top-[-4px]")}
+          style={{ maxHeight: availableHeight }}>
+          <div className="motion-popover-enter min-w-[180px] overflow-y-auto rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md"
+            style={{ maxHeight: availableHeight }}>
+            {item.children.map((child) => (
+              <button key={child.key} type="button" className="motion-interactive-color block w-full rounded-lg px-3 py-2 text-left text-[12px] font-medium text-neutral-700 hover:bg-[#f6f7f9]"
+                onClick={() => { onClose(); child.onSelect(); }}>
+                {child.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function TooltipHint({ text }: { text: string }) {
   return (
-    <span className="group relative inline-flex">
+    <Tooltip content={text}>
       <span
         tabIndex={0}
-        className="inline-flex size-4 items-center justify-center rounded-full bg-[#f3f4f6] text-slate-500 outline-none ring-1 ring-black/[0.05] transition hover:bg-[#ebedf0] hover:text-neutral-800 focus-visible:ring-2 focus-visible:ring-neutral-300"
+        className="motion-interactive-color inline-flex size-4 items-center justify-center rounded-full bg-[#f3f4f6] text-slate-500 outline-none ring-1 ring-black/[0.05] hover:bg-[#ebedf0] hover:text-neutral-800 focus-visible:ring-2 focus-visible:ring-neutral-300"
         aria-label={text}
       >
         <CircleHelp className="size-3" />
       </span>
-      <span className="pointer-events-none invisible absolute left-1/2 top-[calc(100%+8px)] z-20 w-[260px] -translate-x-1/2 -translate-y-1 rounded-lg bg-neutral-950 px-3 py-2 text-[11px] font-medium leading-5 text-white opacity-0 shadow-md transition-[opacity,transform,visibility] duration-150 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100">
-        {text}
-      </span>
-    </span>
-  );
-}
-
-function AvatarTile({ name, index }: { name: string; index: number }) {
-  const palettes = [
-    "bg-slate-100 text-slate-700",
-    "bg-slate-100 text-slate-700",
-    "bg-zinc-100 text-zinc-700",
-    "bg-neutral-100 text-neutral-700",
-    "bg-slate-200 text-slate-700",
-  ];
-
-  return (
-    <div className={cn("flex size-11 shrink-0 items-center justify-center rounded-[15px] text-[20px] font-semibold", palettes[index % palettes.length])}>
-      {name.trim().charAt(0).toUpperCase() || "?"}
-    </div>
+    </Tooltip>
   );
 }
 
@@ -1215,9 +1417,9 @@ function SoftBadge({ label, tone, title }: { label: string; tone: "brand" | "neu
       className={cn(
         "inline-flex h-5 items-center rounded-md px-2 text-[10px] font-medium",
         tone === "brand"
-          ? "bg-slate-200 text-slate-800"
+          ? "bg-sky-50 text-sky-700"
           : tone === "success"
-            ? "bg-slate-100 text-emerald-700"
+            ? "bg-emerald-50 text-emerald-700"
             : "bg-slate-100 text-slate-500",
       )}
       title={title}
@@ -1251,8 +1453,8 @@ function CardUsageRow({
       <div className="min-w-0">
         <div className="h-1.5 overflow-hidden rounded-full bg-slate-200/80">
           <div
-            className={cn("h-full rounded-full transition-[width,background-color] duration-300 ease-out", getUsageProgressClass(percent))}
-            style={{ width: `${percent}%` }}
+            className={cn("h-full origin-left rounded-full transition-[transform,background-color] duration-[220ms] ease-[cubic-bezier(0.23,1,0.32,1)]", getUsageProgressClass(percent))}
+            style={{ transform: `scaleX(${percent / 100})` }}
           />
         </div>
       </div>
@@ -1298,15 +1500,17 @@ function CardTargetButton({
 }) {
   const [open, setOpen] = useState(false);
   const [projectOpen, setProjectOpen] = useState(false);
+  const menuMounted = useDelayedUnmount(open, 140);
+  const projectMenuMounted = useDelayedUnmount(projectOpen, 140);
   const [projects, setProjects] = useState<CodexProject[]>([]);
   const [projectsLoaded, setProjectsLoaded] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const projectTriggerRef = useRef<HTMLDivElement | null>(null);
   const projectMenuRef = useRef<HTMLDivElement | null>(null);
-  const { placement, availableHeight } = useAdaptiveMenuLayout(open, rootRef, menuRef);
+  const { placement, availableHeight } = useAdaptiveMenuLayout(menuMounted, rootRef, menuRef);
   const { placement: projectPlacement, availableHeight: projectAvailableHeight } = useAdaptiveMenuLayout(
-    projectOpen,
+    projectMenuMounted,
     projectTriggerRef,
     projectMenuRef,
   );
@@ -1342,8 +1546,8 @@ function CardTargetButton({
     >
       <div
         className={cn(
-          "flex h-9 overflow-hidden rounded-lg ring-1 ring-black/[0.05] transition",
-          active ? "bg-slate-200 text-slate-900 ring-black/[0.08]" : "bg-[#fafafa] text-neutral-700",
+          "motion-interactive-color flex h-9 overflow-hidden rounded-lg border border-transparent",
+          active ? "ui-selected-control" : "bg-[#fafafa] text-neutral-700",
           !disabled && !active && "hover:bg-[#f3f4f6] hover:text-neutral-950",
           disabled && "cursor-not-allowed opacity-55",
         )}
@@ -1359,7 +1563,7 @@ function CardTargetButton({
         <button
           type="button"
           className={cn(
-            "flex h-full w-8 items-center justify-center text-slate-400 transition",
+            "motion-interactive-color flex h-full w-8 items-center justify-center text-slate-400",
             !disabled && "hover:bg-black/[0.035] hover:text-neutral-700",
           )}
           onClick={() => setOpen((value) => !value)}
@@ -1367,17 +1571,17 @@ function CardTargetButton({
           aria-label={`${label} menu`}
           title={`${label} menu`}
         >
-          <ChevronDown className={cn("size-3.5 transition", open && "rotate-180")} />
+          <ChevronDown className={cn("motion-chevron size-3.5", open && "rotate-180")} />
         </button>
       </div>
-      {open ? (
+      {menuMounted ? (
         <div
           ref={menuRef}
           data-menu-placement={placement}
-          className={cn("absolute right-0 z-20 overflow-y-auto", placement === "up" ? "bottom-full pb-2" : "top-full pt-2")}
+          className={cn("absolute right-0 z-20 overflow-visible", placement === "up" ? "bottom-full pb-2" : "top-full pt-2")}
           style={{ maxHeight: availableHeight }}
         >
-          <div className="motion-popover-enter min-w-[172px] rounded-lg border border-black/[0.08] bg-white p-1 shadow-md">
+          <div data-state={open ? "open" : "closed"} className="motion-popover-enter min-w-[172px] rounded-lg border border-black/[0.08] bg-white p-1 shadow-md">
             {items.map((item) => (
               <div
                 key={item.key}
@@ -1399,7 +1603,7 @@ function CardTargetButton({
                 <button
                   type="button"
                   className={cn(
-                    "flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[12px] font-medium text-neutral-700 transition hover:bg-[#f6f7f9] hover:text-neutral-950",
+                    "motion-interactive-color flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[12px] font-medium text-neutral-700 hover:bg-[#f6f7f9] hover:text-neutral-950",
                     item.key === primaryStrategy && "bg-[#f5f7fa] text-neutral-950",
                   )}
                   onClick={() => {
@@ -1412,7 +1616,7 @@ function CardTargetButton({
                   {item.label}
                   {item.key === "new-window" && loadProjects ? <span className="text-slate-400">›</span> : null}
                 </button>
-                {item.key === "new-window" && projectOpen && loadProjects ? (
+                {item.key === "new-window" && projectMenuMounted && loadProjects ? (
                   <div
                     ref={projectMenuRef}
                     data-submenu-placement={projectPlacement}
@@ -1421,10 +1625,10 @@ function CardTargetButton({
                       projectPlacement === "up" ? "bottom-[-4px]" : "top-[-4px]",
                     )}
                   >
-                    <div className="motion-popover-enter flex w-[280px] flex-col overflow-hidden rounded-lg border border-black/[0.08] bg-white p-1 shadow-md" style={{ maxHeight: projectAvailableHeight }}>
+                    <div data-state={projectOpen ? "open" : "closed"} className="motion-popover-enter flex w-[280px] flex-col overflow-hidden rounded-lg border border-black/[0.08] bg-white p-1 shadow-md" style={{ maxHeight: projectAvailableHeight }}>
                       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                         {projects.map((project) => (
-                          <button key={project.path} type="button" title={project.path} className="block w-full rounded-lg px-3 py-2 text-left transition hover:bg-[#f6f7f9]" onClick={() => { setOpen(false); setProjectOpen(false); onSelectProject?.(project.path); }}>
+                          <button key={project.path} type="button" title={project.path} className="motion-interactive-color block w-full rounded-lg px-3 py-2 text-left hover:bg-[#f6f7f9]" onClick={() => { setOpen(false); setProjectOpen(false); onSelectProject?.(project.path); }}>
                             <span className="block truncate text-[12px] font-medium text-neutral-800">{project.name}</span>
                             <span className="block truncate text-[10px] text-slate-400">{project.path}</span>
                           </button>

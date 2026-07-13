@@ -1,4 +1,4 @@
-export type NavView = "overview" | "environments" | "accounts" | "usage" | "operations";
+export type NavView = "overview" | "environments" | "accounts" | "models" | "usage" | "operations";
 
 export interface EnvironmentRouteStatus {
   envName: string;
@@ -14,6 +14,50 @@ export interface UsageFilter {
   accountName?: string;
   baseUrl?: string;
   model?: string;
+}
+
+export interface UsageRequestQuery extends UsageFilter {
+  page: number;
+  pageSize: number;
+  endpoint?: string;
+  status?: "success" | "error";
+  search?: string;
+}
+
+export interface UsageRequestRecord {
+  requestId: string;
+  routeId: string;
+  startedAt: number;
+  completedAt: number;
+  envName: string;
+  accountName: string;
+  upstreamBaseUrl: string;
+  endpoint: string;
+  model: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheCreationTokens: number | null;
+  cacheReadTokens: number | null;
+  totalTokens: number | null;
+  httpStatus: number;
+  latencyMs: number;
+  actualCost: number | null;
+  standardCost: number | null;
+}
+
+export interface UsageRequestPage {
+  generatedAt: number;
+  items: UsageRequestRecord[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  facets: {
+    envNames: string[];
+    accountNames: string[];
+    models: string[];
+    endpoints: string[];
+  };
 }
 
 export interface UsageSummary {
@@ -110,6 +154,7 @@ export interface AccountSummary {
     enabled: true;
     originalBaseUrl: string;
     localBaseUrl: string;
+    protocol?: "responses" | "chat_completions";
   };
   runtime: {
     preferredAuthMethod: string;
@@ -119,6 +164,14 @@ export interface AccountSummary {
     independentModelProviderId?: string;
     independentModelApiKey?: string;
     independentModelBaseUrl?: string;
+    apiProtocol?: "responses" | "chat_completions";
+    compatibilityRouteEnabled?: boolean;
+    compatibilityRouteBaseUrl?: string;
+    compatibilityUpstreamModel?: string;
+    compatibilityReasoningProfile?: "auto" | "standard" | "reasoning_content" | "think_tags";
+    compatibilityLongConversationStrategy?: "safe" | "continuity";
+    compatibilityInstructionRole?: "auto" | "system" | "developer";
+    compatibilityRequestOverrides?: Record<string, unknown>;
   };
 }
 

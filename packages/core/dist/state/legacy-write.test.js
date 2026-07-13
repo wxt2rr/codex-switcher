@@ -39,6 +39,16 @@ test("legacy writer persists runtime settings for account", async () => {
                 independentModelProviderId: "gateway",
                 independentModelApiKey: "sk-model",
                 independentModelBaseUrl: "https://model.example/v1",
+                apiProtocol: "chat_completions",
+                compatibilityRouteEnabled: true,
+                compatibilityRouteBaseUrl: "http://127.0.0.1:17899/routes/route-a/v1",
+                compatibilityRouteToken: "local-token",
+                compatibilityRouteProviderId: "codex-switcher-route-a",
+                compatibilityUpstreamModel: "deepseek-chat",
+                compatibilityReasoningProfile: "reasoning_content",
+                compatibilityLongConversationStrategy: "continuity",
+                compatibilityInstructionRole: "developer",
+                compatibilityRequestOverrides: { temperature: 0.2 },
             },
         });
         const raw = await readFile(join(stateDir, "env-accounts", "default", "personal", "runtime.json"), "utf8");
@@ -49,6 +59,12 @@ test("legacy writer persists runtime settings for account", async () => {
         assert.match(raw, /"independent_model_provider_id": "gateway"/);
         assert.match(raw, /"independent_model_api_key": "sk-model"/);
         assert.match(raw, /"independent_model_base_url": "https:\/\/model\.example\/v1"/);
+        assert.match(raw, /"api_protocol": "chat_completions"/);
+        assert.match(raw, /"compatibility_route_enabled": true/);
+        assert.match(raw, /"compatibility_route_token": "local-token"/);
+        assert.match(raw, /"compatibility_reasoning_profile": "reasoning_content"/);
+        assert.match(raw, /"compatibility_long_conversation_strategy": "continuity"/);
+        assert.match(raw, /"compatibility_instruction_role": "developer"/);
     }
     finally {
         await rm(root, { recursive: true, force: true });

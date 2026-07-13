@@ -48,7 +48,7 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
       className={cn(
         "h-9 w-full rounded-lg border border-transparent bg-[#f1f4f8] px-3 dark:bg-[#19212b]",
         "text-[13px] text-neutral-800 placeholder:text-neutral-400 dark:text-slate-100 dark:placeholder:text-slate-500",
-        "outline-none transition-all duration-150",
+        "outline-none transition-[background-color,color,border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]",
         "hover:bg-[#e9eef5] dark:hover:bg-[#202a36]",
         "focus:border-primary focus:ring-2 focus:ring-primary/15 focus:ring-offset-0",
         props.className,
@@ -153,7 +153,7 @@ export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
       className={cn(
         "min-h-[120px] w-full rounded-lg border border-transparent bg-[#f1f4f8] px-3 py-2.5 dark:bg-[#19212b]",
         "text-[13px] text-neutral-800 placeholder:text-neutral-400 dark:text-slate-100 dark:placeholder:text-slate-500",
-        "outline-none transition-all duration-150",
+        "outline-none transition-[background-color,color,border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]",
         "hover:bg-[#e9eef5] dark:hover:bg-[#202a36]",
         "focus:border-primary focus:ring-2 focus:ring-primary/15 focus:ring-offset-0",
         "resize-y",

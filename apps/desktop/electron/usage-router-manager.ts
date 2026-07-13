@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
@@ -9,8 +10,21 @@ import {
   type PricingProfile,
   type RouteTarget,
   type UsageFilter,
+  type UsageRequestPage,
+  type UsageRequestQuery,
   type UsageSnapshot,
 } from "./usage-routing-model.js";
+import { FileHistoryPersistence } from "./openai-chat-compat/history-persistence.js";
+import { createUsageStore } from "./usage-store.js";
+import { runCompatibilityCheck, type StagedCompatibilityResult } from "./openai-chat-compat/compatibility-check.js";
+
+const REQUIRED_ROUTER_API_VERSION = 6;
+
+export function isCompatibleRouterHealth(value: unknown): boolean {
+  return Boolean(value && typeof value === "object" &&
+    (value as { ok?: unknown }).ok === true &&
+    (value as { apiVersion?: unknown }).apiVersion === REQUIRED_ROUTER_API_VERSION);
+}
 
 interface RouterStateFile {
   pid: number;
@@ -24,7 +38,27 @@ export interface RoutableAccount {
   accountName: string;
   authMode: string;
   baseUrl: string;
+  apiKey?: string;
+  upstreamModel?: string;
+  reasoningProfile?: RouteTarget["reasoningProfile"];
+  longConversationStrategy?: RouteTarget["longConversationStrategy"];
+  instructionRole?: RouteTarget["instructionRole"];
+  requestOverrides?: Record<string, unknown>;
 }
+
+export interface AccountRouteStatus {
+  envName: string;
+  accountName: string;
+  enabled: boolean;
+  state: "disabled" | "ready" | "degraded";
+  routeId?: string;
+  localBaseUrl?: string;
+  message?: string;
+}
+
+export interface CompatibilityCheckResult extends StagedCompatibilityResult { ok: boolean; status: number; message: string; }
+
+interface RouteTokenFile { routes: Record<string, string>; }
 
 export interface EnvironmentRouteStatus {
   envName: string;
@@ -37,7 +71,8 @@ export interface UsageRouterManagerOptions {
   stateDir: string;
   serviceEntryPath: string;
   executablePath?: string;
-  launchService?: () => Promise<void>;
+  preferredPort?: () => number | Promise<number>;
+  launchService?: (preferredPort?: number) => Promise<void>;
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -47,6 +82,21 @@ export class UsageRouterManager {
 
   constructor(private readonly options: UsageRouterManagerOptions) {
     this.routerDir = join(options.stateDir, "usage-router");
+  }
+
+  private tokenPath(): string { return join(this.routerDir, "compatibility-route-tokens.json"); }
+
+  private async readRouteTokens(): Promise<RouteTokenFile> {
+    try { return JSON.parse(await readFile(this.tokenPath(), "utf8")) as RouteTokenFile; }
+    catch { return { routes: {} }; }
+  }
+
+  private async writeRouteTokens(value: RouteTokenFile): Promise<void> {
+    await mkdir(this.routerDir, { recursive: true });
+    const target = this.tokenPath(); const temporary = `${target}.tmp`;
+    await writeFile(temporary, JSON.stringify(value), { mode: 0o600 });
+    await rename(temporary, target);
+    if (process.platform !== "win32") await chmod(target, 0o600);
   }
 
   private async readState(): Promise<RouterStateFile | null> {
@@ -60,7 +110,7 @@ export class UsageRouterManager {
   private async isHealthy(state: RouterStateFile): Promise<boolean> {
     try {
       const response = await fetch(`http://127.0.0.1:${state.port}/health`, { signal: AbortSignal.timeout(800) });
-      return response.ok;
+      return response.ok && isCompatibleRouterHealth(await response.json());
     } catch {
       return false;
     }
@@ -69,13 +119,17 @@ export class UsageRouterManager {
   async ensureService(): Promise<RouterStateFile> {
     const existing = await this.readState();
     if (existing && await this.isHealthy(existing)) return existing;
+    if (existing?.pid && existing.pid !== process.pid) {
+      try { process.kill(existing.pid); } catch { /* stale process already exited */ }
+    }
 
+    const preferredPort = await this.options.preferredPort?.();
     if (this.options.launchService) {
-      await this.options.launchService();
+      await this.options.launchService(preferredPort);
     } else {
-      const child = spawn(this.options.executablePath ?? process.execPath, [
-        this.options.serviceEntryPath, "--state-dir", this.routerDir,
-      ], {
+      const args = [this.options.serviceEntryPath, "--state-dir", this.routerDir];
+      if (preferredPort !== undefined) args.push("--preferred-port", String(preferredPort));
+      const child = spawn(this.options.executablePath ?? process.execPath, args, {
         detached: true,
         stdio: "ignore",
         env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
@@ -106,6 +160,45 @@ export class UsageRouterManager {
     return this.adminWithState<T>(await this.ensureService(), path, init);
   }
 
+  private async deleteRoutes(routes: RouteTarget[]): Promise<void> {
+    if (!routes.length) return;
+    const tokens = await this.readRouteTokens();
+    for (const route of routes) {
+      await this.admin<void>(`/admin/routes/${encodeURIComponent(route.routeId)}`, { method: "DELETE" });
+      delete tokens.routes[route.routeId];
+    }
+    await this.writeRouteTokens(tokens);
+  }
+
+  private isMissingAccountError(error: unknown, envName: string, accountName: string): boolean {
+    return error instanceof Error && error.message === `Account '${envName}/${accountName}' not found`;
+  }
+
+  private async removeRoutesMatching(predicate: (route: RouteTarget) => boolean): Promise<number> {
+    const runningState = await this.readState();
+    if (runningState && await this.isHealthy(runningState)) {
+      const routes = (await this.adminWithState<RouteTarget[]>(runningState, "/admin/routes")).filter(predicate);
+      await this.deleteRoutes(routes);
+      return routes.length;
+    }
+
+    const store = await createUsageStore(join(this.routerDir, "usage.db"));
+    const history = new FileHistoryPersistence(join(this.routerDir, "chat-history"));
+    try {
+      const routes = (await store.listRoutes()).filter(predicate);
+      const tokens = await this.readRouteTokens();
+      for (const route of routes) {
+        await store.removeRoute(route.routeId);
+        delete tokens.routes[route.routeId];
+        await history.delete(route.routeId);
+      }
+      await this.writeRouteTokens(tokens);
+      return routes.length;
+    } finally {
+      await store.close();
+    }
+  }
+
   listRoutes(): Promise<RouteTarget[]> {
     return this.admin<RouteTarget[]>("/admin/routes");
   }
@@ -114,6 +207,31 @@ export class UsageRouterManager {
     const state = await this.readState();
     if (!state || !await this.isHealthy(state)) return [];
     return this.adminWithState<RouteTarget[]>(state, "/admin/routes");
+  }
+
+  async listPersistedRoutes(): Promise<RouteTarget[]> {
+    const running = await this.readState();
+    if (running && await this.isHealthy(running)) {
+      return this.adminWithState<RouteTarget[]>(running, "/admin/routes");
+    }
+    const store = await createUsageStore(join(this.routerDir, "usage.db"));
+    try {
+      return await store.listRoutes();
+    } finally {
+      await store.close();
+    }
+  }
+
+  async stopService(): Promise<boolean> {
+    const state = await this.readState();
+    if (!state || !await this.isHealthy(state)) return false;
+    await this.adminWithState<void>(state, "/admin/shutdown", { method: "POST" });
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await delay(50);
+      if (!await this.isHealthy(state)) return true;
+    }
+    try { process.kill(state.pid, "SIGTERM"); } catch { /* process already stopped */ }
+    return true;
   }
 
   async isEnvironmentEnabled(envName: string): Promise<boolean> {
@@ -141,6 +259,127 @@ export class UsageRouterManager {
     });
   }
 
+  async removeAccountRoutes(envName: string, accountName: string): Promise<number> {
+    return this.removeRoutesMatching((route) => route.envName === envName && route.accountName === accountName);
+  }
+
+  async removeEnvironmentRoutes(envName: string): Promise<number> {
+    return this.removeRoutesMatching((route) => route.envName === envName);
+  }
+
+  async enableAccountCompatibility(
+    account: RoutableAccount,
+    updateRuntime: (value: { baseUrl: string; localRouteToken: string; providerId: string }) => Promise<void>,
+  ): Promise<AccountRouteStatus> {
+    if (account.authMode === "auth") throw new Error("Chat compatibility requires an API-key account");
+    if (!account.apiKey?.trim()) throw new Error("Account API key is required");
+    const upstreamBaseUrl = normalizeUpstreamBaseUrl(account.baseUrl === "default" ? "https://api.openai.com/v1" : account.baseUrl);
+    if (!upstreamBaseUrl) throw new Error("Account Base URL is required");
+    const state = await this.ensureService();
+    const routeId = createRouteId(account.envName, account.accountName, upstreamBaseUrl);
+    const previous = (await this.listRoutes()).find((route) => route.routeId === routeId);
+    const now = Date.now();
+    const route: RouteTarget = { routeId, envName: account.envName, accountName: account.accountName,
+      upstreamBaseUrl, originalBaseUrl: account.baseUrl, protocol: "chat_completions",
+      upstreamModel: account.upstreamModel, reasoningProfile: account.reasoningProfile ?? "auto",
+      longConversationStrategy: account.longConversationStrategy ?? "safe",
+      instructionRole: account.instructionRole ?? "auto",
+      requestOverrides: account.requestOverrides, enabled: true, createdAt: previous?.createdAt ?? now, updatedAt: now };
+    const tokens = await this.readRouteTokens();
+    const localRouteToken = tokens.routes[routeId] || randomBytes(32).toString("hex");
+    const providerId = `codex_switcher_${routeId}`;
+    try {
+      await this.admin<void>(`/admin/routes/${encodeURIComponent(routeId)}`, {
+        method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(route),
+      });
+      await this.admin<void>(`/admin/routes/${encodeURIComponent(routeId)}/secret`, {
+        method: "PUT", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ upstreamApiKey: account.apiKey, localRouteToken }),
+      });
+      tokens.routes[routeId] = localRouteToken; await this.writeRouteTokens(tokens);
+      await updateRuntime({ baseUrl: buildLocalRouteBaseUrl(state.port, routeId), localRouteToken, providerId });
+      return { envName: account.envName, accountName: account.accountName, enabled: true, state: "ready", routeId,
+        localBaseUrl: buildLocalRouteBaseUrl(state.port, routeId) };
+    } catch (error) {
+      await this.admin<void>(`/admin/routes/${encodeURIComponent(routeId)}`, { method: "DELETE" }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async disableAccountCompatibility(
+    envName: string,
+    accountName: string,
+    restoreRuntime: (originalBaseUrl: string) => Promise<void>,
+  ): Promise<AccountRouteStatus> {
+    const route = (await this.listRoutes()).find((item) => item.envName === envName && item.accountName === accountName && item.protocol === "chat_completions");
+    if (!route) return { envName, accountName, enabled: false, state: "disabled" };
+    await restoreRuntime(route.originalBaseUrl);
+    await this.admin<void>(`/admin/routes/${encodeURIComponent(route.routeId)}`, { method: "DELETE" });
+    const tokens = await this.readRouteTokens(); delete tokens.routes[route.routeId]; await this.writeRouteTokens(tokens);
+    return { envName, accountName, enabled: false, state: "disabled" };
+  }
+
+  async getAccountCompatibilityStatuses(accountKeys: string[]): Promise<AccountRouteStatus[]> {
+    const routes = await this.listRoutesIfRunning();
+    return Promise.all(accountKeys.map(async (key) => {
+      const [envName, ...rest] = key.split("/"); const accountName = rest.join("/");
+      const route = routes.find((item) => item.envName === envName && item.accountName === accountName && item.protocol === "chat_completions");
+      if (!route) return { envName, accountName, enabled: false, state: "disabled" };
+      const hydrated = await this.admin<{ hydrated: boolean }>(`/admin/routes/${encodeURIComponent(route.routeId)}/status`)
+        .then((value) => value.hydrated).catch(() => false);
+      return { envName, accountName, enabled: true, state: hydrated ? "ready" : "degraded", routeId: route.routeId,
+        message: hydrated ? undefined : "Route credentials require rehydration" };
+    }));
+  }
+
+  async checkAccountCompatibility(envName: string, accountName: string): Promise<CompatibilityCheckResult> {
+    const state = await this.ensureService();
+    const route = (await this.listRoutes()).find((item) => item.envName === envName && item.accountName === accountName && item.protocol === "chat_completions");
+    if (!route) return { ok: false, status: 404, message: "Compatibility route is not enabled", state: "failed",
+      checkedAt: Date.now(), probes: [], capabilities: { text: false, streaming: false, sequentialTools: false, parallelTools: false, reasoning: false } };
+    const token = (await this.readRouteTokens()).routes[route.routeId];
+    if (!token) return { ok: false, status: 503, message: "Compatibility route token is unavailable", state: "failed",
+      checkedAt: Date.now(), probes: [], capabilities: { text: false, streaming: false, sequentialTools: false, parallelTools: false, reasoning: false } };
+    const endpoint = `${buildLocalRouteBaseUrl(state.port, route.routeId)}/responses`;
+    const execute = async (body: Record<string, unknown>, signal: AbortSignal) => {
+      const response = await fetch(endpoint, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ model: route.upstreamModel ?? "gpt-4.1-mini", max_output_tokens: 32, ...body }), signal });
+      const content = await response.text();
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${content}`);
+      return { response, content };
+    };
+    const result = await runCompatibilityCheck({ probe: async (stage, signal) => {
+      if (stage === "auth" || stage === "text") {
+        const { content } = await execute({ input: "Reply with OK." }, signal);
+        if (!content.includes("output_text")) throw new Error("No text output");
+      } else if (stage === "stream") {
+        const { content } = await execute({ input: "Reply with OK.", stream: true }, signal);
+        if (!content.includes("response.output_text.delta")) throw new Error("No streaming text delta");
+      } else if (stage === "sequential_tool") {
+        const first = await execute({ input: "Call echo_probe once.", tools: [{ type: "function", name: "echo_probe",
+          description: "Echo a value", parameters: { type: "object", properties: { value: { type: "string" } }, required: ["value"] } }],
+          tool_choice: { type: "function", name: "echo_probe" } }, signal);
+        const payload = JSON.parse(first.content) as { id?: string; output?: Array<Record<string, unknown>> };
+        const call = payload.output?.find((item) => item.type === "function_call");
+        if (!payload.id || typeof call?.call_id !== "string") throw new Error("No sequential tool call");
+        await execute({ previous_response_id: payload.id, input: [{ type: "function_call_output", call_id: call.call_id, output: "probe-ok" }] }, signal);
+      } else if (stage === "parallel_tool") {
+        const { content } = await execute({ input: "Call echo_a and echo_b.", tools: ["echo_a", "echo_b"].map((name) => ({
+          type: "function", name, parameters: { type: "object", properties: {} },
+        })), tool_choice: "required" }, signal);
+        const payload = JSON.parse(content) as { output?: Array<Record<string, unknown>> };
+        if ((payload.output?.filter((item) => item.type === "function_call").length ?? 0) < 2) throw new Error("No parallel tool calls");
+      } else {
+        const { content } = await execute({ input: "Think briefly, then answer OK.", reasoning: { effort: "low" } }, signal);
+        const payload = JSON.parse(content) as { output?: Array<Record<string, unknown>> };
+        if (!payload.output?.some((item) => item.type === "reasoning")) throw new Error("No explicit reasoning item");
+      }
+    } });
+    return { ...result, ok: result.state !== "failed", status: result.state === "failed" ? 422 : 200,
+      message: result.state === "ready" ? "All compatibility checks passed" : result.state === "degraded"
+        ? "Core compatibility passed with optional limitations" : "A required compatibility check failed" };
+  }
+
   async enableEnvironment(
     envName: string,
     accounts: RoutableAccount[],
@@ -163,7 +402,13 @@ export class UsageRouterManager {
         const now = Date.now();
         const route: RouteTarget = {
           routeId, envName, accountName: account.accountName, upstreamBaseUrl,
-          originalBaseUrl, enabled: true, createdAt: prior?.createdAt ?? now, updatedAt: now,
+          originalBaseUrl, protocol: prior?.protocol ?? "responses",
+          upstreamModel: prior?.upstreamModel,
+          reasoningProfile: prior?.reasoningProfile ?? "auto",
+          longConversationStrategy: prior?.longConversationStrategy ?? "safe",
+          instructionRole: prior?.instructionRole ?? "auto",
+          requestOverrides: prior?.requestOverrides,
+          enabled: true, createdAt: prior?.createdAt ?? now, updatedAt: now,
         };
         await this.admin<void>(`/admin/routes/${encodeURIComponent(routeId)}`, {
           method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(route),
@@ -189,12 +434,17 @@ export class UsageRouterManager {
     const restored: RouteTarget[] = [];
     try {
       for (const route of routes) {
-        await updateBaseUrl(route.accountName, route.originalBaseUrl);
-        restored.push(route);
+        try {
+          await updateBaseUrl(route.accountName, route.originalBaseUrl);
+          restored.push(route);
+        } catch (error) {
+          if (this.isMissingAccountError(error, route.envName, route.accountName)) {
+            continue;
+          }
+          throw error;
+        }
       }
-      for (const route of routes) {
-        await this.admin<void>(`/admin/routes/${encodeURIComponent(route.routeId)}`, { method: "DELETE" });
-      }
+      await this.deleteRoutes(routes);
     } catch (error) {
       const state = await this.ensureService();
       await Promise.allSettled(restored.map((route) =>
@@ -211,6 +461,21 @@ export class UsageRouterManager {
     if (filter.baseUrl) query.set("baseUrl", filter.baseUrl);
     if (filter.model) query.set("model", filter.model);
     return this.admin<UsageSnapshot>(`/admin/stats?${query}`);
+  }
+
+  queryUsageRequests(filter: UsageRequestQuery): Promise<UsageRequestPage> {
+    const query = new URLSearchParams({
+      from: String(filter.from), to: String(filter.to),
+      page: String(filter.page), pageSize: String(filter.pageSize),
+    });
+    if (filter.envName) query.set("envName", filter.envName);
+    if (filter.accountName) query.set("accountName", filter.accountName);
+    if (filter.baseUrl) query.set("baseUrl", filter.baseUrl);
+    if (filter.model) query.set("model", filter.model);
+    if (filter.endpoint) query.set("endpoint", filter.endpoint);
+    if (filter.status) query.set("status", filter.status);
+    if (filter.search) query.set("search", filter.search);
+    return this.admin<UsageRequestPage>(`/admin/requests?${query}`);
   }
 
   listPricing(): Promise<PricingProfile[]> {

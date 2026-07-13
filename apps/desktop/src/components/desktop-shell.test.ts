@@ -13,6 +13,7 @@ import {
 } from "./desktop-shell-layout.js";
 
 const shell = readFileSync(new URL("./desktop-shell.tsx", import.meta.url), "utf8");
+const app = readFileSync(new URL("../react-app.tsx", import.meta.url), "utf8");
 
 test("desktop shell reserves leading and top space on macOS for traffic lights", () => {
   assert.equal(getDesktopShellBrandClass("MacIntel"), "pl-[72px]");
@@ -49,8 +50,15 @@ test("desktop shell separates the macOS sidebar toggle from the lowered brand ro
   assert.match(getDesktopShellSidebarBrandRowClass("Win32"), /mt-8/);
 });
 
-test("desktop shell replays restrained page motion when the view changes", () => {
-  assert.match(shell, /key=\{currentView\}/);
-  assert.match(shell, /motion-page-enter/);
+test("desktop shell switches high-frequency views without replaying entrance motion", () => {
+  assert.doesNotMatch(shell, /key=\{currentView\}/);
+  assert.doesNotMatch(shell, /motion-page-enter/);
   assert.match(shell, /motion-notice-enter/);
+});
+
+test("startup progress follows initialization stages instead of a timer", () => {
+  assert.match(app, /setInitialLoadingStage\("loading-settings"\)/);
+  assert.match(app, /setInitialLoadingStage\("restoring-routes"\)/);
+  assert.match(app, /setInitialLoadingStage\("ready"\)/);
+  assert.doesNotMatch(app, /current >= 92/);
 });

@@ -22,6 +22,11 @@ const sampleState = {
                     runtime: {
                         preferredAuthMethod: "chatgpt",
                         openaiBaseUrlMode: "default",
+                        apiProtocol: "responses",
+                        compatibilityRouteEnabled: false,
+                        compatibilityReasoningProfile: "auto",
+                        compatibilityLongConversationStrategy: "safe",
+                        compatibilityInstructionRole: "auto",
                     },
                 },
             },
@@ -40,6 +45,22 @@ test("state store saves and reloads canonical switcher state", async () => {
         assert.deepEqual(reloaded, sampleState);
         const raw = JSON.parse(await readFile(join(root, "core-state.json"), "utf8"));
         assert.equal(raw.schemaVersion, DEFAULT_SCHEMA_VERSION);
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+test("state store defaults legacy account protocol settings to native responses", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-core-protocol-defaults-"));
+    try {
+        const store = createStateStore({ rootDir: root });
+        await store.save(sampleState);
+        const runtime = (await store.load()).envs.default.accounts.work.runtime;
+        assert.equal(runtime.apiProtocol, "responses");
+        assert.equal(runtime.compatibilityRouteEnabled, false);
+        assert.equal(runtime.compatibilityReasoningProfile, "auto");
+        assert.equal(runtime.compatibilityLongConversationStrategy, "safe");
+        assert.equal(runtime.compatibilityInstructionRole, "auto");
     }
     finally {
         await rm(root, { recursive: true, force: true });

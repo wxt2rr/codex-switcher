@@ -10,6 +10,8 @@ import type {
   UsageDimensionAggregate,
   UsageFilter,
   UsageRequest,
+  UsageRequestPage,
+  UsageRequestQuery,
   UsageSnapshot,
   UsageSummary,
   UsageTrendPoint,
@@ -21,6 +23,7 @@ export interface UsageStore {
   listRoutes(): Promise<RouteTarget[]>;
   recordUsage(request: UsageRequest): Promise<void>;
   queryUsage(filter: UsageFilter): Promise<UsageSnapshot>;
+  queryUsageRequests(query: UsageRequestQuery): Promise<UsageRequestPage>;
   upsertPricing(profile: PricingProfile): Promise<void>;
   listPricing(): Promise<PricingProfile[]>;
   close(): Promise<void>;
@@ -54,6 +57,37 @@ function runRows(db: Database, sql: string, params: unknown[]): Record<string, u
     return rows;
   } finally {
     statement.free();
+  }
+}
+
+function routeColumns(db: Database): Set<string> {
+  return new Set(runRows(db, "PRAGMA table_info(route_targets)", []).map((row) => String(row.name)));
+}
+
+function ensureRouteMetadataColumns(db: Database): void {
+  const columns = routeColumns(db);
+  const migrations = [
+    ["protocol", "TEXT NOT NULL DEFAULT 'responses'"],
+    ["upstream_model", "TEXT"],
+    ["reasoning_profile", "TEXT NOT NULL DEFAULT 'auto'"],
+    ["request_overrides_json", "TEXT"],
+    ["long_conversation_strategy", "TEXT NOT NULL DEFAULT 'safe'"],
+    ["instruction_role", "TEXT NOT NULL DEFAULT 'auto'"],
+  ] as const;
+  for (const [name, definition] of migrations) {
+    if (!columns.has(name)) db.run(`ALTER TABLE route_targets ADD COLUMN ${name} ${definition}`);
+  }
+}
+
+function parseOverrides(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== "string" || !value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -203,6 +237,7 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
       PRIMARY KEY(kind, base_url, model_pattern)
     );
   `);
+  ensureRouteMetadataColumns(db);
 
   let closed = false;
   let writeQueue = Promise.resolve();
@@ -225,13 +260,25 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
   return {
     upsertRoute(route) {
       return mutate(() => db.run(
-        `INSERT INTO route_targets VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO route_targets (
+           route_id, env_name, account_name, upstream_base_url, original_base_url,
+           enabled, created_at, updated_at, protocol, upstream_model, reasoning_profile, request_overrides_json,
+           long_conversation_strategy, instruction_role
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(route_id) DO UPDATE SET
            env_name=excluded.env_name, account_name=excluded.account_name,
            upstream_base_url=excluded.upstream_base_url, original_base_url=excluded.original_base_url,
-           enabled=excluded.enabled, updated_at=excluded.updated_at`,
+           enabled=excluded.enabled, protocol=excluded.protocol, upstream_model=excluded.upstream_model,
+           reasoning_profile=excluded.reasoning_profile,
+           request_overrides_json=excluded.request_overrides_json,
+           long_conversation_strategy=excluded.long_conversation_strategy,
+           instruction_role=excluded.instruction_role,
+           updated_at=excluded.updated_at`,
         [route.routeId, route.envName, route.accountName, route.upstreamBaseUrl, route.originalBaseUrl,
-          route.enabled ? 1 : 0, route.createdAt, route.updatedAt],
+          route.enabled ? 1 : 0, route.createdAt, route.updatedAt, route.protocol,
+          route.upstreamModel ?? null, route.reasoningProfile,
+          route.requestOverrides ? JSON.stringify(route.requestOverrides) : null,
+          route.longConversationStrategy ?? "safe", route.instructionRole ?? "auto"],
       ));
     },
     removeRoute(routeId) {
@@ -242,6 +289,14 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
       return runRows(db, "SELECT * FROM route_targets ORDER BY env_name, account_name", []).map((row) => ({
         routeId: String(row.route_id), envName: String(row.env_name), accountName: String(row.account_name),
         upstreamBaseUrl: String(row.upstream_base_url), originalBaseUrl: String(row.original_base_url),
+        protocol: row.protocol === "chat_completions" ? "chat_completions" : "responses",
+        upstreamModel: row.upstream_model ? String(row.upstream_model) : undefined,
+        reasoningProfile: ["standard", "reasoning_content", "think_tags"].includes(String(row.reasoning_profile))
+          ? String(row.reasoning_profile) as RouteTarget["reasoningProfile"] : "auto",
+        requestOverrides: parseOverrides(row.request_overrides_json),
+        longConversationStrategy: row.long_conversation_strategy === "continuity" ? "continuity" : "safe",
+        instructionRole: row.instruction_role === "system" || row.instruction_role === "developer"
+          ? row.instruction_role : "auto",
         enabled: Boolean(row.enabled), createdAt: asNumber(row.created_at), updatedAt: asNumber(row.updated_at),
       }));
     },
@@ -283,6 +338,59 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
       return { generatedAt: Date.now(), summary, models: dimensions("model", "model"),
         baseUrls: dimensions("upstream_base_url", "baseUrl"), trend };
     },
+    async queryUsageRequests(query) {
+      await writeQueue;
+      const pageSize = Math.min(100, Math.max(1, Math.trunc(query.pageSize) || 20));
+      const requestedPage = Math.max(1, Math.trunc(query.page) || 1);
+      const facetClauses = ["completed_at >= ?", "completed_at <= ?"];
+      const facetParams: unknown[] = [query.from, query.to];
+      const baseClauses = [...facetClauses];
+      const baseParams = [...facetParams];
+      if (query.baseUrl) { baseClauses.push("upstream_base_url = ?"); baseParams.push(query.baseUrl); }
+
+      const clauses = [...baseClauses];
+      const params = [...baseParams];
+      for (const [column, value] of [
+        ["env_name", query.envName], ["account_name", query.accountName],
+        ["model", query.model], ["endpoint", query.endpoint],
+      ] as const) {
+        if (value) { clauses.push(`${column} = ?`); params.push(value); }
+      }
+      if (query.status === "success") clauses.push("http_status >= 200 AND http_status < 400");
+      if (query.status === "error") clauses.push("(http_status < 200 OR http_status >= 400)");
+      if (query.search?.trim()) {
+        clauses.push("(request_id LIKE ? OR endpoint LIKE ? OR COALESCE(model, '') LIKE ?)");
+        const pattern = `%${query.search.trim()}%`;
+        params.push(pattern, pattern, pattern);
+      }
+
+      const where = `WHERE ${clauses.join(" AND ")}`;
+      const total = asNumber(runRows(db, `SELECT COUNT(*) AS total FROM usage_requests ${where}`, params)[0]?.total);
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      const page = Math.min(requestedPage, totalPages);
+      const rows = runRows(db,
+        `SELECT * FROM usage_requests ${where}
+         ORDER BY completed_at DESC, request_id DESC LIMIT ? OFFSET ?`,
+        [...params, pageSize, (page - 1) * pageSize],
+      );
+      const items = rows.map(usageRequestFromRow);
+      const facetsWhere = `WHERE ${facetClauses.join(" AND ")}`;
+      const facet = (column: string) => runRows(db,
+        `SELECT DISTINCT ${column} AS value FROM usage_requests ${facetsWhere}
+         AND ${column} IS NOT NULL AND ${column} != '' ORDER BY ${column}`,
+        facetParams,
+      ).map((row) => String(row.value));
+
+      return {
+        generatedAt: Date.now(), items, total, page, pageSize, totalPages,
+        facets: {
+          envNames: facet("env_name"),
+          accountNames: facet("account_name"),
+          models: facet("model"),
+          endpoints: facet("endpoint"),
+        },
+      };
+    },
     upsertPricing(profile) {
       return mutate(() => {
         db.run(
@@ -311,6 +419,30 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
       closed = true;
       db.close();
     },
+  };
+}
+
+function usageRequestFromRow(row: Record<string, unknown>): UsageRequest {
+  const nullableNumber = (value: unknown) => value === null || value === undefined ? null : asNumber(value);
+  return {
+    requestId: String(row.request_id),
+    routeId: String(row.route_id),
+    startedAt: asNumber(row.started_at),
+    completedAt: asNumber(row.completed_at),
+    envName: String(row.env_name),
+    accountName: String(row.account_name),
+    upstreamBaseUrl: String(row.upstream_base_url),
+    endpoint: String(row.endpoint),
+    model: row.model === null ? null : String(row.model),
+    inputTokens: nullableNumber(row.input_tokens),
+    outputTokens: nullableNumber(row.output_tokens),
+    cacheCreationTokens: nullableNumber(row.cache_creation_tokens),
+    cacheReadTokens: nullableNumber(row.cache_read_tokens),
+    totalTokens: nullableNumber(row.total_tokens),
+    httpStatus: asNumber(row.http_status),
+    latencyMs: asNumber(row.latency_ms),
+    actualCost: nullableNumber(row.actual_cost),
+    standardCost: nullableNumber(row.standard_cost),
   };
 }
 

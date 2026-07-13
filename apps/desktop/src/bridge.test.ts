@@ -48,11 +48,35 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       calls.push("getCliAutoResumeSettings");
       return { enabled: false, sessionNumber: 1 };
     },
+    getEnvHistoryRetentionSettings: async () => {
+      calls.push("getEnvHistoryRetentionSettings");
+      return { enabled: false, retentionDays: 30 };
+    },
+    getRouterLifecycleSettings: async () => {
+      calls.push("getRouterLifecycleSettings");
+      return { stopOnAppQuit: false };
+    },
+    getRouterPortSettings: async () => {
+      calls.push("getRouterPortSettings");
+      return { preferredPort: 17832 };
+    },
     detectCodexToolPaths: async () => [],
     setCodexToolPath: async (kind, path) => ({ kind, path, detectedPath: "", manualPath: path, source: "manual", available: true }),
     clearCodexToolPath: async (kind) => ({ kind, path: "", detectedPath: "", manualPath: "", source: "missing", available: false }),
     setCliAutoResumeSettings: async (value) => {
       calls.push(`setCliAutoResumeSettings:${value.enabled}:${value.sessionNumber}`);
+      return value;
+    },
+    setEnvHistoryRetentionSettings: async (value) => {
+      calls.push(`setEnvHistoryRetentionSettings:${value.enabled}:${value.retentionDays}`);
+      return value;
+    },
+    setRouterLifecycleSettings: async (value) => {
+      calls.push(`setRouterLifecycleSettings:${value.stopOnAppQuit}`);
+      return value;
+    },
+    setRouterPortSettings: async (value) => {
+      calls.push(`setRouterPortSettings:${value.preferredPort}`);
       return value;
     },
     getCliTerminalSettings: async () => ({ selectedId: "terminal", terminals: [{ id: "terminal", label: "Terminal", supportsCurrentWindow: true }] }),
@@ -131,12 +155,21 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       calls.push(`updateIndependentModel:${request.envName}:${request.accountName}:${request.enabled ? "on" : "off"}`);
       return { message: "ok" };
     },
+    listCustomModels: async () => ({ version: 1, models: [], accountBindings: {} }),
+    saveCustomModel: async () => ({ version: 1, models: [], accountBindings: {} }),
+    deleteCustomModel: async () => ({ version: 1, models: [], accountBindings: {} }),
+    setAccountModelBindings: async () => ({ version: 1, models: [], accountBindings: {} }),
+    setModelAccountBindings: async () => ({ version: 1, models: [], accountBindings: {} }),
     logoutAccount: async (envName, accountName, target) => {
       calls.push(`logoutAccount:${envName}:${accountName}:${target}`);
       return { message: "ok" };
     },
     deleteAccount: async (envName, accountName) => {
       calls.push(`deleteAccount:${envName}:${accountName}`);
+      return { message: "ok" };
+    },
+    copyAccount: async (sourceEnvName, sourceAccountName, targetEnvName) => {
+      calls.push(`copyAccount:${sourceEnvName}:${sourceAccountName}:${targetEnvName}`);
       return { message: "ok" };
     },
     showProxy: async () => {
@@ -213,7 +246,25 @@ test("desktop bridge forwards calls to injected electron api", async () => {
     },
     getEnvironmentRouteStatuses: async () => [],
     toggleEnvironmentRoute: async (envName, enabled) => ({ envName, enabled, routedAccounts: enabled ? 1 : 0, port: enabled ? 17832 : null }),
+    toggleAccountCompatibility: async (input) => {
+      calls.push(`toggleAccountCompatibility:${input.envName}:${input.accountName}:${input.enabled}`);
+      return { envName: input.envName, accountName: input.accountName, enabled: input.enabled, state: input.enabled ? "ready" : "disabled" };
+    },
+    getAccountCompatibilityStatuses: async (keys) => {
+      calls.push(`getAccountCompatibilityStatuses:${keys.join(",")}`);
+      return [];
+    },
+    checkAccountCompatibility: async (envName, accountName) => {
+      calls.push(`checkAccountCompatibility:${envName}:${accountName}`);
+      return { ok: true, status: 200, message: "ok" };
+    },
     loadUsageSnapshot: async () => ({ generatedAt: Date.now(), summary: { requests: 0, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 0, actualCost: null, standardCost: null, requestsWithoutUsage: 0, cacheHitRate: null }, models: [], baseUrls: [], trend: [] }),
+    loadUsageRequests: async (query) => {
+      calls.push(`loadUsageRequests:${query.baseUrl}:${query.page}:${query.pageSize}`);
+      return { generatedAt: Date.now(), items: [], total: 0,
+        page: query.page, pageSize: query.pageSize, totalPages: 1,
+        facets: { envNames: [], accountNames: [], models: [], endpoints: [] } };
+    },
     listUsagePricing: async () => [],
     saveUsagePricing: async () => undefined,
   });
@@ -222,6 +273,12 @@ test("desktop bridge forwards calls to injected electron api", async () => {
   await bridge.loadAuthMetrics();
   await bridge.getCliAutoResumeSettings();
   await bridge.setCliAutoResumeSettings({ enabled: true, sessionNumber: 2 });
+  await bridge.getEnvHistoryRetentionSettings();
+  await bridge.setEnvHistoryRetentionSettings({ enabled: true, retentionDays: 45 });
+  await bridge.getRouterLifecycleSettings();
+  await bridge.setRouterLifecycleSettings({ stopOnAppQuit: true });
+  await bridge.getRouterPortSettings();
+  await bridge.setRouterPortSettings({ preferredPort: 19090 });
   await bridge.getLanguage();
   await bridge.setLanguage("ja");
   await bridge.writeClipboardText("sk-secret");
@@ -250,6 +307,7 @@ test("desktop bridge forwards calls to injected electron api", async () => {
   });
   await bridge.logoutAccount("project", "personal", "cli");
   await bridge.deleteAccount("project", "personal");
+  await bridge.copyAccount("project", "personal", "sandbox");
   await bridge.showProxy();
   await bridge.setProxy("http://127.0.0.1:7890");
   await bridge.disableProxy();
@@ -268,12 +326,22 @@ test("desktop bridge forwards calls to injected electron api", async () => {
   await bridge.runRecover();
   await bridge.readSwitcherLog();
   await bridge.readTokenRefreshLog();
+  await bridge.toggleAccountCompatibility({ envName: "project", accountName: "personal", enabled: true, upstreamModel: "model" });
+  await bridge.getAccountCompatibilityStatuses(["project/personal"]);
+  await bridge.checkAccountCompatibility("project", "personal");
+  await bridge.loadUsageRequests({ from: 0, to: 1000, baseUrl: "https://api.example.com/v1", page: 1, pageSize: 20 });
 
   assert.deepEqual(calls, [
     "loadOverview",
     "loadAuthMetrics",
     "getCliAutoResumeSettings",
     "setCliAutoResumeSettings:true:2",
+    "getEnvHistoryRetentionSettings",
+    "setEnvHistoryRetentionSettings:true:45",
+    "getRouterLifecycleSettings",
+    "setRouterLifecycleSettings:true",
+    "getRouterPortSettings",
+    "setRouterPortSettings:19090",
     "getLanguage",
     "setLanguage:ja",
     "writeClipboardText:sk-secret",
@@ -289,6 +357,7 @@ test("desktop bridge forwards calls to injected electron api", async () => {
     "updateIndependentModel:project:personal:on",
     "logoutAccount:project:personal:cli",
     "deleteAccount:project:personal",
+    "copyAccount:project:personal:sandbox",
     "showProxy",
     "setProxy:http://127.0.0.1:7890",
     "disableProxy",
@@ -307,5 +376,9 @@ test("desktop bridge forwards calls to injected electron api", async () => {
     "runRecover",
     "readSwitcherLog",
     "readTokenRefreshLog",
+    "toggleAccountCompatibility:project:personal:true",
+    "getAccountCompatibilityStatuses:project/personal",
+    "checkAccountCompatibility:project:personal",
+    "loadUsageRequests:https://api.example.com/v1:1:20",
   ]);
 });

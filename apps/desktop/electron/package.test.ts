@@ -15,7 +15,12 @@ test("desktop build emits electron main entry and preload bundle", async () => {
   const codexToolPathsPath = join(desktopRoot, "electron-dist", "electron", "codex-tool-paths.cjs");
   const codexProjectsPath = join(desktopRoot, "electron-dist", "electron", "codex-projects.cjs");
   const desktopSettingsPath = join(desktopRoot, "electron-dist", "electron", "desktop-settings.cjs");
+  const envHistoryRetentionPath = join(desktopRoot, "electron-dist", "electron", "env-history-retention.cjs");
   const cliTerminalSettingsPath = join(desktopRoot, "electron-dist", "electron", "cli-terminal-settings.cjs");
+  const modelCatalogStorePath = join(desktopRoot, "electron-dist", "electron", "model-catalog-store.cjs");
+  const accountModelCatalogPath = join(desktopRoot, "electron-dist", "electron", "account-model-catalog.cjs");
+  const compatibilityHandlerPath = join(desktopRoot, "electron-dist", "electron", "openai-chat-compat", "compatibility-handler.js");
+  const electronModuleBoundaryPath = join(desktopRoot, "electron-dist", "electron", "package.json");
 
   await access(mainPath, constants.F_OK);
   await access(preloadPath, constants.F_OK);
@@ -23,7 +28,12 @@ test("desktop build emits electron main entry and preload bundle", async () => {
   await access(codexToolPathsPath, constants.F_OK);
   await access(codexProjectsPath, constants.F_OK);
   await access(desktopSettingsPath, constants.F_OK);
+  await access(envHistoryRetentionPath, constants.F_OK);
   await access(cliTerminalSettingsPath, constants.F_OK);
+  await access(modelCatalogStorePath, constants.F_OK);
+  await access(accountModelCatalogPath, constants.F_OK);
+  await access(compatibilityHandlerPath, constants.F_OK);
+  await access(electronModuleBoundaryPath, constants.F_OK);
 
   const mainSource = await readFile(mainPath, "utf8");
   assert.match(mainSource, /BrowserWindow/);
@@ -35,6 +45,9 @@ test("desktop build emits electron main entry and preload bundle", async () => {
   assert.match(mainSource, /setMenu\(null\)/);
   assert.match(mainSource, /setApplicationMenu\(null\)/);
   assert.match(mainSource, /logo-win\.png/);
+  assert.match(mainSource, /await createWindow\(\);\s*startEnvHistoryCleanupSchedule\(\)/);
+  assert.match(mainSource, /void \(0, \w+\.runEnvHistoryRetentionCleanup\)\(\)\.catch/);
+  assert.doesNotMatch(mainSource, /await \(0, \w+\.runEnvHistoryRetentionCleanup\)/);
 
   const runtimePathsSource = await readFile(runtimePathsPath, "utf8");
   assert.match(runtimePathsSource, /CODEX_SWITCHER_DESKTOP_RESOURCES_PATH/);
@@ -43,8 +56,20 @@ test("desktop build emits electron main entry and preload bundle", async () => {
   assert.match(bridgeSource, /require\("\.\/codex-projects\.cjs"\)/);
   assert.doesNotMatch(bridgeSource, /require\("\.\/codex-projects\.js"\)/);
   assert.match(bridgeSource, /require\("\.\/desktop-settings\.cjs"\)/);
+  assert.match(bridgeSource, /require\("\.\/env-history-retention\.cjs"\)/);
   assert.doesNotMatch(bridgeSource, /require\("\.\/desktop-settings\.js"\)/);
   assert.match(bridgeSource, /require\("\.\/cli-terminal-settings\.cjs"\)/);
+  assert.match(bridgeSource, /require\("\.\/model-catalog-store\.cjs"\)/);
+  assert.doesNotMatch(bridgeSource, /require\("\.\/model-catalog-store\.js"\)/);
+  assert.match(bridgeSource, /require\("\.\/account-model-catalog\.cjs"\)/);
+  assert.doesNotMatch(bridgeSource, /require\("\.\/account-model-catalog\.js"\)/);
+
+  const accountModelCatalogSource = await readFile(accountModelCatalogPath, "utf8");
+  assert.match(accountModelCatalogSource, /require\("\.\/model-catalog-store\.cjs"\)/);
+  assert.deepEqual(JSON.parse(await readFile(electronModuleBoundaryPath, "utf8")), { type: "commonjs" });
+  const compatibilitySource = await readFile(compatibilityHandlerPath, "utf8");
+  assert.match(compatibilitySource, /handleChatCompatibilityRequest/);
+  assert.doesNotMatch(compatibilitySource, /CLIProxyAPI|cc-switch|child_process/);
 
   const htmlSource = await readFile(join(desktopRoot, "dist", "index.html"), "utf8");
   assert.doesNotMatch(htmlSource, /src="\/assets\//);

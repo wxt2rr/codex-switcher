@@ -14,9 +14,11 @@ export async function resolveCommandPath(command, env = process.env, platform = 
             }
         }
     }
-    for (const candidate of codexCliCandidatePaths(env, platform)) {
-        if (await isExecutable(candidate)) {
-            return { source: "candidate", path: candidate };
+    if (command === "codex") {
+        for (const candidate of codexCliCandidatePaths(env, platform)) {
+            if (await isExecutable(candidate)) {
+                return { source: "candidate", path: candidate };
+            }
         }
     }
     return null;

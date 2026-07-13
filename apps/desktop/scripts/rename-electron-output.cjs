@@ -3,6 +3,8 @@ const path = require("node:path");
 
 const electronDir = path.join(__dirname, "..", "electron-dist", "electron");
 
+fs.writeFileSync(path.join(electronDir, "package.json"), `${JSON.stringify({ type: "commonjs" }, null, 2)}\n`, "utf8");
+
 const commonJsModules = [
   "main",
   "preload",
@@ -15,11 +17,14 @@ const commonJsModules = [
   "desktop-settings",
   "cli-terminal-settings",
   "env-file-history",
+  "env-history-retention",
   "usage-routing-model",
   "usage-store",
   "usage-router-service",
   "usage-router-service-main",
   "usage-router-manager",
+  "model-catalog-store",
+  "account-model-catalog",
 ];
 
 for (const file of commonJsModules) {
@@ -35,6 +40,25 @@ for (const file of commonJsModules) {
     fs.renameSync(mapPath, cjsMapPath);
   }
 }
+
+function rewriteCompiledDependencies(directory) {
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      rewriteCompiledDependencies(target);
+      continue;
+    }
+    if (!entry.name.endsWith(".js") && !entry.name.endsWith(".cjs")) continue;
+    let source = fs.readFileSync(target, "utf8");
+    for (const dependency of commonJsModules) {
+      source = source.replaceAll(`./${dependency}.js`, `./${dependency}.cjs`);
+      source = source.replaceAll(`../${dependency}.js`, `../${dependency}.cjs`);
+    }
+    fs.writeFileSync(target, source, "utf8");
+  }
+}
+
+rewriteCompiledDependencies(electronDir);
 
 for (const file of commonJsModules) {
   const cjsPath = path.join(electronDir, `${file}.cjs`);

@@ -4,6 +4,9 @@ export interface DesktopActionResult {
 }
 export interface CodexToolStatus { kind: "cli" | "app"; path: string; detectedPath: string; manualPath: string; source: "manual" | "environment" | "path" | "candidate" | "missing"; available: boolean; }
 export interface CliAutoResumeSettings { enabled: boolean; sessionNumber: number; }
+export interface RouterLifecycleSettings { stopOnAppQuit: boolean; }
+export interface RouterPortSettings { preferredPort: number; }
+export interface EnvHistoryRetentionSettings { enabled: boolean; retentionDays: number; }
 export type CliTerminalId = "iterm" | "terminal" | "warp" | "ghostty" | "windows-terminal" | "powershell7" | "windows-powershell" | "command-prompt";
 export interface CliTerminalOption { id: CliTerminalId; label: string; supportsCurrentWindow: boolean; iconUrl?: string; }
 export interface CliTerminalSettings { selectedId: CliTerminalId; terminals: CliTerminalOption[]; }
@@ -46,6 +49,13 @@ export interface DesktopNativeLoginRequest {
   baseUrlMode?: "default" | "custom";
   baseUrl?: string;
   sub2apiPayload?: string;
+  apiProtocol?: "responses" | "chat_completions";
+  compatibilityEnabled?: boolean;
+  upstreamModel?: string;
+  reasoningProfile?: "auto" | "standard" | "reasoning_content" | "think_tags";
+  longConversationStrategy?: "safe" | "continuity";
+  instructionRole?: "auto" | "system" | "developer";
+  requestOverrides?: Record<string, unknown>;
 }
 
 export type DesktopLaunchStrategy = "replace-current" | "current-window" | "new-window";
@@ -60,10 +70,55 @@ export interface DesktopIndependentModelRequest {
   baseUrl?: string;
 }
 
+export interface AccountCompatibilityRequest {
+  envName: string;
+  accountName: string;
+  enabled: boolean;
+  upstreamModel?: string;
+  reasoningProfile?: "auto" | "standard" | "reasoning_content" | "think_tags";
+  longConversationStrategy?: "safe" | "continuity";
+  instructionRole?: "auto" | "system" | "developer";
+  requestOverrides?: Record<string, unknown>;
+}
+export interface AccountCompatibilityStatus {
+  envName: string;
+  accountName: string;
+  enabled: boolean;
+  state: "disabled" | "ready" | "degraded";
+  routeId?: string;
+  localBaseUrl?: string;
+  message?: string;
+}
+export interface CompatibilityCheckResult {
+  ok: boolean; status: number; message: string; state?: "ready" | "degraded" | "failed"; checkedAt?: number;
+  probes?: Array<{ stage: string; required: boolean; ok: boolean; message: string }>;
+  capabilities?: { text: boolean; streaming: boolean; sequentialTools: boolean; parallelTools: boolean; reasoning: boolean };
+}
+
+export type ModelCatalogEntry = Record<string, unknown> & {
+  slug: string;
+  display_name: string;
+  description?: string;
+};
+export interface CustomModelRecord {
+  id: string;
+  entry: ModelCatalogEntry;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface ModelCatalogSnapshot {
+  version: 1;
+  models: CustomModelRecord[];
+  accountBindings: Record<string, string[]>;
+}
+export interface SaveCustomModelRequest { id?: string; entry: Record<string, unknown>; }
+
 import type {
   EnvironmentRouteStatus,
   UsageFilter,
   UsagePricingProfile,
+  UsageRequestPage,
+  UsageRequestQuery,
   UsageSnapshot,
 } from "./desktop-model";
 
@@ -72,10 +127,16 @@ export interface DesktopElectronApi {
   loadAuthMetrics(): Promise<string>;
   getCodexToolPaths(): Promise<CodexToolStatus[]>;
   getCliAutoResumeSettings(): Promise<CliAutoResumeSettings>;
+  getEnvHistoryRetentionSettings(): Promise<EnvHistoryRetentionSettings>;
+  getRouterLifecycleSettings(): Promise<RouterLifecycleSettings>;
+  getRouterPortSettings(): Promise<RouterPortSettings>;
   detectCodexToolPaths(): Promise<CodexToolStatus[]>;
   setCodexToolPath(kind: "cli" | "app", path: string): Promise<CodexToolStatus>;
   clearCodexToolPath(kind: "cli" | "app"): Promise<CodexToolStatus>;
   setCliAutoResumeSettings(value: CliAutoResumeSettings): Promise<CliAutoResumeSettings>;
+  setEnvHistoryRetentionSettings(value: EnvHistoryRetentionSettings): Promise<EnvHistoryRetentionSettings>;
+  setRouterLifecycleSettings(value: RouterLifecycleSettings): Promise<RouterLifecycleSettings>;
+  setRouterPortSettings(value: RouterPortSettings): Promise<RouterPortSettings>;
   getCliTerminalSettings(): Promise<CliTerminalSettings>;
   scanCliTerminalSettings(): Promise<CliTerminalSettings>;
   setCliTerminalSelection(id: CliTerminalId): Promise<CliTerminalSettings>;
@@ -105,8 +166,14 @@ export interface DesktopElectronApi {
   deleteEnvFileHistory(envName: string, entryIds: string[]): Promise<DesktopActionResult>;
   updateRuntime(envName: string, accountName: string, baseUrl: string): Promise<DesktopActionResult>;
   updateIndependentModel(request: DesktopIndependentModelRequest): Promise<DesktopActionResult>;
+  listCustomModels(): Promise<ModelCatalogSnapshot>;
+  saveCustomModel(request: SaveCustomModelRequest): Promise<ModelCatalogSnapshot>;
+  deleteCustomModel(id: string): Promise<ModelCatalogSnapshot>;
+  setAccountModelBindings(accountKey: string, modelIds: string[]): Promise<ModelCatalogSnapshot>;
+  setModelAccountBindings(modelId: string, accountKeys: string[]): Promise<ModelCatalogSnapshot>;
   logoutAccount(envName: string, accountName: string, target: "cli" | "app" | "both"): Promise<DesktopActionResult>;
   deleteAccount(envName: string, accountName: string): Promise<DesktopActionResult>;
+  copyAccount(sourceEnvName: string, sourceAccountName: string, targetEnvName: string): Promise<DesktopActionResult>;
   showProxy(): Promise<DesktopActionResult>;
   setProxy(value: string): Promise<DesktopActionResult>;
   disableProxy(): Promise<DesktopActionResult>;
@@ -127,7 +194,11 @@ export interface DesktopElectronApi {
   readTokenRefreshLog(): Promise<DesktopLogResult>;
   getEnvironmentRouteStatuses(): Promise<EnvironmentRouteStatus[]>;
   toggleEnvironmentRoute(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
+  toggleAccountCompatibility(input: AccountCompatibilityRequest): Promise<AccountCompatibilityStatus>;
+  getAccountCompatibilityStatuses(accountKeys: string[]): Promise<AccountCompatibilityStatus[]>;
+  checkAccountCompatibility(envName: string, accountName: string): Promise<CompatibilityCheckResult>;
   loadUsageSnapshot(filter: UsageFilter): Promise<UsageSnapshot>;
+  loadUsageRequests(query: UsageRequestQuery): Promise<UsageRequestPage>;
   listUsagePricing(): Promise<UsagePricingProfile[]>;
   saveUsagePricing(profile: UsagePricingProfile): Promise<void>;
 }
@@ -137,10 +208,16 @@ export interface DesktopBridge {
   loadAuthMetrics(): Promise<string>;
   getCodexToolPaths(): Promise<CodexToolStatus[]>;
   getCliAutoResumeSettings(): Promise<CliAutoResumeSettings>;
+  getEnvHistoryRetentionSettings(): Promise<EnvHistoryRetentionSettings>;
+  getRouterLifecycleSettings(): Promise<RouterLifecycleSettings>;
+  getRouterPortSettings(): Promise<RouterPortSettings>;
   detectCodexToolPaths(): Promise<CodexToolStatus[]>;
   setCodexToolPath(kind: "cli" | "app", path: string): Promise<CodexToolStatus>;
   clearCodexToolPath(kind: "cli" | "app"): Promise<CodexToolStatus>;
   setCliAutoResumeSettings(value: CliAutoResumeSettings): Promise<CliAutoResumeSettings>;
+  setEnvHistoryRetentionSettings(value: EnvHistoryRetentionSettings): Promise<EnvHistoryRetentionSettings>;
+  setRouterLifecycleSettings(value: RouterLifecycleSettings): Promise<RouterLifecycleSettings>;
+  setRouterPortSettings(value: RouterPortSettings): Promise<RouterPortSettings>;
   getCliTerminalSettings(): Promise<CliTerminalSettings>;
   scanCliTerminalSettings(): Promise<CliTerminalSettings>;
   setCliTerminalSelection(id: CliTerminalId): Promise<CliTerminalSettings>;
@@ -170,8 +247,14 @@ export interface DesktopBridge {
   deleteEnvFileHistory(envName: string, entryIds: string[]): Promise<DesktopActionResult>;
   updateRuntime(envName: string, accountName: string, baseUrl: string): Promise<DesktopActionResult>;
   updateIndependentModel(request: DesktopIndependentModelRequest): Promise<DesktopActionResult>;
+  listCustomModels(): Promise<ModelCatalogSnapshot>;
+  saveCustomModel(request: SaveCustomModelRequest): Promise<ModelCatalogSnapshot>;
+  deleteCustomModel(id: string): Promise<ModelCatalogSnapshot>;
+  setAccountModelBindings(accountKey: string, modelIds: string[]): Promise<ModelCatalogSnapshot>;
+  setModelAccountBindings(modelId: string, accountKeys: string[]): Promise<ModelCatalogSnapshot>;
   logoutAccount(envName: string, accountName: string, target: "cli" | "app" | "both"): Promise<DesktopActionResult>;
   deleteAccount(envName: string, accountName: string): Promise<DesktopActionResult>;
+  copyAccount(sourceEnvName: string, sourceAccountName: string, targetEnvName: string): Promise<DesktopActionResult>;
   showProxy(): Promise<DesktopActionResult>;
   setProxy(value: string): Promise<DesktopActionResult>;
   disableProxy(): Promise<DesktopActionResult>;
@@ -192,7 +275,11 @@ export interface DesktopBridge {
   readTokenRefreshLog(): Promise<DesktopLogResult>;
   getEnvironmentRouteStatuses(): Promise<EnvironmentRouteStatus[]>;
   toggleEnvironmentRoute(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
+  toggleAccountCompatibility(input: AccountCompatibilityRequest): Promise<AccountCompatibilityStatus>;
+  getAccountCompatibilityStatuses(accountKeys: string[]): Promise<AccountCompatibilityStatus[]>;
+  checkAccountCompatibility(envName: string, accountName: string): Promise<CompatibilityCheckResult>;
   loadUsageSnapshot(filter: UsageFilter): Promise<UsageSnapshot>;
+  loadUsageRequests(query: UsageRequestQuery): Promise<UsageRequestPage>;
   listUsagePricing(): Promise<UsagePricingProfile[]>;
   saveUsagePricing(profile: UsagePricingProfile): Promise<void>;
 }
@@ -204,10 +291,16 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       loadAuthMetrics: unavailable,
       getCodexToolPaths: unavailable,
       getCliAutoResumeSettings: unavailable,
+      getEnvHistoryRetentionSettings: unavailable,
+      getRouterLifecycleSettings: unavailable,
+      getRouterPortSettings: unavailable,
       detectCodexToolPaths: unavailable,
       setCodexToolPath: unavailable,
       clearCodexToolPath: unavailable,
       setCliAutoResumeSettings: unavailable,
+      setEnvHistoryRetentionSettings: unavailable,
+      setRouterLifecycleSettings: unavailable,
+      setRouterPortSettings: unavailable,
       getCliTerminalSettings: unavailable,
       scanCliTerminalSettings: unavailable,
       setCliTerminalSelection: unavailable,
@@ -231,8 +324,14 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       deleteEnvFileHistory: unavailable,
       updateRuntime: unavailable,
       updateIndependentModel: unavailable,
+      listCustomModels: unavailable,
+      saveCustomModel: unavailable,
+      deleteCustomModel: unavailable,
+      setAccountModelBindings: unavailable,
+      setModelAccountBindings: unavailable,
       logoutAccount: unavailable,
       deleteAccount: unavailable,
+      copyAccount: unavailable,
       showProxy: unavailable,
       setProxy: unavailable,
       disableProxy: unavailable,
@@ -253,7 +352,11 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       readTokenRefreshLog: unavailable,
       getEnvironmentRouteStatuses: unavailable,
       toggleEnvironmentRoute: unavailable,
+      toggleAccountCompatibility: unavailable,
+      getAccountCompatibilityStatuses: unavailable,
+      checkAccountCompatibility: unavailable,
       loadUsageSnapshot: unavailable,
+      loadUsageRequests: unavailable,
       listUsagePricing: unavailable,
       saveUsagePricing: unavailable,
     };
@@ -347,10 +450,16 @@ function createBrowserPreviewBridge(): DesktopBridge {
     loadAuthMetrics: browserPreviewLoadAuthMetrics,
     getCodexToolPaths: async () => [],
     getCliAutoResumeSettings: async () => ({ enabled: false, sessionNumber: 1 }),
+    getEnvHistoryRetentionSettings: async () => ({ enabled: false, retentionDays: 30 }),
+    getRouterLifecycleSettings: async () => ({ stopOnAppQuit: false }),
+    getRouterPortSettings: async () => ({ preferredPort: 17832 }),
     detectCodexToolPaths: async () => [],
     setCodexToolPath: async (kind, path) => ({ kind, path, detectedPath: "", manualPath: path, source: "manual", available: true }),
     clearCodexToolPath: async (kind) => ({ kind, path: "", detectedPath: "", manualPath: "", source: "missing", available: false }),
     setCliAutoResumeSettings: async (value) => value,
+    setEnvHistoryRetentionSettings: async (value) => value,
+    setRouterLifecycleSettings: async (value) => value,
+    setRouterPortSettings: async (value) => value,
     getCliTerminalSettings: async () => ({ selectedId: "terminal", terminals: [{ id: "terminal", label: "Terminal", supportsCurrentWindow: true }] }),
     scanCliTerminalSettings: async () => ({ selectedId: "terminal", terminals: [{ id: "terminal", label: "Terminal", supportsCurrentWindow: true }] }),
     setCliTerminalSelection: async (id) => ({ selectedId: id, terminals: [{ id, label: id, supportsCurrentWindow: false }] }),
@@ -374,8 +483,14 @@ function createBrowserPreviewBridge(): DesktopBridge {
     deleteEnvFileHistory: () => browserPreviewAction(),
     updateRuntime: () => browserPreviewAction(),
     updateIndependentModel: () => browserPreviewAction(),
+    listCustomModels: async () => ({ version: 1, models: [], accountBindings: {} }),
+    saveCustomModel: async () => ({ version: 1, models: [], accountBindings: {} }),
+    deleteCustomModel: async () => ({ version: 1, models: [], accountBindings: {} }),
+    setAccountModelBindings: async () => ({ version: 1, models: [], accountBindings: {} }),
+    setModelAccountBindings: async () => ({ version: 1, models: [], accountBindings: {} }),
     logoutAccount: () => browserPreviewAction(),
     deleteAccount: () => browserPreviewAction(),
+    copyAccount: () => browserPreviewAction(),
     showProxy: () => browserPreviewAction(),
     setProxy: () => browserPreviewAction(),
     disableProxy: () => browserPreviewAction(),
@@ -401,6 +516,12 @@ function createBrowserPreviewBridge(): DesktopBridge {
     toggleEnvironmentRoute: async (envName, enabled) => ({
       envName, enabled, routedAccounts: enabled ? 2 : 0, port: enabled ? 17832 : null,
     }),
+    toggleAccountCompatibility: async (input) => ({ envName: input.envName, accountName: input.accountName,
+      enabled: input.enabled, state: input.enabled ? "ready" : "disabled" }),
+    getAccountCompatibilityStatuses: async (keys) => keys.map((key) => {
+      const [envName, ...rest] = key.split("/"); return { envName, accountName: rest.join("/"), enabled: false, state: "disabled" as const };
+    }),
+    checkAccountCompatibility: async () => ({ ok: true, status: 200, message: "Compatibility check passed" }),
     loadUsageSnapshot: async () => ({
       generatedAt: Date.now(),
       summary: { requests: 267, inputTokens: 1_450_000, outputTokens: 60_490,
@@ -424,6 +545,24 @@ function createBrowserPreviewBridge(): DesktopBridge {
         { bucket: Date.now(), requests: 147, inputTokens: 750_000, outputTokens: 35_490,
           cacheCreationTokens: 0, cacheReadTokens: 7_580_000, totalTokens: 8_365_490,
           actualCost: null, standardCost: 4.24, requestsWithoutUsage: 0, cacheHitRate: 0.918 },
+      ],
+    }),
+    loadUsageRequests: async (query) => ({
+      generatedAt: Date.now(), total: 2, page: query.page, pageSize: query.pageSize, totalPages: 1,
+      facets: { envNames: ["wangxt"], accountNames: ["demo"], models: ["gpt-5.4"], endpoints: ["/responses"] },
+      items: [
+        { requestId: "req-preview-1", routeId: "route-preview", startedAt: Date.now() - 1250,
+          completedAt: Date.now(), envName: "wangxt", accountName: "demo",
+          upstreamBaseUrl: query.baseUrl ?? "https://api.example.com/v1", endpoint: "/responses",
+          model: "gpt-5.4", inputTokens: 4429, outputTokens: 540, cacheCreationTokens: 0,
+          cacheReadTokens: 77600, totalTokens: 82569, httpStatus: 200, latencyMs: 1250,
+          actualCost: null, standardCost: 0.002314 },
+        { requestId: "req-preview-2", routeId: "route-preview", startedAt: Date.now() - 3200,
+          completedAt: Date.now() - 15_000, envName: "wangxt", accountName: "demo",
+          upstreamBaseUrl: query.baseUrl ?? "https://api.example.com/v1", endpoint: "/responses",
+          model: "gpt-5.4", inputTokens: 5378, outputTokens: 1075, cacheCreationTokens: 0,
+          cacheReadTokens: 75500, totalTokens: 81953, httpStatus: 200, latencyMs: 3200,
+          actualCost: null, standardCost: 0.002907 },
       ],
     }),
     listUsagePricing: async () => [],

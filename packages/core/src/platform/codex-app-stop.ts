@@ -27,6 +27,12 @@ export interface ManagedAppStopExecutor {
   signal(pid: number, signal: NodeJS.Signals): Promise<void>;
 }
 
+export interface ManagedAppExitWaiter {
+  isRunning(pid: number): Promise<boolean>;
+  signal(pid: number, signal: NodeJS.Signals): Promise<void>;
+  delay(ms: number): Promise<void>;
+}
+
 export function buildManagedAppStopPlan(
   input: ManagedAppStopPlanInput,
 ): ManagedAppStopPlanStep[] {
@@ -60,11 +66,53 @@ export function buildManagedAppStopPlan(
 
   steps.push({
     kind: "signal",
-    pid: input.pid,
+    pid: -Math.abs(input.pid),
     signal: "SIGTERM",
   });
 
   return steps;
+}
+
+export async function waitForManagedAppExit(
+  input: { platform: SwitcherPlatform; pid: number; gracefulTimeoutMs?: number; forceTimeoutMs?: number; pollMs?: number },
+  waiter: ManagedAppExitWaiter = defaultManagedAppExitWaiter,
+): Promise<void> {
+  if (input.platform === "windows") return;
+  const processGroupId = -Math.abs(input.pid);
+  const processId = Math.abs(input.pid);
+  const pollMs = input.pollMs ?? 50;
+  let useProcessGroup = true;
+  const isRunning = async () => {
+    try {
+      return await waiter.isRunning(useProcessGroup ? processGroupId : processId);
+    } catch (error) {
+      if (!useProcessGroup || !isProcessPermissionError(error)) throw error;
+      useProcessGroup = false;
+      return waiter.isRunning(processId);
+    }
+  };
+  const waitUntilStopped = async (timeoutMs: number) => {
+    const attempts = Math.max(1, Math.ceil(timeoutMs / pollMs));
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (!await isRunning()) return true;
+      await waiter.delay(pollMs);
+    }
+    return !await isRunning();
+  };
+  if (await waitUntilStopped(input.gracefulTimeoutMs ?? 3000)) return;
+  try {
+    await waiter.signal(useProcessGroup ? processGroupId : processId, "SIGKILL");
+  } catch (error) {
+    if (useProcessGroup && isProcessPermissionError(error)) {
+      useProcessGroup = false;
+      await waiter.signal(processId, "SIGKILL");
+    } else if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+      throw error;
+    }
+  }
+  if (!await waitUntilStopped(input.forceTimeoutMs ?? 1500)) {
+    throw new Error(`Managed Codex App process group ${Math.abs(input.pid)} did not exit`);
+  }
 }
 
 export async function executeManagedAppStopPlan(
@@ -76,7 +124,15 @@ export async function executeManagedAppStopPlan(
       if (step.kind === "spawn") {
         await executor.spawn(step.command, step.args);
       } else {
-        await executor.signal(step.pid, step.signal);
+        try {
+          await executor.signal(step.pid, step.signal);
+        } catch (error) {
+          if (step.pid < 0 && isProcessPermissionError(error)) {
+            await executor.signal(Math.abs(step.pid), step.signal);
+          } else {
+            throw error;
+          }
+        }
       }
     } catch (error) {
       if (step.kind === "spawn" && isIgnorableWindowsTaskkillError(step, error)) {
@@ -90,6 +146,10 @@ export async function executeManagedAppStopPlan(
   }
 
   return true;
+}
+
+function isProcessPermissionError(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException)?.code === "EPERM";
 }
 
 function isIgnorableWindowsTaskkillError(
@@ -136,5 +196,23 @@ const defaultManagedAppStopExecutor: ManagedAppStopExecutor = {
   spawn: defaultManagedAppStopExecutorSpawn,
   async signal(pid, signal) {
     process.kill(pid, signal);
+  },
+};
+
+const defaultManagedAppExitWaiter: ManagedAppExitWaiter = {
+  async isRunning(pid) {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+      throw error;
+    }
+  },
+  async signal(pid, signal) {
+    process.kill(pid, signal);
+  },
+  delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   },
 };

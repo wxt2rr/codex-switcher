@@ -6,6 +6,7 @@ type TranslationTree = {
     overview: string;
     environments: string;
     accounts: string;
+    models: string;
     usage: string;
     operations: string;
   };
@@ -143,6 +144,7 @@ const translations: Record<UiLanguage, TranslationTree> = {
       overview: "总览",
       environments: "环境",
       accounts: "账号",
+      models: "模型",
       usage: "用量",
       operations: "设置",
     },
@@ -277,6 +279,7 @@ const translations: Record<UiLanguage, TranslationTree> = {
       overview: "Overview",
       environments: "Environments",
       accounts: "Accounts",
+      models: "Models",
       usage: "Usage",
       operations: "Settings",
     },
@@ -411,6 +414,7 @@ const translations: Record<UiLanguage, TranslationTree> = {
       overview: "概要",
       environments: "環境",
       accounts: "アカウント",
+      models: "モデル",
       usage: "使用量",
       operations: "設定",
     },

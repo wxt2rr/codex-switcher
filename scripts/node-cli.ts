@@ -1390,7 +1390,7 @@ function buildWindowsTokenRefreshCreateArgs(taskName: string): string[] {
 }
 
 async function resolveCodexBinaryPath(): Promise<string | null> {
-  const explicit = process.env.CODEX_BIN || process.env.CODEX_SWITCHER_CODEX_BIN;
+  const explicit = process.env.CODEX_SWITCHER_CODEX_BIN || process.env.CODEX_BIN;
   if (explicit) {
     return explicit;
   }
@@ -2185,7 +2185,7 @@ function buildSub2ApiAuthJson(raw: string | undefined) {
 }
 
 async function defaultRunAuthLogin(input: { codexHome: string }): Promise<void> {
-  const codexBin = process.env.CODEX_BIN || process.env.CODEX_SWITCHER_CODEX_BIN;
+  const codexBin = process.env.CODEX_SWITCHER_CODEX_BIN || process.env.CODEX_BIN;
   if (!codexBin) {
     throw new Error("CODEX_BIN or CODEX_SWITCHER_CODEX_BIN is required for auth login");
   }

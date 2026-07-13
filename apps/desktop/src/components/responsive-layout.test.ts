@@ -8,20 +8,39 @@ const adminPrimitives = readFileSync(new URL("./admin-primitives.tsx", import.me
 const desktopShell = readFileSync(new URL("./desktop-shell.tsx", import.meta.url), "utf8");
 const accounts = readFileSync(new URL("../pages/accounts-page.tsx", import.meta.url), "utf8");
 const environments = readFileSync(new URL("../pages/environments-page.tsx", import.meta.url), "utf8");
+const models = readFileSync(new URL("../pages/models-page.tsx", import.meta.url), "utf8");
 const overview = readFileSync(new URL("../pages/overview-page.tsx", import.meta.url), "utf8");
 const operations = readFileSync(new URL("../pages/operations-page.tsx", import.meta.url), "utf8");
 const reactApp = readFileSync(new URL("../react-app.tsx", import.meta.url), "utf8");
 const usage = readFileSync(new URL("../pages/usage-page.tsx", import.meta.url), "utf8");
+const usageRequestDetails = readFileSync(new URL("../pages/usage-request-details-page.tsx", import.meta.url), "utf8");
 const select = readFileSync(new URL("./ui/select.tsx", import.meta.url), "utf8");
+const tooltip = readFileSync(new URL("./ui/tooltip.tsx", import.meta.url), "utf8");
 const formPrimitives = readFileSync(new URL("./form-primitives.tsx", import.meta.url), "utf8");
 const button = readFileSync(new URL("./ui/button.tsx", import.meta.url), "utf8");
 const dashboard = readFileSync(new URL("./dashboard-kit.tsx", import.meta.url), "utf8");
 const i18n = readFileSync(new URL("../i18n.ts", import.meta.url), "utf8");
+const adaptiveMenuPlacement = readFileSync(new URL("./adaptive-menu-placement.ts", import.meta.url), "utf8");
+
+test("adaptive menus remeasure their natural height when layout changes", () => {
+  assert.match(adaptiveMenuPlacement, /Math\.max\(menu\.height, menuRef\.current\?\.scrollHeight \?\? 0\)/);
+  assert.match(adaptiveMenuPlacement, /new ResizeObserver\(update\)/);
+  assert.match(adaptiveMenuPlacement, /resizeObserver\.observe\(rootRef\.current\)/);
+  assert.match(adaptiveMenuPlacement, /resizeObserver\.observe\(menuRef\.current\)/);
+  assert.match(adaptiveMenuPlacement, /resizeObserver\.disconnect\(\)/);
+});
 
 test("shared page layout uses the full content width and defines compact actions", () => {
   assert.match(primitives, /admin-page-content/);
+  assert.match(primitives, /<PageScrollArea>/);
+  assert.match(primitives, /page-scroll-gutter h-full min-h-0/);
   assert.doesNotMatch(primitives, /max-w-\[1520px\]/);
   assert.match(primitives, /responsive-action-label/);
+  assert.match(primitives, /responsive-record-scroll mt-1 min-h-0 flex-1 space-y-2\.5/);
+  assert.match(primitives, /management-list-card/);
+  assert.match(css, /\.management-list-card\s*\{[^}]*transition:\s*border-color 140ms ease/s);
+  assert.match(css, /\.management-list-card:hover\s*\{[^}]*border-color:[^}]*background-color:\s*white/s);
+  assert.match(css, /@media \(hover: hover\) and \(pointer: fine\)/);
   assert.match(primitives, /title=\{label\}/);
   assert.match(css, /container-type:\s*inline-size/);
   assert.match(css, /\.responsive-actions\s*\{[^}]*flex-wrap:\s*nowrap/s);
@@ -32,11 +51,24 @@ test("shared page layout uses the full content width and defines compact actions
 test("account records keep actions in the row and provide icons for compact controls", () => {
   assert.match(accounts, /admin-page-content/);
   assert.match(accounts, /responsive-account-row/);
+  assert.match(accounts, /import \{ StatCard \} from "@\/components\/dashboard-kit"/);
+  assert.match(accounts, /grid divide-y divide-black\/\[0\.06\].*sm:divide-x sm:divide-y-0/);
+  assert.doesNotMatch(accounts, /function StatCard\(/);
+  assert.match(accounts, /className="page-scroll-gutter min-h-0 flex-1"/);
+  assert.match(accounts, /<ListStack className="mt-0 min-h-full">/);
+  assert.match(css, /\.page-scroll-gutter\s*\{[^}]*margin-right:\s*-0\.75rem;[^}]*padding-right:\s*0\.75rem;[^}]*overflow-y:\s*auto;/s);
+  assert.match(css, /@media \(min-width: 1280px\)\s*\{\s*\.page-scroll-gutter\s*\{[^}]*margin-right:\s*-1rem;[^}]*padding-right:\s*1rem;/s);
+  assert.match(accounts, /<ListCard/);
+  assert.doesNotMatch(accounts, /hover:bg-\[#f7f8fa\]/);
+  assert.doesNotMatch(accounts, /index % 2 === 0 \? "bg-white" : "bg-\[#fbfbfc\]"/);
+  assert.doesNotMatch(accounts, /border-t border-black\/\[0\.04\]/);
   assert.match(accounts, /responsive-actions/);
   assert.doesNotMatch(accounts, /responsive-actions[^\n]*flex-wrap/);
   assert.match(accounts, /Pencil/);
   assert.match(accounts, /Ellipsis/);
   assert.match(accounts, /useAdaptiveMenuLayout/);
+  assert.match(accounts, /useAdaptiveMenuLayout\(menuMounted, rootRef, menuRef\)/);
+  assert.match(accounts, /useAdaptiveMenuLayout\(\s*projectMenuMounted,\s*projectTriggerRef,\s*projectMenuRef/s);
   assert.match(accounts, /data-menu-placement=\{placement\}/);
   assert.match(accounts, /bottom-full pb-2/);
   assert.match(accounts, /top-full pt-2/);
@@ -44,11 +76,13 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.match(accounts, /data-submenu-placement=\{projectPlacement\}/);
   assert.match(accounts, /projectPlacement === "up" \? "bottom-\[-4px\]" : "top-\[-4px\]"/);
   assert.match(accounts, /maxHeight: projectAvailableHeight/);
+  assert.match(accounts, /absolute right-0 z-20 overflow-visible/);
+  assert.doesNotMatch(accounts, /absolute right-0 z-20 overflow-y-auto/);
   assert.match(accounts, /account-runtime-cell/);
   assert.match(accounts, /account-runtime-actions/);
   assert.match(accounts, /account-usage-row/);
   assert.match(css, /\.account-runtime-cell\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)\s+3\.25rem/s);
-  assert.match(css, /\.account-usage-row\s*\{[^}]*grid-template-columns:\s*2rem\s+minmax\(80px, 1fr\)\s+2\.25rem\s+5\.75rem/s);
+  assert.match(css, /\.account-usage-row\s*\{[^}]*grid-template-columns:\s*2rem\s+minmax\(80px, 1fr\)\s+2rem\s+4\.5rem;[^}]*column-gap:\s*0\.375rem/s);
   assert.doesNotMatch(accounts, /value:\s*"chatgpt",\s*label:\s*localizeAuthMode/);
   assert.doesNotMatch(accounts, /SlidersHorizontal/);
   assert.match(accounts, /RefreshCw/);
@@ -64,6 +98,10 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.doesNotMatch(accounts, /<RunStatusBadge/);
   assert.doesNotMatch(accounts, /<Field label=\{pageCopy\.accounts\.target\}>/);
   assert.match(accounts, /保存 API Key/);
+  assert.doesNotMatch(accounts, /保存设置/);
+  assert.match(accounts, /compatibilityEnabled:\s*apiProtocolDraft === "chat_completions" && compatibilityEnabled/);
+  assert.match(reactApp, /compatibilityEnabled:\s*effectiveProtocolSettings\.compatibilityEnabled/);
+  assert.match(reactApp, /account\.route\?\.originalBaseUrl \?\? account\.runtime\.openaiBaseUrl/);
   assert.match(accounts, /保存 sub2api/);
   assert.doesNotMatch(environments, /<RunStatusBadge/);
   assert.doesNotMatch(select, /focus-visible:ring/);
@@ -71,9 +109,17 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.match(select, /--radix-select-content-available-height/);
   assert.match(css, /\[data-slot="select-trigger"\]:focus-visible\s*\{[^}]*box-shadow:\s*none/s);
   assert.match(accounts, /data-auth-refresh-input/);
+  assert.match(accounts, /data-account-search-input/);
+  assert.match(accounts, /focus:border-transparent focus:ring-0/);
+  assert.match(css, /\[data-account-search-input\]:focus-visible\s*\{[^}]*box-shadow:\s*none/s);
   assert.match(accounts, /w-\[64px\]/);
   assert.match(css, /\[data-auth-refresh-input\]:focus-visible\s*\{[^}]*box-shadow:\s*none/s);
   assert.match(accounts, /aria-expanded=\{open\}/);
+  assert.match(accounts, /key: "copy"/);
+  assert.match(accounts, /key: "copy-to"/);
+  assert.match(accounts, /copyTargetEnvironments/);
+  assert.match(accounts, /<RowActionSubmenu/);
+  assert.match(accounts, /<ChevronRight/);
   assert.doesNotMatch(accounts, /onClick=\{\(\) => onSelect\(primaryStrategy\)\}/);
   assert.match(accounts, /onMouseLeave=\{\(\) => setProjectOpen\(false\)\}/);
   assert.match(css, /\.responsive-record-row:has\(\[aria-expanded="true"\]\)/);
@@ -81,8 +127,29 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.match(css, /\.responsive-record-row:focus-within/);
 });
 
+test("selected controls share the environment route blue treatment", () => {
+  assert.match(css, /--selected-border-color:\s*rgb\(148 163 184 \/ 0\.55\)/);
+  assert.match(css, /\.ui-selected-control\s*\{[^}]*border-color:\s*var\(--selected-border-color\);[^}]*background-color:\s*rgb\(224 242 254\);[^}]*color:\s*rgb\(3 105 161\);/s);
+  assert.match(css, /\.management-list-card:hover\s*\{[^}]*border-color:\s*var\(--selected-border-color\)/s);
+  assert.match(primitives, /active\s*\?\s*"ui-selected-control"/);
+  assert.match(accounts, /active \? "ui-selected-control"/);
+  assert.match(desktopShell, /\? "bg-\[#f1f3f5\] text-neutral-950 dark:bg-\[#1b2129\] dark:text-white"/);
+  assert.doesNotMatch(desktopShell, /ui-selected-control/);
+  assert.match(environments, /\? "ui-selected-control rounded-lg border px-3 py-1\.5 text-xs font-semibold"/);
+  assert.match(models, /mode === "form" \? "ui-selected-control"/);
+  assert.match(models, /mode === "json" \? "ui-selected-control"/);
+});
+
 test("all management record cards opt into the single-row responsive contract", () => {
   assert.match(environments, /responsive-environment-row/);
+  assert.match(environments, /ListStack/);
+  assert.match(environments, /<ListStack>/);
+  assert.match(environments, /title=\{env\.path\}/);
+  assert.match(environments, /font-mono text-\[11px\] text-slate-500/);
+  assert.doesNotMatch(environments, /!rounded-none/);
+  assert.doesNotMatch(environments, /!shadow-none/);
+  assert.doesNotMatch(environments, /index % 2 \? "bg-\[#fafbfc\]" : "bg-white"/);
+  assert.doesNotMatch(environments, /min-h-0 flex-1 overflow-auto rounded-\[14px\] border border-black\/\[0\.05\] bg-white/);
   assert.match(overview, /responsive-overview-row/);
   assert.match(operations, /grid-cols-\[minmax\(180px,0\.62fr\)_minmax\(0,1\.55fr\)\]/);
   assert.match(environments, /responsive-actions/);
@@ -105,16 +172,76 @@ test("all management record cards opt into the single-row responsive contract", 
   assert.match(usage, /shouldScheduleUsageRefresh/);
 });
 
+test("management lists do not render decorative initial avatars", () => {
+  for (const source of [primitives, accounts, environments, overview, operations, usage]) {
+    assert.doesNotMatch(source, /AvatarTile/);
+    assert.doesNotMatch(source, /charAt\(0\)\.toUpperCase\(\)/);
+  }
+  assert.doesNotMatch(models, /AvatarTile/);
+});
+
+test("search toolbars do not advertise unsupported keyboard shortcuts", () => {
+  for (const source of [primitives, accounts, environments, models, overview, operations, usage]) {
+    assert.doesNotMatch(source, /<Command\b/);
+    assert.doesNotMatch(source, /<kbd\b/i);
+  }
+});
+
 test("desktop motion is restrained and respects reduced-motion preferences", () => {
-  assert.match(css, /@keyframes page-enter/);
-  assert.match(css, /@keyframes record-enter/);
+  assert.doesNotMatch(css, /@keyframes page-enter/);
+  assert.doesNotMatch(css, /@keyframes record-enter/);
+  assert.doesNotMatch(css, /@keyframes popover-enter/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.match(css, /\.motion-page-enter/);
-  assert.match(css, /\.responsive-record-row\s*\{[^}]*animation:\s*record-enter/s);
+  assert.doesNotMatch(css, /\.motion-page-enter/);
+  assert.doesNotMatch(css, /\.responsive-record-row\s*\{[^}]*animation:/s);
+  assert.doesNotMatch(button, /active:scale-\[0\.97\]/);
   assert.doesNotMatch(button, /active:scale/);
-  assert.doesNotMatch(css, /button:not\(:disabled\):active[^{]*\{[^}]*scale:/s);
-  assert.match(accounts, /transition-\[width,background-color\] duration-300/);
-  assert.match(reactApp, /transition-\[width\] duration-300/);
+  assert.doesNotMatch(select, /active:scale/);
+  assert.doesNotMatch(desktopShell, /active:scale/);
+  assert.doesNotMatch(button, /transition-all/);
+  assert.doesNotMatch(select, /transition-all/);
+  assert.doesNotMatch(formPrimitives, /transition-all/);
+  assert.match(css, /--ease-out:\s*cubic-bezier\(0\.23, 1, 0\.32, 1\)/);
+  assert.match(css, /--ease-in-out:\s*cubic-bezier\(0\.77, 0, 0\.175, 1\)/);
+  assert.match(css, /\.motion-dialog-enter/);
+  assert.match(css, /--motion-dialog-enter:\s*260ms/);
+  assert.match(css, /--motion-dialog-exit:\s*180ms/);
+  assert.match(css, /--motion-notice-exit:\s*160ms/);
+  assert.match(css, /--motion-popover-enter:\s*200ms/);
+  assert.match(css, /--motion-popover-exit:\s*140ms/);
+  assert.match(css, /--motion-toggle:\s*240ms/);
+  assert.match(css, /--ease-drawer:\s*cubic-bezier\(0\.32, 0\.72, 0, 1\)/);
+  assert.match(css, /\.motion-popover-enter\[data-menu-placement="up"\]/);
+  assert.match(css, /@starting-style/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*transform:\s*none !important/);
+  assert.doesNotMatch(desktopShell, /transition-\[width,padding\]/);
+  assert.doesNotMatch(desktopShell, /transition-\[opacity,transform,width\]/);
+  assert.match(accounts, /transition-\[transform,background-color\] duration-\[220ms\]/);
+  assert.match(accounts, /scaleX\(\$\{percent \/ 100\}\)/);
+  assert.match(reactApp, /transition-transform duration-\[220ms\]/);
+  assert.match(reactApp, /scaleX\(\$\{initialLoadingProgress \/ 100\}\)/);
+  assert.doesNotMatch(css, /@keyframes fadeInUp|@keyframes fadeInDown|@keyframes slideInRight|@keyframes slideInLeft|@keyframes scaleIn|@keyframes shimmer|@keyframes pulse-soft/);
+  assert.doesNotMatch(css, /@utility transition-bounce|@utility hover-glow|@utility hover-lift/);
+  assert.doesNotMatch(select, /data-\[state=open\]:animate-in|data-\[state=closed\]:animate-out/);
+  assert.doesNotMatch(tooltip, /data-\[state=delayed-open\]:animate-in|data-\[state=closed\]:animate-out/);
+  assert.match(select, /motion-select-content/);
+  assert.match(tooltip, /motion-tooltip-content/);
+  assert.match(operations, /motion-toggle/);
+  assert.match(operations, /motion-toggle-thumb/);
+  assert.match(operations, /环境历史/);
+  assert.match(operations, /max=\{365\}/);
+  assert.match(operations, /后台异步执行，不影响应用启动和使用/);
+});
+
+test("tooltips use a portal with delayed hover intent and collision handling", () => {
+  assert.match(accounts, /<Tooltip content=\{text\}>/);
+  assert.match(desktopShell, /<TooltipProvider>/);
+  assert.match(tooltip, /TooltipPrimitive\.Portal/);
+  assert.match(tooltip, /delayDuration=\{420\}/);
+  assert.match(tooltip, /skipDelayDuration=\{180\}/);
+  assert.match(tooltip, /collisionPadding=\{12\}/);
+  assert.match(tooltip, /--radix-tooltip-content-transform-origin/);
+  assert.doesNotMatch(accounts, /group-hover:visible group-hover:translate-y-0/);
 });
 
 test("shared selects open on hover without button press scaling", () => {
@@ -131,18 +258,30 @@ test("shared selects open on hover without button press scaling", () => {
 
 test("account side panel selects require a manual click", () => {
   const clickOnlySelects = accounts.match(/openOnHover=\{false\}/g) ?? [];
-  assert.equal(clickOnlySelects.length, 5);
+  assert.equal(clickOnlySelects.length, 9);
+  assert.match(accounts, /API protocol/);
+  assert.match(accounts, /长会话处理/);
+  assert.match(accounts, /安全压缩（推荐）/);
+  assert.match(accounts, /指令角色/);
+  assert.match(accounts, /自动（推荐）/);
+  assert.doesNotMatch(accounts, /toggleAccountCompatibility/);
+  assert.match(accounts, /buildProtocolSettings/);
 });
 
 test("dialogs use a restrained native-style overlay and single surface", () => {
   assert.match(adminPrimitives, /createPortal/);
   assert.match(adminPrimitives, /document\.body/);
   assert.match(adminPrimitives, /function DialogPortal/);
+  assert.match(adminPrimitives, /style=\{\{ alignItems: "flex-start" \}\}/);
   assert.match(adminPrimitives, /dialogOverlayClass/);
   assert.match(adminPrimitives, /bg-slate-950\/\[0\.18\]/);
   assert.match(adminPrimitives, /backdrop-blur-\[2px\]/);
   assert.match(adminPrimitives, /dialogSurfaceClass/);
+  assert.match(adminPrimitives, /motion-dialog-enter/);
+  assert.doesNotMatch(adminPrimitives, /animate-fade-in-up/);
   assert.match(adminPrimitives, /max-w-\[520px\].*rounded-\[16px\]/);
+  assert.match(adminPrimitives, /max-h-\[calc\(100vh-2rem\)\]/);
+  assert.match(adminPrimitives, /min-h-0 overflow-y-auto/);
   assert.match(adminPrimitives, /<X className="size-4"/);
   assert.doesNotMatch(adminPrimitives, /mt-5 rounded-\[16px\] bg-\[#f7f8fa\] p-4/);
 });
@@ -152,8 +291,6 @@ test("data changes and contextual controls provide motion feedback", () => {
   assert.match(css, /\.motion-value-update/);
   assert.match(dashboard, /key=\{value\}/);
   assert.match(dashboard, /motion-value-update/);
-  assert.match(accounts, /group-hover:visible/);
-  assert.match(accounts, /group-hover:opacity-100/);
   assert.match(select, /group-data-\[state=open\]:rotate-180/);
 });
 
@@ -163,7 +300,24 @@ test("desktop notices appear at the top center with semantic status icons", () =
   assert.match(desktopShell, /CircleCheck/);
   assert.match(desktopShell, /CircleX/);
   assert.doesNotMatch(desktopShell, /right-8 top-20/);
-  assert.match(css, /@keyframes notice-enter\s*\{[^}]*translateY\(-8px\)/s);
+  assert.match(css, /\.motion-notice-enter\s*\{[^}]*transition:/s);
+  assert.match(css, /@starting-style\s*\{[^}]*translateY\(-8px\)/s);
+  assert.match(reactApp, /message\.tone === "error" \? 8000 : 6000/);
+  assert.doesNotMatch(reactApp, /setOverview\(nextOverview\);\s*setMessage\(null\)/);
+  assert.match(desktopShell, /onMouseEnter/);
+  assert.match(desktopShell, /onMouseLeave/);
+  assert.match(desktopShell, /data-state=\{noticeVisible \? "open" : "closed"\}/);
+});
+
+test("sidebar uses one continuous drawer transition without unmounting labels", () => {
+  assert.match(desktopShell, /motion-sidebar-panel/);
+  assert.match(desktopShell, /data-expanded=\{sidebarExpanded\}/);
+  assert.match(css, /\.motion-sidebar-panel\s*\{[^}]*transition:/s);
+  assert.match(css, /\.motion-sidebar-label\s*\{[^}]*transition:/s);
+  assert.doesNotMatch(desktopShell, /\{sidebarExpanded \? \(\s*<div className="min-w-0 overflow-hidden"/s);
+  assert.match(desktopShell, /sidebarExpanded \? "w-\[208px\] px-4" : "w-\[78px\] items-center px-3"/);
+  assert.match(desktopShell, /sidebarExpanded \? "w-full justify-start gap-3 px-3\.5" : "size-11 justify-center"/);
+  assert.match(desktopShell, /shrink-0[^>]*>\{navIcons\[item\]\}/s);
 });
 
 test("system tools use clear navigation and page naming", () => {
@@ -173,6 +327,18 @@ test("system tools use clear navigation and page naming", () => {
   assert.match(operations, /管理 Codex 安装路径、网络代理和运行日志/);
   assert.match(operations, /role="switch"/);
   assert.match(operations, /CLI 启动/);
+  assert.match(operations, /启动CLI时自动恢复最近第N次对话/);
+  assert.match(operations, /本地路由/);
+  assert.match(operations, /退出应用时停止路由/);
+  assert.doesNotMatch(operations, /本地代理|代理生命周期|退出应用时停止代理|依赖代理的 CLI/);
+  assert.match(operations, /配置CLI 与 APP 的安装路径后，支持一键启动与切换/);
+  assert.match(operations, /界面语言/);
+  assert.match(operations, /onLanguageChange/);
+  assert.match(operations, /languageOptions/);
+  assert.doesNotMatch(operations, /ListFilters|cliCurrent|appCurrent|OverviewPayload/);
+  assert.doesNotMatch(reactApp, /<OperationsPage\s+overview=/);
+  assert.doesNotMatch(desktopShell, /Languages/);
+  assert.doesNotMatch(desktopShell, /languageOptions/);
   assert.match(operations, /Codex 安装/);
   assert.match(operations, /bg-\[#34C759\]/);
   assert.match(operations, /absolute left-0 top-\[2px\]/);
@@ -207,6 +373,31 @@ test("usage analytics uses semantic colors and destructive actions stay red", ()
   assert.match(usage, /text-violet-600/);
   assert.match(environments, /variant="destructive"/);
   assert.match(accounts, /text-rose-600 hover:bg-rose-50/);
+  assert.match(models, /tone="danger"/);
+  assert.match(primitives, /bg-sky-50 text-sky-700/);
+  assert.match(primitives, /bg-emerald-50 text-emerald-700/);
+  assert.match(primitives, /bg-amber-50 text-amber-700/);
+  assert.match(css, /--color-rose-600: oklch\(0\.586 0\.253 17\.585\)/);
+  assert.match(css, /--primary: oklch\(0\.623 0\.214 259\.815\)/);
+});
+
+test("usage Base URLs open a filterable paginated request details view", () => {
+  assert.match(usage, /setRequestDetails\(\{ baseUrl:/);
+  assert.match(usage, /<UsageRequestDetailsPage/);
+  assert.match(usageRequestDetails, /loadUsageRequests/);
+  assert.match(usageRequestDetails, /返回用量/);
+  assert.match(usageRequestDetails, /\[-webkit-app-region:no-drag\]/);
+  assert.match(usageRequestDetails, /relative z-20/);
+  assert.match(usageRequestDetails, /environmentNames\.map/);
+  assert.match(usageRequestDetails, /new Set\(accounts\.map\(\(account\) => account\.name\)\)/);
+  assert.match(usageRequestDetails, /全部环境/);
+  assert.match(usageRequestDetails, /全部账号/);
+  assert.match(usageRequestDetails, /全部模型/);
+  assert.match(usageRequestDetails, /全部端点/);
+  assert.match(usageRequestDetails, /全部状态/);
+  assert.match(usageRequestDetails, /\[20, 50, 100\]/);
+  assert.match(usageRequestDetails, /ChevronLeft/);
+  assert.match(usageRequestDetails, /ChevronRight/);
 });
 
 test("successful mutations refresh their affected view state", () => {

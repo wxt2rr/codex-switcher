@@ -150,6 +150,26 @@ test("resolveWindowsLauncherCommands reports launcher executables from PATH on w
   }
 });
 
+test("resolveCommandPath does not use Codex candidates for unrelated commands", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-command-discovery-"));
+  const codexPath = join(root, "codex");
+
+  try {
+    await writeFile(codexPath, "#!/bin/sh\nexit 0\n", "utf8");
+    await chmod(codexPath, 0o755);
+
+    const resolved = await resolveCommandPath(
+      "wt",
+      { PATH: "", CODEX_SWITCHER_CODEX_BIN: codexPath },
+      "win32",
+    );
+
+    assert.equal(resolved, null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("getWindowsReadinessSnapshot aggregates launcher commands, candidates, and shell init files", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-windows-readiness-"));
   const binDir = join(root, "bin");

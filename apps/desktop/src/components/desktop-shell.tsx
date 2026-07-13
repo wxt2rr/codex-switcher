@@ -4,9 +4,9 @@ import {
   CircleCheck,
   CircleX,
   Gauge,
+  Boxes,
   Globe2,
   Info,
-  Languages,
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
@@ -15,9 +15,9 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import type { NavView } from "../desktop-model";
 import type { DesktopNotice } from "../desktop-feedback";
-import type { UiLanguage } from "../i18n";
 import {
   getDesktopShellDragRegionClass,
   getDesktopShellDragStripClass,
@@ -37,23 +37,19 @@ export function DesktopShell({
   nav,
   currentView,
   onChangeView,
-  language,
-  languageLabel,
-  languageOptions,
-  onChangeLanguage,
   children,
   message,
+  noticeVisible = true,
+  onNoticePauseChange,
 }: {
   brand: string;
   nav: Array<{ view: Exclude<NavView, "overview">; label: string }>;
   currentView: NavView;
   onChangeView: (view: NavView) => void;
-  language: UiLanguage;
-  languageLabel: string;
-  languageOptions: Array<{ value: UiLanguage; label: string }>;
-  onChangeLanguage: (language: UiLanguage) => void;
   children: ReactNode;
   message?: DesktopNotice | null;
+  noticeVisible?: boolean;
+  onNoticePauseChange?: (paused: boolean) => void;
 }) {
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const platform = globalThis.navigator?.platform;
@@ -65,6 +61,7 @@ export function DesktopShell({
     overview: <Box className="size-5" />,
     environments: <Globe2 className="size-5" />,
     accounts: <TerminalSquare className="size-5" />,
+    models: <Boxes className="size-5" />,
     usage: <Gauge className="size-5" />,
     operations: <Settings className="size-5" />,
   };
@@ -97,7 +94,7 @@ export function DesktopShell({
       aria-expanded={sidebarExpanded}
       onClick={() => setSidebarExpanded((current) => !current)}
       className={cn(
-        "flex size-9 shrink-0 items-center justify-center rounded-xl bg-transparent text-neutral-500 shadow-none transition hover:bg-black/[0.045] hover:text-neutral-900 dark:text-slate-300 dark:hover:bg-white/[0.07] dark:hover:text-white",
+        "flex size-9 shrink-0 items-center justify-center rounded-xl bg-transparent text-neutral-500 shadow-none transition-[background-color,color] duration-[160ms] ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-black/[0.045] hover:text-neutral-900 dark:text-slate-300 dark:hover:bg-white/[0.07] dark:hover:text-white",
         getDesktopShellSidebarToggleClass(platform, sidebarExpanded),
         noDragClass,
       )}
@@ -107,12 +104,13 @@ export function DesktopShell({
   );
 
   return (
+    <TooltipProvider>
     <div className="h-screen overflow-hidden bg-[#f7f8fa] text-neutral-900 dark:bg-[#0f1318] dark:text-neutral-100">
       <div className="flex h-full">
         <aside
+          data-expanded={sidebarExpanded}
           className={cn(
-            "relative flex shrink-0 flex-col border-r border-black/[0.06] bg-white pb-7 pt-5 dark:border-white/[0.07] dark:bg-[#11151a]",
-            "transition-[width,padding] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
+            "motion-sidebar-panel relative flex shrink-0 flex-col overflow-hidden border-r border-black/[0.06] bg-white pb-7 pt-5 dark:border-white/[0.07] dark:bg-[#11151a]",
             sidebarExpanded ? "w-[208px] px-4" : "w-[78px] items-center px-3",
           )}
         >
@@ -129,13 +127,9 @@ export function DesktopShell({
               !sidebarExpanded && !isMacDesktop && "justify-center",
             )}
           >
-            {sidebarExpanded ? (
-              <div
-                className="min-w-0 overflow-hidden transition-[opacity,transform] duration-200"
-              >
-                <div className="truncate text-[15px] font-semibold tracking-[-0.02em] text-neutral-950 dark:text-neutral-50">{brand}</div>
-              </div>
-            ) : null}
+            <div className="motion-sidebar-label min-w-0 overflow-hidden">
+              <div className="truncate text-[15px] font-semibold tracking-[-0.02em] text-neutral-950 dark:text-neutral-50">{brand}</div>
+            </div>
 
             {!isMacDesktop ? sidebarToggle : null}
           </div>
@@ -157,18 +151,19 @@ export function DesktopShell({
                   aria-label={label}
                   onClick={() => onChangeView(item)}
                   className={cn(
-                    "flex h-11 items-center rounded-xl transition-all duration-150",
+                    "flex h-11 items-center rounded-xl transition-[background-color,color] duration-[180ms] ease-[cubic-bezier(0.23,1,0.32,1)]",
                     sidebarExpanded ? "w-full justify-start gap-3 px-3.5" : "size-11 justify-center",
                     isActive
                       ? "bg-[#f1f3f5] text-neutral-950 dark:bg-[#1b2129] dark:text-white"
                       : "text-neutral-700 hover:bg-[#f6f7f8] hover:text-neutral-950 dark:text-slate-300 dark:hover:bg-[#171c23] dark:hover:text-white",
                   )}
+                  aria-pressed={isActive}
                 >
-                  {navIcons[item]}
+                  <span className="flex size-5 shrink-0 items-center justify-center">{navIcons[item]}</span>
                   <span
                     className={cn(
-                      "min-w-0 truncate text-sm font-semibold transition-[opacity,transform,width] duration-200",
-                      sidebarExpanded ? "w-auto translate-x-0 opacity-100" : "w-0 -translate-x-1 opacity-0",
+                      "motion-sidebar-label min-w-0 truncate text-sm font-semibold",
+                      sidebarExpanded ? "w-auto" : "w-0",
                     )}
                   >
                     {label}
@@ -186,29 +181,15 @@ export function DesktopShell({
               <div className={cn("absolute left-0 top-[34px] z-10 h-[108px] w-[420px]", dragRegionClass)} />
             </>
           ) : null}
-          <div className={cn("absolute right-8 top-7 z-20 flex items-center gap-3", noDragClass)}>
-            <button
-              type="button"
-              aria-label={languageLabel}
-              title={languageLabel}
-              onClick={() => {
-                const currentIndex = languageOptions.findIndex((item) => item.value === language);
-                const next = languageOptions[(currentIndex + 1) % languageOptions.length]?.value ?? language;
-                onChangeLanguage(next);
-              }}
-              className="flex h-10 items-center gap-2 rounded-lg border border-black/[0.06] bg-white px-3.5 text-[12px] font-medium text-neutral-800 transition hover:bg-neutral-50 dark:border-white/[0.08] dark:bg-[#161b22] dark:text-slate-100 dark:hover:bg-[#1c232c]"
-            >
-              <Languages className="size-4" />
-              {languageOptions.find((item) => item.value === language)?.label ?? languageLabel}
-            </button>
-          </div>
-
           {message && (
             <div key={message.text} className="pointer-events-none fixed inset-x-0 top-5 z-[60] flex justify-center px-6">
               <section
+                data-state={noticeVisible ? "open" : "closed"}
+                onMouseEnter={() => onNoticePauseChange?.(true)}
+                onMouseLeave={() => onNoticePauseChange?.(false)}
                 className={cn(
                   "motion-notice-enter flex min-w-[280px] max-w-[420px] items-center gap-2.5 rounded-xl border border-black/[0.08] bg-white px-4 py-3 text-sm font-medium shadow-[0_8px_28px_rgba(15,23,42,0.12)]",
-                  "pointer-events-auto transition-all duration-200 dark:border-white/[0.1] dark:bg-[#171b21]",
+                  "pointer-events-auto dark:border-white/[0.1] dark:bg-[#171b21]",
                   messageClass,
                 )}
                 role={message.tone === "error" ? "alert" : "status"}
@@ -220,9 +201,10 @@ export function DesktopShell({
             </div>
           )}
 
-          <main key={currentView} className="motion-page-enter relative z-10 min-h-0 flex-1 overflow-hidden">{children}</main>
+          <main className="relative z-10 min-h-0 flex-1 overflow-hidden">{children}</main>
         </div>
       </div>
     </div>
+    </TooltipProvider>
   );
 }

@@ -1,9 +1,28 @@
 import { spawn } from "node:child_process";
+import { mkdir, rm } from "node:fs/promises";
+import { join } from "node:path";
 import process from "node:process";
 import { resolveCodexAppPath } from "./command-discovery.js";
-import { buildManagedAppStopPlan, executeManagedAppStopPlan, } from "./codex-app-stop.js";
+import { buildManagedAppStopPlan, executeManagedAppStopPlan, waitForManagedAppExit, } from "./codex-app-stop.js";
 import { listManagedAppInstances, resolveManagedAppStatePaths, setManagedAppInstance, stopManagedAppPid, writeManagedAppPid, } from "./codex-app-runtime.js";
 import { detectPlatform } from "./os.js";
+const managedAppActionQueues = new Map();
+async function withManagedAppActionLock(stateDir, action) {
+    const previous = managedAppActionQueues.get(stateDir) ?? Promise.resolve();
+    let release = () => undefined;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const queued = previous.then(() => gate);
+    managedAppActionQueues.set(stateDir, queued);
+    await previous;
+    try {
+        return await action();
+    }
+    finally {
+        release();
+        if (managedAppActionQueues.get(stateDir) === queued)
+            managedAppActionQueues.delete(stateDir);
+    }
+}
 export async function launchCodexApp(input, runner = defaultCodexAppRunner) {
     const explicitBin = input.env?.CODEX_SWITCHER_APP_BIN;
     const resolved = explicitBin || (await resolveCodexAppPath(input.env));
@@ -16,14 +35,14 @@ export async function launchCodexApp(input, runner = defaultCodexAppRunner) {
         CODEX_HOME: input.codexHome,
         CODEX_SWITCHER_MANAGED: "1",
     };
-    const launchSpec = buildCodexAppLaunchSpec(resolved, mergedEnv);
+    const launchSpec = buildCodexAppLaunchSpec(resolved, mergedEnv, process.platform, input.userDataDir);
     return runner(launchSpec.command, launchSpec.args, mergedEnv);
 }
-export function buildCodexAppLaunchSpec(appPath, env = process.env, platform = process.platform) {
+export function buildCodexAppLaunchSpec(appPath, env = process.env, platform = process.platform, userDataDir) {
     if (detectPlatform(platform) !== "windows") {
         return {
             command: appPath,
-            args: [],
+            args: userDataDir ? [`--user-data-dir=${userDataDir}`] : [],
         };
     }
     const launcher = resolveWindowsAppLauncher(env);
@@ -60,13 +79,26 @@ export function resolveWindowsAppLauncher(env = process.env) {
     return (env.CODEX_SWITCHER_WINDOWS_APP_LAUNCHER || "cmd").toLowerCase();
 }
 export async function launchNewCodexApp(input, runner = defaultCodexAppRunner) {
-    const result = await launchCodexApp(input, runner);
+    return withManagedAppActionLock(input.stateDir, () => launchNewCodexAppUnlocked(input, runner));
+}
+async function launchNewCodexAppUnlocked(input, runner) {
     const paths = resolveManagedAppStatePaths(input.stateDir);
+    const instanceId = await nextManagedAppInstanceId(paths);
+    const userDataDir = join(paths.appProfilesDir, instanceId);
+    await mkdir(userDataDir, { recursive: true });
+    let result;
+    try {
+        result = await launchCodexApp({ ...input, userDataDir }, runner);
+    }
+    catch (error) {
+        await rm(userDataDir, { recursive: true, force: true });
+        throw error;
+    }
     if (result.pid !== null) {
-        const instanceId = await nextManagedAppInstanceId(paths);
         await setManagedAppInstance(paths, {
             instanceId,
             pid: result.pid,
+            targetKey: input.targetKey,
         });
     }
     else {
@@ -75,22 +107,27 @@ export async function launchNewCodexApp(input, runner = defaultCodexAppRunner) {
     return result;
 }
 export async function stopManagedCodexApp(input, stopper = defaultManagedAppStopper) {
-    return stopManagedAppPid(resolveManagedAppStatePaths(input.stateDir), stopper, input.applicationName);
+    return withManagedAppActionLock(input.stateDir, () => stopManagedCodexAppUnlocked(input, stopper));
+}
+async function stopManagedCodexAppUnlocked(input, stopper) {
+    return stopManagedAppPid(resolveManagedAppStatePaths(input.stateDir), stopper, input.applicationName, input.targetKey);
 }
 export async function restartCurrentCodexApp(input, runner = defaultCodexAppRunner, stopper = defaultManagedAppStopper) {
-    const applicationName = resolveMacOsApplicationName(input.env?.CODEX_SWITCHER_APP_BIN);
-    await stopManagedCodexApp({ stateDir: input.stateDir, applicationName }, stopper);
-    return launchNewCodexApp(input, runner);
+    return withManagedAppActionLock(input.stateDir, async () => {
+        await stopManagedCodexAppUnlocked({ stateDir: input.stateDir, targetKey: input.targetKey }, stopper);
+        return launchNewCodexAppUnlocked(input, runner);
+    });
 }
 async function defaultManagedAppStopper(pid, applicationName) {
     try {
+        const platform = detectPlatform(process.env.CODEX_SWITCHER_TEST_PLATFORM || process.platform);
         await executeManagedAppStopPlan(buildManagedAppStopPlan({
-            platform: detectPlatform(process.env.CODEX_SWITCHER_TEST_PLATFORM ||
-                process.platform),
+            platform,
             pid,
-            preferAppQuit: true,
+            preferAppQuit: Boolean(applicationName),
             applicationName,
         }));
+        await waitForManagedAppExit({ platform, pid });
         return true;
     }
     catch (error) {
@@ -100,7 +137,7 @@ async function defaultManagedAppStopper(pid, applicationName) {
             typeof error.code === "string"
             ? error.code
             : "";
-        if (code === "ESRCH") {
+        if (code === "ESRCH" || code === "EPERM") {
             return false;
         }
         throw error;
@@ -126,17 +163,32 @@ async function nextManagedAppInstanceId(paths) {
 }
 async function defaultCodexAppRunner(command, args, env) {
     return new Promise((resolve, reject) => {
+        let settled = false;
         const child = spawn(command, args, {
             env,
             detached: true,
             stdio: "ignore",
         });
-        child.on("error", reject);
+        const rejectOnce = (error) => {
+            if (settled)
+                return;
+            settled = true;
+            reject(error);
+        };
+        child.on("error", rejectOnce);
+        child.on("exit", (code, signal) => {
+            rejectOnce(new Error(`Codex App exited before its window was ready (code ${code ?? "none"}, signal ${signal ?? "none"})`));
+        });
         child.on("spawn", () => {
             child.unref();
-            resolve({
-                pid: child.pid ?? null,
-            });
+            setTimeout(() => {
+                if (settled)
+                    return;
+                settled = true;
+                resolve({
+                    pid: child.pid ?? null,
+                });
+            }, 1_000);
         });
     });
 }

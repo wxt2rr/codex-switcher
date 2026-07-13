@@ -5,11 +5,12 @@ import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 import { cn } from "@/lib/utils";
+import { useDelayedUnmount } from "./use-delayed-unmount";
 
 const dialogOverlayClass =
-  "fixed inset-0 flex items-center justify-center bg-slate-950/[0.18] px-6 backdrop-blur-[2px] animate-fade-in";
+  "motion-dialog-overlay fixed inset-0 flex items-start justify-center overflow-y-auto bg-slate-950/[0.18] px-6 py-4 backdrop-blur-[2px] sm:items-center";
 const dialogSurfaceClass =
-  "motion-popover-enter w-full border border-black/[0.07] bg-white p-6 shadow-[0_20px_42px_-14px_rgba(15,23,42,0.24),0_4px_12px_rgba(15,23,42,0.06)]";
+  "motion-dialog-enter w-full border border-black/[0.07] bg-white p-6 shadow-[0_20px_42px_-14px_rgba(15,23,42,0.24),0_4px_12px_rgba(15,23,42,0.06)]";
 
 function DialogPortal({ children }: { children: ReactNode }) {
   if (typeof document === "undefined") return children;
@@ -36,7 +37,7 @@ export function PageHeader({
   return (
     <div
       className={cn(
-        "flex flex-col gap-2 animate-fade-in-up",
+        "flex flex-col gap-2",
         "md:flex-row md:items-end md:justify-between",
       )}
     >
@@ -66,10 +67,8 @@ export function PageToolbar({
     <div
       className={cn(
         "flex flex-col gap-2.5 rounded-[14px] border border-black/[0.05] bg-white px-3 py-2.5",
-        "animate-fade-in-up",
         "lg:flex-row lg:items-center lg:justify-between",
       )}
-      style={{ animationDelay: "50ms" }}
     >
       <div className="flex flex-1 flex-wrap items-center gap-2.5">
         {children}
@@ -101,10 +100,9 @@ export function TableCard({
   return (
     <section
       className={cn(
-        "overflow-hidden rounded-[14px] border border-black/[0.05] bg-white animate-fade-in-up",
+        "overflow-hidden rounded-[14px] border border-black/[0.05] bg-white",
         className,
       )}
-      style={{ animationDelay: "100ms" }}
     >
       <div
         className={cn(
@@ -259,22 +257,33 @@ export function SidePanel({
   closeLabel?: string;
   children: ReactNode;
 }) {
-  if (!open) return null;
+  const mounted = useDelayedUnmount(open);
+  if (!mounted) return null;
 
   return (
     <DialogPortal>
-      <div className={cn(dialogOverlayClass, "z-40")}>
-        <div className={cn(dialogSurfaceClass, "max-w-[520px] overflow-auto rounded-[16px]")}>
+      <div
+        data-state={open ? "open" : "closed"}
+        className={cn(dialogOverlayClass, "z-40")}
+        style={{ alignItems: "flex-start" }}
+      >
+        <div
+          data-state={open ? "open" : "closed"}
+          className={cn(
+            dialogSurfaceClass,
+            "flex max-h-[calc(100vh-2rem)] max-w-[520px] flex-col overflow-hidden rounded-[16px]",
+          )}
+        >
           <div className="flex items-start justify-between gap-4">
             <div>
               <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-neutral-950">{title}</h3>
               {description ? <p className="mt-1 text-[13px] leading-6 text-neutral-500">{description}</p> : null}
             </div>
-            <button type="button" onClick={onClose} aria-label={closeLabel} title={closeLabel} className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-black/[0.045] hover:text-neutral-800">
+            <button type="button" onClick={onClose} aria-label={closeLabel} title={closeLabel} className="motion-interactive-color inline-flex size-8 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-black/[0.045] hover:text-neutral-800">
               <X className="size-4" />
             </button>
           </div>
-          <div className="mt-6">{children}</div>
+          <div className="mt-6 min-h-0 overflow-y-auto pr-1">{children}</div>
         </div>
       </div>
     </DialogPortal>
@@ -304,12 +313,13 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
-  if (!open) return null;
+  const mounted = useDelayedUnmount(open);
+  if (!mounted) return null;
 
   return (
     <DialogPortal>
-      <div className={cn(dialogOverlayClass, "z-50")}>
-        <div className={cn(dialogSurfaceClass, "max-w-[460px] rounded-[16px]")}>
+      <div data-state={open ? "open" : "closed"} className={cn(dialogOverlayClass, "z-50")}>
+        <div data-state={open ? "open" : "closed"} className={cn(dialogSurfaceClass, "max-w-[460px] rounded-[16px]")}>
           <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-neutral-950">{title}</h3>
           {description ? <p className="mt-2 text-[13px] leading-6 text-neutral-500">{description}</p> : null}
           {impact && (
@@ -372,8 +382,7 @@ export function SummaryPanel({
 
   return (
     <section
-      className="rounded-[18px] bg-white shadow-[0_12px_36px_rgba(15,23,42,0.045)] animate-fade-in-up"
-      style={{ animationDelay: "150ms" }}
+      className="rounded-[18px] bg-white shadow-[0_12px_36px_rgba(15,23,42,0.045)]"
     >
       <div className="px-5 py-3.5">
         <h3 className="text-[16px] font-semibold text-neutral-950">{title}</h3>

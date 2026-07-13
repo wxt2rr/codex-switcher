@@ -5,6 +5,7 @@ export function resolveManagedAppStatePaths(stateDir) {
         stateDir,
         appPidFile: join(stateDir, "app.pid"),
         appInstancesDir: join(stateDir, "app-instances"),
+        appProfilesDir: join(stateDir, "app-profiles"),
         appLastInstanceFile: join(stateDir, "app-last-instance"),
     };
 }
@@ -39,17 +40,22 @@ export async function readLastManagedAppInstanceId(paths) {
 export async function listManagedAppInstances(paths) {
     try {
         const entries = await readDirPidFiles(paths.appInstancesDir);
-        return entries
-            .map(({ name, raw }) => {
+        const instances = await Promise.all(entries.map(async ({ name, raw }) => {
             const pid = Number(raw.trim());
             if (!Number.isFinite(pid) || pid <= 0) {
                 return null;
             }
+            const instanceId = name.replace(/\.pid$/, "");
+            const targetKey = await readFile(join(paths.appInstancesDir, `${instanceId}.target`), "utf8")
+                .then((value) => value.trim() || undefined)
+                .catch(() => undefined);
             return {
-                instanceId: name.replace(/\.pid$/, ""),
+                instanceId,
                 pid,
+                ...(targetKey ? { targetKey } : {}),
             };
-        })
+        }));
+        return instances
             .filter((value) => value !== null)
             .sort((a, b) => a.instanceId.localeCompare(b.instanceId));
     }
@@ -60,11 +66,19 @@ export async function listManagedAppInstances(paths) {
 export async function setManagedAppInstance(paths, input) {
     await mkdir(paths.appInstancesDir, { recursive: true });
     await writeFile(join(paths.appInstancesDir, `${input.instanceId}.pid`), `${input.pid}\n`, "utf8");
+    if (input.targetKey) {
+        await writeFile(join(paths.appInstancesDir, `${input.instanceId}.target`), `${input.targetKey}\n`, "utf8");
+    }
+    else {
+        await rm(join(paths.appInstancesDir, `${input.instanceId}.target`), { force: true });
+    }
     await writeFile(paths.appLastInstanceFile, `${input.instanceId}\n`, "utf8");
     await writeManagedAppPid(paths, input.pid);
 }
-export async function clearManagedAppInstance(paths, instanceId) {
+export async function clearManagedAppInstance(paths, instanceId, removalOptions) {
+    await removeManagedAppProfile(join(paths.appProfilesDir, instanceId), removalOptions);
     await rm(join(paths.appInstancesDir, `${instanceId}.pid`), { force: true });
+    await rm(join(paths.appInstancesDir, `${instanceId}.target`), { force: true });
     const current = await readLastManagedAppInstanceId(paths);
     if (current === instanceId) {
         const nextInstances = await listManagedAppInstances(paths);
@@ -77,26 +91,42 @@ export async function clearManagedAppInstance(paths, instanceId) {
         await rm(paths.appLastInstanceFile, { force: true });
     }
 }
-export async function stopManagedAppPid(paths, stopper, applicationName) {
+export async function removeManagedAppProfile(profilePath, options = {}) {
+    const remove = options.remove ?? ((path) => rm(path, { recursive: true, force: true }));
+    const delay = options.delay ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    const maxRetries = options.maxRetries ?? 8;
+    for (let attempt = 0;; attempt += 1) {
+        try {
+            await remove(profilePath);
+            return;
+        }
+        catch (error) {
+            const code = error.code;
+            if (!new Set(["ENOTEMPTY", "EBUSY", "EPERM"]).has(code ?? "") || attempt >= maxRetries)
+                throw error;
+            await delay((options.retryDelayMs ?? 75) * (attempt + 1));
+        }
+    }
+}
+export async function stopManagedAppPid(paths, stopper, applicationName, targetKey) {
     const lastInstanceId = await readLastManagedAppInstanceId(paths);
     const instances = await listManagedAppInstances(paths);
-    const selected = (lastInstanceId
-        ? instances.find((instance) => instance.instanceId === lastInstanceId)
-        : undefined) ?? instances[0];
-    const pid = selected?.pid ?? (await readManagedAppPid(paths));
+    const scopedInstances = targetKey ? instances.filter((instance) => instance.targetKey === targetKey) : instances;
+    const selected = targetKey
+        ? scopedInstances[scopedInstances.length - 1]
+        : (lastInstanceId
+            ? scopedInstances.find((instance) => instance.instanceId === lastInstanceId)
+            : undefined) ?? scopedInstances[0];
+    const pid = selected?.pid ?? (targetKey ? null : await readManagedAppPid(paths));
     if (pid === null) {
         return false;
     }
-    try {
-        await stopper(pid, applicationName);
+    await stopper(pid, applicationName);
+    if (selected) {
+        await clearManagedAppInstance(paths, selected.instanceId);
     }
-    finally {
-        if (selected) {
-            await clearManagedAppInstance(paths, selected.instanceId);
-        }
-        if (!selected || (await readManagedAppPid(paths)) === pid) {
-            await writeManagedAppPid(paths, null);
-        }
+    if (!selected || (await readManagedAppPid(paths)) === pid) {
+        await writeManagedAppPid(paths, null);
     }
     return true;
 }

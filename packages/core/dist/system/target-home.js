@@ -12,8 +12,19 @@ export async function applyTargetHomeState(options) {
         await clearTargetHomeState(env.path);
         return;
     }
-    if (account.authData) {
-        await writeFile(join(env.path, "auth.json"), `${JSON.stringify(normalizeAuthDataForTargetHome(account.authData), null, 2)}\n`, "utf8");
+    const compatibilityRouteActive = account.runtime.apiProtocol === "chat_completions" &&
+        account.runtime.compatibilityRouteEnabled === true;
+    if (compatibilityRouteActive &&
+        (!account.runtime.compatibilityRouteBaseUrl ||
+            !account.runtime.compatibilityRouteToken ||
+            !account.runtime.compatibilityRouteProviderId)) {
+        throw new Error(`Compatibility route for '${account.name}' is incomplete`);
+    }
+    const targetAuthData = compatibilityRouteActive
+        ? { OPENAI_API_KEY: account.runtime.compatibilityRouteToken }
+        : account.authData;
+    if (targetAuthData) {
+        await writeFile(join(env.path, "auth.json"), `${JSON.stringify(normalizeAuthDataForTargetHome(targetAuthData), null, 2)}\n`, "utf8");
     }
     else {
         await rm(join(env.path, "auth.json"), { force: true });
@@ -28,7 +39,21 @@ async function writeManagedConfig(configPath, runtime) {
     const existing = await readText(configPath);
     const cleaned = removeManagedConfigLines(existing);
     const managedLines = [`preferred_auth_method = "${runtime.preferredAuthMethod}"`];
-    if (runtime.preferredAuthMethod === "apikey" &&
+    if (runtime.apiProtocol === "chat_completions" &&
+        runtime.compatibilityRouteEnabled &&
+        runtime.compatibilityRouteBaseUrl &&
+        runtime.compatibilityRouteProviderId) {
+        managedLines.push("");
+        managedLines.push(`model_provider = ${quoteTomlString(runtime.compatibilityRouteProviderId)}`);
+        managedLines.push("");
+        managedLines.push(`[model_providers.${runtime.compatibilityRouteProviderId}]`);
+        managedLines.push(`name = ${quoteTomlString(runtime.compatibilityRouteProviderId)}`);
+        managedLines.push(`base_url = ${quoteTomlString(runtime.compatibilityRouteBaseUrl)}`);
+        managedLines.push('wire_api = "responses"');
+        managedLines.push('env_key = "OPENAI_API_KEY"');
+    }
+    if (runtime.apiProtocol !== "chat_completions" &&
+        runtime.preferredAuthMethod === "apikey" &&
         runtime.openaiBaseUrlMode === "custom" &&
         runtime.openaiBaseUrl) {
         managedLines.push(`openai_base_url = "${runtime.openaiBaseUrl}"`);

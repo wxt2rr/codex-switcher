@@ -136,6 +136,17 @@ function validateRuntimeSettings(accountName, value) {
     const runtime = {
         preferredAuthMethod: value.preferredAuthMethod,
         openaiBaseUrlMode: value.openaiBaseUrlMode,
+        apiProtocol: isAccountApiProtocol(value.apiProtocol) ? value.apiProtocol : "responses",
+        compatibilityRouteEnabled: value.compatibilityRouteEnabled === true,
+        compatibilityReasoningProfile: isReasoningProfile(value.compatibilityReasoningProfile)
+            ? value.compatibilityReasoningProfile
+            : "auto",
+        compatibilityLongConversationStrategy: value.compatibilityLongConversationStrategy === "continuity"
+            ? "continuity"
+            : "safe",
+        compatibilityInstructionRole: value.compatibilityInstructionRole === "system" || value.compatibilityInstructionRole === "developer"
+            ? value.compatibilityInstructionRole
+            : "auto",
     };
     if (typeof value.openaiBaseUrl === "string") {
         runtime.openaiBaseUrl = value.openaiBaseUrl;
@@ -158,7 +169,25 @@ function validateRuntimeSettings(accountName, value) {
     if (typeof value.independentModelBaseUrl === "string") {
         runtime.independentModelBaseUrl = value.independentModelBaseUrl;
     }
+    for (const key of [
+        "compatibilityRouteBaseUrl",
+        "compatibilityRouteToken",
+        "compatibilityRouteProviderId",
+        "compatibilityUpstreamModel",
+    ]) {
+        if (typeof value[key] === "string")
+            runtime[key] = value[key];
+    }
+    if (isRecord(value.compatibilityRequestOverrides)) {
+        runtime.compatibilityRequestOverrides = value.compatibilityRequestOverrides;
+    }
     return runtime;
+}
+function isAccountApiProtocol(value) {
+    return value === "responses" || value === "chat_completions";
+}
+function isReasoningProfile(value) {
+    return value === "auto" || value === "standard" || value === "reasoning_content" || value === "think_tags";
 }
 function validateTasks(value) {
     if (!isRecord(value) || !Array.isArray(value.recent)) {

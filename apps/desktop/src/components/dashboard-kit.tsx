@@ -20,7 +20,6 @@ export function DashboardCard({
     <article
       className={cn(
         "rounded-[14px] border border-border bg-white p-5",
-        "animate-fade-in-up",
         className,
       )}
     >

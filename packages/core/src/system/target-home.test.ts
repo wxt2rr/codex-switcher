@@ -61,6 +61,55 @@ test("target-home writer installs auth.json and managed config for apikey accoun
   }
 });
 
+test("target-home writer materializes an enabled Chat compatibility route without exposing the upstream key", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-chat-route-"));
+  const homePath = join(root, "home");
+  const state: SwitcherState = {
+    schemaVersion: DEFAULT_SCHEMA_VERSION,
+    generatedAt: "2026-07-12T10:00:00.000Z",
+    targets: { cli: { env: "default", account: "chat" }, app: { env: "default", account: "chat" } },
+    envs: {
+      default: {
+        name: "default",
+        path: homePath,
+        accounts: {
+          chat: {
+            name: "chat",
+            authMode: "apikey",
+            runtime: {
+              preferredAuthMethod: "apikey",
+              openaiBaseUrlMode: "custom",
+              openaiBaseUrl: "https://chat.example/v1",
+              apiProtocol: "chat_completions",
+              compatibilityRouteEnabled: true,
+              compatibilityRouteBaseUrl: "http://127.0.0.1:17899/routes/route-a/v1",
+              compatibilityRouteToken: "local-route-token",
+              compatibilityRouteProviderId: "codex-switcher-route-a",
+              compatibilityReasoningProfile: "auto",
+            },
+            authData: { OPENAI_API_KEY: "sk-upstream-secret" },
+          },
+        },
+      },
+    },
+    tasks: { recent: [] },
+  };
+
+  try {
+    await applyTargetHomeState({ state, target: "cli" });
+    const auth = JSON.parse(await readFile(join(homePath, "auth.json"), "utf8"));
+    assert.deepEqual(auth, { OPENAI_API_KEY: "local-route-token" });
+    const config = await readFile(join(homePath, "config.toml"), "utf8");
+    assert.match(config, /model_provider = "codex-switcher-route-a"/);
+    assert.match(config, /base_url = "http:\/\/127\.0\.0\.1:17899\/routes\/route-a\/v1"/);
+    assert.match(config, /wire_api = "responses"/);
+    assert.match(config, /env_key = "OPENAI_API_KEY"/);
+    assert.doesNotMatch(config, /sk-upstream-secret/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("target-home writer appends managed custom model config for auth account when enabled", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-custom-model-"));
   const homePath = join(root, "home");

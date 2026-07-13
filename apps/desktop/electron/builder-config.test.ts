@@ -30,6 +30,7 @@ const desktopPackage = JSON.parse(
     nsis?: {
       installerIcon?: string;
       uninstallerIcon?: string;
+      include?: string;
     };
   };
 };
@@ -63,4 +64,11 @@ test("desktop package defines electron packaging entrypoints", () => {
   assert.equal(desktopPackage.build.win?.icon, "build/icon.ico");
   assert.equal(desktopPackage.build.nsis?.installerIcon, "build/icon.ico");
   assert.equal(desktopPackage.build.nsis?.uninstallerIcon, "build/icon.ico");
+  assert.equal(desktopPackage.build.nsis?.include, "build/installer.nsh");
+  const installerInclude = readFileSync(join(desktopRoot, "build", "installer.nsh"), "utf8");
+  assert.match(installerInclude, /!macro customCheckAppRunning/);
+  assert.match(installerInclude, /taskkill\.exe/);
+  assert.match(installerInclude, /\/F \/T \/IM/);
+  assert.match(installerInclude, /APP_EXECUTABLE_FILENAME/);
+  assert.match(installerInclude, /nsProcess::FindProcess/);
 });

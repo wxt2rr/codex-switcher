@@ -1,14 +1,14 @@
 import { useMemo, useState } from "react";
-import { ArrowDownToLine, Command, FilePenLine, FileText, FolderPlus, History, Network, Search, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowDownToLine, FilePenLine, FileText, FolderPlus, History, Network, Search, RotateCcw, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry } from "../bridge";
 import {
-  AvatarTile,
   EmptyList,
   IconActionButton,
   ListCard,
   ListPageFrame,
+  ListStack,
   SoftBadge,
 } from "../components/account-list-primitives";
 import { ConfirmDialog, SidePanel } from "../components/admin-primitives";
@@ -91,7 +91,6 @@ function buildHistorySnapshotGroups(entries: DesktopEnvFileHistoryEntry[]): Hist
 
 function EnvCard({
   env,
-  index,
   language,
   accountCount,
   busy,
@@ -104,7 +103,6 @@ function EnvCard({
   onToggleRoute,
 }: {
   env: EnvSummary;
-  index: number;
   language: UiLanguage;
   accountCount: number;
   busy: boolean;
@@ -117,10 +115,8 @@ function EnvCard({
   onToggleRoute: () => void;
 }) {
   return (
-    <ListCard className={`responsive-record-row responsive-environment-row grid min-h-[94px] items-center gap-5 !rounded-none !shadow-none ${index % 2 ? "bg-[#fafbfc]" : "bg-white"}`}>
-      <div className="flex min-w-0 items-center gap-4">
-        <AvatarTile label={env.name} index={index} />
-        <div className="min-w-0">
+    <ListCard className="responsive-record-row responsive-environment-row grid min-h-[94px] items-center gap-5">
+      <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-3">
             <h3 className="truncate text-[15px] font-semibold tracking-[-0.02em] text-neutral-950">{env.name}</h3>
           </div>
@@ -141,11 +137,10 @@ function EnvCard({
               />
             ) : null}
           </div>
-        </div>
       </div>
 
       <div className="responsive-priority-tertiary flex min-w-0 items-center pl-5">
-        <div className="truncate text-[14px] font-medium text-neutral-950">{env.path}</div>
+        <div className="truncate font-mono text-[11px] text-slate-500" title={env.path}>{env.path}</div>
       </div>
 
       <div className="responsive-priority-secondary flex min-w-0 items-center pl-5">
@@ -162,7 +157,7 @@ function EnvCard({
         <IconActionButton icon={<History className="size-4" />} label={language === "zh" ? "历史" : "History"} onClick={onHistory} disabled={busy} />
         <button
           type="button"
-          className="flex size-9 items-center justify-center rounded-lg bg-rose-50 text-rose-600 transition hover:bg-rose-100 hover:text-rose-700"
+          className="motion-interactive-color flex size-9 items-center justify-center rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 hover:text-rose-700"
           onClick={onDelete}
           disabled={busy}
           aria-label={language === "zh" ? "删除" : "Delete"}
@@ -270,7 +265,6 @@ export function EnvironmentsPage({
         <div><h2 className="text-[28px] font-semibold tracking-[-0.04em] text-neutral-950">{pageTitle(language)}</h2><p className="mt-1 text-[13px] leading-6 text-slate-500">{pageSubtitle(language)}</p></div>
         <div className="rounded-[14px] border border-black/[0.05] bg-white px-3 py-2.5">
           <div className="responsive-toolbar flex items-center gap-2.5">
-            <div className="inline-flex h-8 items-center gap-2 rounded-lg bg-[#f3f4f6] px-3 text-[12px] font-medium text-slate-500"><Command className="size-3.5" />K</div>
             <div className="relative min-w-[220px] flex-1"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={pageCopy.environments.searchPlaceholder} className="h-8 rounded-lg border-transparent bg-[#fbfbfc] pl-10 text-[12px] shadow-none" /></div>
             <Button
               className="ml-auto h-8 rounded-lg bg-neutral-950 px-3.5 text-[12px] shadow-none"
@@ -289,15 +283,14 @@ export function EnvironmentsPage({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto rounded-[14px] border border-black/[0.05] bg-white">
+      <ListStack>
           {filteredEnvs.length === 0 ? (
             <EmptyList title={overview.envs.length === 0 ? pageCopy.environments.emptyListTitle : pageCopy.environments.emptyFilterTitle} />
           ) : null}
-          {filteredEnvs.map((env, index) => (
+          {filteredEnvs.map((env) => (
             <EnvCard
               key={env.name}
               env={env}
-              index={index}
               language={language}
               accountCount={accountCountByEnv.get(env.name) ?? 0}
               busy={busy}
@@ -332,7 +325,7 @@ export function EnvironmentsPage({
               }}
             />
           ))}
-      </div>
+      </ListStack>
 
       <SidePanel open={drawerOpen} title={pageCopy.environments.createTitle} onClose={() => setDrawerOpen(false)} closeLabel={pageCopy.common.close}>
         <div className="space-y-4">
@@ -406,10 +399,11 @@ export function EnvironmentsPage({
                 type="button"
                 className={
                   configTab === tab
-                    ? "rounded-lg bg-neutral-950 px-3 py-1.5 text-xs font-semibold text-white"
-                    : "rounded-lg bg-[#f3f4f6] px-3 py-1.5 text-xs font-semibold text-slate-600"
+                    ? "ui-selected-control rounded-lg border px-3 py-1.5 text-xs font-semibold"
+                    : "rounded-lg border border-transparent bg-[#f3f4f6] px-3 py-1.5 text-xs font-semibold text-slate-600"
                 }
                 onClick={() => setConfigTab(tab)}
+                aria-pressed={configTab === tab}
               >
                 {tab}
               </button>
@@ -567,7 +561,7 @@ export function EnvironmentsPage({
               {pageCopy.common.cancel}
             </Button>
             <Button
-              variant="outline"
+              variant="destructive"
               onClick={async () => {
                 if (historySelection.length === 0) return;
                 if (await onDeleteEnvFileHistory(historyEnvName, historySelection)) {
