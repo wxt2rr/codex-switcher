@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   buildWindowsPackagedAppStopCommand,
   prepareWindowsPackagedAppHome,
+  stopWindowsPackagedAppProcesses,
 } from "./windows-packaged-app-profile.js";
 
 test("packaged App projection preserves and restores the default Codex home", async () => {
@@ -66,7 +67,16 @@ test("packaged App stop command targets known ChatGPT and Codex process names", 
   assert.match(spec.args.join(" "), /ChatGPT,Codex,CodexApp/);
   assert.match(spec.args.join(" "), /Get-AppxPackage/);
   assert.match(spec.args.join(" "), /StartsWith\(\$pkgRoot/);
-  assert.match(spec.args.join(" "), /Stop-Process -Force/);
+  assert.match(spec.args.join(" "), /foreach \(\$process in \$processes\)/);
+  assert.match(spec.args.join(" "), /Stop-Process -Id \$process\.Id -Force/);
+  assert.match(spec.args.join(" "), /exit 0/);
+});
+
+test("packaged App launch is not blocked when the stop command fails", async () => {
+  const stopped = await stopWindowsPackagedAppProcesses(async () => {
+    throw new Error("access denied");
+  });
+  assert.equal(stopped, false);
 });
 
 async function writeSnapshot(home: string, config: string, auth: string): Promise<void> {

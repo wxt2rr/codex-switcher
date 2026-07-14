@@ -47,12 +47,20 @@ export async function prepareWindowsPackagedAppHome(options: {
 
 export function buildWindowsPackagedAppStopCommand(): { command: string; args: string[] } {
   const script = [
-    "$pkgRoot = (Get-AppxPackage | Where-Object { $_.PackageFamilyName -match '^OpenAI\\.(Codex|ChatGPT)_' } | Select-Object -First 1).InstallLocation",
+    "$ErrorActionPreference = 'SilentlyContinue'",
+    "$pkgRoot = $null",
+    "try { $pkgRoot = (Get-AppxPackage | Where-Object { $_.PackageFamilyName -match '^OpenAI\\.(Codex|ChatGPT)_' } | Select-Object -First 1).InstallLocation } catch {}",
     "if ($pkgRoot) {",
-    "  Get-Process -Name ChatGPT,Codex,CodexApp -ErrorAction SilentlyContinue | Where-Object {",
-    "    try { $_.Path -and $_.Path.StartsWith($pkgRoot, [System.StringComparison]::OrdinalIgnoreCase) } catch { $false }",
-    "  } | Stop-Process -Force -ErrorAction SilentlyContinue",
+    "  $processes = @(Get-Process -Name ChatGPT,Codex,CodexApp -ErrorAction SilentlyContinue)",
+    "  foreach ($process in $processes) {",
+    "    $processPath = $null",
+    "    try { $processPath = $process.Path } catch {}",
+    "    if ($processPath -and $processPath.StartsWith($pkgRoot, [System.StringComparison]::OrdinalIgnoreCase)) {",
+    "      try { Stop-Process -Id $process.Id -Force -ErrorAction Stop } catch {}",
+    "    }",
+    "  }",
     "}",
+    "exit 0",
   ].join("\n");
   return {
     command: "powershell.exe",
@@ -67,9 +75,17 @@ export function buildWindowsPackagedAppStopCommand(): { command: string; args: s
   };
 }
 
-export async function stopWindowsPackagedAppProcesses(): Promise<void> {
+export async function stopWindowsPackagedAppProcesses(
+  runner: (command: string, args: string[]) => Promise<unknown> = (command, args) =>
+    execFileAsync(command, args, { timeout: 10_000, windowsHide: true }),
+): Promise<boolean> {
   const spec = buildWindowsPackagedAppStopCommand();
-  await execFileAsync(spec.command, spec.args, { timeout: 10_000, windowsHide: true });
+  try {
+    await runner(spec.command, spec.args);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function readHomeSnapshot(homePath: string): Promise<HomeSnapshot> {
