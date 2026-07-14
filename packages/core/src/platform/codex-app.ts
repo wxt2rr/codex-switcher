@@ -89,7 +89,7 @@ export async function launchCodexApp(
   const launchSpec = buildCodexAppLaunchSpec(
     resolved,
     mergedEnv,
-    process.platform,
+    (input.env?.CODEX_SWITCHER_TEST_PLATFORM as NodeJS.Platform | undefined) || process.platform,
     input.userDataDir,
   );
   return runner(launchSpec.command, launchSpec.args, mergedEnv, {
@@ -119,10 +119,11 @@ export function buildCodexAppLaunchSpec(
   }
 
   const launcher = resolveWindowsAppLauncher(env);
+  const profileArg = userDataDir ? `--user-data-dir=${userDataDir}` : "";
   if (launcher === "wt" || launcher === "windows-terminal" || launcher === "wt.exe") {
     return {
       command: "wt.exe",
-      args: ["-w", "new", appPath],
+      args: ["-w", "new", appPath, ...(profileArg ? [profileArg] : [])],
     };
   }
 
@@ -135,7 +136,7 @@ export function buildCodexAppLaunchSpec(
         "-ExecutionPolicy",
         "Bypass",
         "-Command",
-        `Start-Process -FilePath '${escapePowerShellSingleQuoted(appPath)}'`,
+        `Start-Process -FilePath '${escapePowerShellSingleQuoted(appPath)}'${profileArg ? ` -ArgumentList '${escapePowerShellSingleQuoted(profileArg)}'` : ""}`,
       ],
     };
   }
@@ -146,7 +147,7 @@ export function buildCodexAppLaunchSpec(
       "/d",
       "/s",
       "/c",
-      `start "" /b "${escapeCmdDoubleQuoted(appPath)}"`,
+      `start "" /b "${escapeCmdDoubleQuoted(appPath)}"${profileArg ? ` "${escapeCmdDoubleQuoted(profileArg)}"` : ""}`,
     ],
   };
 }
@@ -169,6 +170,11 @@ async function launchNewCodexAppUnlocked(
   runner: CodexAppRunner,
 ): Promise<CodexAppRunnerResult> {
   const paths = resolveManagedAppStatePaths(input.stateDir);
+  if (isWindowsPackagedAppTarget(input.env?.CODEX_SWITCHER_APP_BIN ?? "")) {
+    const result = await launchCodexApp(input, runner);
+    await writeManagedAppPid(paths, null);
+    return result;
+  }
   const instanceId = await nextManagedAppInstanceId(paths);
   const userDataDir = join(paths.appProfilesDir, instanceId);
   await mkdir(userDataDir, { recursive: true });

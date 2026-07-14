@@ -95,8 +95,22 @@ async function normalizeManualPath(kind: CodexToolKind, value: string, platform:
       : [join(value, "codex")];
   return firstExecutable(nested);
 }
+export function buildWindowsPackagedAppDetectionCommand(): string {
+  return [
+    "$pkg = Get-AppxPackage | Where-Object { $_.PackageFamilyName -match '^OpenAI\\.(Codex|ChatGPT)_' } | Select-Object -First 1",
+    "if ($pkg) {",
+    "  [xml]$manifest = Get-Content (Join-Path $pkg.InstallLocation 'AppxManifest.xml')",
+    "  $aliasName = @($manifest.SelectNodes(\"//*[local-name()='ExecutionAlias']\") | ForEach-Object { $_.GetAttribute('Alias') } | Where-Object { $_ })[0]",
+    "  $aliasPath = if ($aliasName) { Join-Path $env:LOCALAPPDATA (Join-Path 'Microsoft\\WindowsApps' $aliasName) } else { $null }",
+    "  if ($aliasPath -and (Test-Path $aliasPath)) { [Console]::Out.Write($aliasPath); exit 0 }",
+    "}",
+    "$app = Get-StartApps | Where-Object { $_.Name -match '^(ChatGPT|Codex)$' -or $_.AppID -match '^OpenAI\\.(Codex|ChatGPT)_' } | Sort-Object @{ Expression = { if ($_.Name -eq 'ChatGPT') { 0 } else { 1 } } } | Select-Object -First 1",
+    "if ($app) { [Console]::Out.Write($app.AppID) }",
+  ].join("\n");
+}
+
 async function detectWindowsPackagedApp(): Promise<string> {
-  const command = "$app = Get-StartApps | Where-Object { $_.Name -match '^(ChatGPT|Codex)$' -or $_.AppID -match '^OpenAI\\.(Codex|ChatGPT)_' } | Sort-Object @{ Expression = { if ($_.Name -eq 'ChatGPT') { 0 } else { 1 } } } | Select-Object -First 1; if ($app) { [Console]::Out.Write($app.AppID) }";
+  const command = buildWindowsPackagedAppDetectionCommand();
   try {
     const { stdout } = await execFileAsync("powershell.exe", [
       "-NoProfile",
@@ -106,7 +120,7 @@ async function detectWindowsPackagedApp(): Promise<string> {
       "-Command",
       command,
     ], { encoding: "utf8", timeout: 10_000, windowsHide: true });
-    return normalizeWindowsPackagedAppTarget(stdout);
+    return stdout.trim();
   } catch {
     return "";
   }
@@ -130,7 +144,7 @@ async function detectPath(kind: CodexToolKind, env: NodeJS.ProcessEnv, platform:
     if (candidate) break;
   }
   if (!candidate && kind === "app" && platform === "win32") {
-    candidate = normalizeWindowsPackagedAppTarget(await packagedAppDetector());
+    candidate = await normalizeAppCandidate(await packagedAppDetector(), platform);
   }
   return candidate ? { path: candidate, source: "candidate" } : { path: "", source: "missing" };
 }

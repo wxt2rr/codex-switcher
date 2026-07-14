@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { delimiter, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { getCodexToolStatus, resetCodexToolPath, saveCodexToolPath } from "./codex-tool-paths.js";
+import { buildWindowsPackagedAppDetectionCommand, getCodexToolStatus, resetCodexToolPath, saveCodexToolPath } from "./codex-tool-paths.js";
 async function executable(path: string) { await mkdir(dirname(path), { recursive: true }); await writeFile(path, "#!/bin/sh\necho codex-cli 1.0\n"); await chmod(path, 0o755); }
 test("CLI detection prefers an executable found on PATH", async () => { const root = await mkdtemp(join(tmpdir(), "codex-tools-")); const bin = join(root, "bin"); const cli = join(bin, "codex"); await executable(cli); const status = await getCodexToolStatus("cli", { settingsPath: join(root, "settings.json"), env: { HOME: root, PATH: [bin, "/bin"].join(delimiter) }, platform: "darwin" }); assert.equal(status.path, cli); assert.equal(status.source, "path"); });
 test("manual CLI path persists and reset restores automatic detection", async () => { const root = await mkdtemp(join(tmpdir(), "codex-tools-")); const automatic = join(root, "auto", "codex"); const manual = join(root, "manual", "codex"); await executable(automatic); await executable(manual); const options = { settingsPath: join(root, "settings.json"), env: { HOME: root, PATH: join(root, "auto") }, platform: "darwin" as const, validateCli: async () => undefined }; assert.equal((await saveCodexToolPath("cli", manual, options)).source, "manual"); assert.equal((await resetCodexToolPath("cli", options)).path, automatic); });
@@ -91,6 +91,28 @@ test("Windows App detection falls back to the ChatGPT packaged AppID", async () 
   assert.equal(status.path, "shell:AppsFolder\\OpenAI.Codex_2p2nqsd0c76g0!App");
   assert.equal(status.source, "candidate");
   assert.equal(status.available, true);
+});
+
+test("Windows App detection accepts an execution alias discovered from the package manifest", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-tools-"));
+  const alias = join(root, "WindowsApps", "ChatGPT.exe");
+  await executable(alias);
+  const status = await getCodexToolStatus("app", {
+    settingsPath: join(root, "settings.json"),
+    env: { USERPROFILE: root, LOCALAPPDATA: join(root, "AppData", "Local"), PATH: "" },
+    platform: "win32",
+    detectWindowsPackagedApp: async () => alias,
+  });
+
+  assert.equal(status.path, alias);
+  assert.equal(status.source, "candidate");
+});
+
+test("Windows packaged App detection reads execution aliases before AppsFolder activation", () => {
+  const command = buildWindowsPackagedAppDetectionCommand();
+  assert.match(command, /AppxManifest\.xml/);
+  assert.match(command, /ExecutionAlias/);
+  assert.ok(command.indexOf("ExecutionAlias") < command.indexOf("Get-StartApps"));
 });
 
 test("Windows App settings accept a packaged AppID as a manual target", async () => {

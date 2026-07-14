@@ -25,10 +25,15 @@ import {
   buildEffectiveCodexEnv,
   getCodexToolStatus,
   listCodexToolStatuses,
+  normalizeWindowsPackagedAppTarget,
   resetCodexToolPath,
   saveCodexToolPath,
   type CodexToolKind,
 } from "./codex-tool-paths.js";
+import {
+  prepareWindowsPackagedAppHome,
+  stopWindowsPackagedAppProcesses,
+} from "./windows-packaged-app-profile.js";
 import {
   getConfiguredResourcesPath,
   resolveRuntimeResource,
@@ -3766,7 +3771,7 @@ async function shouldCopyEnvClonePath(path: string, platform: NodeJS.Platform): 
 
 async function launchAppTarget(
   state: Awaited<ReturnType<CoreRuntime["readLegacyState"]>>,
-  _runtime: CoreRuntime,
+  runtime: CoreRuntime,
   strategy: "replace-current" | "new-window",
 ): Promise<void> {
   const env = state.envs[state.targets.app.env];
@@ -3774,15 +3779,49 @@ async function launchAppTarget(
     throw new Error(`App env '${state.targets.app.env}' not found`);
   }
   const support = await loadCoreSupportModules();
-  const action = strategy === "new-window" ? support.launchNewCodexApp : support.restartCurrentCodexApp;
   const account = state.envs[state.targets.app.env]?.accounts[state.targets.app.account];
   const apiKey = account?.runtime.apiProtocol === "chat_completions" && account.runtime.compatibilityRouteEnabled
     ? account.runtime.compatibilityRouteToken
     : readAuthStringField(account?.authData, "OPENAI_API_KEY");
+  const effectiveEnv: NodeJS.ProcessEnv = {
+    ...await getEffectiveCodexEnv(),
+    ...(apiKey ? { OPENAI_API_KEY: apiKey } : {}),
+  };
+  const packagedTarget = process.platform === "win32"
+    ? normalizeWindowsPackagedAppTarget(effectiveEnv.CODEX_SWITCHER_APP_BIN ?? "")
+    : "";
+  if (packagedTarget) {
+    await stopWindowsPackagedAppProcesses();
+    const defaultHome = resolveRuntimePathsLocal(process.env, process.platform).defaultHome;
+    await prepareWindowsPackagedAppHome({
+      stateDir: getStateDir(),
+      defaultHome,
+      sourceHome: env.path,
+      materialize: async (projectionHome) => {
+        const projectionState = {
+          ...state,
+          envs: {
+            ...state.envs,
+            [state.targets.app.env]: { ...env, path: projectionHome },
+          },
+        };
+        await runtime.applyTargetHomeState({ state: projectionState, target: "app" });
+      },
+    });
+    await support.launchNewCodexApp({
+      codexHome: defaultHome,
+      stateDir: getStateDir(),
+      targetKey: `${state.targets.app.env}/${state.targets.app.account}`,
+      env: { ...effectiveEnv, CODEX_SWITCHER_APP_BIN: packagedTarget },
+    });
+    return;
+  }
+
+  const action = strategy === "new-window" ? support.launchNewCodexApp : support.restartCurrentCodexApp;
   await action({
     codexHome: env.path,
     stateDir: getStateDir(),
     targetKey: `${state.targets.app.env}/${state.targets.app.account}`,
-    env: { ...await getEffectiveCodexEnv(), ...(apiKey ? { OPENAI_API_KEY: apiKey } : {}) },
+    env: effectiveEnv,
   });
 }

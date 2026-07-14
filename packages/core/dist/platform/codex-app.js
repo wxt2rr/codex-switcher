@@ -35,7 +35,7 @@ export async function launchCodexApp(input, runner = defaultCodexAppRunner) {
         CODEX_HOME: input.codexHome,
         CODEX_SWITCHER_MANAGED: "1",
     };
-    const launchSpec = buildCodexAppLaunchSpec(resolved, mergedEnv, process.platform, input.userDataDir);
+    const launchSpec = buildCodexAppLaunchSpec(resolved, mergedEnv, input.env?.CODEX_SWITCHER_TEST_PLATFORM || process.platform, input.userDataDir);
     return runner(launchSpec.command, launchSpec.args, mergedEnv, {
         acceptEarlyExit: launchSpec.acceptEarlyExit,
     });
@@ -55,10 +55,11 @@ export function buildCodexAppLaunchSpec(appPath, env = process.env, platform = p
         };
     }
     const launcher = resolveWindowsAppLauncher(env);
+    const profileArg = userDataDir ? `--user-data-dir=${userDataDir}` : "";
     if (launcher === "wt" || launcher === "windows-terminal" || launcher === "wt.exe") {
         return {
             command: "wt.exe",
-            args: ["-w", "new", appPath],
+            args: ["-w", "new", appPath, ...(profileArg ? [profileArg] : [])],
         };
     }
     if (launcher === "powershell" || launcher === "pwsh" || launcher === "powershell.exe") {
@@ -70,7 +71,7 @@ export function buildCodexAppLaunchSpec(appPath, env = process.env, platform = p
                 "-ExecutionPolicy",
                 "Bypass",
                 "-Command",
-                `Start-Process -FilePath '${escapePowerShellSingleQuoted(appPath)}'`,
+                `Start-Process -FilePath '${escapePowerShellSingleQuoted(appPath)}'${profileArg ? ` -ArgumentList '${escapePowerShellSingleQuoted(profileArg)}'` : ""}`,
             ],
         };
     }
@@ -80,7 +81,7 @@ export function buildCodexAppLaunchSpec(appPath, env = process.env, platform = p
             "/d",
             "/s",
             "/c",
-            `start "" /b "${escapeCmdDoubleQuoted(appPath)}"`,
+            `start "" /b "${escapeCmdDoubleQuoted(appPath)}"${profileArg ? ` "${escapeCmdDoubleQuoted(profileArg)}"` : ""}`,
         ],
     };
 }
@@ -92,6 +93,11 @@ export async function launchNewCodexApp(input, runner = defaultCodexAppRunner) {
 }
 async function launchNewCodexAppUnlocked(input, runner) {
     const paths = resolveManagedAppStatePaths(input.stateDir);
+    if (isWindowsPackagedAppTarget(input.env?.CODEX_SWITCHER_APP_BIN ?? "")) {
+        const result = await launchCodexApp(input, runner);
+        await writeManagedAppPid(paths, null);
+        return result;
+    }
     const instanceId = await nextManagedAppInstanceId(paths);
     const userDataDir = join(paths.appProfilesDir, instanceId);
     await mkdir(userDataDir, { recursive: true });

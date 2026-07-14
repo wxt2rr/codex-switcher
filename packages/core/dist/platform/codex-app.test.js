@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildCodexAppLaunchSpec, launchCodexApp, launchNewCodexApp, restartCurrentCodexApp, stopManagedCodexApp, } from "./codex-app.js";
@@ -59,6 +59,16 @@ test("buildCodexAppLaunchSpec supports PowerShell launcher on windows", () => {
         "Start-Process -FilePath 'C:\\Program Files\\Codex\\Codex.exe'",
     ]);
 });
+test("buildCodexAppLaunchSpec forwards the isolated profile to Windows execution aliases", () => {
+    const spec = buildCodexAppLaunchSpec("C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps\\ChatGPT.exe", {}, "win32", "C:\\Users\\tester\\App Data\\instance-1");
+    assert.equal(spec.command, "cmd.exe");
+    assert.deepEqual(spec.args, [
+        "/d",
+        "/s",
+        "/c",
+        'start "" /b "C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps\\ChatGPT.exe" "--user-data-dir=C:\\Users\\tester\\App Data\\instance-1"',
+    ]);
+});
 test("buildCodexAppLaunchSpec supports Windows Terminal launcher on windows", () => {
     const spec = buildCodexAppLaunchSpec("C:\\Program Files\\Codex\\Codex.exe", {
         CODEX_SWITCHER_WINDOWS_APP_LAUNCHER: "wt",
@@ -87,6 +97,30 @@ test("launchNewCodexApp records the managed app pid", async () => {
         assert.equal(await readManagedAppPid(resolveManagedAppStatePaths(root)), 2222);
         assert.equal(await readLastManagedAppInstanceId(resolveManagedAppStatePaths(root)), "instance-1");
         assert.deepEqual(await listManagedAppInstances(resolveManagedAppStatePaths(root)), [{ instanceId: "instance-1", pid: 2222 }]);
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+test("launchNewCodexApp does not create an isolated profile for a packaged AppID", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-app-launch-packaged-"));
+    try {
+        const target = "shell:AppsFolder\\OpenAI.Codex_2p2nqsd0c76g0!App";
+        const result = await launchNewCodexApp({
+            codexHome: "C:\\Users\\tester\\.codex",
+            stateDir: root,
+            env: {
+                CODEX_SWITCHER_APP_BIN: target,
+                CODEX_SWITCHER_TEST_PLATFORM: "win32",
+            },
+        }, async (command, args, _env, options) => {
+            assert.equal(command, "explorer.exe");
+            assert.deepEqual(args, [target]);
+            assert.equal(options?.acceptEarlyExit, true);
+            return { pid: null };
+        });
+        assert.equal(result.pid, null);
+        await assert.rejects(access(join(root, "app-profiles", "instance-1")));
     }
     finally {
         await rm(root, { recursive: true, force: true });

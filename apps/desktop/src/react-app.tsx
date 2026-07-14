@@ -162,6 +162,8 @@ export function App() {
     setInitialLoadingProgress(12);
     setInitialLoadingStage("loading-settings");
     await loadLanguage();
+    setInitialLoadingProgress(24);
+    await loadCodexToolPaths();
     setInitialLoadingProgress(32);
     setInitialLoadingStage("restoring-routes");
     await refreshOverview({ loadMetrics: true });
@@ -932,6 +934,9 @@ export function App() {
           authRefreshIntervalSeconds={authRefreshIntervalSeconds}
           loadingLabel={loadingLabel}
           busy={busy}
+          appUsesWindowsPackage={toolStatuses.some((status) =>
+            status.kind === "app" && /^shell:appsfolder\\/i.test(status.path.trim()),
+          )}
           accountEnvDraft={accountEnvDraft}
           accountNameDraft={accountNameDraft}
           accountTargetDraft={accountTargetDraft}
