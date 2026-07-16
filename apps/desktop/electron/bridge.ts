@@ -621,7 +621,7 @@ export async function switchAccount(
     account: next.targets[target].account,
   });
   if (target === "app") {
-    await launchAppTarget(next, runtime, strategy === "new-window" ? "new-window" : "replace-current");
+    await launchAppTarget(next, runtime);
   } else {
     const warning = await openCommandInPreferredTerminal(
       ["cli", "launch-current"],
@@ -3772,7 +3772,6 @@ async function shouldCopyEnvClonePath(path: string, platform: NodeJS.Platform): 
 async function launchAppTarget(
   state: Awaited<ReturnType<CoreRuntime["readLegacyState"]>>,
   runtime: CoreRuntime,
-  strategy: "replace-current" | "new-window",
 ): Promise<void> {
   const env = state.envs[state.targets.app.env];
   if (!env) {
@@ -3808,20 +3807,19 @@ async function launchAppTarget(
         await runtime.applyTargetHomeState({ state: projectionState, target: "app" });
       },
     });
-    await support.launchNewCodexApp({
+    await support.restartCurrentCodexApp({
       codexHome: defaultHome,
       stateDir: getStateDir(),
-      targetKey: `${state.targets.app.env}/${state.targets.app.account}`,
+      targetKey: state.targets.app.env,
       env: { ...effectiveEnv, CODEX_SWITCHER_APP_BIN: packagedTarget },
     });
     return;
   }
 
-  const action = strategy === "new-window" ? support.launchNewCodexApp : support.restartCurrentCodexApp;
-  await action({
+  await support.restartCurrentCodexApp({
     codexHome: env.path,
     stateDir: getStateDir(),
-    targetKey: `${state.targets.app.env}/${state.targets.app.account}`,
+    targetKey: state.targets.app.env,
     env: effectiveEnv,
   });
 }

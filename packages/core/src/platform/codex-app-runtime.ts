@@ -22,6 +22,13 @@ export interface ManagedAppProfileRemovalOptions {
   delay?: (ms: number) => Promise<void>;
 }
 
+/** App instances are scoped by environment. Older records may still contain env/account. */
+export function normalizeManagedAppScope(value?: string): string | undefined {
+  const normalized = value?.trim();
+  if (!normalized) return undefined;
+  return normalized.split("/", 1)[0] || undefined;
+}
+
 export function resolveManagedAppStatePaths(stateDir: string): ManagedAppStatePaths {
   return {
     stateDir,
@@ -159,27 +166,50 @@ export async function stopManagedAppPid(
 ): Promise<boolean> {
   const lastInstanceId = await readLastManagedAppInstanceId(paths);
   const instances = await listManagedAppInstances(paths);
-  const scopedInstances = targetKey ? instances.filter((instance) => instance.targetKey === targetKey) : instances;
-  const selected = targetKey
-    ? scopedInstances[scopedInstances.length - 1]
-    : (lastInstanceId
-        ? scopedInstances.find((instance) => instance.instanceId === lastInstanceId)
-        : undefined) ?? scopedInstances[0];
+  const requestedScope = normalizeManagedAppScope(targetKey);
+  let candidates = requestedScope
+    ? instances.filter((instance) => normalizeManagedAppScope(instance.targetKey) === requestedScope)
+    : instances;
 
-  const pid = selected?.pid ?? (targetKey ? null : await readManagedAppPid(paths));
-  if (pid === null) {
-    return false;
+  // Records created before environment scoping have no target metadata. The global
+  // pointer is the only safe migration hint, so allow it as a one-time fallback.
+  if (requestedScope && candidates.length === 0 && lastInstanceId) {
+    const legacyCurrent = instances.find((instance) => instance.instanceId === lastInstanceId);
+    if (legacyCurrent && !legacyCurrent.targetKey) candidates = [legacyCurrent];
   }
 
-  await stopper(pid, applicationName);
-  if (selected) {
+  if (!requestedScope && candidates.length === 0) {
+    const pid = await readManagedAppPid(paths);
+    if (pid === null) return false;
+    const stopped = await stopper(pid, applicationName);
+    if (stopped) await writeManagedAppPid(paths, null);
+    return stopped;
+  }
+
+  let cleanedStaleRecord = false;
+  let stoppedAny = false;
+  for (const selected of [...candidates].reverse()) {
+    const stopped = await stopper(selected.pid, applicationName);
+    if (!stopped) {
+      await clearManagedAppInstance(paths, selected.instanceId);
+      if ((await readManagedAppPid(paths)) === selected.pid) {
+        await writeManagedAppPid(paths, null);
+      }
+      cleanedStaleRecord = true;
+      continue;
+    }
     await clearManagedAppInstance(paths, selected.instanceId);
+    if ((await readManagedAppPid(paths)) === selected.pid) {
+      await writeManagedAppPid(paths, null);
+    }
+    stoppedAny = true;
+    // A single environment owns one App window. Older versions could leave
+    // multiple records behind, so drain every matching instance before the
+    // replacement is launched. Unscoped callers retain the historical
+    // newest-only behavior.
+    if (!requestedScope) return true;
   }
-  if (!selected || (await readManagedAppPid(paths)) === pid) {
-    await writeManagedAppPid(paths, null);
-  }
-
-  return true;
+  return stoppedAny || cleanedStaleRecord;
 }
 
 async function readDirPidFiles(

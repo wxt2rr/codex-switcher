@@ -152,7 +152,7 @@ async function defaultManagedAppStopper(pid, applicationName) {
             typeof error.code === "string"
             ? error.code
             : "";
-        if (code === "ESRCH" || code === "EPERM") {
+        if (code === "ESRCH") {
             return false;
         }
         throw error;

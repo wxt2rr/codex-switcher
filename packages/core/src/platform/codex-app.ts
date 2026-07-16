@@ -247,7 +247,7 @@ async function defaultManagedAppStopper(pid: number, applicationName?: string): 
         ? (error as { code: string }).code
         : "";
 
-    if (code === "ESRCH" || code === "EPERM") {
+    if (code === "ESRCH") {
       return false;
     }
     throw error;

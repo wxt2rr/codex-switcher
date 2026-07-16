@@ -934,9 +934,6 @@ export function App() {
           authRefreshIntervalSeconds={authRefreshIntervalSeconds}
           loadingLabel={loadingLabel}
           busy={busy}
-          appUsesWindowsPackage={toolStatuses.some((status) =>
-            status.kind === "app" && /^shell:appsfolder\\/i.test(status.path.trim()),
-          )}
           accountEnvDraft={accountEnvDraft}
           accountNameDraft={accountNameDraft}
           accountTargetDraft={accountTargetDraft}

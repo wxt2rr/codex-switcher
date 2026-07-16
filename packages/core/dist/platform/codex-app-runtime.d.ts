@@ -16,6 +16,8 @@ export interface ManagedAppProfileRemovalOptions {
     remove?: (path: string) => Promise<void>;
     delay?: (ms: number) => Promise<void>;
 }
+/** App instances are scoped by environment. Older records may still contain env/account. */
+export declare function normalizeManagedAppScope(value?: string): string | undefined;
 export declare function resolveManagedAppStatePaths(stateDir: string): ManagedAppStatePaths;
 export declare function readManagedAppPid(paths: ManagedAppStatePaths): Promise<number | null>;
 export declare function writeManagedAppPid(paths: ManagedAppStatePaths, pid: number | null): Promise<void>;

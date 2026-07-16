@@ -101,7 +101,6 @@ export function AccountsPage({
   authRefreshIntervalSeconds,
   loadingLabel,
   busy,
-  appUsesWindowsPackage,
   accountEnvDraft,
   accountNameDraft,
   accountTargetDraft,
@@ -144,7 +143,6 @@ export function AccountsPage({
   authRefreshIntervalSeconds: number;
   loadingLabel: string;
   busy: boolean;
-  appUsesWindowsPackage: boolean;
   accountEnvDraft: string;
   accountNameDraft: string;
   accountTargetDraft: string;
@@ -535,7 +533,6 @@ export function AccountsPage({
               authMetricsLoading={authMetricsLoading}
               loadingLabel={loadingLabel}
               isWindowsDesktop={/win/i.test(globalThis.navigator?.platform ?? "")}
-              appUsesWindowsPackage={appUsesWindowsPackage}
               onPrimeAccount={onPrimeAccount}
               onSwitchAccount={onSwitchAccount}
               onListAccountProjects={onListAccountProjects}
@@ -980,7 +977,6 @@ function AccountListCard({
   authMetricsLoading,
   loadingLabel,
   isWindowsDesktop,
-  appUsesWindowsPackage,
   onPrimeAccount,
   onSwitchAccount,
   onListAccountProjects,
@@ -1001,7 +997,6 @@ function AccountListCard({
   authMetricsLoading: boolean;
   loadingLabel: string;
   isWindowsDesktop: boolean;
-  appUsesWindowsPackage: boolean;
   onPrimeAccount: (account?: AccountSummary) => void;
   onSwitchAccount: (
     target: "cli" | "app",
@@ -1193,36 +1188,15 @@ function AccountListCard({
           icon={<Monitor className="size-4" />}
           label="App"
           primaryStrategy="replace-current"
-          items={appUsesWindowsPackage
-            ? [{
-                key: "replace-current",
-                label:
-                  language === "zh"
-                    ? "重新启动"
-                    : language === "ja"
-                      ? "再起動"
-                      : "Restart App",
-              }]
-            : [
-                {
-                  key: "replace-current",
-                  label:
-                    language === "zh"
-                      ? "覆盖当前窗口"
-                      : language === "ja"
-                        ? "現在のウィンドウを置換"
-                        : "Replace current",
-                },
-                {
-                  key: "new-window",
-                  label:
-                    language === "zh"
-                      ? "新开窗口"
-                      : language === "ja"
-                        ? "新しいウィンドウ"
-                        : "New window",
-                },
-              ]}
+          items={[{
+            key: "replace-current",
+            label:
+              language === "zh"
+                ? "启动 / 切换"
+                : language === "ja"
+                  ? "起動 / 切り替え"
+                  : "Launch / switch",
+          }]}
           onSelect={(strategy) => {
             onPrimeAccount(account);
             onSwitchAccount("app", account, strategy);

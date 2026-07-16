@@ -171,7 +171,7 @@ test("stopManagedAppPid falls back to the previous managed instance when others 
   }
 });
 
-test("stopManagedAppPid replaces only the latest instance for the requested account scope", async () => {
+test("stopManagedAppPid drains all instances in the requested environment scope", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-app-runtime-scope-"));
   const calls: number[] = [];
   try {
@@ -180,12 +180,11 @@ test("stopManagedAppPid replaces only the latest instance for the requested acco
     await setManagedAppInstance(paths, { instanceId: "instance-2", pid: 2222, targetKey: "env-b/account-b" });
     await setManagedAppInstance(paths, { instanceId: "instance-3", pid: 3333, targetKey: "env-a/account-a" });
 
-    const stopped = await stopManagedAppPid(paths, async (pid) => { calls.push(pid); return true; }, undefined, "env-a/account-a");
+    const stopped = await stopManagedAppPid(paths, async (pid) => { calls.push(pid); return true; }, undefined, "env-a");
 
     assert.equal(stopped, true);
-    assert.deepEqual(calls, [3333]);
+    assert.deepEqual(calls, [3333, 1111]);
     assert.deepEqual(await listManagedAppInstances(paths), [
-      { instanceId: "instance-1", pid: 1111, targetKey: "env-a/account-a" },
       { instanceId: "instance-2", pid: 2222, targetKey: "env-b/account-b" },
     ]);
   } finally {

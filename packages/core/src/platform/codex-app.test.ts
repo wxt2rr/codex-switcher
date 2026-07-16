@@ -346,21 +346,21 @@ test("restartCurrentCodexApp avoids application-wide quit when replacing one ins
   }
 });
 
-test("restartCurrentCodexApp stops only the instance bound to its target account", async () => {
+test("restartCurrentCodexApp stops only the instance bound to its environment", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-app-target-restart-"));
   const stopped: number[] = [];
   try {
     const paths = resolveManagedAppStatePaths(root);
     await setManagedAppInstance(paths, { instanceId: "instance-1", pid: 1111, targetKey: "env-a/account-a" });
     await setManagedAppInstance(paths, { instanceId: "instance-2", pid: 2222, targetKey: "env-b/account-b" });
-    await restartCurrentCodexApp({ codexHome: "/tmp/a", stateDir: root, targetKey: "env-a/account-a",
+    await restartCurrentCodexApp({ codexHome: "/tmp/a", stateDir: root, targetKey: "env-a",
       env: { CODEX_SWITCHER_APP_BIN: "/tmp/Codex" } }, async () => ({ pid: 3333 }), async (pid) => {
       stopped.push(pid); return true;
     });
     assert.deepEqual(stopped, [1111]);
     assert.deepEqual(await listManagedAppInstances(paths), [
       { instanceId: "instance-2", pid: 2222, targetKey: "env-b/account-b" },
-      { instanceId: "instance-3", pid: 3333, targetKey: "env-a/account-a" },
+      { instanceId: "instance-3", pid: 3333, targetKey: "env-a" },
     ]);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
