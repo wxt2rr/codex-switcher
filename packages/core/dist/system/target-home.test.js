@@ -47,6 +47,8 @@ test("target-home writer installs auth.json and managed config for apikey accoun
         const config = await readFile(join(homePath, "config.toml"), "utf8");
         assert.match(config, /preferred_auth_method = "apikey"/);
         assert.match(config, /openai_base_url = "https:\/\/proxy\.example\.test\/v1"/);
+        assert.match(config, /requires_openai_auth = false/);
+        assert.match(config, /http_headers = \{ "x-openai-actor-authorization" = "codex-sw\.app" \}/);
     }
     finally {
         await rm(root, { recursive: true, force: true });
@@ -94,6 +96,8 @@ test("target-home writer materializes an enabled Chat compatibility route withou
         assert.match(config, /base_url = "http:\/\/127\.0\.0\.1:17899\/routes\/route-a\/v1"/);
         assert.match(config, /wire_api = "responses"/);
         assert.match(config, /env_key = "OPENAI_API_KEY"/);
+        assert.match(config, /requires_openai_auth = false/);
+        assert.match(config, /http_headers = \{ "x-openai-actor-authorization" = "codex-sw\.app" \}/);
         assert.doesNotMatch(config, /sk-upstream-secret/);
     }
     finally {
@@ -145,7 +149,8 @@ test("target-home writer appends managed custom model config for auth account wh
         assert.match(config, /model = "gpt-5.4"/);
         assert.match(config, /base_url = "https:\/\/proxy\.example\.test\/v1"/);
         assert.match(config, /experimental_bearer_token = "sk-apikey"/);
-        assert.match(config, /requires_openai_auth = true/);
+        assert.match(config, /requires_openai_auth = false/);
+        assert.match(config, /http_headers = \{ "x-openai-actor-authorization" = "codex-sw\.app" \}/);
     }
     finally {
         await rm(root, { recursive: true, force: true });

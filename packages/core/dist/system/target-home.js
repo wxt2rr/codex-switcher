@@ -39,10 +39,11 @@ async function writeManagedConfig(configPath, runtime) {
     const existing = await readText(configPath);
     const cleaned = removeManagedConfigLines(existing);
     const managedLines = [`preferred_auth_method = "${runtime.preferredAuthMethod}"`];
-    if (runtime.apiProtocol === "chat_completions" &&
+    const compatibilityProviderActive = runtime.apiProtocol === "chat_completions" &&
         runtime.compatibilityRouteEnabled &&
-        runtime.compatibilityRouteBaseUrl &&
-        runtime.compatibilityRouteProviderId) {
+        Boolean(runtime.compatibilityRouteBaseUrl) &&
+        Boolean(runtime.compatibilityRouteProviderId);
+    if (compatibilityProviderActive) {
         managedLines.push("");
         managedLines.push(`model_provider = ${quoteTomlString(runtime.compatibilityRouteProviderId)}`);
         managedLines.push("");
@@ -51,12 +52,15 @@ async function writeManagedConfig(configPath, runtime) {
         managedLines.push(`base_url = ${quoteTomlString(runtime.compatibilityRouteBaseUrl)}`);
         managedLines.push('wire_api = "responses"');
         managedLines.push('env_key = "OPENAI_API_KEY"');
+        managedLines.push("requires_openai_auth = false");
+        managedLines.push('http_headers = { "x-openai-actor-authorization" = "codex-sw.app" }');
     }
-    if (runtime.apiProtocol !== "chat_completions" &&
-        runtime.preferredAuthMethod === "apikey" &&
-        runtime.openaiBaseUrlMode === "custom" &&
-        runtime.openaiBaseUrl) {
-        managedLines.push(`openai_base_url = "${runtime.openaiBaseUrl}"`);
+    if (runtime.preferredAuthMethod === "apikey" && !compatibilityProviderActive) {
+        if (runtime.apiProtocol !== "chat_completions" && runtime.openaiBaseUrlMode === "custom" && runtime.openaiBaseUrl) {
+            managedLines.push(`openai_base_url = "${runtime.openaiBaseUrl}"`);
+        }
+        managedLines.push("requires_openai_auth = false");
+        managedLines.push('http_headers = { "x-openai-actor-authorization" = "codex-sw.app" }');
     }
     if (runtime.independentModelEnabled && runtime.preferredAuthMethod === "chatgpt") {
         const providerId = normalizeProviderId(runtime.independentModelProviderId);
@@ -68,7 +72,8 @@ async function writeManagedConfig(configPath, runtime) {
         managedLines.push('model = "gpt-5.4"');
         managedLines.push(`base_url = ${quoteTomlString(runtime.independentModelBaseUrl ?? "")}`);
         managedLines.push(`experimental_bearer_token = ${quoteTomlString(runtime.independentModelApiKey ?? "")}`);
-        managedLines.push("requires_openai_auth = true");
+        managedLines.push("requires_openai_auth = false");
+        managedLines.push('http_headers = { "x-openai-actor-authorization" = "codex-sw.app" }');
     }
     const content = `${managedLines.join("\n")}${cleaned ? `\n${cleaned}` : ""}\n`;
     await writeFile(configPath, content, "utf8");
@@ -88,6 +93,7 @@ function removeManagedConfigLines(content) {
         .map((line) => line.trim().match(/^model_provider\s*=\s*"([^"]+)"$/)?.[1] ?? "")
         .filter(Boolean));
     let skipManagedProviderSection = false;
+    let insideTomlSection = false;
     for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed) {
@@ -98,6 +104,7 @@ function removeManagedConfigLines(content) {
         }
         const providerHeaderMatch = trimmed.match(/^\[model_providers\.([A-Za-z0-9_-]+)\]$/);
         if (providerHeaderMatch) {
+            insideTomlSection = true;
             if (managedProviderIds.has(providerHeaderMatch[1] ?? "")) {
                 skipManagedProviderSection = true;
                 continue;
@@ -106,14 +113,20 @@ function removeManagedConfigLines(content) {
         if (skipManagedProviderSection) {
             if (trimmed.startsWith("[")) {
                 skipManagedProviderSection = false;
+                insideTomlSection = true;
             }
             else {
                 continue;
             }
         }
+        else if (trimmed.startsWith("[")) {
+            insideTomlSection = true;
+        }
         if (trimmed.startsWith("preferred_auth_method") ||
             trimmed.startsWith("openai_base_url") ||
-            trimmed.startsWith("model_provider = ")) {
+            trimmed.startsWith("model_provider = ") ||
+            (!insideTomlSection &&
+                (trimmed.startsWith("requires_openai_auth") || trimmed.startsWith("http_headers")))) {
             continue;
         }
         kept.push(line);
