@@ -31,6 +31,14 @@ Packaging notes:
 - Build macOS installers on macOS for best results.
 - Build Windows installers on Windows for best results.
 - macOS code signing / notarization is still not configured, so local packages are unsigned.
+- After installing the unsigned macOS package, remove the quarantine attribute and launch it with:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/codex-switcher.app"
+open "/Applications/codex-switcher.app"
+```
+
+- Windows packages are also unsigned. If Microsoft Defender SmartScreen warns about the installer, first verify that it came from this repository's GitHub Releases, then choose **More info** → **Run anyway** (or keep the download in the browser) to continue.
 
 GitHub Actions packaging:
 - Ordinary pushes and pull requests run CI but do not package installers.

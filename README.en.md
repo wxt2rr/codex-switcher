@@ -56,6 +56,19 @@ Notes:
 - The main unfinished work is release hardening such as app icon, code signing, notarization, and distribution.
 - See [docs/desktop-core-architecture.md](docs/desktop-core-architecture.md) for architecture and migration notes.
 
+### Desktop installer security notice
+
+The current macOS and Windows packages are unsigned. Download them only from this repository's GitHub Releases and continue only after verifying the source.
+
+If macOS reports that the installed app is damaged or cannot be opened, run:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/codex-switcher.app"
+open "/Applications/codex-switcher.app"
+```
+
+Windows may show a Microsoft Defender SmartScreen warning during download or installation. After confirming that the installer came from this repository's GitHub Releases, choose **More info** → **Run anyway**, or keep the download in the browser, and continue the installation.
+
 ### Install from source
 
 ```bash

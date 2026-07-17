@@ -56,6 +56,19 @@ codex-sw check
 - 当前未完成的主要是发行级能力，例如应用图标、签名、公证和分发流程。
 - 详细架构和迁移说明见 [docs/desktop-core-architecture.md](docs/desktop-core-architecture.md)。
 
+### 桌面安装包安全提示
+
+当前 macOS 和 Windows 安装包均未进行代码签名。请只从本仓库的 GitHub Release 下载，并在确认文件来源可信后继续以下操作。
+
+macOS 安装完成后，如果系统提示应用“已损坏”或无法打开，请在终端执行：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/codex-switcher.app"
+open "/Applications/codex-switcher.app"
+```
+
+Windows 下载或安装时可能出现 Microsoft Defender SmartScreen 风险提示。确认安装包来自本仓库 GitHub Release 后，可选择“更多信息”→“仍要运行”，或在浏览器下载提示中选择保留，然后继续安装。
+
 ### 源码安装
 
 ```bash
