@@ -52,6 +52,9 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       calls.push("getEnvHistoryRetentionSettings");
       return { enabled: false, retentionDays: 30 };
     },
+    getGeneratedImageRecoverySettings: async () => ({
+      enabled: false, installedEnvironments: 0, totalEnvironments: 2, conflicts: [],
+    }),
     getRouterLifecycleSettings: async () => {
       calls.push("getRouterLifecycleSettings");
       return { stopOnAppQuit: false };
@@ -71,6 +74,9 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       calls.push(`setEnvHistoryRetentionSettings:${value.enabled}:${value.retentionDays}`);
       return value;
     },
+    setGeneratedImageRecoverySettings: async (value) => ({
+      enabled: value.enabled, installedEnvironments: value.enabled ? 2 : 0, totalEnvironments: 2, conflicts: [],
+    }),
     setRouterLifecycleSettings: async (value) => {
       calls.push(`setRouterLifecycleSettings:${value.stopOnAppQuit}`);
       return value;
@@ -101,8 +107,8 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       calls.push(`switchEnv:${target}:${envName}`);
       return { message: "ok" };
     },
-    switchAccount: async (target, envName, accountName) => {
-      calls.push(`switchAccount:${target}:${envName}:${accountName}`);
+    switchAccount: async (target, envName, accountName, strategy) => {
+      calls.push(`switchAccount:${target}:${envName}:${accountName}:${strategy ?? "default"}`);
       return { message: "ok" };
     },
     listAccountProjects: async () => [],
@@ -254,6 +260,8 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       calls.push(`getAccountCompatibilityStatuses:${keys.join(",")}`);
       return [];
     },
+    listAccountPools: async () => [],
+    saveAccountPool: async () => null,
     checkAccountCompatibility: async (envName, accountName) => {
       calls.push(`checkAccountCompatibility:${envName}:${accountName}`);
       return { ok: true, status: 200, message: "ok" };
@@ -263,10 +271,26 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       calls.push(`loadUsageRequests:${query.baseUrl}:${query.page}:${query.pageSize}`);
       return { generatedAt: Date.now(), items: [], total: 0,
         page: query.page, pageSize: query.pageSize, totalPages: 1,
-        facets: { envNames: [], accountNames: [], models: [], endpoints: [] } };
+        facets: { envNames: [], accountNames: [], models: [], endpoints: [], poolIds: [], failoverReasons: [] } };
     },
     listUsagePricing: async () => [],
     saveUsagePricing: async () => undefined,
+    getSkillSnapshot: async () => ({
+      marketplace: { items: [], status: "link-only", externalUrl: "https://skills.sh" },
+      scopes: [{ id: "marketplace", kind: "marketplace", name: "Marketplace", skills: [] }],
+      bindings: [],
+    }),
+    installSkill: async (input) => ({ id: input.skillName ?? "skill", name: input.skillName ?? "Skill",
+      description: "", path: "/tmp/skill", scopeId: `codex:${input.envName}`, managed: true, linked: false, state: "healthy" }),
+    checkSkillUpdates: async () => ({}),
+    updateSkill: async (input) => ({ id: input.skillId, name: input.skillId, description: "", path: "/tmp/skill",
+      scopeId: `codex:${input.envName}`, managed: true, linked: false, state: "healthy" }),
+    uninstallSkill: async () => undefined,
+    setSkillProviderBinding: async (input) => ({ providerId: input.providerId, enabled: input.enabled,
+      sourceEnv: input.sourceEnv, targetPath: input.targetPath ?? "/tmp/skills",
+      status: input.enabled ? "healthy" : "disabled", managedLinks: 0, conflicts: 0 }),
+    repairSkillProvider: async (providerId) => ({ providerId, enabled: false, targetPath: "/tmp/skills",
+      status: "disabled", managedLinks: 0, conflicts: 0 }),
   });
 
   await bridge.loadOverview();
@@ -290,7 +314,7 @@ test("desktop bridge forwards calls to injected electron api", async () => {
     relogin: false,
   });
   await bridge.switchEnv("cli", "project");
-  await bridge.switchAccount("app", "project", "personal");
+  await bridge.switchAccount("app", "project", "personal", "multi-window");
   await bridge.createEnv({ envName: "sandbox", source: { kind: "default" } });
   await bridge.deleteEnv("sandbox");
   await bridge.updateEnv("sandbox", "sandbox-next", "/tmp/sandbox-home");
@@ -347,7 +371,7 @@ test("desktop bridge forwards calls to injected electron api", async () => {
     "writeClipboardText:sk-secret",
     "nativeLogin:auth:personal:default:cli:login",
     "switchEnv:cli:project",
-    "switchAccount:app:project:personal",
+    "switchAccount:app:project:personal:multi-window",
     "createEnv:sandbox:default:",
     "deleteEnv:sandbox",
     "updateEnv:sandbox:sandbox-next:/tmp/sandbox-home",

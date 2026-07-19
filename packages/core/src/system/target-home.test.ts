@@ -338,6 +338,30 @@ test("target-home writer clears managed files when selected account is missing",
   }
 });
 
+test("AUTH account keeps ChatGPT credentials while using a custom local Responses Base URL", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-auth-pool-target-home-"));
+  const homePath = join(root, "home");
+  const state: SwitcherState = {
+    schemaVersion: DEFAULT_SCHEMA_VERSION,
+    generatedAt: new Date().toISOString(),
+    targets: { cli: { env: "work", account: "login" }, app: { env: "work", account: "login" } },
+    envs: { work: { name: "work", path: homePath, accounts: { login: { name: "login", authMode: "auth",
+      authData: { auth_mode: "chatgpt", tokens: { access_token: "access", refresh_token: "refresh" } },
+      runtime: { preferredAuthMethod: "chatgpt", openaiBaseUrlMode: "custom",
+        openaiBaseUrl: "http://127.0.0.1:17832/pools/work", apiProtocol: "responses" } } } } },
+    tasks: { recent: [] },
+  };
+  try {
+    await applyTargetHomeState({ state, target: "cli" });
+    const auth = JSON.parse(await readFile(join(homePath, "auth.json"), "utf8"));
+    assert.equal(auth.tokens.access_token, "access");
+    const config = await readFile(join(homePath, "config.toml"), "utf8");
+    assert.match(config, /preferred_auth_method = "chatgpt"/);
+    assert.match(config, /openai_base_url = "http:\/\/127\.0\.0\.1:17832\/pools\/work"/);
+    assert.doesNotMatch(config, /requires_openai_auth = false/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 async function applyFixture(homePath: string) {
   await mkdir(homePath, { recursive: true });
   await writeFile(

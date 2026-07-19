@@ -19,6 +19,14 @@ export interface EnvHistoryRetentionSettings {
   retentionDays: number;
 }
 
+export interface GeneratedImageRecoverySettings {
+  enabled: boolean;
+}
+
+export interface AppWindowSettings {
+  counts: Record<string, number>;
+}
+
 interface DesktopSettingsFile {
   cliPath?: string;
   appPath?: string;
@@ -26,6 +34,8 @@ interface DesktopSettingsFile {
   routerLifecycle?: Partial<RouterLifecycleSettings>;
   routerPort?: Partial<RouterPortSettings>;
   envHistoryRetention?: Partial<EnvHistoryRetentionSettings>;
+  generatedImageRecovery?: Partial<GeneratedImageRecoverySettings>;
+  appWindowCounts?: Record<string, unknown>;
 }
 
 export const DEFAULT_CLI_AUTO_RESUME_SETTINGS: CliAutoResumeSettings = { enabled: false, sessionNumber: 1 };
@@ -35,6 +45,9 @@ export const DEFAULT_ENV_HISTORY_RETENTION_SETTINGS: EnvHistoryRetentionSettings
   enabled: false,
   retentionDays: 30,
 };
+export const DEFAULT_GENERATED_IMAGE_RECOVERY_SETTINGS: GeneratedImageRecoverySettings = { enabled: false };
+export const DEFAULT_APP_WINDOW_COUNT = 1;
+export const MAX_APP_WINDOW_COUNT = 8;
 
 export async function readCliAutoResumeSettings(path: string): Promise<CliAutoResumeSettings> {
   const settings = await readSettings(path);
@@ -101,6 +114,60 @@ export async function saveEnvHistoryRetentionSettings(
   return normalized;
 }
 
+export async function readGeneratedImageRecoverySettings(path: string): Promise<GeneratedImageRecoverySettings> {
+  const settings = await readSettings(path);
+  return { enabled: settings.generatedImageRecovery?.enabled === true };
+}
+
+export async function saveGeneratedImageRecoverySettings(
+  path: string,
+  value: GeneratedImageRecoverySettings,
+): Promise<GeneratedImageRecoverySettings> {
+  const normalized = { enabled: value.enabled === true };
+  const settings = await readSettings(path);
+  settings.generatedImageRecovery = normalized;
+  await writeSettings(path, settings);
+  return normalized;
+}
+
+export async function readAppWindowSettings(path: string): Promise<AppWindowSettings> {
+  const settings = await readSettings(path);
+  return normalizeAppWindowSettings(settings.appWindowCounts);
+}
+
+export async function saveAppWindowCount(path: string, envName: string, count: number): Promise<number> {
+  const normalizedEnvName = normalizeEnvName(envName);
+  const normalizedCount = normalizeAppWindowCount(count);
+  const settings = await readSettings(path);
+  const current = normalizeAppWindowSettings(settings.appWindowCounts);
+  settings.appWindowCounts = { ...current.counts, [normalizedEnvName]: normalizedCount };
+  await writeSettings(path, settings);
+  return normalizedCount;
+}
+
+export async function renameAppWindowCount(path: string, envName: string, nextEnvName: string): Promise<void> {
+  const source = normalizeEnvName(envName);
+  const target = normalizeEnvName(nextEnvName);
+  if (source === target) return;
+  const settings = await readSettings(path);
+  const current = normalizeAppWindowSettings(settings.appWindowCounts).counts;
+  const count = current[source];
+  if (count === undefined) return;
+  const { [source]: _removed, ...remaining } = current;
+  settings.appWindowCounts = { ...remaining, [target]: count };
+  await writeSettings(path, settings);
+}
+
+export async function removeAppWindowCount(path: string, envName: string): Promise<void> {
+  const normalizedEnvName = normalizeEnvName(envName);
+  const settings = await readSettings(path);
+  const current = normalizeAppWindowSettings(settings.appWindowCounts).counts;
+  if (current[normalizedEnvName] === undefined) return;
+  const { [normalizedEnvName]: _removed, ...remaining } = current;
+  settings.appWindowCounts = remaining;
+  await writeSettings(path, settings);
+}
+
 function normalizeCliAutoResumeSettings(value?: Partial<CliAutoResumeSettings>): CliAutoResumeSettings {
   const sessionNumber = Number(value?.sessionNumber);
   return {
@@ -128,6 +195,33 @@ function normalizeRouterPortSettings(value?: Partial<RouterPortSettings>): Route
       ? preferredPort
       : DEFAULT_ROUTER_PORT_SETTINGS.preferredPort,
   };
+}
+
+function normalizeAppWindowSettings(value?: Record<string, unknown>): AppWindowSettings {
+  const counts = Object.fromEntries(
+    Object.entries(value ?? {})
+      .map(([envName, count]) => [envName.trim(), normalizeAppWindowCount(Number(count))] as const)
+      .filter(([envName]) => envName.length > 0),
+  );
+  return { counts };
+}
+
+function normalizeAppWindowCount(value: number): number {
+  const count = Math.trunc(value);
+  return Number.isFinite(count)
+    ? Math.min(MAX_APP_WINDOW_COUNT, Math.max(DEFAULT_APP_WINDOW_COUNT, count))
+    : DEFAULT_APP_WINDOW_COUNT;
+}
+
+function normalizeEnvName(value: string): string {
+  const normalized = value.trim();
+  if (!normalized) throw new Error("Environment name is required");
+  return normalized;
+}
+
+async function writeSettings(path: string, settings: DesktopSettingsFile): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
 }
 
 async function readSettings(path: string): Promise<DesktopSettingsFile> {

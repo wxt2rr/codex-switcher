@@ -1,0 +1,70 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import AppPreview from "../../components/AppPreview.astro";
+import { findAsset, getLatestRelease } from "../../lib/releases";
+import { withBase } from "../../lib/paths";
+
+const release = await getLatestRelease();
+const macAsset = findAsset(release, /\.dmg$/i);
+const winAsset = findAsset(release, /\.exe$/i);
+---
+
+<BaseLayout title="codex-switcher｜管理多个 Codex 环境与账号" description="用一个清晰的本地界面管理 Codex CLI 与 App 的环境、账号、模型、路由和用量。">
+  <section class="hero page-container">
+    <div class="hero-copy">
+      <span class="eyebrow">为 Codex CLI / App 设计</span>
+      <h1>一个界面，管理多个<br /><span>Codex 环境与账号</span></h1>
+      <p>隔离会话，切换身份，配置模型，并按环境一键启动 CLI 或 App。把复杂的本地配置，变成看得懂、切得快的工作流。</p>
+      <div class="hero-actions">
+        <a class="button button-primary" href="#download">下载桌面版 <span aria-hidden="true">↗</span></a>
+        <a class="button button-secondary" href={withBase("/zh/docs/")}>查看使用文档</a>
+      </div>
+      <div class="hero-note"><span class="status-dot"></span>本地优先 · macOS / Windows · MIT License</div>
+    </div>
+    <div class="hero-preview"><AppPreview /></div>
+  </section>
+
+  <section class="section page-container" id="concepts">
+    <div class="section-heading"><span class="eyebrow">先理解两个概念</span><h2>环境和账号，各自负责一件事</h2><p>用环境隔离会话与配置，用账号管理登录身份。两者组合起来，适合个人、工作和不同项目并行使用。</p></div>
+    <div class="concept-grid">
+      <article class="concept-card card"><div class="concept-number">01</div><h3>环境 Env</h3><p>一套独立的本地工作目录，保存会话、历史、配置和路由状态。不同项目可以互不打扰。</p><code>project-a / .codex-envs</code></article>
+      <article class="concept-card card"><div class="concept-number">02</div><h3>账号 Account</h3><p>一个环境下的登录身份或 API Key。切换账号只更换身份，不清空当前环境的对话历史。</p><code>work · personal · api-key</code></article>
+    </div>
+  </section>
+
+  <section class="section feature-section" id="features">
+    <div class="page-container"><div class="section-heading"><span class="eyebrow">能力概览</span><h2>把每天会反复做的切换，收拢到一个地方</h2><p>产品首页只介绍当前软件已经支持的能力，具体步骤和边界以使用文档为准。</p></div>
+      <div class="feature-grid">
+        <article class="feature-card card"><div class="icon-box">↔</div><h3>环境与账号隔离</h3><p>按项目创建环境，在同一个环境里安全切换多个账号。</p><a href={withBase("/zh/docs/concepts/")}>了解概念 →</a></article>
+        <article class="feature-card card"><div class="icon-box">⌁</div><h3>CLI / App 一键启动</h3><p>按环境决定启动当前窗口、新开窗口或覆盖当前窗口。</p><a href={withBase("/zh/docs/launch/")}>查看启动规则 →</a></article>
+        <article class="feature-card card"><div class="icon-box">⌘</div><h3>多种账号模式</h3><p>支持 Auth、API Key、独立 API Key 和 sub2api 配置。</p><a href={withBase("/zh/docs/accounts/")}>查看账号配置 →</a></article>
+        <article class="feature-card card"><div class="icon-box">◇</div><h3>自定义模型</h3><p>维护模型目录，并按账号控制可用模型与 Chat 兼容模式。</p><a href={withBase("/zh/docs/models/")}>查看兼容说明 →</a></article>
+        <article class="feature-card card"><div class="icon-box">⟲</div><h3>本地路由</h3><p>为自定义 API 接入本地路由，支持端口配置和进程生命周期管理。</p><a href={withBase("/zh/docs/routing/")}>查看路由说明 →</a></article>
+        <article class="feature-card card"><div class="icon-box">▥</div><h3>用量与请求详情</h3><p>按环境、账号、Base URL 和模型查看 Token 统计与请求明细。</p><a href={withBase("/zh/docs/usage/")}>查看用量说明 →</a></article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section page-container" id="workflow">
+    <div class="section-heading"><span class="eyebrow">三步开始</span><h2>从安装到切换，不需要记住一串命令</h2></div>
+    <div class="workflow-grid"><article><b>01</b><h3>创建环境</h3><p>为项目或工作场景建立独立的本地空间。</p></article><article><b>02</b><h3>添加账号</h3><p>选择 Auth、API Key 或兼容路由模式，绑定可用模型。</p></article><article><b>03</b><h3>一键启动</h3><p>选择 CLI 或 App，直接进入对应环境和身份。</p></article></div>
+  </section>
+
+  <section class="section muted-section">
+    <div class="page-container split-section"><div><span class="eyebrow">本地优先</span><h2>你的账号和会话，留在你的设备上</h2><p>codex-switcher 不提供云端账号同步。桌面端管理本地环境目录、账号凭证、路由和历史记录，官网只负责介绍、文档和下载。</p></div><div class="privacy-list"><div><strong>本地保存</strong><span>配置和会话不经过产品服务器</span></div><div><strong>可控清理</strong><span>环境历史支持按天异步清理</span></div><div><strong>透明排障</strong><span>日志和请求详情便于定位问题</span></div></div></div>
+  </section>
+
+  <section class="section page-container" id="download">
+    <div class="section-heading"><span class="eyebrow">下载安装</span><h2>选择你的平台，开始管理 Codex</h2><p>当前安装包来自 GitHub Releases。未检测到版本信息时，仍可进入全部版本页面下载。</p></div>
+    <div class="download-grid"><article class="download-card card"><div><span class="platform-label">macOS</span><h3>Apple Silicon</h3><p>{release.version} · DMG 安装包</p></div><a class="button button-primary" href={macAsset?.url ?? release.url} target="_blank" rel="noreferrer">下载 macOS</a></article><article class="download-card card"><div><span class="platform-label">Windows</span><h3>x64</h3><p>{release.version} · NSIS 安装包</p></div><a class="button button-primary" href={winAsset?.url ?? release.url} target="_blank" rel="noreferrer">下载 Windows</a></article></div>
+    <p class="download-footnote">macOS 未签名应用启动说明和 Windows 安全提示，见<a href={withBase("/zh/docs/installation/")}>安装文档</a>。也可以<a href={release.url} target="_blank" rel="noreferrer">查看全部版本</a>。</p>
+  </section>
+
+  <section class="section page-container faq-section" id="faq"><div class="section-heading"><span class="eyebrow">FAQ</span><h2>常见问题，先在这里找到答案</h2></div><div class="faq-list"><details><summary>环境和账号有什么区别？</summary><p>环境隔离会话、历史和配置；账号代表登录身份或 API Key。同一环境可以拥有多个账号。</p></details><details><summary>切换账号会丢失对话吗？</summary><p>同一环境内切换账号只替换账号身份，不会主动删除该环境的会话历史。</p></details><details><summary>什么时候使用 Chat 兼容模式？</summary><p>当上游只接受 Chat Completions 协议时使用。Responses、reasoning、compaction 等能力会受到上游格式限制。</p></details><details><summary>路由会在退出应用后继续运行吗？</summary><p>生命周期由设置中的开关控制，默认不主动关闭；可以按需改为退出应用时停止路由。</p></details></div></section>
+</BaseLayout>
+
+<style>
+  .hero { display: grid; grid-template-columns: .85fr 1.15fr; gap: 4rem; align-items: center; padding-top: 6.5rem; }.hero-copy h1 { margin: 1rem 0 1.25rem; font-size: clamp(2.7rem, 5.8vw, 5.2rem); line-height: 1.03; letter-spacing: -.075em; }.hero-copy h1 span { color: var(--cs-primary); }.hero-copy > p { max-width: 550px; margin: 0; color: var(--cs-muted-foreground); font-size: 17px; line-height: 1.8; }.hero-actions { display: flex; flex-wrap: wrap; gap: .65rem; margin-top: 1.7rem; }.hero-note { display: flex; align-items: center; gap: .5rem; margin-top: 1.2rem; color: var(--cs-muted-foreground); font-size: 12px; }.status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--cs-success); }.hero-preview { min-width: 0; transform: perspective(1200px) rotateY(-2deg) rotateX(1deg); }.concept-grid, .feature-grid, .download-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }.concept-card { padding: 1.5rem; }.concept-number { color: var(--cs-primary); font-size: 12px; font-weight: 700; }.concept-card h3, .feature-card h3, .download-card h3 { margin: 1.25rem 0 .4rem; font-size: 18px; letter-spacing: -.025em; }.concept-card p, .feature-card p, .download-card p { margin: 0; color: var(--cs-muted-foreground); line-height: 1.7; }.concept-card code { display: inline-block; margin-top: 1.25rem; padding: .35rem .5rem; border-radius: .45rem; background: var(--cs-muted); color: var(--cs-muted-foreground); font-size: 12px; }.feature-section, .muted-section { background: var(--cs-muted); }.feature-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }.feature-card { padding: 1.35rem; }.feature-card h3 { margin-top: 1rem; font-size: 16px; }.feature-card a, .download-footnote a { display: inline-block; margin-top: 1.1rem; color: var(--cs-primary); font-size: 13px; font-weight: 650; text-decoration: none; }.workflow-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }.workflow-grid article { padding: 1.4rem 0; border-top: 1px solid var(--cs-border); }.workflow-grid b { color: var(--cs-primary); font-size: 12px; }.workflow-grid h3 { margin: .8rem 0 .3rem; font-size: 18px; }.workflow-grid p { margin: 0; color: var(--cs-muted-foreground); }.split-section { display: grid; grid-template-columns: 1fr 1fr; gap: 5rem; align-items: center; }.split-section h2 { max-width: 460px; margin: 1rem 0 .75rem; font-size: clamp(1.8rem, 3vw, 2.6rem); line-height: 1.15; letter-spacing: -.05em; }.split-section p { max-width: 510px; margin: 0; color: var(--cs-muted-foreground); line-height: 1.8; }.privacy-list { border-top: 1px solid var(--cs-border); }.privacy-list div { display: flex; justify-content: space-between; gap: 2rem; padding: 1rem 0; border-bottom: 1px solid var(--cs-border); }.privacy-list span { color: var(--cs-muted-foreground); text-align: right; }.download-card { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.25rem 1.35rem; }.platform-label { color: var(--cs-primary); font-size: 12px; font-weight: 700; }.download-card h3 { margin: .35rem 0 .1rem; }.download-footnote { color: var(--cs-muted-foreground); font-size: 13px; }.download-footnote a { margin: 0 .25rem; }.faq-list { border-top: 1px solid var(--cs-border); }.faq-list details { border-bottom: 1px solid var(--cs-border); }.faq-list summary { cursor: pointer; padding: 1.15rem 0; font-weight: 650; list-style: none; }.faq-list summary::-webkit-details-marker { display: none; }.faq-list summary::after { float: right; content: "+"; color: var(--cs-muted-foreground); font-size: 18px; font-weight: 400; }.faq-list details[open] summary::after { content: "−"; }.faq-list p { max-width: 700px; margin: -.35rem 0 1.2rem; color: var(--cs-muted-foreground); }
+  @media (max-width: 920px) { .hero { grid-template-columns: 1fr; gap: 2.5rem; padding-top: 4rem; }.hero-preview { transform: none; }.feature-grid { grid-template-columns: repeat(2, 1fr); }.split-section { gap: 2.5rem; } }
+  @media (max-width: 620px) { .hero-copy h1 { font-size: 2.9rem; }.concept-grid, .feature-grid, .download-grid, .workflow-grid, .split-section { grid-template-columns: 1fr; }.download-card { align-items: start; flex-direction: column; }.privacy-list div { display: grid; gap: .2rem; }.privacy-list span { text-align: left; }.feature-grid { gap: .75rem; }.feature-card { padding: 1rem; } }
+</style>

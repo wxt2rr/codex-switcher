@@ -61,6 +61,16 @@ const authMetrics: AuthMetricsPayload = {
       usageWeekly: "20%",
     },
   },
+  requestHealth: {
+    "default/key-user": {
+      envName: "default", accountName: "key-user", sampleSize: 2,
+      successRate: 0.5, cacheHitRate: 0.5,
+      segments: [
+        { completedAt: 1, success: false, cacheHit: false },
+        { completedAt: 2, success: true, cacheHit: true },
+      ],
+    },
+  },
   status: {
     cli: {
       email: "auth@example.com",
@@ -79,15 +89,16 @@ test("mergeOverviewWithAuthMetrics only patches auth-backed records", () => {
     usageWeekly: "20%",
   });
   assert.equal(merged.accounts[1]?.authProfile, undefined);
+  assert.equal(merged.accounts[1]?.requestHealth?.successRate, 0.5);
   assert.equal(merged.status.cli.email, "auth@example.com");
   assert.equal(merged.status.app.email, undefined);
 });
 
-test("mergeAccountUsageMetrics changes only AUTH account usage fields", () => {
+test("mergeAccountUsageMetrics merges remote AUTH usage and local request health", () => {
   const merged = mergeAccountUsageMetrics(overview, authMetrics);
 
   assert.deepEqual(merged.accounts[0]?.authProfile, authMetrics.accounts["default/auth-user"]);
-  assert.equal(merged.accounts[1], overview.accounts[1]);
+  assert.equal(merged.accounts[1]?.requestHealth?.cacheHitRate, 0.5);
   assert.equal(merged.status, overview.status);
   assert.equal(merged.envs, overview.envs);
   assert.equal(merged.recentTasks, overview.recentTasks);

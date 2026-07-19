@@ -8,9 +8,9 @@ import { cn } from "@/lib/utils";
 import { useDelayedUnmount } from "./use-delayed-unmount";
 
 const dialogOverlayClass =
-  "motion-dialog-overlay fixed inset-0 flex items-start justify-center overflow-y-auto bg-slate-950/[0.18] px-6 py-4 backdrop-blur-[2px] sm:items-center";
+  "motion-dialog-overlay fixed inset-0 flex items-center justify-center overflow-y-auto bg-slate-950/[0.22] px-6 py-4";
 const dialogSurfaceClass =
-  "motion-dialog-enter w-full border border-black/[0.07] bg-white p-6 shadow-[0_20px_42px_-14px_rgba(15,23,42,0.24),0_4px_12px_rgba(15,23,42,0.06)]";
+  "motion-dialog-enter w-full border border-black/[0.07] bg-white p-6 shadow-[0_6px_18px_-10px_rgba(15,23,42,0.22),0_1px_3px_rgba(15,23,42,0.08)]";
 
 function DialogPortal({ children }: { children: ReactNode }) {
   if (typeof document === "undefined") return children;
@@ -262,16 +262,12 @@ export function SidePanel({
 
   return (
     <DialogPortal>
-      <div
-        data-state={open ? "open" : "closed"}
-        className={cn(dialogOverlayClass, "z-40")}
-        style={{ alignItems: "flex-start" }}
-      >
+      <div data-state={open ? "open" : "closed"} className={cn(dialogOverlayClass, "z-40")}>
         <div
           data-state={open ? "open" : "closed"}
           className={cn(
             dialogSurfaceClass,
-            "flex max-h-[calc(100vh-2rem)] max-w-[520px] flex-col overflow-hidden rounded-[16px]",
+            "flex max-h-[min(720px,calc(100dvh-2rem))] max-w-[520px] flex-col overflow-hidden rounded-[16px]",
           )}
         >
           <div className="flex items-start justify-between gap-4">

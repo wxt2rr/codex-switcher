@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   getCodexToolPaths: () => ipcRenderer.invoke("desktop:getCodexToolPaths"),
   getCliAutoResumeSettings: () => ipcRenderer.invoke("desktop:getCliAutoResumeSettings"),
   getEnvHistoryRetentionSettings: () => ipcRenderer.invoke("desktop:getEnvHistoryRetentionSettings"),
+  getGeneratedImageRecoverySettings: () => ipcRenderer.invoke("desktop:getGeneratedImageRecoverySettings"),
   getRouterLifecycleSettings: () => ipcRenderer.invoke("desktop:getRouterLifecycleSettings"),
   getRouterPortSettings: () => ipcRenderer.invoke("desktop:getRouterPortSettings"),
   detectCodexToolPaths: () => ipcRenderer.invoke("desktop:detectCodexToolPaths"),
@@ -15,6 +16,8 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     ipcRenderer.invoke("desktop:setCliAutoResumeSettings", value),
   setEnvHistoryRetentionSettings: (value: { enabled: boolean; retentionDays: number }) =>
     ipcRenderer.invoke("desktop:setEnvHistoryRetentionSettings", value),
+  setGeneratedImageRecoverySettings: (value: { enabled: boolean }) =>
+    ipcRenderer.invoke("desktop:setGeneratedImageRecoverySettings", value),
   setRouterLifecycleSettings: (value: { stopOnAppQuit: boolean }) =>
     ipcRenderer.invoke("desktop:setRouterLifecycleSettings", value),
   setRouterPortSettings: (value: { preferredPort: number }) =>
@@ -50,7 +53,7 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     target: "cli" | "app",
     envName: string,
     accountName: string,
-    strategy?: "replace-current" | "current-window" | "new-window",
+    strategy?: "replace-current" | "current-window" | "new-window" | "multi-window",
     workingDirectory?: string,
   ) => ipcRenderer.invoke("desktop:switchAccount", target, envName, accountName, strategy, workingDirectory),
   listAccountProjects: (envName: string, accountName: string) =>
@@ -123,6 +126,8 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   getEnvironmentRouteStatuses: () => ipcRenderer.invoke("desktop:getEnvironmentRouteStatuses"),
   toggleEnvironmentRoute: (envName: string, enabled: boolean) =>
     ipcRenderer.invoke("desktop:toggleEnvironmentRoute", envName, enabled),
+  listAccountPools: () => ipcRenderer.invoke("desktop:listAccountPools"),
+  saveAccountPool: (input: unknown) => ipcRenderer.invoke("desktop:saveAccountPool", input),
   toggleAccountCompatibility: (input: {
     envName: string; accountName: string; enabled: boolean; upstreamModel?: string;
     reasoningProfile?: "auto" | "standard" | "reasoning_content" | "think_tags";
@@ -138,4 +143,11 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   loadUsageRequests: (query: unknown) => ipcRenderer.invoke("desktop:loadUsageRequests", query),
   listUsagePricing: () => ipcRenderer.invoke("desktop:listUsagePricing"),
   saveUsagePricing: (profile: unknown) => ipcRenderer.invoke("desktop:saveUsagePricing", profile),
+  getSkillSnapshot: (refreshMarketplace?: boolean) => ipcRenderer.invoke("desktop:getSkillSnapshot", refreshMarketplace),
+  installSkill: (input: unknown) => ipcRenderer.invoke("desktop:installSkill", input),
+  checkSkillUpdates: (envName: string) => ipcRenderer.invoke("desktop:checkSkillUpdates", envName),
+  updateSkill: (input: unknown) => ipcRenderer.invoke("desktop:updateSkill", input),
+  uninstallSkill: (envName: string, skillId: string) => ipcRenderer.invoke("desktop:uninstallSkill", envName, skillId),
+  setSkillProviderBinding: (input: unknown) => ipcRenderer.invoke("desktop:setSkillProviderBinding", input),
+  repairSkillProvider: (providerId: string) => ipcRenderer.invoke("desktop:repairSkillProvider", providerId),
 });

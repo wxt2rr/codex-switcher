@@ -57,6 +57,10 @@ test("desktop package defines electron packaging entrypoints", () => {
       from: "../../scripts/bin",
       to: "scripts/bin",
     },
+    {
+      from: "resources/skills",
+      to: "skills",
+    },
   ]);
   assert.deepEqual(desktopPackage.build.mac?.target, ["dmg", "zip", "dir"]);
   assert.equal(desktopPackage.build.mac?.icon, "build/icon.icns");

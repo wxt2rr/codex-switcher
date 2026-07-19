@@ -1,0 +1,32 @@
+---
+title: 模型与兼容模式
+description: 添加自定义模型，并理解 Responses 与 Chat Completions 的边界。
+toc:
+  - id: custom
+    label: 自定义模型
+  - id: protocol
+    label: 协议选择
+  - id: chat-limitations
+    label: Chat 兼容限制
+  - id: compression
+    label: 长会话压缩
+---
+
+## 自定义模型
+
+在“模型”页面维护模型标识（slug），再在账号中绑定可用模型。CLI 的模型选择器只有在账号和环境都能读取到模型目录时，才会展示自定义名称。
+
+## 协议选择
+
+- Responses：上游支持 Codex 的 Responses 请求格式时使用。
+- Chat Completions（兼容）：上游只接受 `system/user/assistant/tool` 消息时使用。
+
+兼容模式会根据配置把 `developer` 指令降级为 `system`，但它不是完整协议转换器。
+
+## Chat 兼容限制
+
+Chat 上游通常不接受 Codex 的 `reasoning`、`compaction` 或部分工具调用项。遇到 `Unsupported input item type` 时，先确认协议和路由转换能力，再减少不兼容的历史内容或新开会话。
+
+## 长会话压缩
+
+Responses 模式可以使用 Codex 原生压缩。Chat 兼容模式使用文本摘要时，需要由兼容路由或上游模型完成摘要，再将摘要作为普通消息发送；这不会完全等同于 Codex 原生压缩，也不能保证原生 Token 进度圈语义一致。

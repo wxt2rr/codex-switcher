@@ -1,10 +1,14 @@
-export type NavView = "overview" | "environments" | "accounts" | "models" | "usage" | "operations";
+export type NavView = "overview" | "environments" | "accounts" | "models" | "skills" | "usage" | "operations";
 
 export interface EnvironmentRouteStatus {
   envName: string;
   enabled: boolean;
   routedAccounts: number;
   port: number | null;
+  poolEnabled?: boolean;
+  poolId?: string;
+  poolMemberCount?: number;
+  poolReadyMembers?: number;
 }
 
 export interface UsageFilter {
@@ -21,6 +25,8 @@ export interface UsageRequestQuery extends UsageFilter {
   pageSize: number;
   endpoint?: string;
   status?: "success" | "error";
+  poolId?: string;
+  failoverReason?: string;
   search?: string;
 }
 
@@ -43,6 +49,22 @@ export interface UsageRequestRecord {
   latencyMs: number;
   actualCost: number | null;
   standardCost: number | null;
+  poolId?: string | null;
+  entryAccountName?: string | null;
+  attemptedAccounts?: string[];
+  attemptCount?: number;
+  failoverReason?: string | null;
+  sessionKeyHash?: string | null;
+  errorMessage?: string | null;
+  attempts?: Array<{
+    accountName: string;
+    startedAt: number;
+    completedAt: number;
+    httpStatus: number | null;
+    reason: string | null;
+    errorMessage: string | null;
+    outcome: "success" | "retry" | "returned" | "failed";
+  }>;
 }
 
 export interface UsageRequestPage {
@@ -57,6 +79,8 @@ export interface UsageRequestPage {
     accountNames: string[];
     models: string[];
     endpoints: string[];
+    poolIds: string[];
+    failoverReasons: string[];
   };
 }
 
@@ -113,6 +137,19 @@ export interface AuthProfileSummary {
   usageWeekly: string;
 }
 
+export interface AccountRequestHealth {
+  envName: string;
+  accountName: string;
+  sampleSize: number;
+  successRate: number | null;
+  cacheHitRate: number | null;
+  segments: Array<{
+    completedAt: number;
+    success: boolean;
+    cacheHit: boolean | null;
+  }>;
+}
+
 export interface TargetStatus {
   current: string;
   auth: string;
@@ -147,7 +184,9 @@ export interface AccountSummary {
   authMode: string;
   apiKeyPreview?: string;
   apiKeyValue?: string;
+  hasApiKey?: boolean;
   authProfile?: AuthProfileSummary;
+  requestHealth?: AccountRequestHealth;
   isCurrentCli: boolean;
   isCurrentApp: boolean;
   route?: {
@@ -155,6 +194,8 @@ export interface AccountSummary {
     originalBaseUrl: string;
     localBaseUrl: string;
     protocol?: "responses" | "chat_completions";
+    poolEnabled?: boolean;
+    poolId?: string;
   };
   runtime: {
     preferredAuthMethod: string;
@@ -198,6 +239,7 @@ export interface AuthMetricsTargetStatus {
 
 export interface AuthMetricsPayload {
   accounts: Record<string, AuthProfileSummary>;
+  requestHealth?: Record<string, AccountRequestHealth>;
   status: {
     cli?: AuthMetricsTargetStatus;
     app?: AuthMetricsTargetStatus;

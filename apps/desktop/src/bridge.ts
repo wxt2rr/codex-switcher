@@ -7,6 +7,9 @@ export interface CliAutoResumeSettings { enabled: boolean; sessionNumber: number
 export interface RouterLifecycleSettings { stopOnAppQuit: boolean; }
 export interface RouterPortSettings { preferredPort: number; }
 export interface EnvHistoryRetentionSettings { enabled: boolean; retentionDays: number; }
+export interface GeneratedImageRecoveryStatus {
+  enabled: boolean; installedEnvironments: number; totalEnvironments: number; conflicts: string[];
+}
 export type CliTerminalId = "iterm" | "terminal" | "warp" | "ghostty" | "windows-terminal" | "powershell7" | "windows-powershell" | "command-prompt";
 export interface CliTerminalOption { id: CliTerminalId; label: string; supportsCurrentWindow: boolean; iconUrl?: string; }
 export interface CliTerminalSettings { selectedId: CliTerminalId; terminals: CliTerminalOption[]; }
@@ -58,7 +61,7 @@ export interface DesktopNativeLoginRequest {
   requestOverrides?: Record<string, unknown>;
 }
 
-export type DesktopLaunchStrategy = "replace-current" | "current-window" | "new-window";
+export type DesktopLaunchStrategy = "replace-current" | "current-window" | "new-window" | "multi-window";
 export interface CodexProject { path: string; name: string; lastUsedAt?: string; }
 
 export interface DesktopIndependentModelRequest {
@@ -89,6 +92,22 @@ export interface AccountCompatibilityStatus {
   localBaseUrl?: string;
   message?: string;
 }
+export interface AccountPoolMemberInput { accountName: string; enabled?: boolean; weight?: number; priority?: number; }
+export interface AccountPoolInput {
+  envName: string; enabled: boolean; protocol: "responses" | "chat_completions";
+  members: AccountPoolMemberInput[]; sessionTtlMinutes?: number; maxFailoverAttempts?: number; maxSameAccountFailures?: number;
+}
+export interface AccountPoolMemberStatus {
+  accountName: string; state: "healthy" | "degraded" | "cooldown" | "exhausted" | "unauthorized" | "disabled";
+  consecutiveFailures: number; cooldownUntil: number | null; lastSuccessAt: number | null;
+  lastFailureAt: number | null; lastFailureReason: string | null; lastFailureStatus: number | null;
+}
+export interface AccountPoolStatus {
+  poolId: string; envName: string; protocol: "responses" | "chat_completions"; enabled: boolean;
+  sessionTtlMinutes: number; maxFailoverAttempts: number; maxSameAccountFailures: number;
+  members: Array<{ accountName: string; enabled: boolean; weight: number; priority: number }>;
+  health: AccountPoolMemberStatus[]; readyMembers: number; localBaseUrl?: string;
+}
 export interface CompatibilityCheckResult {
   ok: boolean; status: number; message: string; state?: "ready" | "degraded" | "failed"; checkedAt?: number;
   probes?: Array<{ stage: string; required: boolean; ok: boolean; message: string }>;
@@ -113,6 +132,39 @@ export interface ModelCatalogSnapshot {
 }
 export interface SaveCustomModelRequest { id?: string; entry: Record<string, unknown>; }
 
+export type SkillProviderId = "claude-code" | "qoder" | "zcode" | "codebuddy" | "cursor";
+export interface MarketplaceSkill {
+  id: string; slug: string; name: string; source: string; installs?: number;
+  installUrl: string; url: string; description?: string;
+}
+export interface MarketplaceSnapshot {
+  items: MarketplaceSkill[]; status: "live" | "cached" | "link-only" | "error";
+  fetchedAt?: string; message?: string; externalUrl: string;
+}
+export interface InstalledSkill {
+  id: string; name: string; description: string; path: string; scopeId: string;
+  managed: boolean; linked: boolean; linkedFrom?: string; sourceUrl?: string;
+  sourcePath?: string; requestedRef?: string; revision?: string; installedAt?: string;
+  state: "healthy" | "modified" | "missing" | "conflict";
+}
+export interface SkillScope {
+  id: string; kind: "marketplace" | "codex" | "provider"; name: string; path?: string;
+  envName?: string; providerId?: SkillProviderId; sourceEnv?: string; skills: InstalledSkill[];
+}
+export interface ProviderBinding {
+  providerId: SkillProviderId; enabled: boolean; sourceEnv?: string; targetPath: string;
+  status: "disabled" | "healthy" | "conflict" | "missing-source" | "error";
+  managedLinks: number; conflicts: number; message?: string;
+}
+export interface SkillManagerSnapshot { marketplace: MarketplaceSnapshot; scopes: SkillScope[]; bindings: ProviderBinding[]; }
+export interface InstallSkillRequest {
+  envName: string; sourceUrl: string; skillName?: string; sourcePath?: string; ref?: string; force?: boolean;
+}
+export interface UpdateSkillRequest { envName: string; skillId: string; force?: boolean; }
+export interface SetProviderBindingRequest {
+  providerId: SkillProviderId; enabled: boolean; sourceEnv?: string; targetPath?: string;
+}
+
 import type {
   EnvironmentRouteStatus,
   UsageFilter,
@@ -128,6 +180,7 @@ export interface DesktopElectronApi {
   getCodexToolPaths(): Promise<CodexToolStatus[]>;
   getCliAutoResumeSettings(): Promise<CliAutoResumeSettings>;
   getEnvHistoryRetentionSettings(): Promise<EnvHistoryRetentionSettings>;
+  getGeneratedImageRecoverySettings(): Promise<GeneratedImageRecoveryStatus>;
   getRouterLifecycleSettings(): Promise<RouterLifecycleSettings>;
   getRouterPortSettings(): Promise<RouterPortSettings>;
   detectCodexToolPaths(): Promise<CodexToolStatus[]>;
@@ -135,6 +188,7 @@ export interface DesktopElectronApi {
   clearCodexToolPath(kind: "cli" | "app"): Promise<CodexToolStatus>;
   setCliAutoResumeSettings(value: CliAutoResumeSettings): Promise<CliAutoResumeSettings>;
   setEnvHistoryRetentionSettings(value: EnvHistoryRetentionSettings): Promise<EnvHistoryRetentionSettings>;
+  setGeneratedImageRecoverySettings(value: { enabled: boolean }): Promise<GeneratedImageRecoveryStatus>;
   setRouterLifecycleSettings(value: RouterLifecycleSettings): Promise<RouterLifecycleSettings>;
   setRouterPortSettings(value: RouterPortSettings): Promise<RouterPortSettings>;
   getCliTerminalSettings(): Promise<CliTerminalSettings>;
@@ -194,6 +248,8 @@ export interface DesktopElectronApi {
   readTokenRefreshLog(): Promise<DesktopLogResult>;
   getEnvironmentRouteStatuses(): Promise<EnvironmentRouteStatus[]>;
   toggleEnvironmentRoute(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
+  listAccountPools(): Promise<AccountPoolStatus[]>;
+  saveAccountPool(input: AccountPoolInput): Promise<AccountPoolStatus | null>;
   toggleAccountCompatibility(input: AccountCompatibilityRequest): Promise<AccountCompatibilityStatus>;
   getAccountCompatibilityStatuses(accountKeys: string[]): Promise<AccountCompatibilityStatus[]>;
   checkAccountCompatibility(envName: string, accountName: string): Promise<CompatibilityCheckResult>;
@@ -201,6 +257,13 @@ export interface DesktopElectronApi {
   loadUsageRequests(query: UsageRequestQuery): Promise<UsageRequestPage>;
   listUsagePricing(): Promise<UsagePricingProfile[]>;
   saveUsagePricing(profile: UsagePricingProfile): Promise<void>;
+  getSkillSnapshot(refreshMarketplace?: boolean): Promise<SkillManagerSnapshot>;
+  installSkill(input: InstallSkillRequest): Promise<InstalledSkill>;
+  checkSkillUpdates(envName: string): Promise<Record<string, boolean>>;
+  updateSkill(input: UpdateSkillRequest): Promise<InstalledSkill>;
+  uninstallSkill(envName: string, skillId: string): Promise<void>;
+  setSkillProviderBinding(input: SetProviderBindingRequest): Promise<ProviderBinding>;
+  repairSkillProvider(providerId: SkillProviderId): Promise<ProviderBinding>;
 }
 
 export interface DesktopBridge {
@@ -209,6 +272,7 @@ export interface DesktopBridge {
   getCodexToolPaths(): Promise<CodexToolStatus[]>;
   getCliAutoResumeSettings(): Promise<CliAutoResumeSettings>;
   getEnvHistoryRetentionSettings(): Promise<EnvHistoryRetentionSettings>;
+  getGeneratedImageRecoverySettings(): Promise<GeneratedImageRecoveryStatus>;
   getRouterLifecycleSettings(): Promise<RouterLifecycleSettings>;
   getRouterPortSettings(): Promise<RouterPortSettings>;
   detectCodexToolPaths(): Promise<CodexToolStatus[]>;
@@ -216,6 +280,7 @@ export interface DesktopBridge {
   clearCodexToolPath(kind: "cli" | "app"): Promise<CodexToolStatus>;
   setCliAutoResumeSettings(value: CliAutoResumeSettings): Promise<CliAutoResumeSettings>;
   setEnvHistoryRetentionSettings(value: EnvHistoryRetentionSettings): Promise<EnvHistoryRetentionSettings>;
+  setGeneratedImageRecoverySettings(value: { enabled: boolean }): Promise<GeneratedImageRecoveryStatus>;
   setRouterLifecycleSettings(value: RouterLifecycleSettings): Promise<RouterLifecycleSettings>;
   setRouterPortSettings(value: RouterPortSettings): Promise<RouterPortSettings>;
   getCliTerminalSettings(): Promise<CliTerminalSettings>;
@@ -275,6 +340,8 @@ export interface DesktopBridge {
   readTokenRefreshLog(): Promise<DesktopLogResult>;
   getEnvironmentRouteStatuses(): Promise<EnvironmentRouteStatus[]>;
   toggleEnvironmentRoute(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
+  listAccountPools(): Promise<AccountPoolStatus[]>;
+  saveAccountPool(input: AccountPoolInput): Promise<AccountPoolStatus | null>;
   toggleAccountCompatibility(input: AccountCompatibilityRequest): Promise<AccountCompatibilityStatus>;
   getAccountCompatibilityStatuses(accountKeys: string[]): Promise<AccountCompatibilityStatus[]>;
   checkAccountCompatibility(envName: string, accountName: string): Promise<CompatibilityCheckResult>;
@@ -282,6 +349,13 @@ export interface DesktopBridge {
   loadUsageRequests(query: UsageRequestQuery): Promise<UsageRequestPage>;
   listUsagePricing(): Promise<UsagePricingProfile[]>;
   saveUsagePricing(profile: UsagePricingProfile): Promise<void>;
+  getSkillSnapshot(refreshMarketplace?: boolean): Promise<SkillManagerSnapshot>;
+  installSkill(input: InstallSkillRequest): Promise<InstalledSkill>;
+  checkSkillUpdates(envName: string): Promise<Record<string, boolean>>;
+  updateSkill(input: UpdateSkillRequest): Promise<InstalledSkill>;
+  uninstallSkill(envName: string, skillId: string): Promise<void>;
+  setSkillProviderBinding(input: SetProviderBindingRequest): Promise<ProviderBinding>;
+  repairSkillProvider(providerId: SkillProviderId): Promise<ProviderBinding>;
 }
 
 export function createDesktopBridge(api: DesktopElectronApi | undefined): DesktopBridge {
@@ -292,6 +366,7 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       getCodexToolPaths: unavailable,
       getCliAutoResumeSettings: unavailable,
       getEnvHistoryRetentionSettings: unavailable,
+      getGeneratedImageRecoverySettings: unavailable,
       getRouterLifecycleSettings: unavailable,
       getRouterPortSettings: unavailable,
       detectCodexToolPaths: unavailable,
@@ -299,6 +374,7 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       clearCodexToolPath: unavailable,
       setCliAutoResumeSettings: unavailable,
       setEnvHistoryRetentionSettings: unavailable,
+      setGeneratedImageRecoverySettings: unavailable,
       setRouterLifecycleSettings: unavailable,
       setRouterPortSettings: unavailable,
       getCliTerminalSettings: unavailable,
@@ -352,6 +428,8 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       readTokenRefreshLog: unavailable,
       getEnvironmentRouteStatuses: unavailable,
       toggleEnvironmentRoute: unavailable,
+      listAccountPools: unavailable,
+      saveAccountPool: unavailable,
       toggleAccountCompatibility: unavailable,
       getAccountCompatibilityStatuses: unavailable,
       checkAccountCompatibility: unavailable,
@@ -359,6 +437,13 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       loadUsageRequests: unavailable,
       listUsagePricing: unavailable,
       saveUsagePricing: unavailable,
+      getSkillSnapshot: unavailable,
+      installSkill: unavailable,
+      checkSkillUpdates: unavailable,
+      updateSkill: unavailable,
+      uninstallSkill: unavailable,
+      setSkillProviderBinding: unavailable,
+      repairSkillProvider: unavailable,
     };
   }
 
@@ -399,6 +484,23 @@ async function browserPreviewLoadAuthMetrics() {
   return `${JSON.stringify(
     {
       accounts,
+      requestHealth: Object.fromEntries(fallbackOverview.accounts
+        .filter((account) => account.authMode === "apikey" || Boolean(account.runtime.independentModelApiKey))
+        .map((account, accountIndex) => {
+          const segments = Array.from({ length: 60 }, (_, index) => ({
+            completedAt: Date.now() - (59 - index) * 30_000,
+            success: (index + accountIndex) % 17 !== 0,
+            cacheHit: (index + accountIndex) % 7 !== 0,
+          }));
+          return [`${account.envName}/${account.name}`, {
+            envName: account.envName,
+            accountName: account.name,
+            sampleSize: segments.length,
+            successRate: segments.filter((segment) => segment.success).length / segments.length,
+            cacheHitRate: segments.filter((segment) => segment.cacheHit).length / segments.length,
+            segments,
+          }];
+        })),
       status: {
         cli: {
           email: fallbackOverview.status.cli.email ?? "wangxt@example.com",
@@ -516,6 +618,8 @@ function createBrowserPreviewBridge(): DesktopBridge {
     toggleEnvironmentRoute: async (envName, enabled) => ({
       envName, enabled, routedAccounts: enabled ? 2 : 0, port: enabled ? 17832 : null,
     }),
+    listAccountPools: async () => [],
+    saveAccountPool: async () => null,
     toggleAccountCompatibility: async (input) => ({ envName: input.envName, accountName: input.accountName,
       enabled: input.enabled, state: input.enabled ? "ready" : "disabled" }),
     getAccountCompatibilityStatuses: async (keys) => keys.map((key) => {
@@ -549,7 +653,7 @@ function createBrowserPreviewBridge(): DesktopBridge {
     }),
     loadUsageRequests: async (query) => ({
       generatedAt: Date.now(), total: 2, page: query.page, pageSize: query.pageSize, totalPages: 1,
-      facets: { envNames: ["wangxt"], accountNames: ["demo"], models: ["gpt-5.4"], endpoints: ["/responses"] },
+      facets: { envNames: ["wangxt"], accountNames: ["demo"], models: ["gpt-5.4"], endpoints: ["/responses"], poolIds: [], failoverReasons: [] },
       items: [
         { requestId: "req-preview-1", routeId: "route-preview", startedAt: Date.now() - 1250,
           completedAt: Date.now(), envName: "wangxt", accountName: "demo",
@@ -567,7 +671,94 @@ function createBrowserPreviewBridge(): DesktopBridge {
     }),
     listUsagePricing: async () => [],
     saveUsagePricing: async () => undefined,
+    getGeneratedImageRecoverySettings: async () => ({
+      enabled: false, installedEnvironments: 0, totalEnvironments: 2, conflicts: [],
+    }),
+    setGeneratedImageRecoverySettings: async (value) => ({
+      enabled: value.enabled, installedEnvironments: value.enabled ? 2 : 0, totalEnvironments: 2, conflicts: [],
+    }),
+    getSkillSnapshot: async (refreshMarketplace) => loadPreviewSkillSnapshot(Boolean(refreshMarketplace)),
+    installSkill: async (input) => ({
+      id: input.skillName ?? "preview-skill", name: input.skillName ?? "Preview Skill",
+      description: "Preview installation", path: `/preview/${input.envName}/skills/${input.skillName ?? "preview-skill"}`,
+      scopeId: `codex:${input.envName}`, managed: true, linked: false, state: "healthy",
+    }),
+    checkSkillUpdates: async () => ({ "apple-design": true }),
+    updateSkill: async (input) => ({
+      id: input.skillId, name: input.skillId, description: "Updated preview skill",
+      path: `/preview/${input.envName}/skills/${input.skillId}`, scopeId: `codex:${input.envName}`,
+      managed: true, linked: false, state: "healthy",
+    }),
+    uninstallSkill: async () => undefined,
+    setSkillProviderBinding: async (input) => ({
+      providerId: input.providerId, enabled: input.enabled, sourceEnv: input.sourceEnv,
+      targetPath: input.targetPath ?? `~/.${input.providerId}/skills`, status: input.enabled ? "healthy" : "disabled",
+      managedLinks: input.enabled ? 3 : 0, conflicts: 0,
+    }),
+    repairSkillProvider: async (providerId) => ({
+      providerId, enabled: true, sourceEnv: "personal", targetPath: `~/.${providerId}/skills`,
+      status: "healthy", managedLinks: 3, conflicts: 0,
+    }),
   };
+}
+
+const previewInstalledSkills: InstalledSkill[] = [
+  { id: "animation-vocabulary", name: "Animation Vocabulary", description: "Reverse-lookup glossary for web animation and motion effects.",
+    path: "/preview/personal/skills/animation-vocabulary", scopeId: "codex:personal", managed: true, linked: false,
+    sourceUrl: "https://github.com/example/skills.git", revision: "a1b2c3d", state: "healthy" },
+  { id: "apple-design", name: "Apple Design", description: "Apple's approach to interface design and fluid physical motion.",
+    path: "/preview/personal/skills/apple-design", scopeId: "codex:personal", managed: true, linked: false,
+    sourceUrl: "https://github.com/example/skills.git", revision: "b2c3d4e", state: "healthy" },
+  { id: "completion-review", name: "Completion Review Skill", description: "Determine whether development work is genuinely complete.",
+    path: "/preview/personal/skills/completion-review", scopeId: "codex:personal", managed: false, linked: false, state: "healthy" },
+];
+
+const previewSkillSnapshot: SkillManagerSnapshot = {
+  marketplace: {
+    status: "live", fetchedAt: new Date().toISOString(), externalUrl: "https://skills.sh",
+    items: [
+      { id: "vercel-labs/skills/find-skills", slug: "find-skills", name: "Find Skills", source: "vercel-labs/skills",
+        installs: 24531, installUrl: "https://github.com/vercel-labs/skills", url: "https://skills.sh/vercel-labs/skills/find-skills",
+        description: "Discover and install skills from the open ecosystem." },
+      { id: "anthropics/skills/frontend-design", slug: "frontend-design", name: "Frontend Design", source: "anthropics/skills",
+        installs: 18340, installUrl: "https://github.com/anthropics/skills", url: "https://skills.sh/anthropics/skills/frontend-design",
+        description: "Build distinctive, production-grade frontend interfaces." },
+      { id: "vercel-labs/agent-skills/web-design-guidelines", slug: "web-design-guidelines", name: "Web Design Guidelines",
+        source: "vercel-labs/agent-skills", installs: 12680, installUrl: "https://github.com/vercel-labs/agent-skills",
+        url: "https://skills.sh/vercel-labs/agent-skills/web-design-guidelines", description: "Review UI code against practical web interface guidelines." },
+    ],
+  },
+  scopes: [
+    { id: "marketplace", kind: "marketplace", name: "Marketplace", skills: [] },
+    { id: "codex:personal", kind: "codex", name: "Codex · Personal", envName: "personal", path: "/preview/personal/skills", skills: previewInstalledSkills },
+    { id: "codex:company", kind: "codex", name: "Codex · Company", envName: "company", path: "/preview/company/skills", skills: [] },
+    { id: "provider:claude-code", kind: "provider", name: "Claude Code", providerId: "claude-code", path: "~/.claude/skills", skills: [] },
+    { id: "provider:qoder", kind: "provider", name: "Qoder", providerId: "qoder", path: "~/.qoder/skills", skills: [] },
+    { id: "provider:zcode", kind: "provider", name: "ZCode", providerId: "zcode", path: "~/.zcode/skills", skills: [] },
+    { id: "provider:codebuddy", kind: "provider", name: "CodeBuddy / WorkBuddy", providerId: "codebuddy", path: "~/.codebuddy/skills", skills: [] },
+    { id: "provider:cursor", kind: "provider", name: "Cursor", providerId: "cursor", path: "~/.cursor/skills", skills: [] },
+  ],
+  bindings: [
+    { providerId: "claude-code", enabled: false, targetPath: "~/.claude/skills", status: "disabled", managedLinks: 0, conflicts: 0 },
+    { providerId: "qoder", enabled: false, targetPath: "~/.qoder/skills", status: "disabled", managedLinks: 0, conflicts: 0 },
+    { providerId: "zcode", enabled: false, targetPath: "~/.zcode/skills", status: "disabled", managedLinks: 0, conflicts: 0 },
+    { providerId: "codebuddy", enabled: false, targetPath: "~/.codebuddy/skills", status: "disabled", managedLinks: 0, conflicts: 0 },
+    { providerId: "cursor", enabled: false, targetPath: "~/.cursor/skills", status: "disabled", managedLinks: 0, conflicts: 0 },
+  ],
+};
+
+async function loadPreviewSkillSnapshot(refreshMarketplace: boolean): Promise<SkillManagerSnapshot> {
+  try {
+    const response = await fetch(`/desktop-preview/skills-snapshot?refresh=${refreshMarketplace}`);
+    if (!response.ok) throw new Error(`Marketplace returned HTTP ${response.status}`);
+    return await response.json() as SkillManagerSnapshot;
+  } catch (error) {
+    return { ...previewSkillSnapshot, marketplace: {
+      ...previewSkillSnapshot.marketplace,
+      status: "cached",
+      message: error instanceof Error ? error.message : String(error),
+    } };
+  }
 }
 
 declare global {

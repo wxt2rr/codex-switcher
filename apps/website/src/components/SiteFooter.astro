@@ -1,0 +1,20 @@
+---
+import Logo from "./Logo.astro";
+import { withBase } from "../lib/paths";
+---
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div>
+      <Logo />
+      <p>让多个 Codex 环境和账号各就各位。</p>
+    </div>
+    <div class="footer-links">
+      <a href={withBase("/zh/docs/")}>使用文档</a>
+      <a href={withBase("/zh/#download")}>下载安装</a>
+      <a href="https://github.com/wxt2rr/codex-switcher/releases" target="_blank" rel="noreferrer">更新记录</a>
+      <a href="https://github.com/wxt2rr/codex-switcher" target="_blank" rel="noreferrer">GitHub</a>
+    </div>
+  </div>
+  <div class="footer-meta">© {new Date().getFullYear()} codex-switcher · MIT License · 本地优先</div>
+</footer>

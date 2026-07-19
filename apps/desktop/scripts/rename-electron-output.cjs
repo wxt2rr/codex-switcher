@@ -15,6 +15,7 @@ const commonJsModules = [
   "codex-projects",
   "codex-tool-paths",
   "desktop-settings",
+  "generated-image-recovery-skill",
   "cli-terminal-settings",
   "env-file-history",
   "env-history-retention",

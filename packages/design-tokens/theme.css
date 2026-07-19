@@ -1,0 +1,38 @@
+:root {
+  --cs-font-sans: "Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --cs-background: oklch(0.975 0.004 85);
+  --cs-surface: oklch(0.99 0 0);
+  --cs-foreground: oklch(0.18 0 0);
+  --cs-muted: oklch(0.965 0 0);
+  --cs-muted-foreground: oklch(0.495 0.005 85);
+  --cs-border: oklch(0.9 0 0);
+  --cs-primary: oklch(0.623 0.214 259.815);
+  --cs-primary-foreground: oklch(0.99 0 0);
+  --cs-selected-background: oklch(0.951 0.026 236.824);
+  --cs-selected-border: rgb(148 163 184 / 0.55);
+  --cs-success: oklch(0.596 0.145 163.225);
+  --cs-success-background: oklch(0.979 0.021 166.113);
+  --cs-danger: oklch(0.586 0.253 17.585);
+  --cs-danger-background: oklch(0.969 0.015 12.422);
+  --cs-radius-sm: 0.625rem;
+  --cs-radius-md: 0.875rem;
+  --cs-radius-lg: 1.125rem;
+  --cs-shadow-xs: 0 1px 3px rgb(0 0 0 / 0.04), 0 1px 2px -1px rgb(0 0 0 / 0.04);
+  --cs-shadow-sm: 0 1px 3px rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.04);
+  --cs-shadow-lg: 0 18px 40px rgb(15 23 42 / 0.08);
+  --cs-motion-fast: 160ms;
+  --cs-motion-normal: 180ms;
+  --cs-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.dark {
+  --cs-background: oklch(0.16 0.01 250);
+  --cs-surface: oklch(0.2 0.01 250);
+  --cs-foreground: oklch(0.96 0 0);
+  --cs-muted: oklch(0.22 0.01 250);
+  --cs-muted-foreground: oklch(0.72 0 0);
+  --cs-border: oklch(0.3 0.01 250);
+  --cs-primary: oklch(0.707 0.165 254.624);
+  --cs-primary-foreground: oklch(0.16 0 0);
+  --cs-selected-border: rgb(100 116 139 / 0.8);
+}

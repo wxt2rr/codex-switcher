@@ -1,0 +1,58 @@
+---
+title: 故障排查
+description: 按现象、原因、处理和验证结果快速定位问题。
+toc:
+  - id: protocol
+    label: 请求格式错误
+  - id: process
+    label: 路由或进程错误
+  - id: platform
+    label: 平台启动错误
+  - id: config
+    label: 配置文件检查
+---
+
+## 请求格式错误
+
+### `unknown variant developer`
+
+**现象**：上游只接受 `system/user/assistant/tool/latest_reminder`，但请求包含 `developer`。
+
+**原因**：当前账号使用 Chat 兼容模式，而上游不是 Responses API。
+
+**处理**：在账号编辑中选择兼容模式，并将指令角色设置为自动或 `system`；保存后新开会话验证。
+
+**验证**：请求体不再包含 `developer`，且上游返回正常消息。
+
+### `Unsupported input item type reasoning / compaction`
+
+**现象**：继续长会话或压缩时被拒绝。
+
+**原因**：Chat Completions 上游无法识别 Codex 原生 Responses 项。
+
+**处理**：新开会话、使用文本摘要策略，或切换到支持 Responses 的上游；不要把 Chat 兼容模式当作完整 Responses 实现。
+
+## 路由或进程错误
+
+### `ENOENT`
+
+确认路由目录、安装路径和当前环境 home 存在。软件会在启动时创建必要目录，但错误的手动路径仍需在设置中修正。
+
+### `kill EPERM`
+
+Windows 可能拒绝结束 MSIX 管理的进程。刷新状态后再启动；如果旧实例仍在运行，使用系统任务管理器确认后再重试。
+
+## 平台启动错误
+
+macOS 显示“应用已损坏”时，按[安装说明](../installation/)移除 quarantine 属性。Windows 启动失败时，先确认 App 路径和 AppExecutionAlias，再确认安装包已被 SmartScreen 保留。
+
+## 配置文件检查
+
+确认当前环境的 `config.toml` 使用预期的 `openai_base_url`，且没有被另一个环境覆盖。API Key 模式通常需要：
+
+```toml
+requires_openai_auth = false
+http_headers = { "x-openai-actor-authorization" = "codex-sw.app" }
+```
+
+检查后重新启动目标，不要在多个环境间复制同一份运行时配置文件。

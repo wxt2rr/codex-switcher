@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { mergeAccountUsageMetrics, mergeOverviewWithAuthMetrics } from "@/auth-metrics";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/components/theme-provider";
-import type { CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry, EnvHistoryRetentionSettings, RouterLifecycleSettings, RouterPortSettings } from "./bridge";
+import type { AccountPoolInput, AccountPoolStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry, DesktopLaunchStrategy, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, RouterLifecycleSettings, RouterPortSettings } from "./bridge";
 import { DesktopShell } from "./components/desktop-shell";
 import type { AccountSummary, AuthMetricsPayload, EnvironmentRouteStatus, NavView, OverviewPayload } from "./desktop-model";
 import { resolveDesktopBridge } from "./bridge";
@@ -12,6 +12,7 @@ import { AccountsPage, type AccountProtocolSettings } from "./pages/accounts-pag
 import { EnvironmentsPage } from "./pages/environments-page";
 import { OperationsPage } from "./pages/operations-page";
 import { ModelsPage } from "./pages/models-page";
+import { SkillsPage } from "./pages/skills-page";
 import { UsagePage } from "./pages/usage-page";
 import { parseProxyStatusOutput, shouldAutoLoadProxy } from "./proxy-status";
 import {
@@ -31,7 +32,7 @@ function resolveInitialView(): NavView {
     return "accounts";
   }
   const view = new URLSearchParams(window.location.search).get("view");
-  if (view === "environments" || view === "accounts" || view === "models" || view === "usage" || view === "operations") {
+  if (view === "environments" || view === "accounts" || view === "models" || view === "skills" || view === "usage" || view === "operations") {
     return view;
   }
   return "accounts";
@@ -78,9 +79,14 @@ export function App() {
   const [routerPortSaving, setRouterPortSaving] = useState(false);
   const [envHistoryRetention, setEnvHistoryRetention] = useState<EnvHistoryRetentionSettings>({ enabled: false, retentionDays: 30 });
   const [envHistoryRetentionSaving, setEnvHistoryRetentionSaving] = useState(false);
+  const [generatedImageRecovery, setGeneratedImageRecovery] = useState<GeneratedImageRecoveryStatus>({
+    enabled: false, installedEnvironments: 0, totalEnvironments: 0, conflicts: [],
+  });
+  const [generatedImageRecoverySaving, setGeneratedImageRecoverySaving] = useState(false);
   const [cliTerminalSettings, setCliTerminalSettings] = useState<CliTerminalSettings | null>(null);
   const [cliTerminalSaving, setCliTerminalSaving] = useState(false);
   const [routeStatuses, setRouteStatuses] = useState<EnvironmentRouteStatus[]>([]);
+  const [accountPools, setAccountPools] = useState<AccountPoolStatus[]>([]);
   const authMetricsRequestRef = useRef(0);
   const authMetricsInFlightRef = useRef(false);
   const proxyDraftDirtyRef = useRef(false);
@@ -142,7 +148,12 @@ export function App() {
 
   useEffect(() => {
     if (view !== "environments" || !overview) return;
-    void bridge.getEnvironmentRouteStatuses().then(setRouteStatuses).catch(setErrorMessage);
+    const refreshPools = () => bridge.listAccountPools().then(setAccountPools).catch(setErrorMessage);
+    void Promise.all([bridge.getEnvironmentRouteStatuses(), bridge.listAccountPools()])
+      .then(([routes, pools]) => { setRouteStatuses(routes); setAccountPools(pools); })
+      .catch(setErrorMessage);
+    const interval = window.setInterval(() => { void refreshPools(); }, 10_000);
+    return () => window.clearInterval(interval);
   }, [view, overview?.generatedAt]);
 
   useEffect(() => {
@@ -156,6 +167,7 @@ export function App() {
     void bridge.getRouterLifecycleSettings().then(setRouterLifecycle).catch(setErrorMessage);
     void bridge.getRouterPortSettings().then(setRouterPort).catch(setErrorMessage);
     void bridge.getEnvHistoryRetentionSettings().then(setEnvHistoryRetention).catch(setErrorMessage);
+    void bridge.getGeneratedImageRecoverySettings().then(setGeneratedImageRecovery).catch(setErrorMessage);
   }, [view]);
 
   async function initializeApp() {
@@ -238,6 +250,24 @@ export function App() {
     }
   }
 
+  async function handleGeneratedImageRecoveryChange(enabled: boolean) {
+    const previous = generatedImageRecovery;
+    setGeneratedImageRecovery((current) => ({ ...current, enabled }));
+    setGeneratedImageRecoverySaving(true);
+    try {
+      const saved = await bridge.setGeneratedImageRecoverySettings({ enabled });
+      setGeneratedImageRecovery(saved);
+      setSuccessMessage(language === "zh"
+        ? enabled ? `已在 ${saved.installedEnvironments} 个 Codex 环境安装图片恢复 Skill` : "已从所有 Codex 环境移除图片恢复 Skill"
+        : enabled ? `Recovery skill installed in ${saved.installedEnvironments} Codex environments` : "Recovery skill removed from all Codex environments");
+    } catch (error) {
+      setGeneratedImageRecovery(previous);
+      setErrorMessage(error);
+    } finally {
+      setGeneratedImageRecoverySaving(false);
+    }
+  }
+
   async function handleRouterPortChange(next: RouterPortSettings) {
     const previous = routerPort;
     setRouterPort(next);
@@ -274,6 +304,20 @@ export function App() {
       setSuccessMessage(language === "zh" ? `环境 ${envName} 路由已${enabled ? "开启" : "关闭"}` : `Routing ${enabled ? "enabled" : "disabled"} for ${envName}`);
       await refreshOverview({ loadMetrics: false });
     } catch (error) { setErrorMessage(error); }
+    finally { setBusy(false); }
+  }
+
+  async function handleSaveAccountPool(input: AccountPoolInput) {
+    setBusy(true);
+    try {
+      const next = await bridge.saveAccountPool(input);
+      setAccountPools((current) => [...current.filter((item) => item.envName !== input.envName), ...(next ? [next] : [])]);
+      const routes = await bridge.getEnvironmentRouteStatuses();
+      setRouteStatuses(routes);
+      setSuccessMessage(language === "zh" ? `环境 ${input.envName} 账号池已${input.enabled ? "保存" : "关闭"}` : `Account pool ${input.enabled ? "saved" : "disabled"}`);
+      await refreshOverview({ loadMetrics: false });
+      return true;
+    } catch (error) { setErrorMessage(error); return false; }
     finally { setBusy(false); }
   }
 
@@ -414,13 +458,23 @@ export function App() {
   async function handleSwitchAccount(
     target: "cli" | "app",
     account: AccountSummary,
-    strategy?: "replace-current" | "current-window" | "new-window",
+    strategy?: DesktopLaunchStrategy,
     workingDirectory?: string,
   ) {
     setBusy(true);
     try {
       await bridge.switchAccount(target, account.envName, account.name, strategy, workingDirectory);
-      setMessage(buildDesktopNotice(language, "success", translate(copy.message.switchedAccount, { target: target.toUpperCase(), env: account.envName, account: account.name })));
+      setMessage(buildDesktopNotice(
+        language,
+        "success",
+        strategy === "multi-window"
+          ? language === "zh"
+            ? `已为 ${account.envName}/${account.name} 新开一个 App 窗口`
+            : language === "ja"
+              ? `${account.envName}/${account.name} の App ウィンドウを追加しました`
+              : `Opened another App window for ${account.envName}/${account.name}`
+          : translate(copy.message.switchedAccount, { target: target.toUpperCase(), env: account.envName, account: account.name }),
+      ));
       await refreshOverview({ loadMetrics: true });
     } catch (error) {
       setErrorMessage(error);
@@ -826,6 +880,7 @@ export function App() {
           { view: "accounts", label: copy.nav.accounts },
           { view: "environments", label: copy.nav.environments },
           { view: "models", label: copy.nav.models },
+          { view: "skills", label: copy.nav.skills },
           { view: "usage", label: copy.nav.usage },
           { view: "operations", label: copy.nav.operations },
         ]}
@@ -835,7 +890,7 @@ export function App() {
         noticeVisible={noticeVisible}
         onNoticePauseChange={setNoticePaused}
       >
-        <section className="flex min-h-[calc(100vh-140px)] items-center justify-center">
+        <section className="flex h-full min-h-0 items-center justify-center px-6">
           <div className="w-full max-w-[520px]">
             <div className="h-1.5 overflow-hidden rounded-full bg-neutral-200/70">
               <div
@@ -864,6 +919,7 @@ export function App() {
           { view: "accounts", label: copy.nav.accounts },
           { view: "environments", label: copy.nav.environments },
           { view: "models", label: copy.nav.models },
+          { view: "skills", label: copy.nav.skills },
           { view: "usage", label: copy.nav.usage },
           { view: "operations", label: copy.nav.operations },
         ]}
@@ -873,7 +929,7 @@ export function App() {
         noticeVisible={noticeVisible}
         onNoticePauseChange={setNoticePaused}
       >
-        <section className="flex min-h-[calc(100vh-140px)] items-center justify-center">
+        <section className="flex h-full min-h-0 items-center justify-center px-6">
           <div className="flex flex-col items-center gap-4">
             <div className="text-lg font-semibold text-neutral-800">{loadingErrorTitle}</div>
             <Button variant="outline" onClick={() => void refreshOverview({ loadMetrics: true })} disabled={busy}>
@@ -892,6 +948,7 @@ export function App() {
         { view: "accounts", label: copy.nav.accounts },
         { view: "environments", label: copy.nav.environments },
         { view: "models", label: copy.nav.models },
+        { view: "skills", label: copy.nav.skills },
         { view: "usage", label: copy.nav.usage },
         { view: "operations", label: copy.nav.operations },
       ]}
@@ -923,6 +980,8 @@ export function App() {
           onDeleteEnv={() => void handleDeleteEnv()}
           routeStatuses={routeStatuses}
           onToggleRoute={handleToggleEnvironmentRoute}
+          accountPools={accountPools}
+          onSaveAccountPool={handleSaveAccountPool}
         />
       ) : null}
 
@@ -974,6 +1033,11 @@ export function App() {
           onCopyAccount={(account, targetEnvName) => void handleCopyAccount(account, targetEnvName)}
           onUpdateRuntime={handleUpdateRuntime}
           onUpdateIndependentModel={handleUpdateIndependentModel}
+          onCopyBaseUrl={(value) => {
+            void bridge.writeClipboardText(value)
+              .then(() => setSuccessMessage(language === "zh" ? "Base URL 已复制" : language === "ja" ? "Base URL をコピーしました" : "Base URL copied"))
+              .catch(setErrorMessage);
+          }}
           onCopyApiKey={(value) => {
             void bridge.writeClipboardText(value)
               .then(() => setSuccessMessage(language === "zh" ? "API Key 已复制" : language === "ja" ? "API Key をコピーしました" : "API key copied"))
@@ -987,6 +1051,15 @@ export function App() {
           overview={overview}
           language={language}
           bridge={bridge}
+          onSuccess={setSuccessMessage}
+          onError={setErrorMessage}
+        />
+      ) : null}
+
+      {view === "skills" ? (
+        <SkillsPage
+          bridge={bridge}
+          language={language}
           onSuccess={setSuccessMessage}
           onError={setErrorMessage}
         />
@@ -1029,6 +1102,9 @@ export function App() {
           envHistoryRetention={envHistoryRetention}
           envHistoryRetentionSaving={envHistoryRetentionSaving}
           onEnvHistoryRetentionChange={(next) => void handleEnvHistoryRetentionChange(next)}
+          generatedImageRecovery={generatedImageRecovery}
+          generatedImageRecoverySaving={generatedImageRecoverySaving}
+          onGeneratedImageRecoveryChange={(enabled) => void handleGeneratedImageRecoveryChange(enabled)}
         />
       ) : null}
 

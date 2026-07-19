@@ -313,6 +313,10 @@ test("desktop bridge deletes envs directly from core state and resets pointers",
       join(root, "state", "env-accounts", "project", "default", "runtime.json"),
       "{\n  \"preferred_auth_method\": \"chatgpt\",\n  \"openai_base_url_mode\": \"default\"\n}\n",
     );
+    await writeFileRecursive(
+      join(root, "state", "desktop-settings.json"),
+      "{\n  \"appWindowCounts\": { \"project\": 4, \"other\": 2 }\n}\n",
+    );
 
     const result = await bridge.deleteEnv("project");
 
@@ -320,6 +324,44 @@ test("desktop bridge deletes envs directly from core state and resets pointers",
     assert.equal(result.output, "project\n");
     await assert.rejects(access(join(root, "envs", "project", "home", "config.toml")));
     assert.equal(await readFile(join(root, "state", "current_cli_env"), "utf8"), "default\n");
+    assert.deepEqual(
+      JSON.parse(await readFile(join(root, "state", "desktop-settings.json"), "utf8")).appWindowCounts,
+      { other: 2 },
+    );
+  } finally {
+    restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("desktop bridge migrates the App window count when an environment is renamed", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-env-window-rename-"));
+  const previousEnv = { ...process.env };
+  try {
+    process.env.HOME = root;
+    process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
+    process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
+    process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
+    await writeFileRecursive(join(root, "state", "current_cli_env"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_cli_account"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_app_env"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_app_account"), "default\n");
+    await writeFileRecursive(join(root, "envs", "project", "home", "config.toml"), "model = 'gpt-5'\n");
+    await writeFileRecursive(
+      join(root, "state", "env-accounts", "project", "default", "runtime.json"),
+      "{\n  \"preferred_auth_method\": \"chatgpt\",\n  \"openai_base_url_mode\": \"default\"\n}\n",
+    );
+    await writeFileRecursive(
+      join(root, "state", "desktop-settings.json"),
+      "{\n  \"appWindowCounts\": { \"project\": 3 }\n}\n",
+    );
+
+    await bridge.updateEnv("project", "renamed", join(root, "envs", "renamed", "home"));
+
+    assert.deepEqual(
+      JSON.parse(await readFile(join(root, "state", "desktop-settings.json"), "utf8")).appWindowCounts,
+      { renamed: 3 },
+    );
   } finally {
     restoreEnv(previousEnv);
     await rm(root, { recursive: true, force: true });

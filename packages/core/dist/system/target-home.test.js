@@ -305,6 +305,32 @@ test("target-home writer clears managed files when selected account is missing",
         await rm(root, { recursive: true, force: true });
     }
 });
+test("AUTH account keeps ChatGPT credentials while using a custom local Responses Base URL", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-auth-pool-target-home-"));
+    const homePath = join(root, "home");
+    const state = {
+        schemaVersion: DEFAULT_SCHEMA_VERSION,
+        generatedAt: new Date().toISOString(),
+        targets: { cli: { env: "work", account: "login" }, app: { env: "work", account: "login" } },
+        envs: { work: { name: "work", path: homePath, accounts: { login: { name: "login", authMode: "auth",
+                        authData: { auth_mode: "chatgpt", tokens: { access_token: "access", refresh_token: "refresh" } },
+                        runtime: { preferredAuthMethod: "chatgpt", openaiBaseUrlMode: "custom",
+                            openaiBaseUrl: "http://127.0.0.1:17832/pools/work", apiProtocol: "responses" } } } } },
+        tasks: { recent: [] },
+    };
+    try {
+        await applyTargetHomeState({ state, target: "cli" });
+        const auth = JSON.parse(await readFile(join(homePath, "auth.json"), "utf8"));
+        assert.equal(auth.tokens.access_token, "access");
+        const config = await readFile(join(homePath, "config.toml"), "utf8");
+        assert.match(config, /preferred_auth_method = "chatgpt"/);
+        assert.match(config, /openai_base_url = "http:\/\/127\.0\.0\.1:17832\/pools\/work"/);
+        assert.doesNotMatch(config, /requires_openai_auth = false/);
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
 async function applyFixture(homePath) {
     await mkdir(homePath, { recursive: true });
     await writeFile(join(homePath, "config.toml"), 'preferred_auth_method = "apikey"\nopenai_base_url = "https://proxy.example.test/v1"\nmodel = "gpt-5.5"\nmodel_provider = "custom"\n\n[model_providers.custom]\nname = "custom"\nmodel = "gpt-5.4"\nbase_url = "https://proxy.example.test/v1"\nexperimental_bearer_token = "sk-old"\nrequires_openai_auth = true\n', "utf8");

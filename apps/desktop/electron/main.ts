@@ -56,16 +56,20 @@ import {
   getCodexToolPaths,
   getCliAutoResumeSettings,
   getEnvHistoryRetentionSettings,
+  getGeneratedImageRecoverySettings,
   getRouterLifecycleSettings,
   getRouterPortSettings,
   detectCodexToolPaths,
   setCodexToolPath,
   setCliAutoResumeSettings,
   setEnvHistoryRetentionSettings,
+  setGeneratedImageRecoverySettings,
   setRouterLifecycleSettings,
   setRouterPortSettings,
   clearCodexToolPath,
   toggleEnvironmentRoute,
+  listAccountPools,
+  saveAccountPool,
   loadUsageSnapshot,
   loadUsageRequests,
   listUsagePricing,
@@ -80,6 +84,13 @@ import {
   setModelAccountBindings,
   stopUsageRouter,
   runEnvHistoryRetentionCleanup,
+  getSkillSnapshot,
+  installSkill,
+  checkSkillUpdates,
+  updateSkill,
+  uninstallSkill,
+  setSkillProviderBinding,
+  repairSkillProvider,
 } from "./bridge.js";
 
 const currentDir = __dirname;
@@ -213,6 +224,7 @@ function registerHandlers() {
   ipcMain.handle("desktop:getCodexToolPaths", () => getCodexToolPaths());
   ipcMain.handle("desktop:getCliAutoResumeSettings", () => getCliAutoResumeSettings());
   ipcMain.handle("desktop:getEnvHistoryRetentionSettings", () => getEnvHistoryRetentionSettings());
+  ipcMain.handle("desktop:getGeneratedImageRecoverySettings", () => getGeneratedImageRecoverySettings());
   ipcMain.handle("desktop:getRouterLifecycleSettings", () => getRouterLifecycleSettings());
   ipcMain.handle("desktop:getRouterPortSettings", () => getRouterPortSettings());
   ipcMain.handle("desktop:detectCodexToolPaths", () => detectCodexToolPaths());
@@ -220,6 +232,7 @@ function registerHandlers() {
   ipcMain.handle("desktop:clearCodexToolPath", (_event, kind) => clearCodexToolPath(kind));
   ipcMain.handle("desktop:setCliAutoResumeSettings", (_event, value) => setCliAutoResumeSettings(value));
   ipcMain.handle("desktop:setEnvHistoryRetentionSettings", (_event, value) => setEnvHistoryRetentionSettings(value));
+  ipcMain.handle("desktop:setGeneratedImageRecoverySettings", (_event, value) => setGeneratedImageRecoverySettings(value));
   ipcMain.handle("desktop:setRouterLifecycleSettings", (_event, value) => setRouterLifecycleSettings(value));
   ipcMain.handle("desktop:setRouterPortSettings", (_event, value) => setRouterPortSettings(value));
   ipcMain.handle("desktop:getCliTerminalSettings", async () => withTerminalIcons(await getCliTerminalSettings()));
@@ -241,7 +254,7 @@ function registerHandlers() {
       target: "cli" | "app",
       envName: string,
       accountName: string,
-      strategy?: "replace-current" | "current-window" | "new-window",
+      strategy?: "replace-current" | "current-window" | "new-window" | "multi-window",
       workingDirectory?: string,
     ) => switchAccount(target, envName, accountName, strategy, workingDirectory)
   );
@@ -341,6 +354,8 @@ function registerHandlers() {
   ipcMain.handle("desktop:getEnvironmentRouteStatuses", () => getEnvironmentRouteStatuses());
   ipcMain.handle("desktop:toggleEnvironmentRoute", (_event: IpcMainInvokeEvent, envName: string, enabled: boolean) =>
     toggleEnvironmentRoute(envName, enabled));
+  ipcMain.handle("desktop:listAccountPools", () => listAccountPools());
+  ipcMain.handle("desktop:saveAccountPool", (_event: IpcMainInvokeEvent, input) => saveAccountPool(input));
   ipcMain.handle("desktop:toggleAccountCompatibility", (_event: IpcMainInvokeEvent, input) =>
     input.enabled ? enableAccountCompatibility(input) : disableAccountCompatibility(input.envName, input.accountName));
   ipcMain.handle("desktop:getAccountCompatibilityStatuses", (_event: IpcMainInvokeEvent, accountKeys: string[]) =>
@@ -351,4 +366,13 @@ function registerHandlers() {
   ipcMain.handle("desktop:loadUsageRequests", (_event: IpcMainInvokeEvent, query) => loadUsageRequests(query));
   ipcMain.handle("desktop:listUsagePricing", () => listUsagePricing());
   ipcMain.handle("desktop:saveUsagePricing", (_event: IpcMainInvokeEvent, profile) => saveUsagePricing(profile));
+  ipcMain.handle("desktop:getSkillSnapshot", (_event: IpcMainInvokeEvent, refreshMarketplace?: boolean) =>
+    getSkillSnapshot(Boolean(refreshMarketplace)));
+  ipcMain.handle("desktop:installSkill", (_event: IpcMainInvokeEvent, input) => installSkill(input));
+  ipcMain.handle("desktop:checkSkillUpdates", (_event: IpcMainInvokeEvent, envName: string) => checkSkillUpdates(envName));
+  ipcMain.handle("desktop:updateSkill", (_event: IpcMainInvokeEvent, input) => updateSkill(input));
+  ipcMain.handle("desktop:uninstallSkill", (_event: IpcMainInvokeEvent, envName: string, skillId: string) =>
+    uninstallSkill(envName, skillId));
+  ipcMain.handle("desktop:setSkillProviderBinding", (_event: IpcMainInvokeEvent, input) => setSkillProviderBinding(input));
+  ipcMain.handle("desktop:repairSkillProvider", (_event: IpcMainInvokeEvent, providerId) => repairSkillProvider(providerId));
 }

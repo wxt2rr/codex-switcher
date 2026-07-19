@@ -20,7 +20,7 @@ import {
   type EnvFileHistorySource,
 } from "./env-file-history.js";
 import { UsageRouterManager } from "./usage-router-manager.js";
-import { selectCompatibilityUpstreamBaseUrl, type PricingProfile, type UsageFilter, type UsageRequestQuery } from "./usage-routing-model.js";
+import { isLocalRouterBaseUrl, resolveRouteDisplayBaseUrl, selectCompatibilityUpstreamBaseUrl, type PricingProfile, type UsageFilter, type UsageRequestQuery } from "./usage-routing-model.js";
 import {
   buildEffectiveCodexEnv,
   getCodexToolStatus,
@@ -42,19 +42,28 @@ import {
 import { findCodexResumeSession, readCodexProjects, type CodexProject } from "./codex-projects.js";
 import {
   readCliAutoResumeSettings,
+  readAppWindowSettings,
   readEnvHistoryRetentionSettings,
+  readGeneratedImageRecoverySettings,
   readRouterLifecycleSettings,
   readRouterPortSettings,
   saveCliAutoResumeSettings,
+  saveAppWindowCount,
+  renameAppWindowCount,
+  removeAppWindowCount,
   saveEnvHistoryRetentionSettings,
+  saveGeneratedImageRecoverySettings,
   saveRouterLifecycleSettings,
   saveRouterPortSettings,
   type CliAutoResumeSettings,
   type EnvHistoryRetentionSettings,
+  type GeneratedImageRecoverySettings,
   type RouterLifecycleSettings,
   type RouterPortSettings,
+  MAX_APP_WINDOW_COUNT,
 } from "./desktop-settings.js";
 import { runEnvHistoryCleanupIfDue } from "./env-history-retention.js";
+import { AppWindowLaunchError, assertCanMultiOpen, buildAppWindowLaunchPlan, executeAppWindowLaunchPlan, launchAndPersistAdditionalAppWindow, type AppWindowLaunchMode } from "./app-window-lifecycle.js";
 import { getCliTerminalSettings as readCliTerminalSettings, saveCliTerminalSelection, type CliTerminalId, type CliTerminalSettings } from "./cli-terminal-settings.js";
 import {
   createModelCatalogStore,
@@ -64,6 +73,18 @@ import {
   loadBundledModelCatalog,
   synchronizeAccountModelCatalog,
 } from "./account-model-catalog.js";
+import {
+  SkillManager,
+  type InstallSkillInput,
+  type SetProviderBindingInput,
+  type SkillProviderId,
+  type UpdateSkillInput,
+} from "./skill-manager.js";
+import {
+  inspectGeneratedImageRecoverySkill,
+  reconcileGeneratedImageRecoverySkill,
+  type CodexSkillEnvironment,
+} from "./generated-image-recovery-skill.js";
 
 const execFileAsync = promisify(execFile);
 const currentDir = resolveCurrentDir();
@@ -123,6 +144,83 @@ let desktopOperationsLoaderForTest:
 let usageRouterManager: UsageRouterManager | undefined;
 let usageRouterManagerStateDir: string | undefined;
 let envHistoryCleanupQueue: Promise<void> = Promise.resolve();
+let skillManager: SkillManager | undefined;
+let skillManagerStateDir: string | undefined;
+
+function getSkillManager(): SkillManager {
+  const stateDir = getStateDir();
+  if (!skillManager || skillManagerStateDir !== stateDir) {
+    skillManager = new SkillManager({
+      stateDir,
+      catalogUrl: process.env.CODEX_SWITCHER_SKILLS_CATALOG_URL,
+      environments: async () => {
+        const state = await (await loadCoreRuntime()).readLegacyState(getLegacyOptions());
+        return Object.values(state.envs).map((environment) => ({
+          name: environment.name,
+          homePath: environment.path,
+        }));
+      },
+    });
+    skillManagerStateDir = stateDir;
+  }
+  return skillManager;
+}
+
+export function getSkillSnapshot(refreshMarketplace = false) {
+  return getSkillManager().getSnapshot({ refreshMarketplace });
+}
+
+export function installSkill(input: InstallSkillInput) {
+  return getSkillManager().install(input);
+}
+
+export function checkSkillUpdates(envName: string) {
+  return getSkillManager().checkUpdates(envName);
+}
+
+export function updateSkill(input: UpdateSkillInput) {
+  return getSkillManager().update(input);
+}
+
+export function uninstallSkill(envName: string, skillId: string) {
+  return getSkillManager().uninstall(envName, skillId);
+}
+
+export function setSkillProviderBinding(input: SetProviderBindingInput) {
+  return getSkillManager().setProviderBinding(input);
+}
+
+export function repairSkillProvider(providerId: SkillProviderId) {
+  return getSkillManager().repairProvider(providerId);
+}
+
+async function listCodexSkillEnvironments(): Promise<CodexSkillEnvironment[]> {
+  const state = await (await loadCoreRuntime()).readLegacyState(getLegacyOptions());
+  return Object.values(state.envs)
+    .map((environment) => ({ name: environment.name, homePath: environment.path }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function getGeneratedImageRecoveryBundledSkillPath(): string {
+  const relativePath = join("skills", "recover-codex-generated-images");
+  const resourcesPath = getConfiguredResourcesPath();
+  if (resourcesPath) {
+    const packagedPath = join(resourcesPath, relativePath);
+    if (existsSync(packagedPath)) return packagedPath;
+  }
+  return resolveRuntimeResource(join("apps", "desktop", "resources", relativePath), { currentFile: __filename });
+}
+
+async function reconcileGeneratedImageRecoveryForEnvironments(
+  enabled: boolean,
+  environments: CodexSkillEnvironment[],
+) {
+  return reconcileGeneratedImageRecoverySkill({
+    enabled,
+    environments,
+    bundledSkillPath: getGeneratedImageRecoveryBundledSkillPath(),
+  });
+}
 
 function getUsageRouterManager(): UsageRouterManager {
   const stateDir = getStateDir();
@@ -150,10 +248,39 @@ function getEnvironmentRouteAccounts(state: Awaited<ReturnType<Awaited<ReturnTyp
     envName,
     accountName,
     authMode: account.authMode,
+    apiKey: account.authMode === "auth"
+      ? extractAccessTokenFromAuthData(account.authData)
+      : readAuthStringField(account.authData, "OPENAI_API_KEY"),
+    authAccountId: extractAccountIdFromAuthData(account.authData),
+    protocol: account.authMode === "auth"
+      ? "responses" as const
+      : account.runtime.apiProtocol === "chat_completions" ? "chat_completions" as const : "responses" as const,
+    upstreamModel: account.runtime.compatibilityUpstreamModel,
     baseUrl: account.runtime.openaiBaseUrlMode === "custom" && account.runtime.openaiBaseUrl
       ? account.runtime.openaiBaseUrl
       : "default",
   }));
+}
+
+function extractAccountIdFromAuthData(authData: Record<string, unknown> | undefined): string | undefined {
+  const direct = readAuthStringField(authData, "account_id");
+  if (direct) return direct;
+  const rawTokens = authData?.tokens;
+  if (!rawTokens) return undefined;
+  try {
+    const parsed = typeof rawTokens === "string" ? JSON.parse(rawTokens) as Record<string, unknown> : rawTokens as Record<string, unknown>;
+    const tokenAccountId = parsed.account_id ?? parsed.chatgpt_account_id;
+    if (typeof tokenAccountId === "string" && tokenAccountId.trim()) return tokenAccountId.trim();
+    const accessToken = typeof parsed.access_token === "string" ? parsed.access_token : "";
+    const payload = accessToken.split(".")[1];
+    if (!payload) return undefined;
+    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Record<string, unknown>;
+    const auth = claims["https://api.openai.com/auth"] as Record<string, unknown> | undefined;
+    const accountId = auth?.chatgpt_account_id ?? claims.chatgpt_account_id ?? claims.account_id;
+    return typeof accountId === "string" && accountId.trim() ? accountId.trim() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function resolveAccountUpstreamBaseUrl(
@@ -201,6 +328,49 @@ function createEnvironmentRouteBaseUrlUpdater(
   };
 }
 
+function createAccountPoolRuntimeUpdater(
+  runtime: Awaited<ReturnType<typeof loadCoreRuntime>>,
+  envName: string,
+  protocol: "responses" | "chat_completions",
+) {
+  if (protocol === "responses") return createEnvironmentRouteBaseUrlUpdater(runtime, envName);
+  return async (accountName: string, baseUrl: string) => {
+    const state = await runtime.readLegacyState(getLegacyOptions());
+    const account = state.envs[envName]?.accounts[accountName];
+    if (!account) throw new Error(`Account '${envName}/${accountName}' not found`);
+    const apiKey = readAuthStringField(account.authData, "OPENAI_API_KEY");
+    if (!apiKey) throw new Error(`Chat pool account '${envName}/${accountName}' has no API key`);
+    if (/^http:\/\/127\.0\.0\.1:\d+\/pools\//.test(baseUrl)) {
+      await writeCompatibilityRuntime(runtime, envName, accountName, {
+        ...account.runtime,
+        apiProtocol: "chat_completions",
+        compatibilityRouteEnabled: true,
+        compatibilityRouteBaseUrl: baseUrl,
+        compatibilityRouteToken: apiKey,
+        compatibilityRouteProviderId: account.runtime.compatibilityRouteProviderId || "codex_switcher_pool",
+      });
+      return;
+    }
+    await getUsageRouterManager().enableAccountCompatibility({
+      envName, accountName, authMode: account.authMode, baseUrl, apiKey,
+      upstreamModel: account.runtime.compatibilityUpstreamModel,
+      reasoningProfile: account.runtime.compatibilityReasoningProfile,
+      longConversationStrategy: account.runtime.compatibilityLongConversationStrategy,
+      instructionRole: account.runtime.compatibilityInstructionRole,
+      requestOverrides: account.runtime.compatibilityRequestOverrides,
+    }, async ({ baseUrl: localBaseUrl, localRouteToken, providerId }) => {
+      await writeCompatibilityRuntime(runtime, envName, accountName, {
+        ...account.runtime,
+        apiProtocol: "chat_completions",
+        compatibilityRouteEnabled: true,
+        compatibilityRouteBaseUrl: localBaseUrl,
+        compatibilityRouteToken: localRouteToken,
+        compatibilityRouteProviderId: providerId,
+      });
+    });
+  };
+}
+
 async function applyEnvironmentRouteToActiveTarget(
   runtime: Awaited<ReturnType<typeof loadCoreRuntime>>,
   state: Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>,
@@ -233,6 +403,27 @@ async function applyEnvironmentRouteToActiveTarget(
 async function syncEnvironmentRouteIfEnabled(envName: string): Promise<void> {
   const runtime = await loadCoreRuntime();
   const state = await runtime.readLegacyState(getLegacyOptions());
+  const pool = (await getUsageRouterManager().listPersistedAccountPools()).find((item) => item.envName === envName && item.enabled);
+  if (pool) {
+    const accountMap = new Map(Object.entries(state.envs[envName]?.accounts ?? {}));
+    const poolAccounts = getEnvironmentRouteAccounts(state, envName)
+      .filter((account) => pool.members.some((member) => member.accountName === account.accountName && accountMap.has(account.accountName)))
+      .map((account) => {
+        const member = pool.members.find((item) => item.accountName === account.accountName);
+        return member ? { ...account, baseUrl: member.originalBaseUrl } : account;
+      });
+    if (!poolAccounts.length) {
+      await getUsageRouterManager().removeAccountPoolConfiguration(envName);
+      return;
+    }
+    await getUsageRouterManager().enableAccountPool({ envName, protocol: pool.protocol,
+      accountNames: poolAccounts.map((account) => account.accountName),
+      weights: Object.fromEntries(pool.members.filter((member) => poolAccounts.some((account) => account.accountName === member.accountName)).map((member) => [member.accountName, member.weight])),
+      sessionTtlMinutes: pool.sessionTtlMinutes, maxFailoverAttempts: pool.maxFailoverAttempts,
+      maxSameAccountFailures: pool.maxSameAccountFailures,
+    }, poolAccounts, createAccountPoolRuntimeUpdater(runtime, envName, pool.protocol));
+    return;
+  }
   await getUsageRouterManager().syncEnvironmentIfEnabled(
     envName,
     getEnvironmentRouteAccounts(state, envName),
@@ -255,10 +446,28 @@ async function synchronizeEnabledEnvironmentRoutes(): Promise<void> {
 async function restoreEnabledRoutes(): Promise<void> {
   const manager = getUsageRouterManager();
   const routes = (await manager.listPersistedRoutes()).filter((route) => route.enabled);
-  if (!routes.length) return;
+  const pools = (await manager.listPersistedAccountPools()).filter((pool) => pool.enabled);
+  if (!routes.length && !pools.length) return;
 
   const runtime = await loadCoreRuntime();
   const initialState = await runtime.readLegacyState(getLegacyOptions());
+  for (const pool of pools) {
+    if (!initialState.envs[pool.envName]) {
+      await manager.removeAccountPoolConfiguration(pool.envName).catch(() => undefined);
+      continue;
+    }
+    const poolMembers = new Map(pool.members.map((member) => [member.accountName, member]));
+    const poolAccounts = getEnvironmentRouteAccounts(initialState, pool.envName).map((account) => {
+      const member = poolMembers.get(account.accountName);
+      return member ? { ...account, baseUrl: member.originalBaseUrl } : account;
+    });
+    await manager.enableAccountPool({ envName: pool.envName, protocol: pool.protocol,
+      accountNames: pool.members.map((member) => member.accountName),
+      weights: Object.fromEntries(pool.members.map((member) => [member.accountName, member.weight])),
+      sessionTtlMinutes: pool.sessionTtlMinutes, maxFailoverAttempts: pool.maxFailoverAttempts,
+      maxSameAccountFailures: pool.maxSameAccountFailures,
+    }, poolAccounts, createAccountPoolRuntimeUpdater(runtime, pool.envName, pool.protocol));
+  }
   const responseEnvNames = Array.from(new Set(
     routes.filter((route) => route.protocol === "responses").map((route) => route.envName),
   ));
@@ -315,6 +524,45 @@ export async function toggleEnvironmentRoute(envName: string, enabled: boolean) 
   return enabled
     ? getUsageRouterManager().enableEnvironment(envName, accounts, updateBaseUrl)
     : getUsageRouterManager().disableEnvironment(envName, updateBaseUrl);
+}
+
+export async function listAccountPools() {
+  return getUsageRouterManager().listAccountPools();
+}
+
+export async function saveAccountPool(input: {
+  envName: string; enabled: boolean; protocol: "responses" | "chat_completions";
+  members: Array<{ accountName: string; enabled?: boolean; weight?: number; priority?: number }>;
+  sessionTtlMinutes?: number; maxFailoverAttempts?: number; maxSameAccountFailures?: number;
+}) {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const existingPool = (await getUsageRouterManager().listPersistedAccountPools())
+    .find((pool) => pool.envName === input.envName);
+  const existingMembers = new Map(existingPool?.members.map((member) => [member.accountName, member]) ?? []);
+  const existingRoutes = await getUsageRouterManager().listRoutesIfRunning();
+  const accounts = getEnvironmentRouteAccounts(state, input.envName).map((account) => {
+    const poolMember = existingMembers.get(account.accountName);
+    if (poolMember) return { ...account, baseUrl: poolMember.originalBaseUrl };
+    const route = existingRoutes.find((item) => item.envName === input.envName && item.accountName === account.accountName);
+    return route ? { ...account, baseUrl: route.originalBaseUrl } : account;
+  });
+  const updateBaseUrl = createAccountPoolRuntimeUpdater(runtime, input.envName, existingPool?.protocol ?? input.protocol);
+  if (!input.enabled) {
+    await getUsageRouterManager().disableAccountPool(input.envName, updateBaseUrl);
+    return null;
+  }
+  const selectedNames = new Set(input.members.filter((member) => member.enabled !== false).map((member) => member.accountName));
+  for (const member of existingPool?.members ?? []) {
+    if (!selectedNames.has(member.accountName)) await updateBaseUrl(member.accountName, member.originalBaseUrl);
+  }
+  return getUsageRouterManager().enableAccountPool({
+    envName: input.envName, protocol: input.protocol,
+    accountNames: input.members.filter((member) => member.enabled !== false).sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0)).map((member) => member.accountName),
+    weights: Object.fromEntries(input.members.map((member) => [member.accountName, member.weight ?? 1])),
+    sessionTtlMinutes: input.sessionTtlMinutes, maxFailoverAttempts: input.maxFailoverAttempts,
+    maxSameAccountFailures: input.maxSameAccountFailures,
+  }, accounts, createAccountPoolRuntimeUpdater(runtime, input.envName, input.protocol));
 }
 
 export async function loadUsageSnapshot(filter: UsageFilter) {
@@ -468,29 +716,56 @@ export async function loadOverview(): Promise<string> {
     };
   };
   const routes = await getUsageRouterManager().listRoutesIfRunning().catch(() => []);
+  const pools = await getUsageRouterManager().listAccountPools().catch(() => []);
 
-  const accounts = overview.accounts.map((accountSummary) => {
+  const accounts = await Promise.all(overview.accounts.map(async (accountSummary) => {
     const account = state.envs[accountSummary.envName]?.accounts[accountSummary.name];
-    const route = routes.find((candidate) =>
+    const accountRoutes = routes.filter((candidate) =>
       candidate.enabled && candidate.envName === accountSummary.envName && candidate.accountName === accountSummary.name);
+    const expectedProtocol = account?.runtime.apiProtocol ?? "responses";
+    const route = accountRoutes.find((candidate) => candidate.protocol === expectedProtocol) ?? accountRoutes[0];
+    const pool = pools.find((candidate) => candidate.enabled && candidate.envName === accountSummary.envName
+      && candidate.members.some((member) => member.enabled && member.accountName === accountSummary.name));
+    const poolMember = pool?.members.find((member) => member.accountName === accountSummary.name);
     const isApiKeyAccount =
       account?.runtime.preferredAuthMethod === "apikey" || accountSummary.authMode === "apikey";
+    const storedApiKey = readAuthStringField(account?.authData, "OPENAI_API_KEY");
+
+    const routedBaseUrl = pool && poolMember
+      ? poolMember.upstreamBaseUrl
+      : route ? resolveRouteDisplayBaseUrl(route) : "";
+    const historicalBaseUrl = isLocalRouterBaseUrl(routedBaseUrl)
+      ? (await getUsageRouterManager().queryUsageRequests({
+          from: 0, to: Date.now(), envName: accountSummary.envName, accountName: accountSummary.name,
+          page: 1, pageSize: 100,
+        }).catch(() => null))?.items.find((item) => !isLocalRouterBaseUrl(item.upstreamBaseUrl))?.upstreamBaseUrl
+      : undefined;
 
     return {
       ...accountSummary,
       apiKeyValue: isApiKeyAccount
-        ? readAuthStringField(account?.authData, "OPENAI_API_KEY")
+        ? storedApiKey
         : undefined,
-      route: route
+      hasApiKey: Boolean(storedApiKey || account?.runtime.independentModelApiKey?.trim()),
+      route: pool && poolMember
         ? {
             enabled: true as const,
-            originalBaseUrl: route.originalBaseUrl,
+            originalBaseUrl: historicalBaseUrl ?? poolMember.upstreamBaseUrl,
+            localBaseUrl: pool.localBaseUrl ?? account?.runtime.openaiBaseUrl ?? "",
+            protocol: pool.protocol,
+            poolEnabled: true as const,
+            poolId: pool.poolId,
+          }
+        : route
+        ? {
+            enabled: true as const,
+            originalBaseUrl: historicalBaseUrl ?? resolveRouteDisplayBaseUrl(route),
             localBaseUrl: account?.runtime.openaiBaseUrl ?? "",
             protocol: route.protocol,
           }
         : undefined,
     };
-  });
+  }));
 
   return `${JSON.stringify({ ...overview, accounts }, null, 2)}\n`;
 }
@@ -509,15 +784,21 @@ export async function loadAuthMetrics(): Promise<string> {
     };
   };
 
-  const accountMetrics = await enrichAccountOverviewList(state, overview.accounts);
-  const cliStatus = await enrichTargetOverviewStatus(state, "cli", overview.status.cli);
-  const appStatus = await enrichTargetOverviewStatus(state, "app", overview.status.app);
+  const [accountMetrics, cliStatus, appStatus, requestHealth] = await Promise.all([
+    enrichAccountOverviewList(state, overview.accounts),
+    enrichTargetOverviewStatus(state, "cli", overview.status.cli),
+    enrichTargetOverviewStatus(state, "app", overview.status.app),
+    getUsageRouterManager().queryRecentAccountHealthIfRunning(60).catch(() => []),
+  ]);
 
   const payload = {
     accounts: Object.fromEntries(
       accountMetrics
         .filter((account) => account.authProfile)
         .map((account) => [`${account.envName}/${account.name}`, account.authProfile]),
+    ),
+    requestHealth: Object.fromEntries(
+      requestHealth.map((item) => [`${item.envName}/${item.accountName}`, item]),
     ),
     status: {
       cli: cliStatus.email || cliStatus.usage5h || cliStatus.usageWeekly
@@ -574,13 +855,28 @@ export async function switchAccount(
   target: "cli" | "app",
   envName: string,
   accountName: string,
-  strategy?: "replace-current" | "current-window" | "new-window",
+  strategy?: "replace-current" | "current-window" | "new-window" | "multi-window",
   workingDirectory?: string,
 ): Promise<DesktopActionResult> {
   const runtime = await loadCoreRuntime();
   const state = await runtime.readLegacyState(getLegacyOptions());
   const selected = state.envs[envName]?.accounts[accountName];
+  if (strategy === "multi-window") {
+    const count = (await readAppWindowSettings(getCodexToolPathOptions().settingsPath)).counts[envName] ?? 1;
+    assertCanMultiOpen({ target, envName, accountName, activeEnvName: state.targets.app.env,
+      activeAccountName: state.targets.app.account, currentCount: count, maximumCount: MAX_APP_WINDOW_COUNT });
+  }
   if (selected?.runtime.apiProtocol === "chat_completions" && selected.runtime.compatibilityRouteEnabled) {
+    const activePool = (await getUsageRouterManager().listAccountPools()).find((pool) => (
+      pool.envName === envName
+      && pool.protocol === "chat_completions"
+      && pool.members.some((member) => member.accountName === accountName && member.enabled)
+      && selected.runtime.compatibilityRouteBaseUrl === pool.localBaseUrl
+    ));
+    if (activePool && !activePool.health.some((item) => item.accountName === accountName && ["unauthorized", "exhausted", "disabled"].includes(item.state))) {
+      // Pool credentials are hydrated during startup restoration; do not replace the
+      // shared pool provider with an individual compatibility route while switching.
+    } else {
     let [status] = await getUsageRouterManager().getAccountCompatibilityStatuses([`${envName}/${accountName}`]);
     if (!status || status.state !== "ready") {
       const apiKey = readAuthStringField(selected.authData, "OPENAI_API_KEY");
@@ -605,6 +901,7 @@ export async function switchAccount(
     if (!status || status.state !== "ready") {
       throw new Error(`Compatibility route for '${envName}/${accountName}' is not ready. Re-enable or check the route before launch.`);
     }
+    }
   }
   const next = runtime.createCoreApi({ getState: () => state }).selectAccount({
     envName,
@@ -621,7 +918,18 @@ export async function switchAccount(
     account: next.targets[target].account,
   });
   if (target === "app") {
-    await launchAppTarget(next, runtime);
+    if (strategy === "multi-window") {
+      const settingsPath = getCodexToolPathOptions().settingsPath;
+      const count = (await readAppWindowSettings(settingsPath)).counts[envName] ?? 1;
+      const savedCount = await launchAndPersistAdditionalAppWindow({ currentCount: count,
+        maximumCount: MAX_APP_WINDOW_COUNT,
+        launch: () => launchAppTarget(next, runtime, "additional"),
+        saveCount: (nextCount) => saveAppWindowCount(settingsPath, envName, nextCount) });
+      return {
+        message: `Opened App window ${savedCount} for ${envName}/${accountName}`,
+      };
+    }
+    await launchAppTarget(next, runtime, "reconcile");
   } else {
     const warning = await openCommandInPreferredTerminal(
       ["cli", "launch-current"],
@@ -762,6 +1070,10 @@ export async function createEnv(request: {
       }
       await cloneEnvHomeExcludingAuth(sourcePath, created.path);
     }
+    const recovery = await readGeneratedImageRecoverySettings(getCodexToolPathOptions().settingsPath);
+    if (recovery.enabled) {
+      await reconcileGeneratedImageRecoveryForEnvironments(true, [{ name: created.name, homePath: created.path }]);
+    }
   } catch (error) {
     await rm(join(getEnvsDir(), request.envName), { recursive: true, force: true });
     await rm(join(getStateDir(), "env-accounts", request.envName), { recursive: true, force: true });
@@ -797,6 +1109,12 @@ export async function createEnvLegacy(envName: string): Promise<string> {
     envName,
   });
 
+  const recovery = await readGeneratedImageRecoverySettings(getCodexToolPathOptions().settingsPath);
+  if (recovery.enabled) {
+    const created = next.envs[envName];
+    if (created) await reconcileGeneratedImageRecoveryForEnvironments(true, [{ name: created.name, homePath: created.path }]);
+  }
+
   return `${next.envs[envName]?.name ?? envName}\n`;
 }
 
@@ -807,6 +1125,8 @@ export async function updateEnv(
 ): Promise<DesktopActionResult> {
   const runtime = await loadCoreRuntime();
   const state = await runtime.readLegacyState(getLegacyOptions());
+  const existingPool = (await getUsageRouterManager().listPersistedAccountPools())
+    .find((pool) => pool.envName === envName && pool.enabled);
   const next = runtime.createCoreApi({ getState: () => state }).updateEnv({
     envName,
     nextEnvName,
@@ -825,6 +1145,34 @@ export async function updateEnv(
     nextEnvName,
     homePath: nextEnv.path,
   });
+  if (nextEnvName !== envName) {
+    await renameAppWindowCount(getCodexToolPathOptions().settingsPath, envName, nextEnvName);
+  }
+
+  if (existingPool && nextEnvName !== envName) {
+    const latestState = await runtime.readLegacyState(getLegacyOptions());
+    const originals = new Map(existingPool.members.map((member) => [member.accountName, member.originalBaseUrl]));
+    const accounts = getEnvironmentRouteAccounts(latestState, nextEnvName)
+      .filter((account) => originals.has(account.accountName))
+      .map((account) => ({ ...account, baseUrl: originals.get(account.accountName) ?? account.baseUrl }));
+    await getUsageRouterManager().removeAccountPoolConfiguration(envName);
+    try {
+      await getUsageRouterManager().enableAccountPool({
+        envName: nextEnvName,
+        protocol: existingPool.protocol,
+        accountNames: accounts.map((account) => account.accountName),
+        weights: Object.fromEntries(existingPool.members.map((member) => [member.accountName, member.weight])),
+        sessionTtlMinutes: existingPool.sessionTtlMinutes,
+        maxFailoverAttempts: existingPool.maxFailoverAttempts,
+        maxSameAccountFailures: existingPool.maxSameAccountFailures,
+      }, accounts, createAccountPoolRuntimeUpdater(runtime, nextEnvName, existingPool.protocol));
+    } catch (error) {
+      await Promise.allSettled(accounts.map((account) => (
+        createAccountPoolRuntimeUpdater(runtime, nextEnvName, existingPool.protocol)(account.accountName, account.baseUrl)
+      )));
+      throw error;
+    }
+  }
 
   for (const target of ["cli", "app"] as const) {
     if (next.targets[target].env === nextEnvName) {
@@ -1119,6 +1467,13 @@ export async function getEnvHistoryRetentionSettings(): Promise<EnvHistoryRetent
   return readEnvHistoryRetentionSettings(getCodexToolPathOptions().settingsPath);
 }
 
+export async function getGeneratedImageRecoverySettings() {
+  const settings = await readGeneratedImageRecoverySettings(getCodexToolPathOptions().settingsPath);
+  const environments = await listCodexSkillEnvironments();
+  if (settings.enabled) return reconcileGeneratedImageRecoveryForEnvironments(true, environments);
+  return inspectGeneratedImageRecoverySkill(false, environments);
+}
+
 export async function setRouterLifecycleSettings(value: RouterLifecycleSettings): Promise<RouterLifecycleSettings> {
   return saveRouterLifecycleSettings(getCodexToolPathOptions().settingsPath, value);
 }
@@ -1133,6 +1488,14 @@ export async function setEnvHistoryRetentionSettings(
   const saved = await saveEnvHistoryRetentionSettings(getCodexToolPathOptions().settingsPath, value);
   void runEnvHistoryRetentionCleanup(true).catch(() => undefined);
   return saved;
+}
+
+export async function setGeneratedImageRecoverySettings(value: GeneratedImageRecoverySettings) {
+  const enabled = value.enabled === true;
+  const environments = await listCodexSkillEnvironments();
+  const status = await reconcileGeneratedImageRecoveryForEnvironments(enabled, environments);
+  await saveGeneratedImageRecoverySettings(getCodexToolPathOptions().settingsPath, { enabled });
+  return status;
 }
 
 export function runEnvHistoryRetentionCleanup(force = false) {
@@ -2887,6 +3250,8 @@ async function removeAccountDirect(
     force: true,
   });
 
+  await syncEnvironmentRouteIfEnabled(input.envName);
+
   for (const target of ["cli", "app"] as const) {
     await runtime.writeLegacyPointers({
       stateDir: getStateDir(),
@@ -2905,6 +3270,7 @@ async function removeEnvDirect(runtime: CoreRuntime, envName: string): Promise<v
     envName,
   });
 
+  await getUsageRouterManager().removeAccountPoolConfiguration(envName);
   await getUsageRouterManager().removeEnvironmentRoutes(envName);
 
   await rm(join(getEnvsDir(), envName), { recursive: true, force: true });
@@ -2912,6 +3278,7 @@ async function removeEnvDirect(runtime: CoreRuntime, envName: string): Promise<v
     recursive: true,
     force: true,
   });
+  await removeAppWindowCount(getCodexToolPathOptions().settingsPath, envName);
   await syncTargetsDirect(runtime, next, ["cli", "app"]);
 }
 
@@ -3648,6 +4015,7 @@ async function refreshAccountTokenOnceNativeDirect(
     if (afterRaw !== input.authRaw) {
       await writeFile(input.authFile, afterRaw, "utf8");
       await syncUpdatedAuthToActiveTargetsDirect(runtime, input.envName, input.accountName);
+      await syncEnvironmentRouteIfEnabled(input.envName);
       return "changed";
     }
 
@@ -3772,6 +4140,7 @@ async function shouldCopyEnvClonePath(path: string, platform: NodeJS.Platform): 
 async function launchAppTarget(
   state: Awaited<ReturnType<CoreRuntime["readLegacyState"]>>,
   runtime: CoreRuntime,
+  mode: AppWindowLaunchMode = "reconcile",
 ): Promise<void> {
   const env = state.envs[state.targets.app.env];
   if (!env) {
@@ -3789,37 +4158,72 @@ async function launchAppTarget(
   const packagedTarget = process.platform === "win32"
     ? normalizeWindowsPackagedAppTarget(effectiveEnv.CODEX_SWITCHER_APP_BIN ?? "")
     : "";
+  const desiredCount = mode === "additional" ? 1 : await readDesiredAppWindowCount(state.targets.app.env);
+  const plan = buildAppWindowLaunchPlan({ mode, desiredCount, packagedWindowsTarget: Boolean(packagedTarget) });
   if (packagedTarget) {
-    await stopWindowsPackagedAppProcesses();
     const defaultHome = resolveRuntimePathsLocal(process.env, process.platform).defaultHome;
-    await prepareWindowsPackagedAppHome({
-      stateDir: getStateDir(),
-      defaultHome,
-      sourceHome: env.path,
-      materialize: async (projectionHome) => {
-        const projectionState = {
-          ...state,
-          envs: {
-            ...state.envs,
-            [state.targets.app.env]: { ...env, path: projectionHome },
-          },
-        };
-        await runtime.applyTargetHomeState({ state: projectionState, target: "app" });
-      },
-    });
-    await support.restartCurrentCodexApp({
-      codexHome: defaultHome,
-      stateDir: getStateDir(),
-      targetKey: state.targets.app.env,
-      env: { ...effectiveEnv, CODEX_SWITCHER_APP_BIN: packagedTarget },
-    });
+    if (plan.stopPackagedProcesses) {
+      await stopWindowsPackagedAppProcesses();
+    }
+    if (plan.materializePackagedHome) {
+      await prepareWindowsPackagedAppHome({
+        stateDir: getStateDir(),
+        defaultHome,
+        sourceHome: env.path,
+        materialize: async (projectionHome) => {
+          const projectionState = {
+            ...state,
+            envs: {
+              ...state.envs,
+              [state.targets.app.env]: { ...env, path: projectionHome },
+            },
+          };
+          await runtime.applyTargetHomeState({ state: projectionState, target: "app" });
+        },
+      });
+    }
+    const launchNew = async () => {
+      await support.launchNewCodexApp({
+        codexHome: defaultHome,
+        stateDir: getStateDir(),
+        targetKey: state.targets.app.env,
+        env: { ...effectiveEnv, CODEX_SWITCHER_APP_BIN: packagedTarget },
+      });
+    };
+    try {
+      await executeAppWindowLaunchPlan(plan, {
+        restart: async () => { throw new Error("Invalid packaged App window launch plan"); },
+        launchNew,
+      });
+    } catch (error) {
+      await persistPartialWindowCount(state.targets.app.env, mode, error);
+      throw error;
+    }
     return;
   }
 
-  await support.restartCurrentCodexApp({
+  const launchInput = {
     codexHome: env.path,
     stateDir: getStateDir(),
     targetKey: state.targets.app.env,
     env: effectiveEnv,
-  });
+  };
+  try {
+    await executeAppWindowLaunchPlan(plan, {
+      restart: async () => { await support.restartCurrentCodexApp(launchInput); },
+      launchNew: async () => { await support.launchNewCodexApp(launchInput); },
+    });
+  } catch (error) {
+    await persistPartialWindowCount(state.targets.app.env, mode, error);
+    throw error;
+  }
+}
+
+async function readDesiredAppWindowCount(envName: string): Promise<number> {
+  return (await readAppWindowSettings(getCodexToolPathOptions().settingsPath)).counts[envName] ?? 1;
+}
+
+async function persistPartialWindowCount(envName: string, mode: AppWindowLaunchMode, error: unknown): Promise<void> {
+  if (mode !== "reconcile" || !(error instanceof AppWindowLaunchError) || error.launchedCount < 1) return;
+  await saveAppWindowCount(getCodexToolPathOptions().settingsPath, envName, error.launchedCount);
 }

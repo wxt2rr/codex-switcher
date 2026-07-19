@@ -9,6 +9,7 @@ import {
   Info,
   PanelLeftClose,
   PanelLeftOpen,
+  PackageOpen,
   Settings,
   TerminalSquare,
   TriangleAlert,
@@ -62,6 +63,7 @@ export function DesktopShell({
     environments: <Globe2 className="size-5" />,
     accounts: <TerminalSquare className="size-5" />,
     models: <Boxes className="size-5" />,
+    skills: <PackageOpen className="size-5" />,
     usage: <Gauge className="size-5" />,
     operations: <Settings className="size-5" />,
   };
@@ -105,7 +107,7 @@ export function DesktopShell({
 
   return (
     <TooltipProvider>
-    <div className="h-screen overflow-hidden bg-[#f7f8fa] text-neutral-900 dark:bg-[#0f1318] dark:text-neutral-100">
+    <div className="desktop-shell-root h-screen overflow-hidden bg-[#f7f8fa] text-neutral-900 dark:bg-[#0f1318] dark:text-neutral-100">
       <div className="flex h-full">
         <aside
           data-expanded={sidebarExpanded}

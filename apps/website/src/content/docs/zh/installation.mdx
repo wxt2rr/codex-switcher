@@ -1,0 +1,45 @@
+---
+title: 安装与首次启动
+description: macOS、Windows 和源码安装的步骤与安全提示。
+toc:
+  - id: desktop
+    label: 桌面安装包
+  - id: macos
+    label: macOS 未签名提示
+  - id: windows
+    label: Windows 安全提示
+  - id: source
+    label: 源码安装
+---
+
+## 桌面安装包
+
+从仓库的 Releases 下载 macOS Apple Silicon 或 Windows x64 安装包。安装包当前没有代码签名，请只从官方仓库下载并核对发布版本。
+
+## macOS 未签名提示
+
+如果系统提示“应用已损坏，无法打开”，确认文件来源可信后，在终端执行：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/codex-switcher.app"
+open "/Applications/codex-switcher.app"
+```
+
+## Windows 安全提示
+
+Microsoft Defender SmartScreen 可能提示未知发布者。确认安装包来自本仓库后，选择“更多信息”→“仍要运行”，或在浏览器下载提示中选择保留。
+
+Windows 的 Codex App 可能来自 MSIX。软件会通过包清单和 AppExecutionAlias 查找它，若路径仍未检测到，可在设置中手动配置 App 安装路径。
+
+## 源码安装
+
+```bash
+npm i -g @wangxt0223/codex-switcher
+codex-sw check
+```
+
+Windows 源码安装可使用：
+
+```powershell
+node scripts/bin/codex-sw-node.cjs install --shell powershell
+```

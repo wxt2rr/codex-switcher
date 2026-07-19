@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  CircleHelp,
   CircleCheck,
   CircleX,
   Check,
@@ -27,7 +26,6 @@ import {
   parseUsageMetric,
 } from "@/account-usage";
 import { Button } from "@/components/ui/button";
-import { StatCard } from "@/components/dashboard-kit";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useAdaptiveMenuLayout } from "@/components/adaptive-menu-placement";
 import { useDelayedUnmount } from "@/components/use-delayed-unmount";
@@ -39,7 +37,7 @@ import {
   SidePanel,
 } from "../components/admin-primitives";
 import { Field, Input, Select, Textarea } from "../components/form-primitives";
-import type { AccountSummary, OverviewPayload } from "../desktop-model";
+import type { AccountRequestHealth, AccountSummary, OverviewPayload } from "../desktop-model";
 import { resolveDesktopBridge, type AccountCompatibilityStatus, type CodexProject, type DesktopLaunchStrategy } from "../bridge";
 import { getDesktopCopy } from "../desktop-copy";
 import { localizeAuthMode } from "../desktop-utils";
@@ -135,6 +133,7 @@ export function AccountsPage({
   onCopyAccount,
   onUpdateRuntime,
   onUpdateIndependentModel,
+  onCopyBaseUrl,
   onCopyApiKey,
 }: {
   overview: OverviewPayload;
@@ -188,6 +187,7 @@ export function AccountsPage({
     apiKey: string,
     baseUrl: string,
   ) => Promise<boolean>;
+  onCopyBaseUrl: (value: string) => void;
   onCopyApiKey: (value: string) => void;
 }) {
   const [envFilter, setEnvFilter] = useState("default");
@@ -216,6 +216,8 @@ export function AccountsPage({
   const [compatibilityCheck, setCompatibilityCheck] = useState<{ ok: boolean; message: string } | null>(null);
   const [customRefreshEditing, setCustomRefreshEditing] = useState(false);
   const [customRefreshDraft, setCustomRefreshDraft] = useState(String(authRefreshIntervalSeconds));
+  const [accountListScrolled, setAccountListScrolled] = useState(false);
+  const accountListRef = useRef<HTMLDivElement>(null);
   const pageCopy = getDesktopCopy(language);
   const text = getTranslations(language);
 
@@ -500,26 +502,18 @@ export function AccountsPage({
           </div>
         </div>
 
-        <div className="shrink-0 grid divide-y divide-black/[0.06] rounded-[14px] border border-black/[0.05] bg-white sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-          <StatCard
-            label={language === "zh" ? "账号总数" : language === "ja" ? "アカウント総数" : "Accounts"}
-            value={String(overview.accounts.length)}
-            helper={language === "zh" ? `${filteredAccounts.length} 条当前结果` : language === "ja" ? `${filteredAccounts.length} 件表示中` : `${filteredAccounts.length} shown`}
+        <div className="relative min-h-0 flex-1">
+          <div
+            aria-hidden="true"
+            data-visible={accountListScrolled}
+            className="account-list-top-fade"
           />
-          <StatCard
-            label="CLI / App"
-            value={`${overview.accounts.filter((account) => account.isCurrentCli).length} / ${overview.accounts.filter((account) => account.isCurrentApp).length}`}
-            helper={language === "zh" ? "当前激活目标" : language === "ja" ? "現在の対象" : "Active targets"}
-          />
-          <StatCard
-            label={language === "zh" ? "授权模式" : language === "ja" ? "認証モード" : "Auth mix"}
-            value={`${overview.accounts.filter((account) => account.authMode === "auth").length} AUTH`}
-            helper={language === "zh" ? `${overview.accounts.filter((account) => account.authMode === "apikey").length} API Key / ${overview.accounts.filter((account) => account.authMode === "sub2api").length} sub2api` : language === "ja" ? `${overview.accounts.filter((account) => account.authMode === "apikey").length} API Key / ${overview.accounts.filter((account) => account.authMode === "sub2api").length} sub2api` : `${overview.accounts.filter((account) => account.authMode === "apikey").length} API Key / ${overview.accounts.filter((account) => account.authMode === "sub2api").length} sub2api`}
-          />
-        </div>
-
-        <div className="page-scroll-gutter min-h-0 flex-1">
-          <ListStack className="mt-0 min-h-full">
+          <div
+            ref={accountListRef}
+            className="page-scroll-gutter h-full min-h-0"
+            onScroll={(event) => setAccountListScrolled(event.currentTarget.scrollTop > 2)}
+          >
+            <ListStack className="mt-0 min-h-full">
           {filteredAccounts.length === 0 ? (
             <EmptyList title={overview.accounts.length === 0 ? pageCopy.accounts.emptyListTitle : pageCopy.accounts.emptyFilterTitle} />
           ) : null}
@@ -549,10 +543,12 @@ export function AccountsPage({
                 setModelAccountKey(`${account.envName}/${account.name}`);
                 setModelConfigOpen(true);
               }}
+              onCopyBaseUrl={onCopyBaseUrl}
               onCopyApiKey={onCopyApiKey}
             />
           ))}
-          </ListStack>
+            </ListStack>
+          </div>
         </div>
       </div>
 
@@ -837,14 +833,7 @@ export function AccountsPage({
           <Field label={pageCopy.common.account}>
             <Input value={modelConfigAccount?.name ?? ""} disabled />
           </Field>
-          <Field
-            label={
-              <div className="flex items-center gap-1.5">
-                <span>{pageCopy.accounts.modelProvider}</span>
-                <TooltipHint text={getModelProviderHint(language)} />
-              </div>
-            }
-          >
+          <Field label={pageCopy.accounts.modelProvider} hint={getModelProviderHint(language)}>
             <Input
               value={independentModelProviderIdDraft}
               onChange={(event) => setIndependentModelProviderIdDraft(event.target.value)}
@@ -988,6 +977,7 @@ function AccountListCard({
   onCopyAccount,
   copyTargetEnvironments,
   onModelConfig,
+  onCopyBaseUrl,
   onCopyApiKey,
 }: {
   account: AccountSummary;
@@ -1013,12 +1003,39 @@ function AccountListCard({
   onCopyAccount: (targetEnvName: string) => void;
   copyTargetEnvironments: string[];
   onModelConfig: () => void;
+  onCopyBaseUrl: (value: string) => void;
   onCopyApiKey: (value: string) => void;
 }) {
   const isAuth = account.authMode === "auth";
-  const baseUrl = account.route?.originalBaseUrl?.trim() || account.runtime.openaiBaseUrl?.trim() || "";
-  const apiKeyValue = account.apiKeyValue?.trim() || "";
+  const authCustomApiKey = account.runtime.independentModelApiKey?.trim() || "";
+  const authCustomBaseUrl = account.runtime.independentModelBaseUrl?.trim() || "";
+  const hasIndependentModelConfig = Boolean(authCustomApiKey || authCustomBaseUrl);
+  const baseUrl = isAuth
+    ? authCustomApiKey && authCustomBaseUrl ? authCustomBaseUrl : ""
+    : account.route?.originalBaseUrl?.trim() || account.runtime.openaiBaseUrl?.trim() || "";
+  const apiKeyValue = isAuth ? authCustomApiKey : account.apiKeyValue?.trim() || "";
+  const showRequestHealth = account.authMode === "apikey"
+    || Boolean(account.hasApiKey)
+    || Boolean(account.runtime.independentModelApiKey?.trim());
   const maskedApiKey = maskApiKeyForDisplay(apiKeyValue);
+  const activeRouteLabels = [
+    account.route?.enabled && (account.route.protocol !== "chat_completions" || account.route.poolEnabled)
+      ? language === "zh" ? "已开启代理" : language === "ja" ? "プロキシ有効" : "Routed"
+      : "",
+    account.route?.poolEnabled
+      ? language === "zh" ? "已开启自动分发" : language === "ja" ? "自動分散有効" : "Auto distribution"
+      : "",
+    account.runtime.apiProtocol === "chat_completions" && account.runtime.compatibilityRouteEnabled
+      ? language === "zh" ? "Chat 兼容" : language === "ja" ? "Chat 互換" : "Chat compatible"
+      : "",
+  ].filter(Boolean);
+  const activeRouteDetails = [
+    account.route?.enabled ? account.route.localBaseUrl : "",
+    account.route?.poolEnabled ? account.route.poolId : "",
+    account.runtime.apiProtocol === "chat_completions" && account.runtime.compatibilityRouteEnabled
+      ? account.runtime.compatibilityRouteBaseUrl
+      : "",
+  ].filter(Boolean).join("\n");
   const envLabel =
     account.envName === "default"
       ? language === "zh"
@@ -1031,7 +1048,7 @@ function AccountListCard({
   return (
     <ListCard
       className={cn(
-        "responsive-record-row responsive-account-row grid min-h-[92px] items-start gap-4",
+        "responsive-record-row responsive-account-row grid min-h-[92px] items-center gap-4",
       )}
     >
       <div className="min-w-0">
@@ -1041,19 +1058,13 @@ function AccountListCard({
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             <SoftBadge tone={isAuth ? "brand" : "neutral"} label={formatAccountAuthLabel(account.authMode)} />
             <SoftBadge tone="neutral" label={envLabel} />
-            {account.route?.enabled && account.route.protocol !== "chat_completions" ? (
-              <SoftBadge
-                tone="success"
-                label={language === "zh" ? "已开启代理" : language === "ja" ? "プロキシ有効" : "Routed"}
-                title={account.route?.localBaseUrl}
-              />
-            ) : null}
-            {account.runtime.apiProtocol === "chat_completions" && account.runtime.compatibilityRouteEnabled ? (
-              <SoftBadge
-                tone="success"
-                label={language === "zh" ? "Chat 兼容" : language === "ja" ? "Chat 互換" : "Chat compatible"}
-                title={account.runtime.compatibilityRouteBaseUrl}
-              />
+            {activeRouteLabels.length > 0 ? (
+              <span
+                className="inline-flex min-w-0 items-center truncate text-[10px] font-medium text-emerald-700"
+                title={activeRouteDetails || undefined}
+              >
+                {activeRouteLabels.join(" · ")}
+              </span>
             ) : null}
           </div>
       </div>
@@ -1062,47 +1073,65 @@ function AccountListCard({
         <div className="account-runtime-cell min-h-[52px] px-2 py-2">
           <div className="min-w-0 space-y-1">
             {baseUrl ? (
-              <span className="block truncate text-[14px] font-medium text-neutral-950 [font-variant-numeric:tabular-nums]">{baseUrl}</span>
-            ) : (
-              <span className="block truncate text-[12px] text-slate-400">
+              <div className="account-runtime-line min-h-6 min-w-0">
+                <span className="min-w-0 truncate text-[14px] font-medium text-neutral-950 [font-variant-numeric:tabular-nums]">{baseUrl}</span>
+                <button
+                  type="button"
+                  className="motion-interactive-color inline-flex size-6 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-white hover:text-neutral-900"
+                  onClick={() => onCopyBaseUrl(baseUrl)}
+                  aria-label={language === "zh" ? "复制 Base URL" : language === "ja" ? "Base URL をコピー" : "Copy Base URL"}
+                  title={language === "zh" ? "复制完整 Base URL" : language === "ja" ? "完全な Base URL をコピー" : "Copy full Base URL"}
+                >
+                  <Copy className="size-3.5" />
+                </button>
+              </div>
+            ) : !isAuth ? (
+              <span className="flex min-h-6 items-center truncate text-[12px] text-slate-400">
                 {language === "zh" ? "未配置 Base URL" : language === "ja" ? "Base URL 未設定" : "Base URL not set"}
               </span>
-            )}
+            ) : null}
             {maskedApiKey ? (
-              <span className="block truncate font-mono text-[12px] text-slate-500 [font-variant-numeric:tabular-nums]">{maskedApiKey}</span>
+              <div className="account-runtime-line min-h-6 min-w-0">
+                <span className="min-w-0 truncate font-mono text-[12px] text-slate-500 [font-variant-numeric:tabular-nums]">{maskedApiKey}</span>
+                <button
+                  type="button"
+                  className="motion-interactive-color inline-flex size-6 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-white hover:text-neutral-900"
+                  onClick={() => onCopyApiKey(apiKeyValue)}
+                  aria-label={language === "zh" ? "复制 API Key" : language === "ja" ? "API Key をコピー" : "Copy API key"}
+                  title={language === "zh" ? "复制完整 API Key" : language === "ja" ? "完全な API Key をコピー" : "Copy full API key"}
+                >
+                  <Copy className="size-3.5" />
+                </button>
+              </div>
+            ) : null}
+            {isAuth && !hasIndependentModelConfig ? (
+              <span className="flex min-h-6 items-center truncate text-[12px] text-slate-400">
+                {pageCopy.accounts.independentModelNotSet}
+              </span>
             ) : null}
           </div>
-          <div className="account-runtime-actions">
-            {maskedApiKey ? (
-              <button
-                type="button"
-                className="motion-interactive-color inline-flex size-8 items-center justify-center rounded-lg text-slate-400 hover:bg-white hover:text-neutral-900"
-                onClick={() => onCopyApiKey(apiKeyValue)}
-                aria-label={language === "zh" ? "复制 API Key" : language === "ja" ? "API Key をコピー" : "Copy API key"}
-                title={language === "zh" ? "复制完整 API Key" : language === "ja" ? "完全な API Key をコピー" : "Copy full API key"}
-              >
-                <Copy className="size-3.5" />
-              </button>
-            ) : null}
-            {isAuth ? <TooltipHint text={getModelConfigHint(language)} /> : null}
-            {isAuth ? (
-              <button
-                type="button"
-                className="motion-interactive-color inline-flex size-8 items-center justify-center rounded-lg text-slate-500 hover:bg-white hover:text-neutral-900"
-                onClick={onModelConfig}
-                disabled={busy}
-                aria-label={pageCopy.accounts.modelConfigTitle}
-                title={pageCopy.accounts.modelConfigTitle}
-              >
-                <Settings2 className="size-3.5" />
-              </button>
-            ) : null}
-          </div>
+          {isAuth ? (
+            <div className="account-model-actions">
+              <Tooltip content={getModelConfigHint(language)}>
+                <button
+                  type="button"
+                  className="motion-interactive-color inline-flex size-8 items-center justify-center rounded-lg text-slate-500 outline-none hover:bg-white hover:text-neutral-900 focus-visible:ring-2 focus-visible:ring-blue-300"
+                  onClick={onModelConfig}
+                  disabled={busy}
+                  aria-label={pageCopy.accounts.modelConfigTitle}
+                >
+                  <Settings2 className="size-4" />
+                </button>
+              </Tooltip>
+            </div>
+          ) : null}
         </div>
       </div>
 
       <div className="responsive-priority-secondary min-w-0">
-        {isAuth ? (
+        {showRequestHealth ? (
+          <AccountRequestHealthPanel health={account.requestHealth} language={language} loading={authMetricsLoading} />
+        ) : isAuth ? (
           <div className="px-2 py-2">
             <div className="space-y-1.5">
               <CardUsageRow
@@ -1188,15 +1217,28 @@ function AccountListCard({
           icon={<Monitor className="size-4" />}
           label="App"
           primaryStrategy="replace-current"
-          items={[{
-            key: "replace-current",
-            label:
-              language === "zh"
-                ? "启动 / 切换"
-                : language === "ja"
-                  ? "起動 / 切り替え"
-                  : "Launch / switch",
-          }]}
+          items={[
+            {
+              key: "replace-current",
+              label:
+                language === "zh"
+                  ? "启动 / 切换"
+                  : language === "ja"
+                    ? "起動 / 切り替え"
+                    : "Launch / switch",
+            },
+            {
+              key: "multi-window",
+              label: language === "zh" ? "多开" : language === "ja" ? "複数起動" : "Open another window",
+              disabled: !account.isCurrentApp,
+              disabledHint:
+                language === "zh"
+                  ? "只有活跃账号支持多开"
+                  : language === "ja"
+                    ? "アクティブなアカウントのみ複数起動できます"
+                    : "Only the active account supports multiple windows",
+            },
+          ]}
           onSelect={(strategy) => {
             onPrimeAccount(account);
             onSwitchAccount("app", account, strategy);
@@ -1386,30 +1428,12 @@ function RowActionSubmenu({
   );
 }
 
-function TooltipHint({ text }: { text: string }) {
-  return (
-    <Tooltip content={text}>
-      <span
-        tabIndex={0}
-        className="motion-interactive-color inline-flex size-4 items-center justify-center rounded-full bg-[#f3f4f6] text-slate-500 outline-none ring-1 ring-black/[0.05] hover:bg-[#ebedf0] hover:text-neutral-800 focus-visible:ring-2 focus-visible:ring-neutral-300"
-        aria-label={text}
-      >
-        <CircleHelp className="size-3" />
-      </span>
-    </Tooltip>
-  );
-}
-
-function SoftBadge({ label, tone, title }: { label: string; tone: "brand" | "neutral" | "success"; title?: string }) {
+function SoftBadge({ label, tone, title }: { label: string; tone: "brand" | "neutral"; title?: string }) {
   return (
     <span
       className={cn(
         "inline-flex h-5 items-center rounded-md px-2 text-[10px] font-medium",
-        tone === "brand"
-          ? "bg-sky-50 text-sky-700"
-          : tone === "success"
-            ? "bg-emerald-50 text-emerald-700"
-            : "bg-slate-100 text-slate-500",
+        tone === "brand" ? "bg-sky-50 text-sky-700" : "bg-slate-100 text-slate-500",
       )}
       title={title}
     >
@@ -1457,6 +1481,87 @@ function CardUsageRow({
   );
 }
 
+const REQUEST_HEALTH_SAMPLE_SIZE = 60;
+
+function AccountRequestHealthPanel({
+  health,
+  language,
+  loading,
+}: {
+  health?: AccountRequestHealth;
+  language: UiLanguage;
+  loading: boolean;
+}) {
+  return (
+    <div className={cn("space-y-1.5 px-2 py-1.5", loading && !health && "animate-pulse")}>
+      <RequestHealthRow
+        label={language === "zh" ? "请求成功率" : language === "ja" ? "リクエスト成功率" : "Success rate"}
+        rate={health?.successRate ?? null}
+        segments={health?.segments ?? []}
+        kind="success"
+        language={language}
+      />
+      <RequestHealthRow
+        label={language === "zh" ? "Cache 命中率" : language === "ja" ? "Cache ヒット率" : "Cache hit rate"}
+        rate={health?.cacheHitRate ?? null}
+        segments={health?.segments ?? []}
+        kind="cache"
+        language={language}
+      />
+    </div>
+  );
+}
+
+function RequestHealthRow({
+  label,
+  rate,
+  segments,
+  kind,
+  language,
+}: {
+  label: string;
+  rate: number | null;
+  segments: AccountRequestHealth["segments"];
+  kind: "success" | "cache";
+  language: UiLanguage;
+}) {
+  const visibleSegments = segments.slice(-REQUEST_HEALTH_SAMPLE_SIZE);
+  const slots = Array.from({ length: REQUEST_HEALTH_SAMPLE_SIZE }, (_, index) => {
+    const segment = visibleSegments[index - (REQUEST_HEALTH_SAMPLE_SIZE - visibleSegments.length)];
+    if (!segment) return { className: "bg-slate-100", title: "" };
+    const value = kind === "success" ? segment.success : segment.cacheHit;
+    const stateLabel = kind === "success"
+      ? value ? (language === "zh" ? "成功" : "Success") : (language === "zh" ? "失败" : "Failed")
+      : value === null ? (language === "zh" ? "无 Token 数据" : "No token data")
+        : value ? (language === "zh" ? "命中" : "Hit") : (language === "zh" ? "未命中" : "Miss");
+    return {
+      className: kind === "success"
+        ? value ? "bg-[#afc8b4]" : "bg-[#e6b3a9]"
+        : value === null ? "bg-[#ece9e3]" : value ? "bg-[#afc8b4]" : "bg-[#d9d4cc]",
+      title: `${new Date(segment.completedAt).toLocaleString()} · ${stateLabel}`,
+    };
+  });
+  const percent = rate === null ? "--" : `${(rate * 100).toFixed(rate >= 0.995 || rate === 0 ? 0 : 1)}%`;
+
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between gap-3 text-[10px] leading-none">
+        <span className="font-medium text-slate-500">{label}</span>
+        <span className="font-semibold text-neutral-800 [font-variant-numeric:tabular-nums]">{percent}</span>
+      </div>
+      <div
+        className="grid h-2.5 gap-px"
+        style={{ gridTemplateColumns: `repeat(${REQUEST_HEALTH_SAMPLE_SIZE}, minmax(1px, 1fr))` }}
+        aria-label={`${label} ${percent}`}
+      >
+        {slots.map((slot, index) => (
+          <span key={index} className={cn("min-w-0 rounded-[1px]", slot.className)} title={slot.title || undefined} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CardTargetButton({
   active,
   disabled,
@@ -1479,6 +1584,8 @@ function CardTargetButton({
   items: Array<{
     key: DesktopLaunchStrategy;
     label: string;
+    disabled?: boolean;
+    disabledHint?: string;
   }>;
   onSelect: (strategy: DesktopLaunchStrategy) => void;
   loadProjects?: () => Promise<CodexProject[]>;
@@ -1576,6 +1683,7 @@ function CardTargetButton({
                 key={item.key}
                 ref={item.key === "new-window" ? projectTriggerRef : undefined}
                 className="relative"
+                title={item.disabled ? item.disabledHint : undefined}
                 onMouseEnter={() => {
                   if (item.key !== "new-window" || !loadProjects) {
                     setProjectOpen(false);
@@ -1594,7 +1702,9 @@ function CardTargetButton({
                   className={cn(
                     "motion-interactive-color flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[12px] font-medium text-neutral-700 hover:bg-[#f6f7f9] hover:text-neutral-950",
                     item.key === primaryStrategy && "bg-[#f5f7fa] text-neutral-950",
+                    item.disabled && "cursor-not-allowed text-slate-300 hover:bg-transparent hover:text-slate-300",
                   )}
+                  disabled={item.disabled}
                   onClick={() => {
                     if (item.key === "new-window" && loadProjects) return;
                     setOpen(false);

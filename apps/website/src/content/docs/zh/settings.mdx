@@ -1,0 +1,29 @@
+---
+title: 设置
+description: 配置安装路径、终端、历史清理和路由生命周期。
+toc:
+  - id: paths
+    label: CLI 与 App 路径
+  - id: terminal
+    label: CLI 启动
+  - id: cleanup
+    label: 历史清理
+  - id: route
+    label: 路由策略
+---
+
+## CLI 与 App 路径
+
+设置中配置 CLI 与 App 的安装路径后，账号和环境页可以一键启动与切换。Windows MSIX 路径自动检测失败时，手动填写应用入口或使用应用别名。
+
+## CLI 启动
+
+“默认终端”决定使用 iTerm、Terminal、PowerShell 或 Windows Terminal。“自动恢复最近第 N 次对话”只在启动 CLI 时生效。
+
+## 历史清理
+
+打开环境历史的自动清理开关，设置保留 1–365 天。清理在后台异步执行，不应影响应用正常启动。
+
+## 路由策略
+
+可以设置路由默认端口，以及退出应用时是否停止路由。默认不停止，适合关闭界面后仍让 CLI 继续使用本地路由的场景。

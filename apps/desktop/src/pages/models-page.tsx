@@ -7,6 +7,7 @@ import type { UiLanguage } from "../i18n";
 import {
   IconActionButton,
   ListCard,
+  ListLoadingState,
   ListPageFrame,
   ListPageHeader,
   ListStack,
@@ -46,6 +47,7 @@ export function ModelsPage({
   const [bindingDraft, setBindingDraft] = useState<string[]>([]);
   const [bindingSearch, setBindingSearch] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const activeModel = snapshot.models.find((model) => model.id === activeModelId);
   const visibleAccounts = useMemo(() => {
@@ -63,7 +65,7 @@ export function ModelsPage({
   }, [visibleAccounts]);
 
   useEffect(() => {
-    void bridge.listCustomModels().then(setSnapshot).catch(onError);
+    void bridge.listCustomModels().then(setSnapshot).catch(onError).finally(() => setLoading(false));
   }, []);
 
   function bindingCount(modelId: string): number {
@@ -165,14 +167,14 @@ export function ModelsPage({
       />
 
       <ListStack>
-        {snapshot.models.length === 0 ? (
+        {loading ? <ListLoadingState rows={3} /> : snapshot.models.length === 0 ? (
           <ListCard className="flex min-h-[150px] items-center justify-center text-[13px] font-medium text-slate-400">
             {zh ? "暂无自定义模型" : "No custom models"}
           </ListCard>
         ) : snapshot.models.map((model) => {
           const count = bindingCount(model.id);
           return (
-            <ListCard key={model.id} className="responsive-record-row grid min-h-[86px] grid-cols-[minmax(220px,1fr)_minmax(160px,0.8fr)_auto] items-center gap-5">
+            <ListCard key={model.id} className="responsive-model-row responsive-record-row grid min-h-[86px] grid-cols-[minmax(220px,1fr)_minmax(160px,0.8fr)_auto] items-center gap-5">
               <div className="min-w-0">
                   <h3 className="truncate text-[15px] font-semibold text-neutral-950">{model.entry.display_name}</h3>
                   <p className="mt-1 truncate font-mono text-[11px] text-slate-400">{model.entry.slug}</p>
@@ -228,7 +230,7 @@ export function ModelsPage({
           {[...accountGroups.entries()].map(([envName, accounts]) => (
             <section key={envName}>
               <div className="mb-2 text-[11px] font-semibold text-slate-400">{envName}</div>
-              <div className="overflow-hidden rounded-xl border border-black/[0.06]">
+              <div className="overflow-hidden rounded-lg border border-black/[0.06]">
                 {accounts.map((account) => {
                   const key = `${account.envName}/${account.name}`;
                   const checked = bindingDraft.includes(key);

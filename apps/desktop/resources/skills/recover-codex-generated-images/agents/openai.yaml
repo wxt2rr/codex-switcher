@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex 图片静默恢复"
+  short_description: "在 image_gen 后静默补齐缺失的原生图片文件"
+  default_prompt: "调用 image_gen 后使用 $recover-codex-generated-images 静默检查并补齐原生图片文件，然后继续原有回复流程。"

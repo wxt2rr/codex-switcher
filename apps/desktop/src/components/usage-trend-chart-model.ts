@@ -47,9 +47,7 @@ export function formatUsageTrendTooltip(point: UsageTrendPoint, locale?: string)
       <span style="display:flex;align-items:center;gap:7px"><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${color}"></i>${label}</span>
       <strong>${formatTokens(point[key], locale)}</strong>
     </div>`).join("");
-  const hitRate = point.cacheHitRate === null
-    ? "-"
-    : `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(point.cacheHitRate * 100)}%`;
+  const hitRate = `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format((point.cacheHitRate ?? 0) * 100)}%`;
   return `<div style="min-width:230px;color:#f8fafc;font-size:12px;line-height:1.35">
     <div style="font-size:13px;font-weight:700;margin-bottom:8px">${formatTimestamp(point.bucket, locale)}</div>
     ${rows}
@@ -72,7 +70,7 @@ function bucketFromTooltipParams(params: unknown): number | null {
   return Number.isFinite(bucket) ? bucket : null;
 }
 
-export function buildUsageTrendChartOption(trend: UsageTrendPoint[], locale?: string): EChartsCoreOption {
+export function buildUsageTrendChartOption(trend: UsageTrendPoint[], locale?: string, motion = true): EChartsCoreOption {
   const pointsByBucket = new Map(trend.map((point) => [point.bucket, point]));
   const tokenSeries = [
     ["Input", trendColors.input, "inputTokens"],
@@ -82,7 +80,11 @@ export function buildUsageTrendChartOption(trend: UsageTrendPoint[], locale?: st
   ] as const;
 
   return {
-    animationDuration: 240,
+    animation: motion,
+    animationDuration: motion ? 720 : 0,
+    animationDurationUpdate: motion ? 220 : 0,
+    animationEasing: "cubicOut",
+    animationEasingUpdate: "cubicOut",
     color: Object.values(trendColors),
     grid: { left: 58, right: 58, top: 48, bottom: 40, containLabel: false },
     legend: {
@@ -159,8 +161,8 @@ export function buildUsageTrendChartOption(trend: UsageTrendPoint[], locale?: st
         name: "Cache Hit Rate",
         type: "line",
         yAxisIndex: 1,
-        data: trend.map((point) => [point.bucket, point.cacheHitRate === null ? null : point.cacheHitRate * 100]),
-        connectNulls: false,
+        data: trend.map((point) => [point.bucket, (point.cacheHitRate ?? 0) * 100]),
+        connectNulls: true,
         showSymbol: false,
         symbol: "circle",
         symbolSize: 7,

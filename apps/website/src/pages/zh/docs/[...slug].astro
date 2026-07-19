@@ -1,0 +1,24 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+
+interface DocModule {
+  default: unknown;
+  frontmatter: { title: string; description: string; toc?: Array<{ id: string; label: string }> };
+}
+
+export function getStaticPaths() {
+  const modules = import.meta.glob("../../../content/docs/zh/*.mdx", { eager: true });
+  return Object.entries(modules).map(([path, value]) => ({
+    params: { slug: path.split("/").pop()?.replace(/\.mdx$/, "") },
+    props: { doc: value as DocModule },
+  }));
+}
+
+const { doc } = Astro.props as { doc: DocModule };
+const Content = doc.default as any;
+const slug = Astro.params.slug ?? "";
+---
+
+<DocsLayout title={doc.frontmatter.title} description={doc.frontmatter.description} slug={slug} toc={doc.frontmatter.toc ?? []}>
+  <Content />
+</DocsLayout>

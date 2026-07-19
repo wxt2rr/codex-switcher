@@ -1,0 +1,25 @@
+---
+import { withBase } from "../lib/paths";
+
+interface Props {
+  compact?: boolean;
+}
+
+const { compact = false } = Astro.props;
+---
+
+<a class="brand" href={withBase("/zh/")} aria-label="codex-switcher 首页">
+  <span class="brand-mark" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none">
+      <rect x="3.5" y="4" width="17" height="16" rx="3" stroke="currentColor" stroke-width="1.7" />
+      <path d="m8 9 2.5 2.25L8 13.5M13 14h3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+  </span>
+  {!compact && <span>codex-switcher</span>}
+</a>
+
+<style>
+  .brand { display: inline-flex; align-items: center; gap: .65rem; color: var(--cs-foreground); font-weight: 650; letter-spacing: -.02em; text-decoration: none; }
+  .brand-mark { display: grid; width: 2rem; height: 2rem; place-items: center; border: 1px solid var(--cs-border); border-radius: .65rem; background: var(--cs-surface); box-shadow: var(--cs-shadow-xs); }
+  svg { width: 1.15rem; height: 1.15rem; }
+</style>

@@ -13,7 +13,10 @@ test("router manager rejects stale health responses without the compatibility AP
   assert.equal(isCompatibleRouterHealth({ ok: true, pid: 1, apiVersion: 3 }), false);
   assert.equal(isCompatibleRouterHealth({ ok: true, pid: 1, apiVersion: 4 }), false);
   assert.equal(isCompatibleRouterHealth({ ok: true, pid: 1, apiVersion: 5 }), false);
-  assert.equal(isCompatibleRouterHealth({ ok: true, pid: 1, apiVersion: 6 }), true);
+  assert.equal(isCompatibleRouterHealth({ ok: true, pid: 1, apiVersion: 6 }), false);
+  assert.equal(isCompatibleRouterHealth({ ok: true, pid: 1, apiVersion: 7 }), false);
+  assert.equal(isCompatibleRouterHealth({ ok: true, pid: 1, apiVersion: 8 }), false);
+  assert.equal(isCompatibleRouterHealth({ ok: true, pid: 1, apiVersion: 9 }), true);
 });
 
 test("router manager passes the configured preferred port to the service launcher", async () => {
@@ -199,5 +202,69 @@ test("account compatibility persists only the local token, hydrates the router, 
     const disabled = await manager.disableAccountCompatibility("work", "chat", async (value) => { restored = value; });
     assert.equal(disabled.state, "disabled");
     assert.equal(restored, "https://api.example.com/v1");
+  } finally { await service?.close(); }
+});
+
+test("account pool rewrites selected accounts, persists no upstream secrets, and restores exact URLs", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-account-pool-manager-"));
+  let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
+  const manager = new UsageRouterManager({ stateDir, serviceEntryPath: "unused",
+    launchService: async () => { service = await startUsageRouterService({ stateDir: join(stateDir, "usage-router") }); } });
+  const values = new Map<string, string>();
+  const update = async (accountName: string, baseUrl: string) => { values.set(accountName, baseUrl); };
+  try {
+    const enabled = await manager.enableAccountPool({ envName: "work", protocol: "responses",
+      accountNames: ["a", "b"], weights: { a: 2, b: 1 }, sessionTtlMinutes: 30, maxFailoverAttempts: 1 }, [
+      { envName: "work", accountName: "a", authMode: "apikey", protocol: "responses", baseUrl: "https://a.example/v1", apiKey: "sk-a" },
+      { envName: "work", accountName: "b", authMode: "apikey", protocol: "responses", baseUrl: "https://b.example/v1/", apiKey: "sk-b" },
+    ], update);
+    assert.equal(enabled.members.length, 2);
+    assert.equal(enabled.readyMembers, 2);
+    assert.match(values.get("a") ?? "", /^http:\/\/127\.0\.0\.1:\d+\/pools\//);
+    assert.equal(values.get("a"), values.get("b"));
+    const tokenFile = await import("node:fs/promises").then(({ readFile }) => readFile(join(stateDir, "usage-router", "compatibility-route-tokens.json"), "utf8"));
+    assert.equal(tokenFile.includes("sk-a"), false);
+    assert.equal(tokenFile.includes("sk-b"), false);
+    assert.equal((await manager.listPersistedAccountPools())[0]?.members[0]?.originalBaseUrl, "https://a.example/v1");
+
+    assert.equal(await manager.stopService(), true);
+    assert.equal((await manager.listPersistedAccountPools()).length, 1);
+    const restored = await manager.enableAccountPool({ envName: "work", protocol: "responses",
+      accountNames: ["a", "b"], weights: { a: 2, b: 1 }, sessionTtlMinutes: 30, maxFailoverAttempts: 1 }, [
+      { envName: "work", accountName: "a", authMode: "apikey", protocol: "responses", baseUrl: "https://a.example/v1", apiKey: "sk-a" },
+      { envName: "work", accountName: "b", authMode: "apikey", protocol: "responses", baseUrl: "https://b.example/v1/", apiKey: "sk-b" },
+    ], update);
+    assert.equal(restored.readyMembers, 2);
+
+    await manager.disableAccountPool("work", update);
+    assert.equal(values.get("a"), "https://a.example/v1");
+    assert.equal(values.get("b"), "https://b.example/v1/");
+    assert.deepEqual(await manager.listPersistedAccountPools(), []);
+  } finally { await service?.close(); }
+});
+
+test("Responses account pool accepts mixed AUTH and API-key members without persisting bearer credentials", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-mixed-auth-pool-manager-"));
+  let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
+  const manager = new UsageRouterManager({ stateDir, serviceEntryPath: "unused",
+    launchService: async () => { service = await startUsageRouterService({ stateDir: join(stateDir, "usage-router") }); } });
+  const values = new Map<string, string>();
+  try {
+    const enabled = await manager.enableAccountPool({ envName: "work", protocol: "responses",
+      accountNames: ["login", "key"] }, [
+      { envName: "work", accountName: "login", authMode: "auth", protocol: "responses", baseUrl: "default",
+        apiKey: "auth-access-token", authAccountId: "account-login" },
+      { envName: "work", accountName: "key", authMode: "apikey", protocol: "responses", baseUrl: "default", apiKey: "sk-key" },
+    ], async (accountName, baseUrl) => { values.set(accountName, baseUrl); });
+    assert.equal(enabled.members[0]?.upstreamBaseUrl, "https://chatgpt.com/backend-api/codex");
+    assert.equal(enabled.members[1]?.upstreamBaseUrl, "https://api.openai.com/v1");
+    assert.equal(values.get("login"), values.get("key"));
+    const tokenFile = await import("node:fs/promises").then(({ readFile }) => readFile(join(stateDir, "usage-router", "compatibility-route-tokens.json"), "utf8"));
+    assert.equal(tokenFile.includes("auth-access-token"), false);
+    assert.equal(tokenFile.includes("sk-key"), false);
+    await assert.rejects(manager.enableAccountPool({ envName: "work", protocol: "chat_completions",
+      accountNames: ["login"] }, [
+      { envName: "work", accountName: "login", authMode: "auth", protocol: "chat_completions", baseUrl: "default", apiKey: "auth-access-token" },
+    ], async () => undefined), /require API-key accounts/);
   } finally { await service?.close(); }
 });

@@ -36,6 +36,8 @@ apps/desktop/node_modules/
 apps/desktop/dist/
 apps/desktop/electron-dist/
 apps/desktop/release/
+apps/website/.astro/
+apps/website/dist/
 
 # Local Codex metadata
 .codex/

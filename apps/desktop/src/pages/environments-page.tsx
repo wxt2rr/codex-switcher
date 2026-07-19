@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
-import { ArrowDownToLine, FilePenLine, FileText, FolderPlus, History, Network, Search, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowDownToLine, FilePenLine, FileText, FolderPlus, History, Network, Search, Shuffle, RotateCcw, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import type { DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry } from "../bridge";
+import type { AccountPoolInput, AccountPoolStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry } from "../bridge";
 import {
   EmptyList,
   IconActionButton,
@@ -14,7 +14,6 @@ import {
 import { ConfirmDialog, SidePanel } from "../components/admin-primitives";
 import { Field, Input, Select, Textarea } from "../components/form-primitives";
 import type { EnvironmentRouteStatus, EnvSummary, OverviewPayload } from "../desktop-model";
-import { StatCard } from "../components/dashboard-kit";
 import { getDesktopCopy } from "../desktop-copy";
 import { getTranslations, type UiLanguage } from "../i18n";
 
@@ -101,6 +100,8 @@ function EnvCard({
   routeStatus,
   canRoute,
   onToggleRoute,
+  poolStatus,
+  onOpenPool,
 }: {
   env: EnvSummary;
   language: UiLanguage;
@@ -113,6 +114,8 @@ function EnvCard({
   routeStatus?: EnvironmentRouteStatus;
   canRoute: boolean;
   onToggleRoute: () => void;
+  poolStatus?: AccountPoolStatus;
+  onOpenPool: () => void;
 }) {
   return (
     <ListCard className="responsive-record-row responsive-environment-row grid min-h-[94px] items-center gap-5">
@@ -127,6 +130,7 @@ function EnvCard({
             {routeStatus?.enabled ? (
               <SoftBadge
                 tone="success"
+                className="text-[10px]"
                 label={
                   language === "zh"
                     ? `已开启路由 · 127.0.0.1:${routeStatus.port} · ${routeStatus.routedAccounts} 个账号`
@@ -152,6 +156,7 @@ function EnvCard({
 
       <div className="responsive-actions">
         <IconActionButton icon={<Network className="size-4" />} label={language === "zh" ? (routeStatus?.enabled ? "关闭路由" : "开启路由") : (routeStatus?.enabled ? "Disable route" : "Enable route")} onClick={onToggleRoute} disabled={busy || (!canRoute && !routeStatus?.enabled)} active={routeStatus?.enabled} />
+        <IconActionButton icon={<Shuffle className="size-4" />} label={language === "zh" ? "账号池" : "Account pool"} onClick={onOpenPool} disabled={busy || !canRoute} active={Boolean(poolStatus?.enabled)} />
         <IconActionButton icon={<FilePenLine className="size-4" />} label={language === "zh" ? "编辑" : "Edit"} onClick={onEdit} disabled={busy} />
         <IconActionButton icon={<FileText className="size-4" />} label={language === "zh" ? "修改" : "Modify"} onClick={onConfig} disabled={busy} />
         <IconActionButton icon={<History className="size-4" />} label={language === "zh" ? "历史" : "History"} onClick={onHistory} disabled={busy} />
@@ -191,6 +196,8 @@ export function EnvironmentsPage({
   onDeleteEnv,
   routeStatuses,
   onToggleRoute,
+  accountPools,
+  onSaveAccountPool,
 }: {
   overview: OverviewPayload;
   language: UiLanguage;
@@ -212,6 +219,8 @@ export function EnvironmentsPage({
   onDeleteEnv: () => void;
   routeStatuses: EnvironmentRouteStatus[];
   onToggleRoute: (envName: string, enabled: boolean) => Promise<void>;
+  accountPools: AccountPoolStatus[];
+  onSaveAccountPool: (input: AccountPoolInput) => Promise<boolean>;
 }) {
   const [search, setSearch] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -230,6 +239,14 @@ export function EnvironmentsPage({
   const [historySelection, setHistorySelection] = useState<string[]>([]);
   const [historyFilter, setHistoryFilter] = useState<"all" | "config.toml" | "auth.json">("all");
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [poolOpen, setPoolOpen] = useState(false);
+  const [poolEnvName, setPoolEnvName] = useState("");
+  const [poolProtocol, setPoolProtocol] = useState<"responses" | "chat_completions">("responses");
+  const [poolMembers, setPoolMembers] = useState<string[]>([]);
+  const [poolWeights, setPoolWeights] = useState<Record<string, number>>({});
+  const [poolTtl, setPoolTtl] = useState("1440");
+  const [poolSameAccountFailures, setPoolSameAccountFailures] = useState("1");
+  const [poolFailover, setPoolFailover] = useState("1");
   const pageCopy = getDesktopCopy(language);
   const text = getTranslations(language);
 
@@ -258,6 +275,27 @@ export function EnvironmentsPage({
 
   const selectedDeleteEnv = overview.envs.find((env) => env.name === envDeleteDraft.trim()) ?? null;
   const selectedDeleteAccounts = selectedDeleteEnv ? accountCountByEnv.get(selectedDeleteEnv.name) ?? 0 : 0;
+  const poolEnvAccounts = overview.accounts.filter((account) => account.envName === poolEnvName
+    && (poolProtocol === "responses"
+      ? account.runtime.apiProtocol !== "chat_completions" || account.authMode === "auth"
+      : account.authMode !== "auth" && account.runtime.apiProtocol === "chat_completions"));
+  const poolStatus = accountPools.find((pool) => pool.envName === poolEnvName);
+
+  function openPoolEditor(envName: string) {
+    const current = accountPools.find((pool) => pool.envName === envName);
+    const available = overview.accounts.filter((account) => account.envName === envName
+      && (current?.protocol === "chat_completions"
+        ? account.authMode !== "auth" && account.runtime.apiProtocol === "chat_completions"
+        : account.runtime.apiProtocol !== "chat_completions" || account.authMode === "auth"));
+    setPoolEnvName(envName);
+    setPoolProtocol(current?.protocol ?? "responses");
+    setPoolMembers(current?.members.filter((member) => member.enabled).map((member) => member.accountName) ?? available.map((account) => account.name));
+    setPoolWeights(Object.fromEntries((current?.members ?? available.map((account, index) => ({ accountName: account.name, weight: 1, priority: index, enabled: true }))).map((member) => [member.accountName, member.weight])));
+    setPoolTtl(String(current?.sessionTtlMinutes ?? 1440));
+    setPoolSameAccountFailures(String(current?.maxSameAccountFailures ?? 1));
+    setPoolFailover(String(current?.maxFailoverAttempts ?? 1));
+    setPoolOpen(true);
+  }
 
   return (
     <ListPageFrame className="overflow-hidden" contentClassName="h-full gap-3">
@@ -276,11 +314,6 @@ export function EnvironmentsPage({
             </Button>
           </div>
         </div>
-        <div className="grid divide-y divide-black/[0.06] rounded-[14px] border border-black/[0.05] bg-white sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-          <StatCard label={language === "zh" ? "环境总数" : "Environments"} value={String(overview.envs.length)} helper={language === "zh" ? `${filteredEnvs.length} 条当前结果` : `${filteredEnvs.length} shown`} />
-          <StatCard label="CLI / App" value={`${overview.envs.find((env) => env.isCurrentCli)?.name ?? "-"} / ${overview.envs.find((env) => env.isCurrentApp)?.name ?? "-"}`} helper={language === "zh" ? "当前激活环境" : "Active environments"} />
-          <StatCard label={language === "zh" ? "本地路由" : "Local routing"} value={`${routeStatuses.filter((item) => item.enabled).length}`} helper={language === "zh" ? `${routeStatuses.reduce((sum, item) => sum + item.routedAccounts, 0)} 个账号已接入` : `${routeStatuses.reduce((sum, item) => sum + item.routedAccounts, 0)} accounts routed`} />
-        </div>
       </div>
 
       <ListStack>
@@ -295,8 +328,17 @@ export function EnvironmentsPage({
               accountCount={accountCountByEnv.get(env.name) ?? 0}
               busy={busy}
               routeStatus={routeStatuses.find((item) => item.envName === env.name)}
-              canRoute={overview.accounts.some((account) => account.envName === env.name && account.authMode !== "auth")}
-              onToggleRoute={() => void onToggleRoute(env.name, !routeStatuses.find((item) => item.envName === env.name)?.enabled)}
+              poolStatus={accountPools.find((item) => item.envName === env.name)}
+                  canRoute={overview.accounts.some((account) => account.envName === env.name)}
+              onToggleRoute={() => {
+                const activePool = accountPools.find((item) => item.envName === env.name && item.enabled);
+                if (activePool) {
+                  void onSaveAccountPool({ envName: env.name, enabled: false, protocol: activePool.protocol, members: [] });
+                } else {
+                  void onToggleRoute(env.name, !routeStatuses.find((item) => item.envName === env.name)?.enabled);
+                }
+              }}
+              onOpenPool={() => openPoolEditor(env.name)}
               onEdit={() => {
                 setEditEnvName(env.name);
                 setEditNextEnvName(env.name);
@@ -352,6 +394,79 @@ export function EnvironmentsPage({
           >
             {pageCopy.environments.create}
           </Button>
+        </div>
+      </SidePanel>
+
+      <SidePanel open={poolOpen} title={language === "zh" ? `${poolEnvName} · 账号池` : `${poolEnvName} · Account pool`} onClose={() => setPoolOpen(false)} closeLabel={pageCopy.common.close}>
+        <div className="space-y-4">
+          <div className="rounded-lg bg-[#f7f8fa] px-4 py-3 text-xs leading-5 text-slate-600">
+            {language === "zh" ? "新会话按权重选择账号，同一会话优先保持原账号；只有限流、额度或网络失败才会自动切换。Responses 模式支持 AUTH 与 API Key 混合自动分发。" : "New sessions use weighted selection and stay on one account; failover is limited to rate, quota, and network failures. Responses pools can mix AUTH and API-key accounts."}
+          </div>
+          {poolStatus?.health.length ? <div className="grid gap-2 sm:grid-cols-2">
+            {poolStatus.health.map((item) => <div key={item.accountName} className="flex items-center justify-between rounded-lg border border-black/[0.05] bg-white px-3 py-2 text-xs">
+              <span className="truncate font-medium text-neutral-800">{item.accountName}</span>
+              <SoftBadge tone={item.state === "healthy" ? "success" : item.state === "cooldown" ? "warn" : "neutral"} label={item.state === "healthy" ? (language === "zh" ? "可用" : "Healthy") : item.state === "cooldown" ? (language === "zh" ? "冷却中" : "Cooldown") : item.state} />
+            </div>)}
+          </div> : null}
+          <Field label={language === "zh" ? "协议" : "Protocol"}>
+            <Select value={poolProtocol} onValueChange={(value) => {
+              const nextProtocol = value as "responses" | "chat_completions";
+              setPoolProtocol(nextProtocol);
+              setPoolMembers(overview.accounts.filter((account) => account.envName === poolEnvName
+                && (nextProtocol === "responses"
+                  ? account.runtime.apiProtocol !== "chat_completions" || account.authMode === "auth"
+                  : account.authMode !== "auth" && account.runtime.apiProtocol === "chat_completions"))
+                .map((account) => account.name));
+            }} items={[{ value: "responses", label: "Responses" }, { value: "chat_completions", label: "Chat Completions" }]} />
+          </Field>
+          <Field label={language === "zh" ? "分发策略" : "Dispatch strategy"}>
+            <div className="rounded-lg bg-[#f7f8fa] px-3 py-2 text-sm text-slate-700">{language === "zh" ? "会话粘性 + 加权轮询" : "Sticky session + weighted round robin"}</div>
+          </Field>
+          <Field label={language === "zh" ? "参与轮询的账号" : "Pool members"}>
+            <div className="space-y-2 rounded-lg bg-[#f7f8fa] p-3">
+              {poolEnvAccounts.map((account, index) => {
+                const selected = poolMembers.includes(account.name);
+                return <label key={account.name} className="flex items-center gap-3 rounded-lg bg-white px-3 py-2 text-sm">
+                  <input type="checkbox" checked={selected} onChange={(event) => setPoolMembers((current) => event.target.checked ? [...current, account.name] : current.filter((name) => name !== account.name))} />
+                  <span className="min-w-0 flex-1 truncate">{account.name}</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={String(poolWeights[account.name] ?? 1)}
+                    onChange={(event) => setPoolWeights((current) => ({ ...current, [account.name]: Number(event.target.value) || 1 }))}
+                    className="h-7 w-16 text-xs"
+                    disabled={!selected}
+                    aria-label={`${account.name} ${language === "zh" ? "分配权重" : "distribution weight"}`}
+                    title={language === "zh" ? "分配权重：数值越高，新会话分配到该账号的概率越高" : "Distribution weight: higher values receive more new sessions"}
+                  />
+                  <span
+                    className="text-[10px] text-slate-400"
+                    title={language === "zh" ? "轮询顺序：权重相同时按此顺序选择账号" : "Rotation order used when weights are equal"}
+                  >#{index + 1}</span>
+                </label>;
+              })}
+            </div>
+          </Field>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field
+              label={language === "zh" ? "会话保持时长（分钟）" : "Session affinity (min)"}
+              hint={language === "zh" ? "同一会话在此时间内优先使用原账号，提高缓存命中率" : "Prefer the original account during this period to improve cache hits"}
+            ><Input type="number" min={5} max={10080} value={poolTtl} onChange={(event) => setPoolTtl(event.target.value)} /></Field>
+            <Field
+              label={language === "zh" ? "同一账号最多失败次数" : "Failures before switching"}
+              hint={language === "zh" ? "单次请求内，当前账号连续失败达到此次数后才切换账号" : "Retry the current account until this many failures occur in one request"}
+            ><Input type="number" min={1} max={3} value={poolSameAccountFailures} onChange={(event) => setPoolSameAccountFailures(event.target.value)} /></Field>
+            <Field
+              label={language === "zh" ? "单次请求最多切换账号次数" : "Maximum account switches"}
+              hint={language === "zh" ? "当前账号达到失败次数后，最多再切换到几个其它账号" : "Maximum number of other accounts tried after the current account fails"}
+            ><Input type="number" min={0} max={1} value={poolFailover} onChange={(event) => setPoolFailover(event.target.value)} /></Field>
+          </div>
+          <div className="flex justify-end gap-2.5">
+            <Button variant="outline" onClick={() => setPoolOpen(false)}>{pageCopy.common.cancel}</Button>
+            {poolStatus ? <Button variant="destructive" onClick={async () => { if (await onSaveAccountPool({ envName: poolEnvName, enabled: false, protocol: poolProtocol, members: [] })) setPoolOpen(false); }}>{language === "zh" ? "关闭账号池" : "Disable pool"}</Button> : null}
+            <Button onClick={async () => { if (poolMembers.length && await onSaveAccountPool({ envName: poolEnvName, enabled: true, protocol: poolProtocol, members: poolMembers.map((accountName, priority) => ({ accountName, priority, weight: poolWeights[accountName] ?? 1 })), sessionTtlMinutes: Number(poolTtl), maxSameAccountFailures: Number(poolSameAccountFailures), maxFailoverAttempts: Number(poolFailover) })) setPoolOpen(false); }} disabled={busy || poolMembers.length === 0}>{language === "zh" ? "保存账号池" : "Save pool"}</Button>
+          </div>
         </div>
       </SidePanel>
 
@@ -474,7 +589,7 @@ export function EnvironmentsPage({
               return (
                 <div
                   key={group.key}
-                  className="rounded-xl bg-[#f7f8fa] px-4 py-4"
+                  className="rounded-lg bg-[#f7f8fa] px-4 py-4"
                 >
                   <div className="flex items-start gap-3">
                     <input

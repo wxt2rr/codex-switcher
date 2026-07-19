@@ -1,0 +1,35 @@
+---
+title: 环境与账号
+description: 理解 env、account、CODEX_HOME 和 CLI/App 目标。
+toc:
+  - id: environment
+    label: 什么是环境
+  - id: account
+    label: 什么是账号
+  - id: combinations
+    label: 如何组合
+  - id: targets
+    label: CLI 与 App
+---
+
+## 什么是环境
+
+环境（env）是一套独立的本地工作目录，保存会话、历史、配置和路由状态。Codex 默认使用 `~/.codex`，自定义环境会使用独立的 `.codex-envs/<name>/home`。
+
+## 什么是账号
+
+账号（account）是环境中的一个登录身份，本质上对应一份凭证或 API Key 配置。多个账号可以共享同一个环境的会话和配置。
+
+## 如何组合
+
+| 目标 | 推荐组合 |
+| --- | --- |
+| 同一项目使用个人号和工作号 | 一个环境 + 多个账号 |
+| 不同项目隔离历史 | 多个环境 |
+| 不同环境使用同一个 API Key | 在各环境分别添加账号 |
+
+同一环境切换账号时，切换的是身份；跨环境切换时，会话、配置和历史也随环境改变。
+
+## CLI 与 App
+
+CLI 和 App 是两个独立的运行目标，可以分别绑定不同账号。环境的 CLI / App 指针决定下一次启动使用哪套配置。

@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
 
 import type {
+  AccountRequestHealth,
   PricingProfile,
   RouteTarget,
   UsageDimensionAggregate,
@@ -16,14 +17,29 @@ import type {
   UsageSummary,
   UsageTrendPoint,
 } from "./usage-routing-model.js";
+import type {
+  AccountPool,
+  PoolMemberHealthState,
+  PoolSessionBinding,
+} from "./account-pool-routing.js";
 
 export interface UsageStore {
   upsertRoute(route: RouteTarget): Promise<void>;
   removeRoute(routeId: string): Promise<void>;
   listRoutes(): Promise<RouteTarget[]>;
+  upsertPool(pool: AccountPool, cursor?: number): Promise<void>;
+  updatePoolCursor(poolId: string, cursor: number): Promise<void>;
+  removePool(poolId: string): Promise<void>;
+  listPools(): Promise<Array<AccountPool & { cursor: number }>>;
+  upsertPoolHealth(health: PoolMemberHealthState): Promise<void>;
+  listPoolHealth(poolId: string): Promise<PoolMemberHealthState[]>;
+  upsertPoolBinding(binding: PoolSessionBinding): Promise<void>;
+  listPoolBindings(poolId: string, now?: number): Promise<PoolSessionBinding[]>;
+  removePoolBindings(poolId: string, accountName?: string): Promise<void>;
   recordUsage(request: UsageRequest): Promise<void>;
   queryUsage(filter: UsageFilter): Promise<UsageSnapshot>;
   queryUsageRequests(query: UsageRequestQuery): Promise<UsageRequestPage>;
+  queryRecentAccountHealth(limit?: number): Promise<AccountRequestHealth[]>;
   upsertPricing(profile: PricingProfile): Promise<void>;
   listPricing(): Promise<PricingProfile[]>;
   close(): Promise<void>;
@@ -76,6 +92,42 @@ function ensureRouteMetadataColumns(db: Database): void {
   ] as const;
   for (const [name, definition] of migrations) {
     if (!columns.has(name)) db.run(`ALTER TABLE route_targets ADD COLUMN ${name} ${definition}`);
+  }
+}
+
+function usageColumns(db: Database): Set<string> {
+  return new Set(runRows(db, "PRAGMA table_info(usage_requests)", []).map((row) => String(row.name)));
+}
+
+function ensureUsageAuditColumns(db: Database): void {
+  const columns = usageColumns(db);
+  const migrations = [
+    ["pool_id", "TEXT"],
+    ["entry_account_name", "TEXT"],
+    ["attempted_accounts_json", "TEXT"],
+    ["attempt_count", "INTEGER NOT NULL DEFAULT 1"],
+    ["failover_reason", "TEXT"],
+    ["session_key_hash", "TEXT"],
+    ["error_message", "TEXT"],
+    ["attempts_json", "TEXT"],
+  ] as const;
+  for (const [name, definition] of migrations) {
+    if (!columns.has(name)) db.run(`ALTER TABLE usage_requests ADD COLUMN ${name} ${definition}`);
+  }
+  db.run("CREATE INDEX IF NOT EXISTS usage_pool_idx ON usage_requests(pool_id, completed_at)");
+}
+
+function ensurePoolMemberColumns(db: Database): void {
+  const columns = new Set(runRows(db, "PRAGMA table_info(account_pool_members)", []).map((row) => String(row.name)));
+  if (!columns.has("original_base_url")) {
+    db.run("ALTER TABLE account_pool_members ADD COLUMN original_base_url TEXT NOT NULL DEFAULT 'default'");
+  }
+}
+
+function ensurePoolColumns(db: Database): void {
+  const columns = new Set(runRows(db, "PRAGMA table_info(account_pools)", []).map((row) => String(row.name)));
+  if (!columns.has("max_same_account_failures")) {
+    db.run("ALTER TABLE account_pools ADD COLUMN max_same_account_failures INTEGER NOT NULL DEFAULT 1");
   }
 }
 
@@ -236,8 +288,64 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
       updated_at INTEGER NOT NULL,
       PRIMARY KEY(kind, base_url, model_pattern)
     );
+    CREATE TABLE IF NOT EXISTS account_pools (
+      pool_id TEXT PRIMARY KEY,
+      env_name TEXT NOT NULL UNIQUE,
+      protocol TEXT NOT NULL,
+      enabled INTEGER NOT NULL,
+      strategy TEXT NOT NULL,
+      session_ttl_minutes INTEGER NOT NULL,
+      max_failover_attempts INTEGER NOT NULL,
+      max_same_account_failures INTEGER NOT NULL DEFAULT 1,
+      cursor INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS account_pool_members (
+      pool_id TEXT NOT NULL,
+      account_name TEXT NOT NULL,
+      route_id TEXT NOT NULL,
+      protocol TEXT NOT NULL,
+      upstream_base_url TEXT NOT NULL,
+      original_base_url TEXT NOT NULL,
+      upstream_model TEXT,
+      enabled INTEGER NOT NULL,
+      weight INTEGER NOT NULL,
+      priority INTEGER NOT NULL,
+      PRIMARY KEY(pool_id, account_name),
+      FOREIGN KEY(pool_id) REFERENCES account_pools(pool_id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS account_pool_health (
+      pool_id TEXT NOT NULL,
+      account_name TEXT NOT NULL,
+      state TEXT NOT NULL,
+      consecutive_failures INTEGER NOT NULL,
+      cooldown_until INTEGER,
+      last_success_at INTEGER,
+      last_failure_at INTEGER,
+      last_failure_reason TEXT,
+      last_failure_status INTEGER,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY(pool_id, account_name),
+      FOREIGN KEY(pool_id) REFERENCES account_pools(pool_id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS pool_session_bindings (
+      pool_id TEXT NOT NULL,
+      session_key_hash TEXT NOT NULL,
+      account_name TEXT NOT NULL,
+      response_ids_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      last_used_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      PRIMARY KEY(pool_id, session_key_hash),
+      FOREIGN KEY(pool_id) REFERENCES account_pools(pool_id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS pool_binding_expiry_idx ON pool_session_bindings(pool_id, expires_at);
   `);
   ensureRouteMetadataColumns(db);
+  ensureUsageAuditColumns(db);
+  ensurePoolMemberColumns(db);
+  ensurePoolColumns(db);
 
   let closed = false;
   let writeQueue = Promise.resolve();
@@ -300,16 +408,160 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
         enabled: Boolean(row.enabled), createdAt: asNumber(row.created_at), updatedAt: asNumber(row.updated_at),
       }));
     },
+    upsertPool(pool, cursor = 0) {
+      return mutate(() => {
+        db.run(
+          `INSERT INTO account_pools (
+             pool_id, env_name, protocol, enabled, strategy, session_ttl_minutes,
+             max_failover_attempts, max_same_account_failures, cursor, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(pool_id) DO UPDATE SET
+             env_name=excluded.env_name, protocol=excluded.protocol, enabled=excluded.enabled,
+             strategy=excluded.strategy, session_ttl_minutes=excluded.session_ttl_minutes,
+             max_failover_attempts=excluded.max_failover_attempts, max_same_account_failures=excluded.max_same_account_failures, cursor=excluded.cursor,
+             updated_at=excluded.updated_at`,
+          [pool.poolId, pool.envName, pool.protocol, pool.enabled ? 1 : 0, pool.strategy,
+            pool.sessionTtlMinutes, pool.maxFailoverAttempts, pool.maxSameAccountFailures, cursor, pool.createdAt, pool.updatedAt],
+        );
+        db.run("DELETE FROM account_pool_members WHERE pool_id = ?", [pool.poolId]);
+        for (const member of pool.members) {
+          db.run(
+            `INSERT INTO account_pool_members (
+               pool_id, account_name, route_id, protocol, upstream_base_url, original_base_url,
+               upstream_model, enabled, weight, priority
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [pool.poolId, member.accountName, member.routeId, member.protocol, member.upstreamBaseUrl, member.originalBaseUrl,
+              member.upstreamModel ?? null, member.enabled ? 1 : 0, member.weight, member.priority],
+          );
+          const existing = runRows(db,
+            "SELECT 1 AS present FROM account_pool_health WHERE pool_id = ? AND account_name = ?",
+            [pool.poolId, member.accountName],
+          )[0];
+          if (!existing) db.run(
+            `INSERT INTO account_pool_health VALUES (?, ?, 'healthy', 0, NULL, NULL, NULL, NULL, NULL, ?)`,
+            [pool.poolId, member.accountName, pool.updatedAt],
+          );
+        }
+        db.run(
+          `DELETE FROM account_pool_health WHERE pool_id = ?
+           AND account_name NOT IN (SELECT account_name FROM account_pool_members WHERE pool_id = ?)`,
+          [pool.poolId, pool.poolId],
+        );
+        db.run(
+          `DELETE FROM pool_session_bindings WHERE pool_id = ?
+           AND account_name NOT IN (SELECT account_name FROM account_pool_members WHERE pool_id = ?)`,
+          [pool.poolId, pool.poolId],
+        );
+      });
+    },
+    updatePoolCursor(poolId, cursor) {
+      return mutate(() => db.run("UPDATE account_pools SET cursor = ?, updated_at = ? WHERE pool_id = ?", [cursor, Date.now(), poolId]));
+    },
+    removePool(poolId) {
+      return mutate(() => db.run("DELETE FROM account_pools WHERE pool_id = ?", [poolId]));
+    },
+    async listPools() {
+      await writeQueue;
+      return runRows(db, "SELECT * FROM account_pools ORDER BY env_name", []).map((row) => {
+        const poolId = String(row.pool_id);
+        const members = runRows(db,
+          "SELECT * FROM account_pool_members WHERE pool_id = ? ORDER BY priority, account_name", [poolId],
+        ).map((member) => ({
+          accountName: String(member.account_name), routeId: String(member.route_id),
+          protocol: member.protocol === "chat_completions" ? "chat_completions" as const : "responses" as const,
+          upstreamBaseUrl: String(member.upstream_base_url),
+          originalBaseUrl: String(member.original_base_url),
+          upstreamModel: member.upstream_model ? String(member.upstream_model) : undefined,
+          enabled: Boolean(member.enabled), weight: asNumber(member.weight), priority: asNumber(member.priority),
+        }));
+        return {
+          poolId, envName: String(row.env_name),
+          protocol: row.protocol === "chat_completions" ? "chat_completions" as const : "responses" as const,
+          enabled: Boolean(row.enabled), strategy: "sticky_weighted_round_robin" as const,
+          sessionTtlMinutes: asNumber(row.session_ttl_minutes),
+          maxFailoverAttempts: asNumber(row.max_failover_attempts),
+          maxSameAccountFailures: Math.max(1, asNumber(row.max_same_account_failures) || 1),
+          cursor: asNumber(row.cursor), createdAt: asNumber(row.created_at), updatedAt: asNumber(row.updated_at), members,
+        };
+      });
+    },
+    upsertPoolHealth(health) {
+      return mutate(() => db.run(
+        `INSERT INTO account_pool_health VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(pool_id, account_name) DO UPDATE SET
+           state=excluded.state, consecutive_failures=excluded.consecutive_failures,
+           cooldown_until=excluded.cooldown_until, last_success_at=excluded.last_success_at,
+           last_failure_at=excluded.last_failure_at, last_failure_reason=excluded.last_failure_reason,
+           last_failure_status=excluded.last_failure_status, updated_at=excluded.updated_at`,
+        [health.poolId, health.accountName, health.state, health.consecutiveFailures, health.cooldownUntil,
+          health.lastSuccessAt, health.lastFailureAt, health.lastFailureReason, health.lastFailureStatus, health.updatedAt],
+      ));
+    },
+    async listPoolHealth(poolId) {
+      await writeQueue;
+      return runRows(db, "SELECT * FROM account_pool_health WHERE pool_id = ? ORDER BY account_name", [poolId]).map((row) => ({
+        poolId: String(row.pool_id), accountName: String(row.account_name),
+        state: String(row.state) as PoolMemberHealthState["state"], consecutiveFailures: asNumber(row.consecutive_failures),
+        cooldownUntil: row.cooldown_until === null ? null : asNumber(row.cooldown_until),
+        lastSuccessAt: row.last_success_at === null ? null : asNumber(row.last_success_at),
+        lastFailureAt: row.last_failure_at === null ? null : asNumber(row.last_failure_at),
+        lastFailureReason: row.last_failure_reason === null ? null : String(row.last_failure_reason) as PoolMemberHealthState["lastFailureReason"],
+        lastFailureStatus: row.last_failure_status === null ? null : asNumber(row.last_failure_status), updatedAt: asNumber(row.updated_at),
+      }));
+    },
+    upsertPoolBinding(binding) {
+      return mutate(() => {
+        db.run("DELETE FROM pool_session_bindings WHERE pool_id = ? AND expires_at <= ?", [binding.poolId, binding.lastUsedAt]);
+        db.run(
+        `INSERT INTO pool_session_bindings VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(pool_id, session_key_hash) DO UPDATE SET
+           account_name=excluded.account_name, response_ids_json=excluded.response_ids_json,
+           last_used_at=excluded.last_used_at, expires_at=excluded.expires_at`,
+        [binding.poolId, binding.sessionKeyHash, binding.accountName, JSON.stringify(binding.responseIds.slice(-32)),
+          binding.createdAt, binding.lastUsedAt, binding.expiresAt],
+        );
+      });
+    },
+    async listPoolBindings(poolId, now = Date.now()) {
+      await writeQueue;
+      return runRows(db,
+        "SELECT * FROM pool_session_bindings WHERE pool_id = ? AND expires_at > ? ORDER BY last_used_at DESC",
+        [poolId, now],
+      ).map((row) => ({
+        poolId: String(row.pool_id), sessionKeyHash: String(row.session_key_hash), accountName: String(row.account_name),
+        responseIds: parseStringArray(row.response_ids_json), createdAt: asNumber(row.created_at),
+        lastUsedAt: asNumber(row.last_used_at), expiresAt: asNumber(row.expires_at),
+      }));
+    },
+    removePoolBindings(poolId, accountName) {
+      return mutate(() => db.run(
+        accountName
+          ? "DELETE FROM pool_session_bindings WHERE pool_id = ? AND account_name = ?"
+          : "DELETE FROM pool_session_bindings WHERE pool_id = ?",
+        accountName ? [poolId, accountName] : [poolId],
+      ));
+    },
     recordUsage(request) {
       return mutate(() => {
         const costs = calculateRequestCosts(db, request);
         db.run(
-        `INSERT OR REPLACE INTO usage_requests VALUES (${Array.from({ length: 18 }, () => "?").join(",")})`,
+        `INSERT OR REPLACE INTO usage_requests (
+           request_id, route_id, started_at, completed_at, env_name, account_name,
+           upstream_base_url, endpoint, model, input_tokens, output_tokens,
+           cache_creation_tokens, cache_read_tokens, total_tokens, http_status,
+           latency_ms, actual_cost, standard_cost, pool_id, entry_account_name,
+           attempted_accounts_json, attempt_count, failover_reason, session_key_hash,
+           error_message, attempts_json
+         ) VALUES (${Array.from({ length: 26 }, () => "?").join(",")})`,
         [request.requestId, request.routeId, request.startedAt, request.completedAt, request.envName,
           request.accountName, request.upstreamBaseUrl, request.endpoint, request.model,
           request.inputTokens, request.outputTokens, request.cacheCreationTokens, request.cacheReadTokens,
           request.totalTokens, request.httpStatus, request.latencyMs,
-          request.actualCost ?? costs.actual, request.standardCost ?? costs.standard],
+          request.actualCost ?? costs.actual, request.standardCost ?? costs.standard,
+          request.poolId ?? null, request.entryAccountName ?? null,
+          JSON.stringify(request.attemptedAccounts ?? [request.accountName]), request.attemptCount ?? 1,
+          request.failoverReason ?? null, request.sessionKeyHash ?? null, request.errorMessage ?? null,
+          JSON.stringify(request.attempts ?? [])],
         );
       });
     },
@@ -353,6 +605,7 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
       for (const [column, value] of [
         ["env_name", query.envName], ["account_name", query.accountName],
         ["model", query.model], ["endpoint", query.endpoint],
+        ["pool_id", query.poolId], ["failover_reason", query.failoverReason],
       ] as const) {
         if (value) { clauses.push(`${column} = ?`); params.push(value); }
       }
@@ -388,8 +641,74 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
           accountNames: facet("account_name"),
           models: facet("model"),
           endpoints: facet("endpoint"),
+          poolIds: facet("pool_id"),
+          failoverReasons: facet("failover_reason"),
         },
       };
+    },
+    async queryRecentAccountHealth(limit = 60) {
+      await writeQueue;
+      const boundedLimit = Math.min(60, Math.max(1, Math.trunc(limit) || 60));
+      const rows = runRows(db, `
+        WITH account_events AS (
+          SELECT request.env_name,
+            json_extract(attempt.value, '$.accountName') AS account_name,
+            request.completed_at,
+            CASE WHEN json_extract(attempt.value, '$.outcome') = 'success' THEN 200
+              ELSE COALESCE(json_extract(attempt.value, '$.httpStatus'), 0) END AS http_status,
+            CASE WHEN json_extract(attempt.value, '$.outcome') = 'success'
+              AND json_extract(attempt.value, '$.accountName') = request.account_name
+              THEN request.cache_read_tokens ELSE NULL END AS cache_read_tokens
+          FROM usage_requests AS request, json_each(request.attempts_json) AS attempt
+          WHERE COALESCE(json_array_length(request.attempts_json), 0) > 0
+          UNION ALL
+          SELECT env_name, account_name, completed_at, http_status,
+            CASE WHEN http_status >= 200 AND http_status < 400 THEN cache_read_tokens ELSE NULL END AS cache_read_tokens
+          FROM usage_requests
+          WHERE COALESCE(json_array_length(attempts_json), 0) = 0
+        )
+        SELECT env_name, account_name, completed_at, http_status, cache_read_tokens
+        FROM (
+          SELECT env_name, account_name, completed_at, http_status, cache_read_tokens,
+            ROW_NUMBER() OVER (
+              PARTITION BY env_name, account_name
+              ORDER BY completed_at DESC
+            ) AS request_rank
+          FROM account_events
+        )
+        WHERE request_rank <= ?
+        ORDER BY env_name, account_name, completed_at ASC
+      `, [boundedLimit]);
+      const grouped = new Map<string, AccountRequestHealth>();
+      for (const row of rows) {
+        const envName = String(row.env_name);
+        const accountName = String(row.account_name);
+        const key = `${envName}\u0000${accountName}`;
+        const current = grouped.get(key) ?? {
+          envName, accountName, sampleSize: 0, successRate: null, cacheHitRate: null, segments: [],
+        };
+        current.segments.push({
+          completedAt: asNumber(row.completed_at),
+          success: asNumber(row.http_status) >= 200 && asNumber(row.http_status) < 400,
+          cacheHit: row.cache_read_tokens === null || row.cache_read_tokens === undefined
+            ? null
+            : asNumber(row.cache_read_tokens) > 0,
+        });
+        grouped.set(key, current);
+      }
+      return Array.from(grouped.values()).map((item) => {
+        const cacheSamples = item.segments.filter((segment) => segment.cacheHit !== null);
+        return {
+          ...item,
+          sampleSize: item.segments.length,
+          successRate: item.segments.length
+            ? item.segments.filter((segment) => segment.success).length / item.segments.length
+            : null,
+          cacheHitRate: cacheSamples.length
+            ? cacheSamples.filter((segment) => segment.cacheHit).length / cacheSamples.length
+            : null,
+        };
+      });
     },
     upsertPricing(profile) {
       return mutate(() => {
@@ -443,7 +762,43 @@ function usageRequestFromRow(row: Record<string, unknown>): UsageRequest {
     latencyMs: asNumber(row.latency_ms),
     actualCost: nullableNumber(row.actual_cost),
     standardCost: nullableNumber(row.standard_cost),
+    poolId: row.pool_id === null || row.pool_id === undefined ? null : String(row.pool_id),
+    entryAccountName: row.entry_account_name === null || row.entry_account_name === undefined ? null : String(row.entry_account_name),
+    attemptedAccounts: parseStringArray(row.attempted_accounts_json),
+    attemptCount: row.attempt_count === null || row.attempt_count === undefined ? 1 : asNumber(row.attempt_count),
+    failoverReason: row.failover_reason === null || row.failover_reason === undefined ? null : String(row.failover_reason),
+    sessionKeyHash: row.session_key_hash === null || row.session_key_hash === undefined ? null : String(row.session_key_hash),
+    errorMessage: row.error_message === null || row.error_message === undefined ? null : String(row.error_message),
+    attempts: parseAttempts(row.attempts_json),
   };
+}
+
+function parseAttempts(value: unknown): UsageRequest["attempts"] {
+  if (typeof value !== "string" || !value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is NonNullable<UsageRequest["attempts"]>[number] => {
+      if (!item || typeof item !== "object") return false;
+      const attempt = item as Record<string, unknown>;
+      return typeof attempt.accountName === "string"
+        && typeof attempt.startedAt === "number"
+        && typeof attempt.completedAt === "number"
+        && ["success", "retry", "returned", "failed"].includes(String(attempt.outcome));
+    });
+  } catch {
+    return [];
+  }
+}
+
+function parseStringArray(value: unknown): string[] {
+  if (typeof value !== "string" || !value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 function globMatches(value: string, pattern: string): boolean {

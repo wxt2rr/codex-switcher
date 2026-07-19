@@ -45,6 +45,16 @@ export interface ExtractedTokenUsage {
   totalTokens: number | null;
 }
 
+export interface UsageRequestAttempt {
+  accountName: string;
+  startedAt: number;
+  completedAt: number;
+  httpStatus: number | null;
+  reason: string | null;
+  errorMessage: string | null;
+  outcome: "success" | "retry" | "returned" | "failed";
+}
+
 export interface UsageRequest extends ExtractedTokenUsage {
   requestId: string;
   routeId: string;
@@ -58,6 +68,14 @@ export interface UsageRequest extends ExtractedTokenUsage {
   latencyMs: number;
   actualCost: number | null;
   standardCost: number | null;
+  poolId?: string | null;
+  entryAccountName?: string | null;
+  attemptedAccounts?: string[];
+  attemptCount?: number;
+  failoverReason?: string | null;
+  sessionKeyHash?: string | null;
+  errorMessage?: string | null;
+  attempts?: UsageRequestAttempt[];
 }
 
 export interface UsageFilter {
@@ -74,6 +92,8 @@ export interface UsageRequestQuery extends UsageFilter {
   pageSize: number;
   endpoint?: string;
   status?: "success" | "error";
+  poolId?: string;
+  failoverReason?: string;
   search?: string;
 }
 
@@ -82,6 +102,8 @@ export interface UsageRequestFacets {
   accountNames: string[];
   models: string[];
   endpoints: string[];
+  poolIds: string[];
+  failoverReasons: string[];
 }
 
 export interface UsageRequestPage {
@@ -92,6 +114,21 @@ export interface UsageRequestPage {
   pageSize: number;
   totalPages: number;
   facets: UsageRequestFacets;
+}
+
+export interface AccountRequestHealthSegment {
+  completedAt: number;
+  success: boolean;
+  cacheHit: boolean | null;
+}
+
+export interface AccountRequestHealth {
+  envName: string;
+  accountName: string;
+  sampleSize: number;
+  successRate: number | null;
+  cacheHitRate: number | null;
+  segments: AccountRequestHealthSegment[];
 }
 
 export interface UsageSummary {
@@ -170,14 +207,26 @@ export function buildLocalRouteBaseUrl(port: number, routeId: string): string {
   return `http://127.0.0.1:${port}/routes/${encodeURIComponent(routeId)}`;
 }
 
+export function isLocalRouterBaseUrl(value: string | undefined): boolean {
+  return /^https?:\/\/(?:127\.0\.0\.1|localhost):\d+\/(?:routes|pools)\//i.test(value?.trim() ?? "");
+}
+
 export function selectCompatibilityUpstreamBaseUrl(
   routes: RouteTarget[],
   envName: string,
   accountName: string,
   runtimeBaseUrl: string,
 ): string {
-  return routes.find((route) => route.envName === envName && route.accountName === accountName)?.originalBaseUrl
-    || runtimeBaseUrl;
+  const accountRoutes = routes.filter((route) => route.envName === envName && route.accountName === accountName);
+  const route = accountRoutes.find((candidate) => candidate.protocol === "chat_completions") ?? accountRoutes[0];
+  return route ? resolveRouteDisplayBaseUrl(route) : runtimeBaseUrl;
+}
+
+export function resolveRouteDisplayBaseUrl(route: Pick<RouteTarget, "originalBaseUrl" | "upstreamBaseUrl">): string {
+  const original = route.originalBaseUrl.trim();
+  return isLocalRouterBaseUrl(original)
+    ? route.upstreamBaseUrl
+    : original || route.upstreamBaseUrl;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

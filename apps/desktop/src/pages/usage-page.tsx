@@ -75,6 +75,7 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
   const refreshIntervalIsPreset = REFRESH_INTERVAL_PRESETS.includes(
     refreshIntervalSeconds as (typeof REFRESH_INTERVAL_PRESETS)[number],
   );
+  const visualizationKey = `${range}/${envName}/${accountName}/${baseUrl}/${model}`;
   function commitCustomRefreshInterval() {
     const seconds = normalizeRefreshSeconds(Number(customRefreshDraft));
     setRefreshIntervalSeconds(seconds);
@@ -148,7 +149,7 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
           />
           <StatCard
             label={zh ? "缓存命中率" : "Cache hit rate"}
-            value={snapshot.summary.cacheHitRate === null ? "-" : `${(snapshot.summary.cacheHitRate * 100).toFixed(1)}%`}
+            value={`${((snapshot.summary.cacheHitRate ?? 0) * 100).toFixed(1)}%`}
             valueClassName="text-violet-600"
             helper={<><span className="text-cyan-600">Cache Read {formatCompact(snapshot.summary.cacheReadTokens)}</span><span className="px-1 text-slate-300">·</span><span className="text-amber-600">Creation {formatCompact(snapshot.summary.cacheCreationTokens)}</span></>}
           />
@@ -157,14 +158,14 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
 
         <div className="grid gap-3 xl:grid-cols-[0.95fr_1.35fr]">
           <section className="rounded-[18px] bg-white p-5 ring-1 ring-black/[0.04]"><h3 className="text-[16px] font-semibold">{zh ? "模型分布" : "Model distribution"}</h3>
-            {snapshot.models.length ? <div className="mt-4 grid items-center gap-5 md:grid-cols-[220px_1fr]"><UsageDonut models={snapshot.models} /><div className="space-y-2">{snapshot.models.map((item) => <div key={item.key} className="grid grid-cols-[1fr_auto_auto] gap-4 border-b border-slate-100 py-2 text-[12px]"><b className="truncate">{item.model}</b><span>{item.requests} req</span><span>{formatCompact(item.totalTokens)}</span></div>)}</div></div> : <Empty zh={zh} />}
+            {snapshot.models.length ? <div className="mt-4 grid items-center gap-5 md:grid-cols-[220px_1fr]"><UsageDonut key={visualizationKey} models={snapshot.models} /><div className="space-y-2">{snapshot.models.map((item, index) => <div key={`${visualizationKey}/${item.key}`} className="usage-draw-row grid grid-cols-[1fr_auto_auto] gap-4 border-b border-slate-100 py-2 text-[12px]" style={{ transitionDelay: `${Math.min(index, 8) * 35}ms` }}><b className="truncate">{item.model}</b><span>{item.requests} req</span><span>{formatCompact(item.totalTokens)}</span></div>)}</div></div> : <Empty zh={zh} />}
           </section>
           <section className="rounded-[18px] bg-white p-5 ring-1 ring-black/[0.04]"><h3 className="text-[16px] font-semibold">{zh ? "Token 使用趋势" : "Token usage trend"}</h3>
-            {snapshot.trend.length ? <div className="mt-4"><UsageTrendChart trend={snapshot.trend} /></div> : <Empty zh={zh} />}
+            {snapshot.trend.length ? <div className="mt-4"><UsageTrendChart key={visualizationKey} trend={snapshot.trend} /></div> : <Empty zh={zh} />}
           </section>
         </div>
         <section className="rounded-[18px] bg-white p-5 ring-1 ring-black/[0.04]"><h3 className="text-[16px] font-semibold">Base URL</h3>
-          <div className="mt-3 overflow-auto"><table className="w-full min-w-[720px] text-left text-[12px]"><thead className="text-slate-400"><tr><th className="py-2">Base URL</th><th>{zh ? "请求" : "Requests"}</th><th className="text-blue-600">Input</th><th className="text-emerald-600">Output</th><th className="text-cyan-600">Cache Read</th><th>Token</th><th>{zh ? "标准费用" : "Standard cost"}</th></tr></thead><tbody>{snapshot.baseUrls.map((item) => <tr key={item.key} className="border-t border-slate-100"><td className="max-w-[360px] py-3"><button type="button" className="block max-w-full truncate text-left font-medium underline-offset-4 hover:text-blue-600 hover:underline" title={item.baseUrl} onClick={() => setRequestDetails({ baseUrl: item.baseUrl ?? item.key, filter: buildUsageFilter({ range, envName, accountName, baseUrl: item.baseUrl ?? item.key, model }, Date.now()) })}>{item.baseUrl}</button></td><td>{item.requests}</td><td className="text-blue-600">{formatCompact(item.inputTokens)}</td><td className="text-emerald-600">{formatCompact(item.outputTokens)}</td><td className="text-cyan-600">{formatCompact(item.cacheReadTokens)}</td><td className="font-medium text-neutral-900">{formatCompact(item.totalTokens)}</td><td>{item.standardCost === null ? "-" : `$${item.standardCost.toFixed(4)}`}</td></tr>)}</tbody></table></div>
+          <div className="mt-3 overflow-auto"><table className="w-full min-w-[720px] text-left text-[12px]"><thead className="text-slate-400"><tr><th className="py-2">Base URL</th><th>{zh ? "请求" : "Requests"}</th><th className="text-blue-600">Input</th><th className="text-emerald-600">Output</th><th className="text-cyan-600">Cache Read</th><th>Token</th><th>{zh ? "标准费用" : "Standard cost"}</th></tr></thead><tbody>{snapshot.baseUrls.map((item, index) => <tr key={`${visualizationKey}/${item.key}`} className="usage-draw-row border-t border-slate-100" style={{ transitionDelay: `${Math.min(index, 8) * 35}ms` }}><td className="max-w-[360px] py-3"><button type="button" className="block max-w-full truncate text-left font-medium underline-offset-4 hover:text-blue-600 hover:underline" title={item.baseUrl} onClick={() => setRequestDetails({ baseUrl: item.baseUrl ?? item.key, filter: buildUsageFilter({ range, envName, accountName, baseUrl: item.baseUrl ?? item.key, model }, Date.now()) })}>{item.baseUrl}</button></td><td>{item.requests}</td><td className="text-blue-600">{formatCompact(item.inputTokens)}</td><td className="text-emerald-600">{formatCompact(item.outputTokens)}</td><td className="text-cyan-600">{formatCompact(item.cacheReadTokens)}</td><td className="font-medium text-neutral-900">{formatCompact(item.totalTokens)}</td><td>{item.standardCost === null ? "-" : `$${item.standardCost.toFixed(4)}`}</td></tr>)}</tbody></table></div>
         </section>
         <SidePanel open={pricingOpen} title={zh ? "价格配置" : "Pricing profiles"} description={zh ? "按 Base URL 和模型配置实际采购价或标准价，单位为每百万 Token。保存后会重算历史记录。" : "Configure actual or standard rates per million tokens. Historical records are repriced after saving."} onClose={() => setPricingOpen(false)} closeLabel={zh ? "关闭" : "Close"}>
           <div className="space-y-4">

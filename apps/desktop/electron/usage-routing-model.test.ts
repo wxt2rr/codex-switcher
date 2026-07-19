@@ -6,6 +6,7 @@ import {
   buildLocalRouteBaseUrl,
   createRouteId,
   extractTokenUsage,
+  isLocalRouterBaseUrl,
   normalizeUpstreamBaseUrl,
   selectCompatibilityUpstreamBaseUrl,
 } from "./usage-routing-model.js";
@@ -24,6 +25,21 @@ test("compatibility routing unwraps an existing local usage route to its real up
     enabled: true, createdAt: 1, updatedAt: 1 };
   assert.equal(selectCompatibilityUpstreamBaseUrl([route], "work", "deepseek",
     "http://127.0.0.1:61923/routes/route"), "https://api.deepseek.com");
+});
+
+test("compatibility routing repairs a legacy local original URL from the upstream target", () => {
+  const route = { routeId: "route-chat", envName: "work", accountName: "deepseek",
+    upstreamBaseUrl: "https://api.deepseek.com", originalBaseUrl: "http://127.0.0.1:17832/routes/legacy",
+    protocol: "chat_completions" as const, reasoningProfile: "auto" as const,
+    enabled: true, createdAt: 1, updatedAt: 1 };
+  assert.equal(selectCompatibilityUpstreamBaseUrl([route], "work", "deepseek",
+    "http://127.0.0.1:17832/routes/legacy"), "https://api.deepseek.com");
+});
+
+test("local router URLs are never treated as provider Base URLs", () => {
+  assert.equal(isLocalRouterBaseUrl("http://127.0.0.1:17832/routes/route-a"), true);
+  assert.equal(isLocalRouterBaseUrl("http://localhost:17832/pools/pool-a"), true);
+  assert.equal(isLocalRouterBaseUrl("https://api.deepseek.com"), false);
 });
 
 test("route identity is stable and preserves the upstream Base URL dimension", () => {

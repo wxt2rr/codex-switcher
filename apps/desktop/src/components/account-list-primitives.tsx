@@ -14,7 +14,7 @@ export function ListPageFrame({
   contentClassName?: string;
 }) {
   return (
-    <section className={cn("h-full min-h-0 overflow-hidden px-6 pb-6 pt-6 xl:px-8 xl:pb-8 xl:pt-8", className)}>
+    <section className={cn("desktop-page-frame h-full min-h-0 overflow-hidden px-6 pb-6 pt-6 xl:px-8 xl:pb-8 xl:pt-8", className)}>
       <PageScrollArea>
         <div className={cn("admin-page-content flex min-h-full w-full flex-col gap-4", contentClassName)}>{children}</div>
       </PageScrollArea>
@@ -23,7 +23,23 @@ export function ListPageFrame({
 }
 
 export function PageScrollArea({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("page-scroll-gutter h-full min-h-0", className)}>{children}</div>;
+  return <div className={cn("page-scroll-gutter h-full min-h-0 desktop-page-scroll", className)}>{children}</div>;
+}
+
+export function ListLoadingState({ rows = 4 }: { rows?: number }) {
+  return (
+    <div className="list-loading-state space-y-2.5" aria-busy="true" aria-label="Loading">
+      {Array.from({ length: rows }, (_, index) => (
+        <div key={index} className="list-loading-row rounded-[14px] border border-black/[0.05] bg-white px-5 py-4 dark:border-white/[0.07] dark:bg-[#141a22]">
+          <div className="flex items-center gap-4">
+            <span className="h-4 w-1/4 rounded bg-slate-200/80 dark:bg-slate-700/70" />
+            <span className="h-3 flex-1 rounded bg-slate-200/70 dark:bg-slate-700/60" />
+            <span className="h-8 w-20 rounded-lg bg-slate-200/70 dark:bg-slate-700/60" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function ListPageHeader({
@@ -116,9 +132,11 @@ export function ListCard({
 export function SoftBadge({
   label,
   tone = "neutral",
+  className,
 }: {
   label: string;
   tone?: "brand" | "neutral" | "success" | "warn";
+  className?: string;
 }) {
   return (
     <span
@@ -128,6 +146,7 @@ export function SoftBadge({
         tone === "success" && "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300",
         tone === "warn" && "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300",
         tone === "neutral" && "bg-slate-100 text-slate-500 dark:bg-[#202733] dark:text-slate-300",
+        className,
       )}
     >
       {label}
@@ -145,13 +164,12 @@ export function RunStatusBadge({
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center gap-1 rounded-md px-2 text-[10px] font-semibold",
+        "inline-flex h-5 items-center rounded-md px-2 text-[10px] font-semibold",
         tone === "success" && "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300",
         tone === "warn" && "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300",
         tone === "neutral" && "bg-slate-100 text-slate-500 dark:bg-[#202733] dark:text-slate-300",
       )}
     >
-      <span className="size-1 rounded-full bg-current" />
       {label}
     </span>
   );

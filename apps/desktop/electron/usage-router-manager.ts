@@ -4,6 +4,7 @@ import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
+  type AccountRequestHealth,
   buildLocalRouteBaseUrl,
   createRouteId,
   normalizeUpstreamBaseUrl,
@@ -14,11 +15,21 @@ import {
   type UsageRequestQuery,
   type UsageSnapshot,
 } from "./usage-routing-model.js";
+import {
+  buildLocalPoolBaseUrl,
+  createAccountPoolId,
+  normalizePoolMaxFailoverAttempts,
+  normalizePoolMaxSameAccountFailures,
+  normalizePoolSessionTtl,
+  normalizePoolWeight,
+  type AccountPool,
+  type PoolMemberHealthState,
+} from "./account-pool-routing.js";
 import { FileHistoryPersistence } from "./openai-chat-compat/history-persistence.js";
 import { createUsageStore } from "./usage-store.js";
 import { runCompatibilityCheck, type StagedCompatibilityResult } from "./openai-chat-compat/compatibility-check.js";
 
-const REQUIRED_ROUTER_API_VERSION = 6;
+const REQUIRED_ROUTER_API_VERSION = 9;
 
 export function isCompatibleRouterHealth(value: unknown): boolean {
   return Boolean(value && typeof value === "object" &&
@@ -38,12 +49,31 @@ export interface RoutableAccount {
   accountName: string;
   authMode: string;
   baseUrl: string;
+  protocol?: RouteTarget["protocol"];
   apiKey?: string;
+  authAccountId?: string;
   upstreamModel?: string;
   reasoningProfile?: RouteTarget["reasoningProfile"];
   longConversationStrategy?: RouteTarget["longConversationStrategy"];
   instructionRole?: RouteTarget["instructionRole"];
   requestOverrides?: Record<string, unknown>;
+}
+
+export interface AccountPoolInput {
+  envName: string;
+  protocol: RouteTarget["protocol"];
+  accountNames: string[];
+  weights?: Record<string, number>;
+  sessionTtlMinutes?: number;
+  maxFailoverAttempts?: number;
+  maxSameAccountFailures?: number;
+}
+
+export interface AccountPoolStatus extends AccountPool {
+  cursor: number;
+  health: PoolMemberHealthState[];
+  localBaseUrl?: string;
+  readyMembers: number;
 }
 
 export interface AccountRouteStatus {
@@ -58,13 +88,17 @@ export interface AccountRouteStatus {
 
 export interface CompatibilityCheckResult extends StagedCompatibilityResult { ok: boolean; status: number; message: string; }
 
-interface RouteTokenFile { routes: Record<string, string>; }
+interface RouteTokenFile { routes: Record<string, string>; pools?: Record<string, string>; }
 
 export interface EnvironmentRouteStatus {
   envName: string;
   enabled: boolean;
   routedAccounts: number;
   port: number | null;
+  poolEnabled?: boolean;
+  poolId?: string;
+  poolMemberCount?: number;
+  poolReadyMembers?: number;
 }
 
 export interface UsageRouterManagerOptions {
@@ -88,7 +122,7 @@ export class UsageRouterManager {
 
   private async readRouteTokens(): Promise<RouteTokenFile> {
     try { return JSON.parse(await readFile(this.tokenPath(), "utf8")) as RouteTokenFile; }
-    catch { return { routes: {} }; }
+    catch { return { routes: {}, pools: {} }; }
   }
 
   private async writeRouteTokens(value: RouteTokenFile): Promise<void> {
@@ -209,6 +243,140 @@ export class UsageRouterManager {
     return this.adminWithState<RouteTarget[]>(state, "/admin/routes");
   }
 
+  async listAccountPools(): Promise<AccountPoolStatus[]> {
+    const state = await this.readState();
+    if (!state || !await this.isHealthy(state)) return [];
+    const pools = await this.adminWithState<Array<AccountPool & { cursor: number }>>(state, "/admin/pools");
+    return Promise.all(pools.map(async (pool) => {
+      const health = await this.adminWithState<PoolMemberHealthState[]>(state, `/admin/pools/${encodeURIComponent(pool.poolId)}/health`);
+      return { ...pool, health, localBaseUrl: buildLocalPoolBaseUrl(state.port, pool.poolId), readyMembers: health.filter((item) => item.state === "healthy" || item.state === "degraded").length };
+    }));
+  }
+
+  async listPersistedAccountPools(): Promise<Array<AccountPool & { cursor: number }>> {
+    const state = await this.readState();
+    if (state && await this.isHealthy(state)) return this.adminWithState<Array<AccountPool & { cursor: number }>>(state, "/admin/pools");
+    const store = await createUsageStore(join(this.routerDir, "usage.db"));
+    try { return await store.listPools(); } finally { await store.close(); }
+  }
+
+  async enableAccountPool(
+    input: AccountPoolInput,
+    accounts: RoutableAccount[],
+    updateBaseUrl: (accountName: string, baseUrl: string) => Promise<void>,
+  ): Promise<AccountPoolStatus> {
+    const selected = accounts.filter((account) => input.accountNames.includes(account.accountName));
+    if (!selected.length) throw new Error(`Environment '${input.envName}' has no selected pool accounts`);
+    if (selected.some((account) => !account.apiKey?.trim())) throw new Error("Account pool members require a bearer credential");
+    if (input.protocol === "chat_completions" && selected.some((account) => account.authMode === "auth")) {
+      throw new Error("Chat compatibility pools require API-key accounts");
+    }
+    if (selected.some((account) => account.protocol && account.protocol !== input.protocol)) throw new Error("Pool members must use the same API protocol");
+    const state = await this.ensureService();
+    const poolId = createAccountPoolId(input.envName);
+    const previous = (await this.listAccountPools()).find((pool) => pool.poolId === poolId);
+    const now = Date.now();
+    const pool: AccountPool = {
+      poolId, envName: input.envName, protocol: input.protocol, enabled: true,
+      strategy: "sticky_weighted_round_robin", sessionTtlMinutes: normalizePoolSessionTtl(input.sessionTtlMinutes),
+      maxFailoverAttempts: normalizePoolMaxFailoverAttempts(input.maxFailoverAttempts),
+      maxSameAccountFailures: normalizePoolMaxSameAccountFailures(input.maxSameAccountFailures), createdAt: previous?.createdAt ?? now, updatedAt: now,
+      members: selected.map((account, index) => {
+        const upstreamBaseUrl = normalizeUpstreamBaseUrl(account.baseUrl === "default"
+          ? account.authMode === "auth" ? "https://chatgpt.com/backend-api/codex" : "https://api.openai.com/v1"
+          : account.baseUrl);
+        return {
+        accountName: account.accountName,
+        routeId: createRouteId(input.envName, account.accountName, upstreamBaseUrl),
+        protocol: input.protocol, upstreamBaseUrl,
+        originalBaseUrl: account.baseUrl, upstreamModel: account.upstreamModel,
+        enabled: true, weight: normalizePoolWeight(input.weights?.[account.accountName]), priority: index,
+      }; }),
+    };
+    if (pool.members.some((member) => !member.upstreamBaseUrl)) throw new Error("Pool members require a Base URL");
+    const tokens = await this.readRouteTokens();
+    tokens.pools ??= {};
+    const localRouteToken = tokens.pools[poolId] || randomBytes(32).toString("hex");
+    const changed: Array<{ accountName: string; originalBaseUrl: string }> = [];
+    try {
+      await this.admin<void>("/admin/pools", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(pool) });
+      for (const member of pool.members) {
+        const account = selected.find((item) => item.accountName === member.accountName)!;
+        if (pool.protocol === "chat_completions") {
+          const route: RouteTarget = {
+            routeId: member.routeId, envName: pool.envName, accountName: member.accountName,
+            upstreamBaseUrl: member.upstreamBaseUrl, originalBaseUrl: member.originalBaseUrl,
+            protocol: "chat_completions", upstreamModel: account.upstreamModel,
+            reasoningProfile: account.reasoningProfile ?? "auto",
+            longConversationStrategy: account.longConversationStrategy ?? "safe",
+            instructionRole: account.instructionRole ?? "auto", requestOverrides: account.requestOverrides,
+            enabled: true, createdAt: previous?.createdAt ?? now, updatedAt: now,
+          };
+          await this.admin<void>(`/admin/routes/${encodeURIComponent(member.routeId)}`, {
+            method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(route),
+          });
+        }
+        await this.admin<void>(`/admin/pools/${encodeURIComponent(poolId)}/members/${encodeURIComponent(member.accountName)}/secret`, {
+          method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({
+            upstreamBearerToken: account.apiKey,
+            authMode: account.authMode === "auth" ? "auth" : "apikey",
+            accountId: account.authAccountId,
+          }),
+        });
+      }
+      await this.admin<void>(`/admin/pools/${encodeURIComponent(poolId)}/token`, {
+        method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ localRouteToken }),
+      });
+      const localBaseUrl = buildLocalPoolBaseUrl(state.port, poolId);
+      for (const member of pool.members) {
+        await updateBaseUrl(member.accountName, localBaseUrl);
+        changed.push({ accountName: member.accountName, originalBaseUrl: member.originalBaseUrl });
+      }
+      tokens.pools[poolId] = localRouteToken;
+      await this.writeRouteTokens(tokens);
+      if (pool.protocol === "responses") {
+        await this.deleteRoutes((await this.listRoutes()).filter((route) => route.envName === input.envName));
+      }
+      const health = await this.admin<PoolMemberHealthState[]>(`/admin/pools/${encodeURIComponent(poolId)}/health`);
+      return { ...pool, cursor: previous?.cursor ?? 0, health, localBaseUrl, readyMembers: health.filter((item) => item.state === "healthy" || item.state === "degraded").length };
+    } catch (error) {
+      await Promise.allSettled(changed.map((item) => updateBaseUrl(item.accountName, item.originalBaseUrl)));
+      await this.admin<void>(`/admin/pools/${encodeURIComponent(poolId)}`, { method: "DELETE" }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async disableAccountPool(envName: string, updateBaseUrl: (accountName: string, baseUrl: string) => Promise<void>): Promise<void> {
+    const pool = (await this.admin<Array<AccountPool & { cursor: number }>>("/admin/pools")).find((item) => item.envName === envName);
+    if (!pool) return;
+    for (const member of pool.members) await updateBaseUrl(member.accountName, member.originalBaseUrl);
+    await this.admin<void>(`/admin/pools/${encodeURIComponent(pool.poolId)}`, { method: "DELETE" });
+    if (pool.protocol !== "chat_completions") {
+      for (const member of pool.members) {
+        await this.admin<void>(`/admin/routes/${encodeURIComponent(member.routeId)}`, { method: "DELETE" }).catch(() => undefined);
+      }
+    }
+    const tokens = await this.readRouteTokens(); delete tokens.pools?.[pool.poolId]; await this.writeRouteTokens(tokens);
+  }
+
+  async removeAccountPoolConfiguration(envName: string): Promise<void> {
+    const pool = (await this.listPersistedAccountPools()).find((item) => item.envName === envName);
+    if (!pool) return;
+    const state = await this.readState();
+    if (state && await this.isHealthy(state)) {
+      await this.adminWithState<void>(state, `/admin/pools/${encodeURIComponent(pool.poolId)}`, { method: "DELETE" });
+      for (const member of pool.members) {
+        await this.adminWithState<void>(state, `/admin/routes/${encodeURIComponent(member.routeId)}`, { method: "DELETE" }).catch(() => undefined);
+      }
+    } else {
+      const store = await createUsageStore(join(this.routerDir, "usage.db"));
+      try { await store.removePool(pool.poolId); } finally { await store.close(); }
+    }
+    const tokens = await this.readRouteTokens();
+    delete tokens.pools?.[pool.poolId];
+    await this.writeRouteTokens(tokens);
+  }
+
   async listPersistedRoutes(): Promise<RouteTarget[]> {
     const running = await this.readState();
     if (running && await this.isHealthy(running)) {
@@ -253,7 +421,13 @@ export class UsageRouterManager {
       return envNames.map((envName) => ({ envName, enabled: false, routedAccounts: 0, port: null }));
     }
     const routes = await this.listRoutes();
+    const pools = await this.listAccountPools();
     return envNames.map((envName) => {
+      const pool = pools.find((item) => item.envName === envName && item.enabled);
+      if (pool) return {
+        envName, enabled: true, routedAccounts: pool.members.length, port: state.port,
+        poolEnabled: true, poolId: pool.poolId, poolMemberCount: pool.members.length, poolReadyMembers: pool.readyMembers,
+      };
       const count = routes.filter((route) => route.envName === envName && route.enabled).length;
       return { envName, enabled: count > 0, routedAccounts: count, port: count > 0 ? state.port : null };
     });
@@ -473,9 +647,17 @@ export class UsageRouterManager {
     if (filter.baseUrl) query.set("baseUrl", filter.baseUrl);
     if (filter.model) query.set("model", filter.model);
     if (filter.endpoint) query.set("endpoint", filter.endpoint);
+    if (filter.poolId) query.set("poolId", filter.poolId);
+    if (filter.failoverReason) query.set("failoverReason", filter.failoverReason);
     if (filter.status) query.set("status", filter.status);
     if (filter.search) query.set("search", filter.search);
     return this.admin<UsageRequestPage>(`/admin/requests?${query}`);
+  }
+
+  async queryRecentAccountHealthIfRunning(limit = 60): Promise<AccountRequestHealth[]> {
+    const state = await this.readState();
+    if (!state || !await this.isHealthy(state)) return [];
+    return this.adminWithState<AccountRequestHealth[]>(state, `/admin/account-health?limit=${Math.min(60, Math.max(1, Math.trunc(limit) || 60))}`);
   }
 
   listPricing(): Promise<PricingProfile[]> {

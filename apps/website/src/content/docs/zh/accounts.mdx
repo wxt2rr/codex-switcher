@@ -1,0 +1,36 @@
+---
+title: 账号管理
+description: 添加 Auth、API Key、sub2api 账号并在环境间复制。
+toc:
+  - id: auth
+    label: Auth 授权
+  - id: api-key
+    label: API Key
+  - id: copy
+    label: 复制账号
+  - id: headers
+    label: API Key 配置
+---
+
+## Auth 授权
+
+Auth 模式会调用 Codex 的登录流程。适合使用 ChatGPT 授权能力的账号，登录完成后凭证保存在当前环境的账号目录中。
+
+## API Key
+
+API Key 模式不需要网页登录，输入 Key 后可选择默认或自定义 Base URL。对于自定义上游，还可以打开兼容路由并填写上游模型。
+
+## 复制账号
+
+在账号卡片的更多菜单中选择“复制”，会把当前账号信息复制到当前环境；选择“复制到”会出现其他环境列表，确认后复制到指定环境。复制不会删除源账号。
+
+## API Key 配置
+
+使用 API Key 账号时，软件会写入必要的认证配置，例如：
+
+```toml
+requires_openai_auth = false
+http_headers = { "x-openai-actor-authorization" = "codex-sw.app" }
+```
+
+不要把真实 Key 粘贴到工单、截图或公开仓库中。账号卡片中的 Key 只展示脱敏结果。

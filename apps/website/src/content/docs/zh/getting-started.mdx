@@ -1,0 +1,31 @@
+---
+title: 快速开始
+description: 用几分钟完成安装、创建环境、添加账号并启动 Codex。
+toc:
+  - id: install
+    label: 安装
+  - id: first-environment
+    label: 创建第一个环境
+  - id: first-account
+    label: 添加账号
+  - id: launch
+    label: 启动 CLI 或 App
+---
+
+## 安装
+
+从 [GitHub Releases](https://github.com/wxt2rr/codex-switcher/releases) 下载对应平台的安装包。首次启动遇到安全提示时，先确认文件来自本仓库，再按[安装说明](../installation/)处理。
+
+## 创建第一个环境
+
+打开“环境”页面，点击“新建环境”，为项目起一个容易识别的名称。`default` 适合直接接管已有的 `~/.codex`，自定义环境适合按项目隔离会话和配置。
+
+## 添加账号
+
+切换到“账号”页面，点击“添加账号”，按上游类型选择 Auth、API Key 或兼容路由。账号创建后，可以在当前环境内继续添加其他身份。
+
+## 启动 CLI 或 App
+
+在账号卡片右侧选择 CLI 或 App 启动。首次使用建议先阅读[环境与账号](../concepts/)和[启动规则](../launch/)，理解同环境切换与跨环境多窗口的区别。
+
+> 如果你只是想先验证安装是否成功，可以先运行 `codex-sw check`。

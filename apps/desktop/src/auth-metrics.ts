@@ -29,6 +29,7 @@ export function mergeOverviewWithAuthMetrics(
     ...overview,
     accounts: overview.accounts.map((account) => ({
       ...account,
+      requestHealth: authMetrics.requestHealth?.[`${account.envName}/${account.name}`] ?? account.requestHealth,
       authProfile:
         account.authMode === "auth"
           ? authMetrics.accounts[`${account.envName}/${account.name}`] ?? account.authProfile
@@ -53,12 +54,14 @@ export function mergeAccountUsageMetrics(
   return {
     ...overview,
     accounts: overview.accounts.map((account) => {
-      if (account.authMode !== "auth") return account;
+      const requestHealth = authMetrics.requestHealth?.[`${account.envName}/${account.name}`] ?? account.requestHealth;
+      if (account.authMode !== "auth") return { ...account, requestHealth };
       const nextProfile = authMetrics.accounts[`${account.envName}/${account.name}`];
-      if (!nextProfile) return account;
+      if (!nextProfile) return { ...account, requestHealth };
       return {
         ...account,
         authProfile: nextProfile,
+        requestHealth,
       };
     }),
   };

@@ -1,0 +1,18 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { docsGroups, docsNavigation } from "../../../data/docs";
+import { withBase } from "../../../lib/paths";
+---
+
+<DocsLayout title="使用文档" description="从第一次安装到复杂兼容问题，按任务找到可以直接执行的说明。">
+  <div class="docs-intro">
+    <h2 id="recommended-path">推荐阅读顺序</h2>
+    <ol><li>完成 macOS 或 Windows 安装</li><li>理解环境与账号的区别</li><li>创建环境并添加账号</li><li>启动 CLI 或 App</li><li>按需开启路由和自定义模型</li></ol>
+    <h2 id="all-guides">全部指南</h2>
+    {docsGroups.map((group) => <section class="doc-group"><h3>{group}</h3><div>{docsNavigation.filter((item) => item.group === group).map((item) => <a href={withBase(`/zh/docs/${item.slug}/`)}><strong>{item.title}</strong><span>{item.description}</span></a>)}</div></section>)}
+  </div>
+</DocsLayout>
+
+<style>
+  .docs-intro > h2 { margin-top: 1rem; }.doc-group { margin-top: 1.5rem; }.doc-group > h3 { color: var(--cs-muted-foreground); font-size: 12px; }.doc-group > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; }.doc-group a { padding: .8rem; border: 1px solid var(--cs-border); border-radius: .7rem; background: var(--cs-surface); text-decoration: none; }.doc-group a:hover { border-color: var(--cs-selected-border); }.doc-group strong, .doc-group span { display: block; }.doc-group span { margin-top: .15rem; color: var(--cs-muted-foreground); font-size: 12px; } @media (max-width: 600px) { .doc-group > div { grid-template-columns: 1fr; } }
+</style>

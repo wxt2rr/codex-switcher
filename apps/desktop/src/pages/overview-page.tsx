@@ -13,7 +13,7 @@ import {
 } from "../components/account-list-primitives";
 import type { OverviewPayload, TargetStatus } from "../desktop-model";
 import { getDesktopCopy } from "../desktop-copy";
-import { localizeGuard, localizeLoginState } from "../desktop-utils";
+import { localizeLoginState } from "../desktop-utils";
 import type { UiLanguage } from "../i18n";
 
 function pageTitle(language: UiLanguage) {
@@ -114,9 +114,7 @@ export function OverviewPage({
   language,
   authMetricsLoading,
   loadingLabel,
-  reloginLabel,
   authExpiryLabel,
-  activeAccountsLabel,
   refreshLabel,
   busy,
   onRefresh,
@@ -126,9 +124,7 @@ export function OverviewPage({
   language: UiLanguage;
   authMetricsLoading: boolean;
   loadingLabel: string;
-  reloginLabel: string;
   authExpiryLabel: string;
-  activeAccountsLabel: string;
   refreshLabel: string;
   busy: boolean;
   onRefresh: () => void;
@@ -160,23 +156,6 @@ export function OverviewPage({
           </Button>
         }
       />
-
-      <div className="grid divide-y divide-black/[0.06] rounded-[14px] border border-black/[0.05] bg-white sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-        <div className="px-5 py-3">
-          <div className="text-[12px] font-medium text-slate-500">{pageCopy.overview.guard}</div>
-          <div className="mt-1 text-[20px] font-semibold text-neutral-950">
-            {localizeGuard(overview.status.tokenRefresh.guard, language)}
-          </div>
-        </div>
-        <div className="px-5 py-3">
-          <div className="text-[12px] font-medium text-slate-500">{reloginLabel}</div>
-          <div className="mt-1 text-[20px] font-semibold text-neutral-950">{overview.status.tokenRefresh.needReloginLastRun}</div>
-        </div>
-        <div className="px-5 py-3">
-          <div className="text-[12px] font-medium text-slate-500">{activeAccountsLabel}</div>
-          <div className="mt-1 text-[20px] font-semibold text-neutral-950">{activeAccounts.length}</div>
-        </div>
-      </div>
 
       <ListStack>
         <StatusTargetCard

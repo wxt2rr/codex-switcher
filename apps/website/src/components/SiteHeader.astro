@@ -1,0 +1,37 @@
+---
+import Logo from "./Logo.astro";
+import { withBase } from "../lib/paths";
+
+const path = Astro.url.pathname;
+---
+
+<header class="site-header">
+  <div class="header-inner">
+    <Logo />
+    <button class="menu-toggle" type="button" aria-label="打开导航" aria-expanded="false" data-menu-toggle>
+      <span></span><span></span><span></span>
+    </button>
+    <nav class="site-nav" aria-label="主导航" data-site-nav>
+      <a href={withBase("/zh/#features")}>功能</a>
+      <a href={withBase("/zh/#workflow")}>使用方式</a>
+      <a class:list={{ active: path.includes("/docs") }} href={withBase("/zh/docs/")}>使用文档</a>
+      <a href={withBase("/zh/#download")}>下载</a>
+      <a href="https://github.com/wxt2rr/codex-switcher" target="_blank" rel="noreferrer">GitHub</a>
+      <span class="language" aria-label="当前语言">中文</span>
+    </nav>
+  </div>
+</header>
+
+<script>
+  const toggle = document.querySelector<HTMLButtonElement>("[data-menu-toggle]");
+  const nav = document.querySelector<HTMLElement>("[data-site-nav]");
+  toggle?.addEventListener("click", () => {
+    const open = toggle.getAttribute("aria-expanded") !== "true";
+    toggle.setAttribute("aria-expanded", String(open));
+    nav?.toggleAttribute("data-open", open);
+  });
+  nav?.querySelectorAll("a").forEach((link) => link.addEventListener("click", () => {
+    toggle?.setAttribute("aria-expanded", "false");
+    nav.removeAttribute("data-open");
+  }));
+</script>

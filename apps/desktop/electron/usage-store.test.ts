@@ -182,7 +182,12 @@ test("usage request details support filtering and server-side pagination", async
     });
   await record("request-1", 1000);
   await record("request-2", 2000, { model: "deepseek-chat", endpoint: "/chat/completions", httpStatus: 500 });
-  await record("request-3", 3000);
+  await record("request-3", 3000, { poolId: "pool-work", attemptedAccounts: ["key-b", "key-a"], attemptCount: 2,
+    failoverReason: "rate_limit", sessionKeyHash: "safe-hash", errorMessage: null,
+    attempts: [
+      { accountName: "key-b", startedAt: 2750, completedAt: 2800, httpStatus: 429, reason: "rate_limit", errorMessage: "rate limited", outcome: "retry" },
+      { accountName: "key-a", startedAt: 2801, completedAt: 3000, httpStatus: 200, reason: null, errorMessage: null, outcome: "success" },
+    ] });
   await record("request-other-url", 3500, { envName: "other", accountName: "key-b", upstreamBaseUrl: "https://other.example.com/v1" });
 
   const firstPage = await store.queryUsageRequests({
@@ -195,6 +200,17 @@ test("usage request details support filtering and server-side pagination", async
   assert.deepEqual(firstPage.facets.endpoints, ["/chat/completions", "/responses"]);
   assert.deepEqual(firstPage.facets.envNames, ["other", "work"]);
   assert.deepEqual(firstPage.facets.accountNames, ["key-a", "key-b"]);
+  assert.deepEqual(firstPage.facets.poolIds, ["pool-work"]);
+  assert.deepEqual(firstPage.facets.failoverReasons, ["rate_limit"]);
+
+  const failoverPage = await store.queryUsageRequests({
+    from: 0, to: 4000, page: 1, pageSize: 20, poolId: "pool-work", failoverReason: "rate_limit",
+  });
+  assert.equal(failoverPage.total, 1);
+  assert.deepEqual(failoverPage.items[0]?.attemptedAccounts, ["key-b", "key-a"]);
+  assert.deepEqual(failoverPage.items[0]?.attempts?.map((item) => [item.accountName, item.httpStatus, item.outcome]), [
+    ["key-b", 429, "retry"], ["key-a", 200, "success"],
+  ]);
 
   const errorPage = await store.queryUsageRequests({
     from: 0, to: 4000, baseUrl: "https://api.example.com/v1", page: 1, pageSize: 20,
@@ -203,5 +219,16 @@ test("usage request details support filtering and server-side pagination", async
   assert.equal(errorPage.total, 1);
   assert.equal(errorPage.items[0]?.httpStatus, 500);
   assert.equal(errorPage.items[0]?.model, "deepseek-chat");
+
+  const health = await store.queryRecentAccountHealth(2);
+  const keyAHealth = health.find((item) => item.envName === "work" && item.accountName === "key-a");
+  const keyBHealth = health.find((item) => item.envName === "work" && item.accountName === "key-b");
+  assert.equal(keyAHealth?.sampleSize, 2);
+  assert.deepEqual(keyAHealth?.segments.map((segment) => segment.success), [false, true]);
+  assert.equal(keyAHealth?.successRate, 0.5);
+  assert.equal(keyAHealth?.cacheHitRate, 1);
+  assert.equal(keyBHealth?.sampleSize, 1);
+  assert.equal(keyBHealth?.successRate, 0);
+  assert.equal(keyBHealth?.cacheHitRate, null);
   await store.close();
 });

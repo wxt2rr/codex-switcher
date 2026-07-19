@@ -85,14 +85,11 @@ async function writeManagedConfig(
     managedLines.push('http_headers = { "x-openai-actor-authorization" = "codex-sw.app" }');
   }
 
+  if (!compatibilityProviderActive && runtime.apiProtocol !== "chat_completions"
+    && runtime.openaiBaseUrlMode === "custom" && runtime.openaiBaseUrl) {
+    managedLines.push(`openai_base_url = "${runtime.openaiBaseUrl}"`);
+  }
   if (runtime.preferredAuthMethod === "apikey" && !compatibilityProviderActive) {
-    if (
-      runtime.apiProtocol !== "chat_completions" &&
-      runtime.openaiBaseUrlMode === "custom" &&
-      runtime.openaiBaseUrl
-    ) {
-      managedLines.push(`openai_base_url = "${runtime.openaiBaseUrl}"`);
-    }
     managedLines.push("requires_openai_auth = false");
     managedLines.push('http_headers = { "x-openai-actor-authorization" = "codex-sw.app" }');
   }

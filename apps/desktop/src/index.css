@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/inter";
+@import "../../../packages/design-tokens/theme.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -400,6 +401,32 @@ body {
   animation: value-update var(--animate-duration-normal) cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+.usage-donut-reveal {
+  transition: stroke-dashoffset 620ms var(--ease-in-out);
+}
+
+.usage-donut-segment {
+  transition:
+    stroke-dasharray 260ms var(--ease-out),
+    stroke-dashoffset 260ms var(--ease-out);
+}
+
+.usage-draw-row {
+  opacity: 1;
+  transform: translateX(0);
+  clip-path: inset(0 0 0 0);
+  transition:
+    clip-path 320ms var(--ease-out),
+    opacity 180ms var(--ease-out),
+    transform 220ms var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    transform: translateX(-6px);
+    clip-path: inset(0 100% 0 0);
+  }
+}
+
 @utility transition-colors {
   transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease;
 }
@@ -435,6 +462,21 @@ body {
   padding-right: 0.75rem;
   overflow-y: auto;
   scrollbar-gutter: auto;
+}
+
+.account-list-top-fade {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 10;
+  height: 1rem;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(to bottom, var(--background) 0%, transparent 100%);
+  transition: opacity var(--animate-duration-fast) ease;
+}
+
+.account-list-top-fade[data-visible="true"] {
+  opacity: 1;
 }
 
 @media (min-width: 1280px) {
@@ -480,6 +522,48 @@ body {
 .admin-page-content {
   container-name: admin-page;
   container-type: inline-size;
+  min-width: 0;
+}
+
+.admin-page-content > *,
+.admin-page-content .grid > * {
+  min-width: 0;
+}
+
+.desktop-shell-root {
+  height: 100vh;
+  height: 100dvh;
+}
+
+.desktop-page-frame,
+.desktop-page-scroll {
+  min-width: 0;
+}
+
+.list-loading-row {
+  min-height: 76px;
+  opacity: 0.72;
+  animation: list-loading-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes list-loading-pulse {
+  0%, 100% { opacity: 0.56; }
+  50% { opacity: 0.9; }
+}
+
+.usage-request-table {
+  min-height: clamp(300px, 52vh, 620px);
+}
+
+.usage-trend-chart {
+  min-height: 220px;
+  height: clamp(220px, 32vh, 280px);
+  opacity: 0;
+  transition: opacity 180ms var(--ease-out);
+}
+
+.usage-trend-chart[data-ready="true"] {
+  opacity: 1;
 }
 
 .responsive-toolbar,
@@ -490,6 +574,7 @@ body {
 
 .responsive-record-row {
   width: 100%;
+  align-items: center;
 }
 
 .management-list-card {
@@ -551,23 +636,45 @@ body {
   .motion-value-update {
     transform: none !important;
   }
+
+  .usage-draw-row {
+    clip-path: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .list-loading-row {
+    animation: none !important;
+    opacity: 0.72;
+  }
+
+  .usage-trend-chart {
+    transition: none;
+  }
 }
 
 
 .responsive-account-row {
-  grid-template-columns: minmax(220px, 1.05fr) minmax(220px, 0.9fr) minmax(320px, 1.35fr) auto;
+  grid-template-columns: minmax(220px, 0.95fr) minmax(280px, 1.2fr) minmax(280px, 1.05fr) auto;
 }
 
 .account-runtime-cell {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 3.25rem;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 0.5rem;
 }
 
-.account-runtime-actions {
+.account-runtime-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1.5rem;
+  align-items: center;
+  column-gap: 0.375rem;
+}
+
+.account-model-actions {
   display: flex;
-  width: 3.25rem;
+  width: 2rem;
   align-items: center;
   justify-content: flex-end;
   gap: 0.25rem;
@@ -604,6 +711,14 @@ body {
   align-items: end;
 }
 
+.responsive-model-row {
+  min-width: 0;
+}
+
+.skills-grid > * {
+  min-width: 0;
+}
+
 .responsive-actions {
   display: flex;
   flex-wrap: nowrap;
@@ -629,7 +744,7 @@ body {
   }
 
   .responsive-account-row {
-    grid-template-columns: minmax(200px, 0.95fr) minmax(200px, 0.85fr) minmax(300px, 1.3fr) auto;
+    grid-template-columns: minmax(200px, 0.9fr) minmax(250px, 1.15fr) minmax(260px, 1fr) auto;
   }
 }
 
@@ -660,5 +775,14 @@ body {
   .responsive-operation-row {
     min-width: 600px;
     grid-template-columns: minmax(190px, 0.8fr) minmax(300px, 1.2fr);
+  }
+
+  .responsive-model-row {
+    min-width: 560px;
+    grid-template-columns: minmax(190px, 1fr) auto;
+  }
+
+  .skills-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

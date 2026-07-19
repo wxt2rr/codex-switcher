@@ -132,6 +132,7 @@ type DesktopCopy = {
     sub2api: string;
     apiKey: string;
     independentModel: string;
+    independentModelNotSet: string;
     modelConfig: string;
     modelConfigTitle: string;
     modelConfigDescription: string;
@@ -323,6 +324,7 @@ const copy: Record<UiLanguage, DesktopCopy> = {
       sub2api: "sub2api 配置",
       apiKey: "API Key",
       independentModel: "独立 Model",
+      independentModelNotSet: "未设置独立模型",
       modelConfig: "Model 配置",
       modelConfigTitle: "独立 Model 配置",
       modelConfigDescription: "仅对 AUTH 账号生效。保存后会在设为 CLI 或 App 时写入 custom provider 配置。",
@@ -512,6 +514,7 @@ const copy: Record<UiLanguage, DesktopCopy> = {
       sub2api: "sub2api Payload",
       apiKey: "API Key",
       independentModel: "Independent Model",
+      independentModelNotSet: "Independent model not set",
       modelConfig: "Model Config",
       modelConfigTitle: "Independent Model Config",
       modelConfigDescription: "Only applies to AUTH accounts. The custom provider config is written when this account is set to CLI or App.",
@@ -701,6 +704,7 @@ const copy: Record<UiLanguage, DesktopCopy> = {
       sub2api: "sub2api 設定",
       apiKey: "API Key",
       independentModel: "独立 Model",
+      independentModelNotSet: "独立モデル未設定",
       modelConfig: "Model 設定",
       modelConfigTitle: "独立 Model 設定",
       modelConfigDescription: "AUTH アカウントでのみ有効です。保存後、このアカウントを CLI または App に設定すると custom provider を書き込みます。",

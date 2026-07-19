@@ -9,17 +9,20 @@ const desktopShell = readFileSync(new URL("./desktop-shell.tsx", import.meta.url
 const accounts = readFileSync(new URL("../pages/accounts-page.tsx", import.meta.url), "utf8");
 const environments = readFileSync(new URL("../pages/environments-page.tsx", import.meta.url), "utf8");
 const models = readFileSync(new URL("../pages/models-page.tsx", import.meta.url), "utf8");
+const skills = readFileSync(new URL("../pages/skills-page.tsx", import.meta.url), "utf8");
 const overview = readFileSync(new URL("../pages/overview-page.tsx", import.meta.url), "utf8");
 const operations = readFileSync(new URL("../pages/operations-page.tsx", import.meta.url), "utf8");
 const reactApp = readFileSync(new URL("../react-app.tsx", import.meta.url), "utf8");
 const usage = readFileSync(new URL("../pages/usage-page.tsx", import.meta.url), "utf8");
 const usageRequestDetails = readFileSync(new URL("../pages/usage-request-details-page.tsx", import.meta.url), "utf8");
+const usageCharts = readFileSync(new URL("./usage-charts.tsx", import.meta.url), "utf8");
 const select = readFileSync(new URL("./ui/select.tsx", import.meta.url), "utf8");
 const tooltip = readFileSync(new URL("./ui/tooltip.tsx", import.meta.url), "utf8");
 const formPrimitives = readFileSync(new URL("./form-primitives.tsx", import.meta.url), "utf8");
 const button = readFileSync(new URL("./ui/button.tsx", import.meta.url), "utf8");
 const dashboard = readFileSync(new URL("./dashboard-kit.tsx", import.meta.url), "utf8");
 const i18n = readFileSync(new URL("../i18n.ts", import.meta.url), "utf8");
+const desktopCopy = readFileSync(new URL("../desktop-copy.ts", import.meta.url), "utf8");
 const adaptiveMenuPlacement = readFileSync(new URL("./adaptive-menu-placement.ts", import.meta.url), "utf8");
 
 test("adaptive menus remeasure their natural height when layout changes", () => {
@@ -46,15 +49,22 @@ test("shared page layout uses the full content width and defines compact actions
   assert.match(css, /\.responsive-actions\s*\{[^}]*flex-wrap:\s*nowrap/s);
   assert.match(css, /\.responsive-action-label\s*\{[^}]*display:\s*none/s);
   assert.match(css, /overflow-x:\s*auto/);
+  assert.match(primitives, /export function ListLoadingState/);
+  assert.match(primitives, /aria-busy="true"/);
+  assert.match(css, /\.desktop-shell-root\s*\{[^}]*height:\s*100dvh/s);
+  assert.match(css, /\.usage-trend-chart\s*\{[^}]*height:\s*clamp\(220px, 32vh, 280px\)/s);
 });
 
 test("account records keep actions in the row and provide icons for compact controls", () => {
   assert.match(accounts, /admin-page-content/);
   assert.match(accounts, /responsive-account-row/);
-  assert.match(accounts, /import \{ StatCard \} from "@\/components\/dashboard-kit"/);
-  assert.match(accounts, /grid divide-y divide-black\/\[0\.06\].*sm:divide-x sm:divide-y-0/);
+  assert.doesNotMatch(accounts, /import \{ StatCard \} from "@\/components\/dashboard-kit"/);
+  assert.doesNotMatch(accounts, /账号总数/);
+  assert.doesNotMatch(accounts, /当前激活目标/);
+  assert.doesNotMatch(environments, /环境总数/);
+  assert.doesNotMatch(environments, /当前激活环境/);
   assert.doesNotMatch(accounts, /function StatCard\(/);
-  assert.match(accounts, /className="page-scroll-gutter min-h-0 flex-1"/);
+  assert.match(accounts, /className="page-scroll-gutter h-full min-h-0"/);
   assert.match(accounts, /<ListStack className="mt-0 min-h-full">/);
   assert.match(css, /\.page-scroll-gutter\s*\{[^}]*margin-right:\s*-0\.75rem;[^}]*padding-right:\s*0\.75rem;[^}]*overflow-y:\s*auto;/s);
   assert.match(css, /@media \(min-width: 1280px\)\s*\{\s*\.page-scroll-gutter\s*\{[^}]*margin-right:\s*-1rem;[^}]*padding-right:\s*1rem;/s);
@@ -79,9 +89,25 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.match(accounts, /absolute right-0 z-20 overflow-visible/);
   assert.doesNotMatch(accounts, /absolute right-0 z-20 overflow-y-auto/);
   assert.match(accounts, /account-runtime-cell/);
-  assert.match(accounts, /account-runtime-actions/);
+  assert.match(accounts, /account-runtime-line/);
+  assert.match(accounts, /account-list-top-fade/);
+  assert.match(accounts, /accountListScrolled/);
+  assert.match(accounts, /scrollTop > 2/);
   assert.match(accounts, /account-usage-row/);
-  assert.match(css, /\.account-runtime-cell\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)\s+3\.25rem/s);
+  assert.match(accounts, /AccountRequestHealthPanel/);
+  assert.match(accounts, /REQUEST_HEALTH_SAMPLE_SIZE = 60/);
+  assert.match(accounts, /请求成功率/);
+  assert.match(accounts, /Cache 命中率/);
+  assert.doesNotMatch(accounts, /近 \$\{health\?\.sampleSize/);
+  assert.doesNotMatch(accounts, /过去 → 现在/);
+  assert.doesNotMatch(accounts, /Past → now/);
+  assert.match(accounts, /account\.authMode === "apikey"/);
+  assert.match(accounts, /Boolean\(account\.hasApiKey\)/);
+  assert.match(accounts, /Boolean\(account\.runtime\.independentModelApiKey\?\.trim\(\)\)/);
+  assert.match(accounts, /repeat\(\$\{REQUEST_HEALTH_SAMPLE_SIZE\}, minmax\(1px, 1fr\)\)/);
+  assert.match(css, /\.account-runtime-cell\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)\s+auto/s);
+  assert.match(css, /\.account-runtime-line\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)\s+1\.5rem/s);
+  assert.match(css, /\.account-list-top-fade\s*\{[^}]*linear-gradient\(to bottom, var\(--background\) 0%, transparent 100%\)/s);
   assert.match(css, /\.account-usage-row\s*\{[^}]*grid-template-columns:\s*2rem\s+minmax\(80px, 1fr\)\s+2rem\s+4\.5rem;[^}]*column-gap:\s*0\.375rem/s);
   assert.doesNotMatch(accounts, /value:\s*"chatgpt",\s*label:\s*localizeAuthMode/);
   assert.doesNotMatch(accounts, /SlidersHorizontal/);
@@ -90,10 +116,39 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.match(accounts, /onRefreshAuthMetrics/);
   assert.match(accounts, /route\?\.originalBaseUrl/);
   assert.match(accounts, /maskApiKeyForDisplay\(apiKeyValue\)/);
+  assert.match(accounts, /onCopyBaseUrl\(baseUrl\)/);
+  assert.match(accounts, /aria-label=\{language === "zh" \? "复制 Base URL"/);
   assert.match(accounts, /onCopyApiKey\(apiKeyValue\)/);
   assert.match(accounts, /aria-label=\{language === "zh" \? "复制 API Key"/);
-  assert.match(accounts, /route\?\.localBaseUrl/);
+  assert.match(accounts, /responsive-account-row grid min-h-\[92px\] items-center/);
+  assert.match(css, /\.responsive-record-row\s*\{[^}]*align-items:\s*center;/s);
+  assert.match(css, /\.account-runtime-line\s*\{[^}]*align-items:\s*center;/s);
+  assert.match(css, /\.account-runtime-line\s*\{[^}]*column-gap:\s*0\.375rem;/s);
+  assert.match(accounts, /account-model-actions/);
+  assert.match(accounts, /const authCustomApiKey = account\.runtime\.independentModelApiKey/);
+  assert.match(accounts, /authCustomApiKey && authCustomBaseUrl \? authCustomBaseUrl : ""/);
+  assert.match(accounts, /\) : !isAuth \? \(/);
+  assert.doesNotMatch(accounts, /<TooltipHint text=\{getModelConfigHint\(language\)\}/);
+  assert.match(accounts, /<Tooltip content=\{getModelConfigHint\(language\)\}>/);
+  assert.match(accounts, /<Settings2 className="size-4"/);
+  assert.match(accounts, /pageCopy\.accounts\.independentModelNotSet/);
+  assert.match(desktopCopy, /independentModelNotSet: "未设置独立模型"/);
+  assert.doesNotMatch(accounts, /CircleHelp/);
+  assert.doesNotMatch(accounts, /function TooltipHint/);
+  assert.match(accounts, /hint=\{getModelProviderHint\(language\)\}/);
+  assert.match(accounts, /bg-\[#afc8b4\]/);
+  assert.match(accounts, /bg-\[#e6b3a9\]/);
+  assert.match(css, /\.account-model-actions\s*\{[^}]*width:\s*2rem;/s);
+  assert.match(reactApp, /Base URL 已复制/);
+  assert.match(reactApp, /API Key 已复制/);
+  assert.match(accounts, /account\.route\?\.enabled \? account\.route\.localBaseUrl/);
   assert.match(accounts, /已开启代理/);
+  assert.match(accounts, /已开启自动分发/);
+  assert.match(accounts, /account\.route\?\.poolEnabled/);
+  assert.match(accounts, /activeRouteLabels\.join\(" · "\)/);
+  assert.doesNotMatch(primitives, /size-1 rounded-full bg-current/);
+  assert.match(environments, /current\?\.protocol \?\? "responses"/);
+  assert.match(environments, /Responses 模式支持 AUTH 与 API Key 混合自动分发/);
   assert.doesNotMatch(accounts, /text\.labels\.chatgptMode/);
   assert.doesNotMatch(accounts, /<RunStatusBadge/);
   assert.doesNotMatch(accounts, /<Field label=\{pageCopy\.accounts\.target\}>/);
@@ -122,6 +177,10 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.match(accounts, /<ChevronRight/);
   assert.doesNotMatch(accounts, /onClick=\{\(\) => onSelect\(primaryStrategy\)\}/);
   assert.match(accounts, /onMouseLeave=\{\(\) => setProjectOpen\(false\)\}/);
+  assert.match(accounts, /key: "multi-window"/);
+  assert.match(accounts, /disabled: !account\.isCurrentApp/);
+  assert.match(accounts, /只有活跃账号支持多开/);
+  assert.match(accounts, /title=\{item\.disabled \? item\.disabledHint : undefined\}/);
   assert.match(css, /\.responsive-record-row:has\(\[aria-expanded="true"\]\)/);
   assert.match(css, /\.responsive-record-row:hover/);
   assert.match(css, /\.responsive-record-row:focus-within/);
@@ -138,6 +197,17 @@ test("selected controls share the environment route blue treatment", () => {
   assert.match(environments, /\? "ui-selected-control rounded-lg border px-3 py-1\.5 text-xs font-semibold"/);
   assert.match(models, /mode === "form" \? "ui-selected-control"/);
   assert.match(models, /mode === "json" \? "ui-selected-control"/);
+  assert.doesNotMatch(models, /overflow-hidden rounded-xl border border-black\/\[0\.06\]/);
+  assert.doesNotMatch(overview, /sm:grid-cols-3 sm:divide-x sm:divide-y-0/);
+});
+
+test("account-pool editor explains retry and failover thresholds", () => {
+  assert.match(environments, /分配权重/);
+  assert.match(environments, /轮询顺序：权重相同时按此顺序选择账号/);
+  assert.match(environments, /会话保持时长（分钟）/);
+  assert.match(environments, /同一账号最多失败次数/);
+  assert.match(environments, /单次请求最多切换账号次数/);
+  assert.match(environments, /maxSameAccountFailures: Number\(poolSameAccountFailures\)/);
 });
 
 test("all management record cards opt into the single-row responsive contract", () => {
@@ -220,6 +290,8 @@ test("desktop motion is restrained and respects reduced-motion preferences", () 
   assert.match(accounts, /scaleX\(\$\{percent \/ 100\}\)/);
   assert.match(reactApp, /transition-transform duration-\[220ms\]/);
   assert.match(reactApp, /scaleX\(\$\{initialLoadingProgress \/ 100\}\)/);
+  assert.equal((reactApp.match(/flex h-full min-h-0 items-center justify-center px-6/g) ?? []).length, 2);
+  assert.doesNotMatch(reactApp, /100dvh-140px/);
   assert.doesNotMatch(css, /@keyframes fadeInUp|@keyframes fadeInDown|@keyframes slideInRight|@keyframes slideInLeft|@keyframes scaleIn|@keyframes shimmer|@keyframes pulse-soft/);
   assert.doesNotMatch(css, /@utility transition-bounce|@utility hover-glow|@utility hover-lift/);
   assert.doesNotMatch(select, /data-\[state=open\]:animate-in|data-\[state=closed\]:animate-out/);
@@ -234,7 +306,7 @@ test("desktop motion is restrained and respects reduced-motion preferences", () 
 });
 
 test("tooltips use a portal with delayed hover intent and collision handling", () => {
-  assert.match(accounts, /<Tooltip content=\{text\}>/);
+  assert.match(accounts, /<Tooltip content=\{getModelConfigHint\(language\)\}>/);
   assert.match(desktopShell, /<TooltipProvider>/);
   assert.match(tooltip, /TooltipPrimitive\.Portal/);
   assert.match(tooltip, /delayDuration=\{420\}/);
@@ -272,18 +344,24 @@ test("dialogs use a restrained native-style overlay and single surface", () => {
   assert.match(adminPrimitives, /createPortal/);
   assert.match(adminPrimitives, /document\.body/);
   assert.match(adminPrimitives, /function DialogPortal/);
-  assert.match(adminPrimitives, /style=\{\{ alignItems: "flex-start" \}\}/);
+  assert.match(adminPrimitives, /fixed inset-0 flex items-center justify-center overflow-y-auto/);
+  assert.doesNotMatch(adminPrimitives, /items-start justify-center/);
+  assert.doesNotMatch(adminPrimitives, /style=\{\{ alignItems: "flex-start" \}\}/);
   assert.match(adminPrimitives, /dialogOverlayClass/);
-  assert.match(adminPrimitives, /bg-slate-950\/\[0\.18\]/);
-  assert.match(adminPrimitives, /backdrop-blur-\[2px\]/);
+  assert.match(adminPrimitives, /bg-slate-950\/\[0\.22\]/);
+  assert.doesNotMatch(adminPrimitives, /backdrop-blur/);
+  assert.match(adminPrimitives, /shadow-\[0_6px_18px_-10px/);
   assert.match(adminPrimitives, /dialogSurfaceClass/);
   assert.match(adminPrimitives, /motion-dialog-enter/);
   assert.doesNotMatch(adminPrimitives, /animate-fade-in-up/);
   assert.match(adminPrimitives, /max-w-\[520px\].*rounded-\[16px\]/);
-  assert.match(adminPrimitives, /max-h-\[calc\(100vh-2rem\)\]/);
+  assert.match(adminPrimitives, /max-h-\[min\(720px,calc\(100dvh-2rem\)\)\]/);
   assert.match(adminPrimitives, /min-h-0 overflow-y-auto/);
   assert.match(adminPrimitives, /<X className="size-4"/);
   assert.doesNotMatch(adminPrimitives, /mt-5 rounded-\[16px\] bg-\[#f7f8fa\] p-4/);
+  assert.doesNotMatch(operations, /rounded-xl bg-\[#f7f8fa\]/);
+  assert.doesNotMatch(environments, /rounded-xl bg-\[#f7f8fa\]/);
+  assert.doesNotMatch(skills, /rounded-xl border border-black\/\[0\.06\]/);
 });
 
 test("data changes and contextual controls provide motion feedback", () => {
@@ -381,10 +459,30 @@ test("usage analytics uses semantic colors and destructive actions stay red", ()
   assert.match(css, /--primary: oklch\(0\.623 0\.214 259\.815\)/);
 });
 
+test("usage visualizations draw in once without replaying on background refresh", () => {
+  assert.match(usageCharts, /className="usage-donut-reveal"/);
+  assert.match(usageCharts, /strokeDashoffset=\{drawn \? 0 : circumference\}/);
+  assert.match(usage, /const visualizationKey =/);
+  assert.match(usage, /<UsageDonut key=\{visualizationKey\}/);
+  assert.match(usage, /<UsageTrendChart key=\{visualizationKey\}/);
+  assert.match(usage, /usage-draw-row/);
+  assert.match(usage, /Math\.min\(index, 8\) \* 35/);
+  assert.match(css, /\.usage-donut-reveal\s*\{[^}]*stroke-dashoffset 620ms var\(--ease-in-out\)/s);
+  assert.match(css, /\.usage-draw-row\s*\{[^}]*clip-path 320ms var\(--ease-out\)/s);
+  assert.match(css, /@starting-style\s*\{[^}]*clip-path: inset\(0 100% 0 0\)/s);
+});
+
+test("environment route hints match account status typography", () => {
+  assert.match(environments, /tone="success"\s+className="text-\[10px\]"/);
+  assert.match(accounts, /truncate text-\[10px\] font-medium text-emerald-700/);
+});
+
 test("usage Base URLs open a filterable paginated request details view", () => {
   assert.match(usage, /setRequestDetails\(\{ baseUrl:/);
   assert.match(usage, /<UsageRequestDetailsPage/);
   assert.match(usageRequestDetails, /loadUsageRequests/);
+  assert.match(usageRequestDetails, /baseUrl: baseUrl \|\| undefined/);
+  assert.doesNotMatch(usageRequestDetails, /baseUrl: undefined/);
   assert.match(usageRequestDetails, /返回用量/);
   assert.match(usageRequestDetails, /\[-webkit-app-region:no-drag\]/);
   assert.match(usageRequestDetails, /relative z-20/);
@@ -395,6 +493,11 @@ test("usage Base URLs open a filterable paginated request details view", () => {
   assert.match(usageRequestDetails, /全部模型/);
   assert.match(usageRequestDetails, /全部端点/);
   assert.match(usageRequestDetails, /全部状态/);
+  assert.match(usageRequestDetails, /<RequestStatus item=\{item\}/);
+  assert.match(usageRequestDetails, /<RoutingAttempts item=\{item\}/);
+  assert.match(usageRequestDetails, /真实报错/);
+  assert.match(usageRequestDetails, /路由尝试详情/);
+  assert.match(usageRequestDetails, /失败，切换下一个账号/);
   assert.match(usageRequestDetails, /\[20, 50, 100\]/);
   assert.match(usageRequestDetails, /ChevronLeft/);
   assert.match(usageRequestDetails, /ChevronRight/);
