@@ -28,3 +28,9 @@
 - [ ] 5.2 Add CLI integration tests covering add/list/switch/remove workflows and active-account execution.
 - [ ] 5.3 Add regression tests proving App login/logout and CLI login/logout remain scope-isolated.
 - [ ] 5.4 Document command usage, migration behavior, and rollback procedure in user/developer docs.
+
+## 6. Desktop Shared-Environment Account Invariant
+
+- [x] 6.1 Synchronize CLI and App account selection when both target the same environment.
+- [x] 6.2 Preserve independent account selection when CLI and App target different environments.
+- [x] 6.3 Reconcile legacy conflicting pointers and cover account, environment, persistence, and migration behavior with tests.

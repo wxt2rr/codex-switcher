@@ -16,8 +16,7 @@ export async function applyTargetHomeState(options) {
         account.runtime.compatibilityRouteEnabled === true;
     if (compatibilityRouteActive &&
         (!account.runtime.compatibilityRouteBaseUrl ||
-            !account.runtime.compatibilityRouteToken ||
-            !account.runtime.compatibilityRouteProviderId)) {
+            !account.runtime.compatibilityRouteToken)) {
         throw new Error(`Compatibility route for '${account.name}' is incomplete`);
     }
     const targetAuthData = compatibilityRouteActive
@@ -39,27 +38,17 @@ async function writeManagedConfig(configPath, runtime) {
     const existing = await readText(configPath);
     const cleaned = removeManagedConfigLines(existing);
     const managedLines = [`preferred_auth_method = "${runtime.preferredAuthMethod}"`];
-    const compatibilityProviderActive = runtime.apiProtocol === "chat_completions" &&
+    const compatibilityRouteActive = runtime.apiProtocol === "chat_completions" &&
         runtime.compatibilityRouteEnabled &&
-        Boolean(runtime.compatibilityRouteBaseUrl) &&
-        Boolean(runtime.compatibilityRouteProviderId);
-    if (compatibilityProviderActive) {
-        managedLines.push("");
-        managedLines.push(`model_provider = ${quoteTomlString(runtime.compatibilityRouteProviderId)}`);
-        managedLines.push("");
-        managedLines.push(`[model_providers.${runtime.compatibilityRouteProviderId}]`);
-        managedLines.push(`name = ${quoteTomlString(runtime.compatibilityRouteProviderId)}`);
-        managedLines.push(`base_url = ${quoteTomlString(runtime.compatibilityRouteBaseUrl)}`);
-        managedLines.push('wire_api = "responses"');
-        managedLines.push('env_key = "OPENAI_API_KEY"');
-        managedLines.push("requires_openai_auth = false");
-        managedLines.push('http_headers = { "x-openai-actor-authorization" = "codex-sw.app" }');
+        Boolean(runtime.compatibilityRouteBaseUrl);
+    if (compatibilityRouteActive) {
+        managedLines.push(`openai_base_url = ${quoteTomlString(runtime.compatibilityRouteBaseUrl)}`);
     }
-    if (!compatibilityProviderActive && runtime.apiProtocol !== "chat_completions"
+    if (!compatibilityRouteActive && runtime.apiProtocol !== "chat_completions"
         && runtime.openaiBaseUrlMode === "custom" && runtime.openaiBaseUrl) {
         managedLines.push(`openai_base_url = "${runtime.openaiBaseUrl}"`);
     }
-    if (runtime.preferredAuthMethod === "apikey" && !compatibilityProviderActive) {
+    if (runtime.preferredAuthMethod === "apikey") {
         managedLines.push("requires_openai_auth = false");
         managedLines.push('http_headers = { "x-openai-actor-authorization" = "codex-sw.app" }');
     }

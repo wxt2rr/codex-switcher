@@ -36,6 +36,36 @@ test("legacy writer persists current target pointers", async () => {
   }
 });
 
+test("legacy writer synchronizes account pointers when CLI and App share an environment", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-legacy-write-shared-env-"));
+  const stateDir = join(root, ".codex-switcher");
+
+  try {
+    await writeLegacyPointers({ stateDir, target: "app", env: "project", account: "first" });
+    await writeLegacyPointers({ stateDir, target: "cli", env: "project", account: "second" });
+
+    assert.equal((await readFile(join(stateDir, "current_cli_account"), "utf8")).trim(), "second");
+    assert.equal((await readFile(join(stateDir, "current_app_account"), "utf8")).trim(), "second");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("legacy writer keeps account pointers independent across different environments", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-legacy-write-split-env-"));
+  const stateDir = join(root, ".codex-switcher");
+
+  try {
+    await writeLegacyPointers({ stateDir, target: "app", env: "app-env", account: "app-account" });
+    await writeLegacyPointers({ stateDir, target: "cli", env: "cli-env", account: "cli-account" });
+
+    assert.equal((await readFile(join(stateDir, "current_cli_account"), "utf8")).trim(), "cli-account");
+    assert.equal((await readFile(join(stateDir, "current_app_account"), "utf8")).trim(), "app-account");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("legacy writer persists runtime settings for account", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-legacy-runtime-"));
   const stateDir = join(root, ".codex-switcher");

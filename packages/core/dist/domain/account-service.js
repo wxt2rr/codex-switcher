@@ -18,16 +18,24 @@ export function createAccountService() {
         selectAccount(state, input) {
             const env = requireEnv(state, input.envName);
             requireAccount(env, input.accountName);
+            const otherTarget = input.target === "cli" ? "app" : "cli";
+            const targets = {
+                ...state.targets,
+                [input.target]: {
+                    env: input.envName,
+                    account: input.accountName,
+                },
+            };
+            if (state.targets[otherTarget].env === input.envName) {
+                targets[otherTarget] = {
+                    env: input.envName,
+                    account: input.accountName,
+                };
+            }
             return {
                 ...state,
                 generatedAt: input.now,
-                targets: {
-                    ...state.targets,
-                    [input.target]: {
-                        env: input.envName,
-                        account: input.accountName,
-                    },
-                },
+                targets,
             };
         },
         updateRuntime(state, input) {

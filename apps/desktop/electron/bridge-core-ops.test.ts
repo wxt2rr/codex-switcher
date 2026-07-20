@@ -531,7 +531,7 @@ test("desktop bridge recreates Chat compatibility routing for the copied account
       baseUrl: "https://chat.example.com/v1",
       apiKey: "sk-chat",
       upstreamModel: "deepseek-chat",
-    }, async ({ baseUrl, localRouteToken, providerId }) => {
+    }, async ({ baseUrl, localRouteToken }) => {
       await writeFileRecursive(
         join(root, "state", "env-accounts", "source", "chat", "runtime.json"),
         `${JSON.stringify({
@@ -542,7 +542,6 @@ test("desktop bridge recreates Chat compatibility routing for the copied account
           compatibility_route_enabled: true,
           compatibility_route_base_url: baseUrl,
           compatibility_route_token: localRouteToken,
-          compatibility_route_provider_id: providerId,
           compatibility_upstream_model: "deepseek-chat",
           compatibility_reasoning_profile: "reasoning_content",
           compatibility_long_conversation_strategy: "continuity",
@@ -570,7 +569,7 @@ test("desktop bridge recreates Chat compatibility routing for the copied account
       "utf8",
     )) as Record<string, unknown>;
     assert.equal(targetRuntime.compatibility_route_enabled, true);
-    assert.equal(targetRuntime.compatibility_route_provider_id, `codex_switcher_${targetRoute.routeId}`);
+    assert.equal(targetRuntime.compatibility_route_provider_id, "");
     assert.match(String(targetRuntime.compatibility_route_base_url), new RegExp(`/routes/${targetRoute.routeId}$`));
   } finally {
     await service?.close();

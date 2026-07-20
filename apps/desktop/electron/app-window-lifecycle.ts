@@ -50,6 +50,11 @@ export async function launchAndPersistAdditionalAppWindow(input: {
   return input.saveCount(input.currentCount + 1);
 }
 
+export function resolveCurrentAppWindowCount(persistedCount: number, trackedCount?: number): number {
+  if (trackedCount === undefined) return Math.max(1, Math.trunc(persistedCount) || 1);
+  return Math.max(1, Math.trunc(trackedCount) || 0);
+}
+
 export function buildAppWindowLaunchPlan(input: {
   mode: AppWindowLaunchMode;
   desiredCount: number;

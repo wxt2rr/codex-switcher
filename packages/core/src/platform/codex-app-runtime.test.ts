@@ -9,12 +9,48 @@ import {
   listManagedAppInstances,
   readLastManagedAppInstanceId,
   readManagedAppPid,
+  reconcileManagedAppInstanceCount,
   removeManagedAppProfile,
   resolveManagedAppStatePaths,
   setManagedAppInstance,
   stopManagedAppPid,
   writeManagedAppPid,
 } from "./codex-app-runtime.js";
+
+test("reconcileManagedAppInstanceCount removes stopped instances only in the requested environment", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-app-runtime-reconcile-count-"));
+  try {
+    const paths = resolveManagedAppStatePaths(root);
+    await setManagedAppInstance(paths, { instanceId: "instance-1", pid: 1111, targetKey: "env-a/account-a" });
+    await setManagedAppInstance(paths, { instanceId: "instance-2", pid: 2222, targetKey: "env-a/account-a" });
+    await setManagedAppInstance(paths, { instanceId: "instance-3", pid: 3333, targetKey: "env-b/account-b" });
+    await mkdir(join(paths.appProfilesDir, "instance-2"), { recursive: true });
+
+    const count = await reconcileManagedAppInstanceCount(paths, "env-a", async (pid) => pid === 1111);
+
+    assert.equal(count, 1);
+    assert.deepEqual(await listManagedAppInstances(paths), [
+      { instanceId: "instance-1", pid: 1111, targetKey: "env-a/account-a" },
+      { instanceId: "instance-3", pid: 3333, targetKey: "env-b/account-b" },
+    ]);
+    await assert.rejects(access(join(paths.appProfilesDir, "instance-2")));
+    assert.equal(await reconcileManagedAppInstanceCount(paths, "untracked", async () => false), undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("reconcileManagedAppInstanceCount reports zero when every tracked window has exited", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-app-runtime-reconcile-empty-"));
+  try {
+    const paths = resolveManagedAppStatePaths(root);
+    await setManagedAppInstance(paths, { instanceId: "instance-1", pid: 1111, targetKey: "env-a" });
+    assert.equal(await reconcileManagedAppInstanceCount(paths, "env-a", async () => false), 0);
+    assert.deepEqual(await listManagedAppInstances(paths), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("profile removal retries transient Chromium directory races", async () => {
   let attempts = 0;

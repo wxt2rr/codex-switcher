@@ -77,7 +77,6 @@ test("target-home writer materializes an enabled Chat compatibility route withou
                             compatibilityRouteEnabled: true,
                             compatibilityRouteBaseUrl: "http://127.0.0.1:17899/routes/route-a/v1",
                             compatibilityRouteToken: "local-route-token",
-                            compatibilityRouteProviderId: "codex-switcher-route-a",
                             compatibilityReasoningProfile: "auto",
                         },
                         authData: { OPENAI_API_KEY: "sk-upstream-secret" },
@@ -92,13 +91,73 @@ test("target-home writer materializes an enabled Chat compatibility route withou
         const auth = JSON.parse(await readFile(join(homePath, "auth.json"), "utf8"));
         assert.deepEqual(auth, { OPENAI_API_KEY: "local-route-token" });
         const config = await readFile(join(homePath, "config.toml"), "utf8");
-        assert.match(config, /model_provider = "codex-switcher-route-a"/);
-        assert.match(config, /base_url = "http:\/\/127\.0\.0\.1:17899\/routes\/route-a\/v1"/);
-        assert.match(config, /wire_api = "responses"/);
-        assert.match(config, /env_key = "OPENAI_API_KEY"/);
+        assert.match(config, /openai_base_url = "http:\/\/127\.0\.0\.1:17899\/routes\/route-a\/v1"/);
+        assert.doesNotMatch(config, /model_provider/);
+        assert.doesNotMatch(config, /\[model_providers\./);
+        assert.doesNotMatch(config, /wire_api/);
+        assert.doesNotMatch(config, /env_key/);
         assert.match(config, /requires_openai_auth = false/);
         assert.match(config, /http_headers = \{ "x-openai-actor-authorization" = "codex-sw\.app" \}/);
         assert.doesNotMatch(config, /sk-upstream-secret/);
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+test("target-home writer migrates a legacy compatibility provider to the built-in OpenAI provider", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-chat-migration-"));
+    const homePath = join(root, "home");
+    const state = {
+        schemaVersion: DEFAULT_SCHEMA_VERSION,
+        generatedAt: "2026-07-20T10:00:00.000Z",
+        targets: { cli: { env: "default", account: "chat" }, app: { env: "default", account: "chat" } },
+        envs: {
+            default: {
+                name: "default",
+                path: homePath,
+                accounts: {
+                    chat: {
+                        name: "chat",
+                        authMode: "apikey",
+                        runtime: {
+                            preferredAuthMethod: "apikey",
+                            openaiBaseUrlMode: "custom",
+                            openaiBaseUrl: "https://chat.example/v1",
+                            apiProtocol: "chat_completions",
+                            compatibilityRouteEnabled: true,
+                            compatibilityRouteBaseUrl: "http://127.0.0.1:17899/routes/route-a",
+                            compatibilityRouteToken: "local-route-token",
+                            compatibilityRouteProviderId: "codex_switcher_route_a",
+                        },
+                        authData: { OPENAI_API_KEY: "sk-upstream-secret" },
+                    },
+                },
+            },
+        },
+        tasks: { recent: [] },
+    };
+    try {
+        await mkdir(homePath, { recursive: true });
+        await writeFile(join(homePath, "config.toml"), [
+            'model_provider = "codex_switcher_route_a"',
+            "",
+            "[model_providers.codex_switcher_route_a]",
+            'name = "codex_switcher_route_a"',
+            'base_url = "http://127.0.0.1:17899/routes/route-a"',
+            'wire_api = "responses"',
+            'env_key = "OPENAI_API_KEY"',
+            "",
+            "[history]",
+            'persistence = "save-all"',
+            "",
+        ].join("\n"), "utf8");
+        await applyTargetHomeState({ state, target: "cli" });
+        const config = await readFile(join(homePath, "config.toml"), "utf8");
+        assert.match(config, /openai_base_url = "http:\/\/127\.0\.0\.1:17899\/routes\/route-a"/);
+        assert.doesNotMatch(config, /codex_switcher_route_a/);
+        assert.doesNotMatch(config, /model_provider/);
+        assert.match(config, /\[history\]/);
+        assert.match(config, /persistence = "save-all"/);
     }
     finally {
         await rm(root, { recursive: true, force: true });

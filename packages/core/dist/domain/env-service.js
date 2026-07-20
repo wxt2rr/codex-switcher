@@ -96,11 +96,12 @@ export function createEnvService() {
                 throw createEnvError("ENV_NOT_FOUND", `Env '${input.envName}' not found`);
             }
             const currentAccount = state.targets[input.target].account;
-            const nextAccount = env.accounts[currentAccount]
-                ? currentAccount
-                : env.accounts[DEFAULT_ACCOUNT_NAME]
-                    ? DEFAULT_ACCOUNT_NAME
-                    : DEFAULT_ACCOUNT_NAME;
+            const otherTarget = input.target === "cli" ? "app" : "cli";
+            const otherPointer = state.targets[otherTarget];
+            const sharedAccount = otherPointer.env === input.envName && env.accounts[otherPointer.account]
+                ? otherPointer.account
+                : undefined;
+            const nextAccount = sharedAccount ?? (env.accounts[currentAccount] ? currentAccount : DEFAULT_ACCOUNT_NAME);
             return {
                 ...state,
                 generatedAt: input.now,

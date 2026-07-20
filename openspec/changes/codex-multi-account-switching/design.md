@@ -4,6 +4,10 @@ Codex currently behaves as a single-account client model in practice: signing in
 
 This change crosses auth state management, local credential persistence, and CLI UX. It also introduces migration needs for users with existing single-account local state.
 
+### Desktop environment boundary
+
+The `app` and `cli` storage namespaces described below apply only when the clients have distinct storage scopes. In codex-switcher, one environment has one `CODEX_HOME`, so its `auth.json` and `config.toml` are shared. CLI and App target pointers in the same environment must therefore resolve to the same account. Different environments remain independent.
+
 ## Goals / Non-Goals
 
 **Goals:**

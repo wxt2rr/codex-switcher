@@ -1,4 +1,4 @@
-import { mkdir, writeFile, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, writeFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -38,8 +38,9 @@ test("legacy reader hydrates envs, accounts, runtime settings, and target pointe
             defaultHome,
             now: "2026-06-16T01:02:03.000Z",
         });
-        assert.equal(state.targets.cli.account, "work");
+        assert.equal(state.targets.cli.account, "personal");
         assert.equal(state.targets.app.account, "personal");
+        assert.equal((await readFile(join(stateDir, "current_cli_account"), "utf8")).trim(), "personal");
         assert.equal(state.envs.default.path, defaultHome);
         assert.equal(state.envs.default.accounts.personal.runtime.openaiBaseUrl, "https://proxy.example.test/v1");
         assert.equal(state.envs.default.accounts.work.runtime.independentModelEnabled, true);

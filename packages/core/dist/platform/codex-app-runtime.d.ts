@@ -27,4 +27,6 @@ export declare function setManagedAppInstance(paths: ManagedAppStatePaths, input
 export declare function clearManagedAppInstance(paths: ManagedAppStatePaths, instanceId: string, removalOptions?: ManagedAppProfileRemovalOptions): Promise<void>;
 export declare function removeManagedAppProfile(profilePath: string, options?: ManagedAppProfileRemovalOptions): Promise<void>;
 export type ManagedAppStopper = (pid: number, applicationName?: string) => Promise<boolean>;
+export type ManagedAppProcessProbe = (pid: number) => Promise<boolean>;
+export declare function reconcileManagedAppInstanceCount(paths: ManagedAppStatePaths, targetKey: string, probe?: ManagedAppProcessProbe): Promise<number | undefined>;
 export declare function stopManagedAppPid(paths: ManagedAppStatePaths, stopper: ManagedAppStopper, applicationName?: string, targetKey?: string): Promise<boolean>;

@@ -50,6 +50,7 @@ export interface CoreSupportModules {
   restartCurrentCodexApp: CodexAppModule["restartCurrentCodexApp"];
   stopManagedCodexApp: CodexAppModule["stopManagedCodexApp"];
   readManagedAppPid: CodexAppRuntimeModule["readManagedAppPid"];
+  reconcileManagedAppInstanceCount: CodexAppRuntimeModule["reconcileManagedAppInstanceCount"];
   resolveManagedAppStatePaths: CodexAppRuntimeModule["resolveManagedAppStatePaths"];
   resolveRuntimePaths: RuntimeModule["resolveRuntimePaths"];
 }
@@ -170,6 +171,7 @@ async function loadCoreSupportModulesImpl(): Promise<CoreSupportModules> {
     restartCurrentCodexApp: codexAppModule.restartCurrentCodexApp,
     stopManagedCodexApp: codexAppModule.stopManagedCodexApp,
     readManagedAppPid: codexAppRuntimeModule.readManagedAppPid,
+    reconcileManagedAppInstanceCount: codexAppRuntimeModule.reconcileManagedAppInstanceCount,
     resolveManagedAppStatePaths: codexAppRuntimeModule.resolveManagedAppStatePaths,
     resolveRuntimePaths: runtimeModule.resolveRuntimePaths,
   };

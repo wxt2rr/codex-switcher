@@ -8,7 +8,7 @@ function createSampleState() {
         generatedAt: "2026-06-16T09:00:00.000Z",
         targets: {
             cli: { env: "default", account: "work" },
-            app: { env: "default", account: "personal" },
+            app: { env: "default", account: "work" },
         },
         envs: {
             default: {
@@ -53,7 +53,7 @@ test("account service lists accounts with current target markers", () => {
     const result = service.listAccounts(createSampleState(), { envName: "default" });
     assert.equal(result.length, 3);
     assert.equal(result.find((item) => item.name === "work")?.isCurrentCli, true);
-    assert.equal(result.find((item) => item.name === "personal")?.isCurrentApp, true);
+    assert.equal(result.find((item) => item.name === "work")?.isCurrentApp, true);
 });
 test("account service selects an account for the requested target", () => {
     const service = createAccountService();
@@ -65,6 +65,28 @@ test("account service selects an account for the requested target", () => {
     });
     assert.equal(next.targets.cli.account, "personal");
     assert.equal(next.targets.cli.env, "default");
+    assert.equal(next.targets.app.account, "personal");
+    assert.equal(next.targets.app.env, "default");
+});
+test("account service keeps account pointers independent across different environments", () => {
+    const service = createAccountService();
+    const state = createSampleState();
+    state.envs.project = {
+        name: "project",
+        path: "/tmp/project-home",
+        accounts: {
+            personal: state.envs.default.accounts.personal,
+        },
+    };
+    state.targets.app = { env: "project", account: "personal" };
+    const next = service.selectAccount(state, {
+        envName: "default",
+        accountName: "work",
+        target: "cli",
+        now: "2026-06-16T09:05:00.000Z",
+    });
+    assert.deepEqual(next.targets.cli, { env: "default", account: "work" });
+    assert.deepEqual(next.targets.app, { env: "project", account: "personal" });
 });
 test("account service updates runtime settings for an account", () => {
     const service = createAccountService();

@@ -443,7 +443,7 @@ export class UsageRouterManager {
 
   async enableAccountCompatibility(
     account: RoutableAccount,
-    updateRuntime: (value: { baseUrl: string; localRouteToken: string; providerId: string }) => Promise<void>,
+    updateRuntime: (value: { baseUrl: string; localRouteToken: string }) => Promise<void>,
   ): Promise<AccountRouteStatus> {
     if (account.authMode === "auth") throw new Error("Chat compatibility requires an API-key account");
     if (!account.apiKey?.trim()) throw new Error("Account API key is required");
@@ -461,7 +461,6 @@ export class UsageRouterManager {
       requestOverrides: account.requestOverrides, enabled: true, createdAt: previous?.createdAt ?? now, updatedAt: now };
     const tokens = await this.readRouteTokens();
     const localRouteToken = tokens.routes[routeId] || randomBytes(32).toString("hex");
-    const providerId = `codex_switcher_${routeId}`;
     try {
       await this.admin<void>(`/admin/routes/${encodeURIComponent(routeId)}`, {
         method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(route),
@@ -471,7 +470,7 @@ export class UsageRouterManager {
         body: JSON.stringify({ upstreamApiKey: account.apiKey, localRouteToken }),
       });
       tokens.routes[routeId] = localRouteToken; await this.writeRouteTokens(tokens);
-      await updateRuntime({ baseUrl: buildLocalRouteBaseUrl(state.port, routeId), localRouteToken, providerId });
+      await updateRuntime({ baseUrl: buildLocalRouteBaseUrl(state.port, routeId), localRouteToken });
       return { envName: account.envName, accountName: account.accountName, enabled: true, state: "ready", routeId,
         localBaseUrl: buildLocalRouteBaseUrl(state.port, routeId) };
     } catch (error) {

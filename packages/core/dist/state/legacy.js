@@ -12,19 +12,11 @@ export async function readLegacyState(options) {
         envName,
         await readLegacyEnvState(envName, options),
     ])));
+    const targets = await readAndReconcileLegacyTargets(options.stateDir, envs);
     return {
         schemaVersion: DEFAULT_SCHEMA_VERSION,
         generatedAt: options.now ?? new Date().toISOString(),
-        targets: {
-            cli: {
-                env: await readPointer(options.stateDir, "cli", "env", DEFAULT_ENV_NAME),
-                account: await readPointer(options.stateDir, "cli", "account", DEFAULT_ACCOUNT_NAME),
-            },
-            app: {
-                env: await readPointer(options.stateDir, "app", "env", DEFAULT_ENV_NAME),
-                account: await readPointer(options.stateDir, "app", "account", DEFAULT_ACCOUNT_NAME),
-            },
-        },
+        targets,
         envs,
         tasks: {
             recent: [],
@@ -33,8 +25,13 @@ export async function readLegacyState(options) {
 }
 export async function writeLegacyPointers(options) {
     await mkdir(options.stateDir, { recursive: true });
-    await writeFile(join(options.stateDir, `current_${options.target}_env`), `${options.env}\n`, "utf8");
-    await writeFile(join(options.stateDir, `current_${options.target}_account`), `${options.account}\n`, "utf8");
+    await writePointer(options.stateDir, options.target, "env", options.env);
+    await writePointer(options.stateDir, options.target, "account", options.account);
+    const otherTarget = options.target === "cli" ? "app" : "cli";
+    const otherEnv = await readPointer(options.stateDir, otherTarget, "env", DEFAULT_ENV_NAME);
+    if (otherEnv === options.env) {
+        await writePointer(options.stateDir, otherTarget, "account", options.account);
+    }
 }
 export async function writeLegacyRuntime(options) {
     const runtimeDir = join(options.stateDir, "env-accounts", options.envName, options.accountName);
@@ -168,6 +165,52 @@ async function readPointer(stateDir, target, kind, fallback) {
     catch {
         return fallback;
     }
+}
+async function readAndReconcileLegacyTargets(stateDir, envs) {
+    const [cliEnv, cliAccount, appEnv, appAccount] = await Promise.all([
+        readPointerSnapshot(stateDir, "cli", "env", DEFAULT_ENV_NAME),
+        readPointerSnapshot(stateDir, "cli", "account", DEFAULT_ACCOUNT_NAME),
+        readPointerSnapshot(stateDir, "app", "env", DEFAULT_ENV_NAME),
+        readPointerSnapshot(stateDir, "app", "account", DEFAULT_ACCOUNT_NAME),
+    ]);
+    const targets = {
+        cli: { env: cliEnv.value, account: cliAccount.value },
+        app: { env: appEnv.value, account: appAccount.value },
+    };
+    if (targets.cli.env !== targets.app.env || targets.cli.account === targets.app.account) {
+        return targets;
+    }
+    const accounts = envs[targets.cli.env]?.accounts ?? {};
+    const cliAccountExists = Boolean(accounts[targets.cli.account]);
+    const appAccountExists = Boolean(accounts[targets.app.account]);
+    const account = cliAccountExists && !appAccountExists
+        ? targets.cli.account
+        : appAccountExists && !cliAccountExists
+            ? targets.app.account
+            : cliAccount.modifiedAt > appAccount.modifiedAt
+                ? targets.cli.account
+                : targets.app.account;
+    targets.cli = { ...targets.cli, account };
+    targets.app = { ...targets.app, account };
+    await mkdir(stateDir, { recursive: true });
+    await Promise.all([
+        writePointer(stateDir, "cli", "account", account),
+        writePointer(stateDir, "app", "account", account),
+    ]);
+    return targets;
+}
+async function readPointerSnapshot(stateDir, target, kind, fallback) {
+    const path = join(stateDir, `current_${target}_${kind}`);
+    try {
+        const [raw, metadata] = await Promise.all([readFile(path, "utf8"), stat(path)]);
+        return { value: raw.trim() || fallback, modifiedAt: metadata.mtimeMs };
+    }
+    catch {
+        return { value: fallback, modifiedAt: 0 };
+    }
+}
+async function writePointer(stateDir, target, kind, value) {
+    await writeFile(join(stateDir, `current_${target}_${kind}`), `${value}\n`, "utf8");
 }
 async function listEnvNames(envsDir) {
     return listDirectoryNames(envsDir);

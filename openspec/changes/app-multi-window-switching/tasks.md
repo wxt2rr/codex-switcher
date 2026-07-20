@@ -11,6 +11,8 @@
 - [x] 2.3 Reconcile every saved window when switching an App account while preserving other environments
 - [x] 2.4 Implement repeated Windows packaged-App activation without repeating home materialization
 - [x] 2.5 Add macOS, Windows executable, packaged-App, partial-failure, and stale-instance tests
+- [x] 2.6 Reconcile persisted counts against live environment-scoped managed instances before multi-open and account switching
+- [x] 2.7 Add regression coverage for manually closed windows and conservative untracked-target fallback
 
 ## 3. Desktop UI and IPC
 

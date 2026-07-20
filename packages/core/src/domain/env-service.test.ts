@@ -13,7 +13,7 @@ function createSampleState(): SwitcherState {
     generatedAt: "2026-06-16T08:00:00.000Z",
     targets: {
       cli: { env: "default", account: "work" },
-      app: { env: "default", account: "personal" },
+      app: { env: "default", account: "work" },
     },
     envs: {
       default: {
@@ -106,6 +106,30 @@ test("env service switches a target to the requested env when it exists", () => 
 
   assert.equal(next.targets.cli.env, "project-a");
   assert.equal(next.targets.cli.account, "default");
+});
+
+test("env service reuses the account already active in a shared destination environment", () => {
+  const service = createEnvService();
+  const state = createSampleState();
+  state.envs.project = {
+    name: "project",
+    path: "/tmp/project/home",
+    accounts: {
+      work: state.envs.default!.accounts.work!,
+      personal: state.envs.default!.accounts.personal!,
+    },
+  };
+  state.targets.cli = { env: "project", account: "work" };
+  state.targets.app = { env: "default", account: "personal" };
+
+  const next = service.selectEnv(state, {
+    target: "app",
+    envName: "project",
+    now: "2026-06-16T08:10:00.000Z",
+  });
+
+  assert.deepEqual(next.targets.cli, { env: "project", account: "work" });
+  assert.deepEqual(next.targets.app, { env: "project", account: "work" });
 });
 
 test("env service updates env name and path while preserving accounts and targets", () => {

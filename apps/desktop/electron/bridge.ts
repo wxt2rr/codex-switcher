@@ -63,7 +63,7 @@ import {
   MAX_APP_WINDOW_COUNT,
 } from "./desktop-settings.js";
 import { runEnvHistoryCleanupIfDue } from "./env-history-retention.js";
-import { AppWindowLaunchError, assertCanMultiOpen, buildAppWindowLaunchPlan, executeAppWindowLaunchPlan, launchAndPersistAdditionalAppWindow, type AppWindowLaunchMode } from "./app-window-lifecycle.js";
+import { AppWindowLaunchError, assertCanMultiOpen, buildAppWindowLaunchPlan, executeAppWindowLaunchPlan, launchAndPersistAdditionalAppWindow, resolveCurrentAppWindowCount, type AppWindowLaunchMode } from "./app-window-lifecycle.js";
 import { getCliTerminalSettings as readCliTerminalSettings, saveCliTerminalSelection, type CliTerminalId, type CliTerminalSettings } from "./cli-terminal-settings.js";
 import {
   createModelCatalogStore,
@@ -347,7 +347,7 @@ function createAccountPoolRuntimeUpdater(
         compatibilityRouteEnabled: true,
         compatibilityRouteBaseUrl: baseUrl,
         compatibilityRouteToken: apiKey,
-        compatibilityRouteProviderId: account.runtime.compatibilityRouteProviderId || "codex_switcher_pool",
+        compatibilityRouteProviderId: undefined,
       });
       return;
     }
@@ -358,14 +358,14 @@ function createAccountPoolRuntimeUpdater(
       longConversationStrategy: account.runtime.compatibilityLongConversationStrategy,
       instructionRole: account.runtime.compatibilityInstructionRole,
       requestOverrides: account.runtime.compatibilityRequestOverrides,
-    }, async ({ baseUrl: localBaseUrl, localRouteToken, providerId }) => {
+    }, async ({ baseUrl: localBaseUrl, localRouteToken }) => {
       await writeCompatibilityRuntime(runtime, envName, accountName, {
         ...account.runtime,
         apiProtocol: "chat_completions",
         compatibilityRouteEnabled: true,
         compatibilityRouteBaseUrl: localBaseUrl,
         compatibilityRouteToken: localRouteToken,
-        compatibilityRouteProviderId: providerId,
+        compatibilityRouteProviderId: undefined,
       });
     });
   };
@@ -503,14 +503,14 @@ async function restoreEnabledRoutes(): Promise<void> {
       longConversationStrategy: account.runtime.compatibilityLongConversationStrategy ?? route.longConversationStrategy,
       instructionRole: account.runtime.compatibilityInstructionRole ?? route.instructionRole,
       requestOverrides: account.runtime.compatibilityRequestOverrides ?? route.requestOverrides,
-    }, async ({ baseUrl, localRouteToken, providerId }) => {
+    }, async ({ baseUrl, localRouteToken }) => {
       await writeCompatibilityRuntime(runtime, route.envName, route.accountName, {
         ...account.runtime,
         apiProtocol: "chat_completions",
         compatibilityRouteEnabled: true,
         compatibilityRouteBaseUrl: baseUrl,
         compatibilityRouteToken: localRouteToken,
-        compatibilityRouteProviderId: providerId,
+        compatibilityRouteProviderId: undefined,
       });
     });
   }
@@ -861,10 +861,11 @@ export async function switchAccount(
   const runtime = await loadCoreRuntime();
   const state = await runtime.readLegacyState(getLegacyOptions());
   const selected = state.envs[envName]?.accounts[accountName];
+  let currentAppWindowCount: number | undefined;
   if (strategy === "multi-window") {
-    const count = (await readAppWindowSettings(getCodexToolPathOptions().settingsPath)).counts[envName] ?? 1;
+    currentAppWindowCount = await readDesiredAppWindowCount(envName);
     assertCanMultiOpen({ target, envName, accountName, activeEnvName: state.targets.app.env,
-      activeAccountName: state.targets.app.account, currentCount: count, maximumCount: MAX_APP_WINDOW_COUNT });
+      activeAccountName: state.targets.app.account, currentCount: currentAppWindowCount, maximumCount: MAX_APP_WINDOW_COUNT });
   }
   if (selected?.runtime.apiProtocol === "chat_completions" && selected.runtime.compatibilityRouteEnabled) {
     const activePool = (await getUsageRouterManager().listAccountPools()).find((pool) => (
@@ -888,11 +889,11 @@ export async function switchAccount(
           longConversationStrategy: selected.runtime.compatibilityLongConversationStrategy,
           instructionRole: selected.runtime.compatibilityInstructionRole,
           requestOverrides: selected.runtime.compatibilityRequestOverrides },
-        async ({ baseUrl: localBaseUrl, localRouteToken, providerId }) => {
+        async ({ baseUrl: localBaseUrl, localRouteToken }) => {
           await writeCompatibilityRuntime(runtime, envName, accountName, {
             ...selected.runtime, apiProtocol: "chat_completions", compatibilityRouteEnabled: true,
             compatibilityRouteBaseUrl: localBaseUrl, compatibilityRouteToken: localRouteToken,
-            compatibilityRouteProviderId: providerId,
+            compatibilityRouteProviderId: undefined,
           });
         });
         [status] = await getUsageRouterManager().getAccountCompatibilityStatuses([`${envName}/${accountName}`]);
@@ -920,7 +921,7 @@ export async function switchAccount(
   if (target === "app") {
     if (strategy === "multi-window") {
       const settingsPath = getCodexToolPathOptions().settingsPath;
-      const count = (await readAppWindowSettings(settingsPath)).counts[envName] ?? 1;
+      const count = currentAppWindowCount ?? await readDesiredAppWindowCount(envName);
       const savedCount = await launchAndPersistAdditionalAppWindow({ currentCount: count,
         maximumCount: MAX_APP_WINDOW_COUNT,
         launch: () => launchAppTarget(next, runtime, "additional"),
@@ -986,11 +987,11 @@ export async function enableAccountCompatibility(input: {
     reasoningProfile: input.reasoningProfile, requestOverrides: input.requestOverrides,
     longConversationStrategy: input.longConversationStrategy,
     instructionRole: input.instructionRole,
-  }, async ({ baseUrl: localBaseUrl, localRouteToken, providerId }) => {
+  }, async ({ baseUrl: localBaseUrl, localRouteToken }) => {
     await writeCompatibilityRuntime(runtime, input.envName, input.accountName, {
       apiProtocol: "chat_completions", compatibilityRouteEnabled: true,
       compatibilityRouteBaseUrl: localBaseUrl, compatibilityRouteToken: localRouteToken,
-      compatibilityRouteProviderId: providerId, compatibilityUpstreamModel: input.upstreamModel,
+      compatibilityRouteProviderId: undefined, compatibilityUpstreamModel: input.upstreamModel,
       compatibilityReasoningProfile: input.reasoningProfile ?? "auto",
       compatibilityLongConversationStrategy: input.longConversationStrategy ?? "safe",
       compatibilityInstructionRole: input.instructionRole ?? "auto",
@@ -4220,7 +4221,18 @@ async function launchAppTarget(
 }
 
 async function readDesiredAppWindowCount(envName: string): Promise<number> {
-  return (await readAppWindowSettings(getCodexToolPathOptions().settingsPath)).counts[envName] ?? 1;
+  const settingsPath = getCodexToolPathOptions().settingsPath;
+  const persistedCount = (await readAppWindowSettings(settingsPath)).counts[envName] ?? 1;
+  const support = await loadCoreSupportModules();
+  const trackedCount = await support.reconcileManagedAppInstanceCount(
+    support.resolveManagedAppStatePaths(getStateDir()),
+    envName,
+  );
+  const currentCount = resolveCurrentAppWindowCount(persistedCount, trackedCount);
+  if (trackedCount !== undefined && currentCount !== persistedCount) {
+    await saveAppWindowCount(settingsPath, envName, currentCount);
+  }
+  return currentCount;
 }
 
 async function persistPartialWindowCount(envName: string, mode: AppWindowLaunchMode, error: unknown): Promise<void> {

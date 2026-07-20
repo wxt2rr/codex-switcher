@@ -44,7 +44,8 @@ test("migration writes canonical core state and creates a backup snapshot", asyn
       now: "2026-06-16T05:00:00.000Z",
     });
 
-    assert.equal(result.migrated.targets.cli.account, "work");
+    assert.equal(result.migrated.targets.cli.account, "default");
+    assert.equal(result.migrated.targets.app.account, "default");
     assert.match(result.backupFile, /legacy-state-2026-06-16T05-00-00.000Z\.json$/);
 
     const backup = JSON.parse(await readFile(result.backupFile, "utf8")) as SwitcherState;

@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AppWindowLaunchError, assertCanMultiOpen, buildAppWindowLaunchPlan, executeAppWindowLaunchPlan, launchAndPersistAdditionalAppWindow } from "./app-window-lifecycle.js";
+import { AppWindowLaunchError, assertCanMultiOpen, buildAppWindowLaunchPlan, executeAppWindowLaunchPlan, launchAndPersistAdditionalAppWindow, resolveCurrentAppWindowCount } from "./app-window-lifecycle.js";
+
+test("tracked live windows override a stale persisted multi-open count", () => {
+  assert.equal(resolveCurrentAppWindowCount(3, 1), 1);
+  assert.equal(resolveCurrentAppWindowCount(3, 0), 1);
+  assert.equal(resolveCurrentAppWindowCount(3, undefined), 3);
+});
 
 test("macOS and Windows executable targets restart the environment and restore every window", () => {
   assert.deepEqual(buildAppWindowLaunchPlan({ mode: "reconcile", desiredCount: 3, packagedWindowsTarget: false }), {

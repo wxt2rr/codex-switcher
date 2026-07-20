@@ -22,6 +22,10 @@ The system SHALL persist the desired App window count per environment, SHALL def
 - **WHEN** an additional App window fails to launch
 - **THEN** the persisted desired count remains unchanged
 
+#### Scenario: Manually closed windows reduce the next restore count
+- **WHEN** managed App windows have exited after the user closes them
+- **THEN** the system removes their stale instance records and persists the remaining live window count before the next multi-open or account switch
+
 ### Requirement: Account switching reconciles every window in the environment
 The system SHALL close all managed App instances for the selected environment and SHALL reopen the persisted desired number of windows using the newly selected account.
 
@@ -32,6 +36,10 @@ The system SHALL close all managed App instances for the selected environment an
 #### Scenario: Other environments remain running
 - **WHEN** the selected environment is switched while another environment has managed App instances
 - **THEN** the system leaves the other environment's managed instances untouched on platforms that support isolated instances
+
+#### Scenario: Switching after closing additional windows
+- **WHEN** an environment previously saved multiple windows but only one managed window is still running
+- **THEN** the system switches the account and opens one replacement window
 
 ### Requirement: Multi-window lifecycle supports desktop platforms
 The system SHALL express the same desired-window behavior for macOS executable launches, Windows executable aliases, and Windows packaged-App activation.

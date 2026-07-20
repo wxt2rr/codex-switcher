@@ -157,6 +157,37 @@ export async function removeManagedAppProfile(
 }
 
 export type ManagedAppStopper = (pid: number, applicationName?: string) => Promise<boolean>;
+export type ManagedAppProcessProbe = (pid: number) => Promise<boolean>;
+
+export async function reconcileManagedAppInstanceCount(
+  paths: ManagedAppStatePaths,
+  targetKey: string,
+  probe: ManagedAppProcessProbe = defaultManagedAppProcessProbe,
+): Promise<number | undefined> {
+  const requestedScope = normalizeManagedAppScope(targetKey);
+  if (!requestedScope) return undefined;
+  const scopedInstances = (await listManagedAppInstances(paths))
+    .filter((instance) => normalizeManagedAppScope(instance.targetKey) === requestedScope);
+  if (scopedInstances.length === 0) return undefined;
+
+  let runningCount = 0;
+  for (const instance of scopedInstances) {
+    let running = true;
+    try {
+      running = await probe(instance.pid);
+    } catch {
+      // A probe failure is not proof that the process exited. Preserve the
+      // instance so permission or platform limitations cannot lose a window.
+      running = true;
+    }
+    if (running) {
+      runningCount += 1;
+      continue;
+    }
+    await clearManagedAppInstance(paths, instance.instanceId).catch(() => undefined);
+  }
+  return runningCount;
+}
 
 export async function stopManagedAppPid(
   paths: ManagedAppStatePaths,
@@ -226,4 +257,14 @@ async function readDirPidFiles(
       })),
   );
   return values;
+}
+
+async function defaultManagedAppProcessProbe(pid: number): Promise<boolean> {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    throw error;
+  }
 }

@@ -181,7 +181,7 @@ test("account compatibility persists only the local token, hydrates the router, 
   let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
   const manager = new UsageRouterManager({ stateDir, serviceEntryPath: "unused",
     launchService: async () => { service = await startUsageRouterService({ stateDir: join(stateDir, "usage-router") }); } });
-  let runtime: { baseUrl: string; localRouteToken: string; providerId: string } | undefined;
+  let runtime: { baseUrl: string; localRouteToken: string } | undefined;
   let restored = "";
   try {
     const enabled = await manager.enableAccountCompatibility({ envName: "work", accountName: "chat", authMode: "apikey",

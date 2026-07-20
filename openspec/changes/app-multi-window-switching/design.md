@@ -37,6 +37,8 @@ Alternative considered: a separate IPC method. Keeping it in `switchAccount` pre
 
 For normal App launch/switch, stop all managed instances scoped to the environment, launch the first replacement, then launch the remaining saved slots serially. Serial launch avoids profile ID collisions and makes partial failure observable. If a later slot fails, persist the number that actually launched rather than claiming a larger layout.
 
+Before multi-open or account switching, reconcile the saved count against environment-scoped managed processes. Remove exited instance records and lower the saved count to the number still running, with a minimum of one. Targets such as Windows packaged activation that do not expose per-window PIDs retain the saved count as a conservative fallback.
+
 ### Handle Windows packaged activation explicitly
 
 Executable aliases use the existing isolated profile and PID records. For an `AppsFolder` target, stop the packaged App process set once, materialize the selected environment into the default home once, then invoke activation once per desired slot. Packaged activation decides whether each request creates a new window; codex-switcher records the desired count because no child PID is returned.

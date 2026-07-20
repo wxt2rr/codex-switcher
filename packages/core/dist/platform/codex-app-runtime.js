@@ -115,6 +115,33 @@ export async function removeManagedAppProfile(profilePath, options = {}) {
         }
     }
 }
+export async function reconcileManagedAppInstanceCount(paths, targetKey, probe = defaultManagedAppProcessProbe) {
+    const requestedScope = normalizeManagedAppScope(targetKey);
+    if (!requestedScope)
+        return undefined;
+    const scopedInstances = (await listManagedAppInstances(paths))
+        .filter((instance) => normalizeManagedAppScope(instance.targetKey) === requestedScope);
+    if (scopedInstances.length === 0)
+        return undefined;
+    let runningCount = 0;
+    for (const instance of scopedInstances) {
+        let running = true;
+        try {
+            running = await probe(instance.pid);
+        }
+        catch {
+            // A probe failure is not proof that the process exited. Preserve the
+            // instance so permission or platform limitations cannot lose a window.
+            running = true;
+        }
+        if (running) {
+            runningCount += 1;
+            continue;
+        }
+        await clearManagedAppInstance(paths, instance.instanceId).catch(() => undefined);
+    }
+    return runningCount;
+}
 export async function stopManagedAppPid(paths, stopper, applicationName, targetKey) {
     const lastInstanceId = await readLastManagedAppInstanceId(paths);
     const instances = await listManagedAppInstances(paths);
@@ -174,5 +201,16 @@ async function readDirPidFiles(dir) {
         raw: await readFile(join(dir, name), "utf8"),
     })));
     return values;
+}
+async function defaultManagedAppProcessProbe(pid) {
+    try {
+        process.kill(pid, 0);
+        return true;
+    }
+    catch (error) {
+        if (error.code === "ESRCH")
+            return false;
+        throw error;
+    }
 }
 //# sourceMappingURL=codex-app-runtime.js.map
