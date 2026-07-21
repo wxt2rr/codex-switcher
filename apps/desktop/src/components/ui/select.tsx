@@ -100,14 +100,15 @@ function SelectLabel({
 
 function SelectItem({
   className,
+  action,
   children,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Item>) {
+}: React.ComponentProps<typeof SelectPrimitive.Item> & { action?: React.ReactNode }) {
   return (
     <SelectPrimitive.Item
       data-slot="select-item"
       className={cn(
-        "focus:bg-neutral-100 focus:text-neutral-950 relative flex w-full cursor-default items-center gap-2 rounded-lg py-2 pr-8 pl-8 text-[13px] text-neutral-700 outline-none select-none dark:text-slate-100 dark:focus:bg-[#202733] dark:focus:text-white",
+        "focus:bg-neutral-100 focus:text-neutral-950 relative flex w-full cursor-default items-center gap-2 rounded-lg py-2 pr-2 pl-8 text-[13px] text-neutral-700 outline-none select-none dark:text-slate-100 dark:focus:bg-[#202733] dark:focus:text-white",
         "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         className,
       )}
@@ -119,6 +120,7 @@ function SelectItem({
         </SelectPrimitive.ItemIndicator>
       </span>
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+      {action}
     </SelectPrimitive.Item>
   );
 }

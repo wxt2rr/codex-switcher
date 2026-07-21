@@ -137,7 +137,36 @@ export function Select({
       </SelectTrigger>
       <SelectContent ref={contentRef}>
         {normalizedItems.map((item) => (
-          <SelectItem key={item.value} value={item.value}>
+          <SelectItem
+            key={item.value}
+            value={item.value}
+            action={item.actionLabel ? (
+              <button
+                type="button"
+                disabled={item.actionDisabled}
+                aria-label={item.actionLabel}
+                title={item.actionLabel}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (!item.actionDisabled) item.onAction?.();
+                  setOpen(false);
+                }}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                className={cn(
+                  "ml-auto flex size-6 shrink-0 items-center justify-center rounded-md",
+                  item.actionDisabled
+                    ? "cursor-default text-amber-500"
+                    : "text-slate-400 hover:bg-slate-100 hover:text-amber-500",
+                )}
+              >
+                {item.actionIcon}
+              </button>
+            ) : undefined}
+          >
             <span className="flex min-w-0 items-center gap-2">{item.iconUrl ? <img src={item.iconUrl} alt="" className="size-[18px] shrink-0 object-contain" /> : null}<span className="truncate">{item.label}</span></span>
           </SelectItem>
         ))}

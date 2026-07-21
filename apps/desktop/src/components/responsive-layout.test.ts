@@ -211,6 +211,14 @@ test("selected controls share the environment route blue treatment", () => {
   assert.doesNotMatch(overview, /sm:grid-cols-3 sm:divide-x sm:divide-y-0/);
 });
 
+test("account environment filter persists an explicit default environment", () => {
+  assert.match(accounts, /codex-switcher\.accounts\.default-environment/);
+  assert.match(accounts, /设为默认/);
+  assert.match(accounts, /<Star/);
+  assert.match(accounts, /markDefaultEnvironment/);
+  assert.match(formPrimitives, /onPointerDown=/);
+});
+
 test("account-pool editor explains retry and failover thresholds", () => {
   assert.match(environments, /分配权重/);
   assert.match(environments, /轮询顺序：权重相同时按此顺序选择账号/);

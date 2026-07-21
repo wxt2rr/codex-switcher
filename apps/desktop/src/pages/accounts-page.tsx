@@ -16,6 +16,7 @@ import {
   RefreshCw,
   LoaderCircle,
   Settings2,
+  Star,
   TerminalSquare,
 } from "lucide-react";
 
@@ -80,6 +81,13 @@ function getApiUsageHint(language: UiLanguage) {
   if (language === "zh") return "由上游服务商计费，不展示远程用量。";
   if (language === "ja") return "上流プロバイダー課金のため、ここでは使用量を表示しません。";
   return "Billed upstream. Remote usage is not shown here.";
+}
+
+const DEFAULT_ACCOUNT_ENVIRONMENT_KEY = "codex-switcher.accounts.default-environment";
+
+function readDefaultAccountEnvironment(): string {
+  if (typeof window === "undefined") return "default";
+  return window.localStorage.getItem(DEFAULT_ACCOUNT_ENVIRONMENT_KEY)?.trim() || "default";
 }
 
 export interface AccountProtocolSettings {
@@ -190,7 +198,8 @@ export function AccountsPage({
   onCopyBaseUrl: (value: string) => void;
   onCopyApiKey: (value: string) => void;
 }) {
-  const [envFilter, setEnvFilter] = useState("default");
+  const [defaultEnvironment, setDefaultEnvironment] = useState(readDefaultAccountEnvironment);
+  const [envFilter, setEnvFilter] = useState(readDefaultAccountEnvironment);
   const [search, setSearch] = useState("");
   const [modeFilter, setModeFilter] = useState("all");
   const [sortMode, setSortMode] = useState("recent");
@@ -220,6 +229,22 @@ export function AccountsPage({
   const accountListRef = useRef<HTMLDivElement>(null);
   const pageCopy = getDesktopCopy(language);
   const text = getTranslations(language);
+
+  useEffect(() => {
+    if (overview.envs.some((environment) => environment.name === defaultEnvironment)) return;
+    const fallback = overview.envs.find((environment) => environment.name === "default")?.name
+      ?? overview.envs[0]?.name
+      ?? "all";
+    setDefaultEnvironment(fallback);
+    setEnvFilter(fallback);
+    if (typeof window !== "undefined") window.localStorage.setItem(DEFAULT_ACCOUNT_ENVIRONMENT_KEY, fallback);
+  }, [defaultEnvironment, overview.envs]);
+
+  function markDefaultEnvironment(environment: string) {
+    setDefaultEnvironment(environment);
+    setEnvFilter(environment);
+    if (typeof window !== "undefined") window.localStorage.setItem(DEFAULT_ACCOUNT_ENVIRONMENT_KEY, environment);
+  }
 
   const filteredAccounts = useMemo(() => {
     return overview.accounts
@@ -397,9 +422,23 @@ export function AccountsPage({
                 onValueChange={setEnvFilter}
                 items={[
                   { value: "all", label: pageCopy.accounts.allEnvironments },
-                  ...overview.envs.map((env) => ({ value: env.name, label: env.name })),
+                  ...overview.envs.map((env) => ({
+                    value: env.name,
+                    label: env.name,
+                    actionLabel: defaultEnvironment === env.name
+                      ? language === "zh" ? "默认" : language === "ja" ? "既定" : "Default"
+                      : language === "zh" ? "设为默认" : language === "ja" ? "既定に設定" : "Set default",
+                    actionIcon: (
+                      <Star
+                        className="size-3.5"
+                        fill={defaultEnvironment === env.name ? "currentColor" : "none"}
+                      />
+                    ),
+                    actionDisabled: defaultEnvironment === env.name,
+                    onAction: () => markDefaultEnvironment(env.name),
+                  })),
                 ]}
-                className="h-8 w-[128px] rounded-lg border-transparent bg-[#fbfbfc] px-3 text-[12px] shadow-none"
+                className="h-8 w-[140px] rounded-lg border-transparent bg-[#fbfbfc] px-3 text-[12px] shadow-none"
               />
               <Select
                 value={modeFilter}
