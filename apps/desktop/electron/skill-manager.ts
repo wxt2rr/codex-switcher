@@ -634,7 +634,7 @@ export class SkillManager {
     const prior = file.managed[providerId] ?? {};
     for (const [skillId, expectedTarget] of Object.entries(prior)) {
       const path = join(targetPath, skillId);
-      if (await isLinkTo(path, expectedTarget)) await rm(path, { force: true, recursive: true });
+      if (await isLinkTo(path, expectedTarget)) await removeManagedLink(path);
     }
     file.managed[providerId] = {};
     if (!stored.enabled) return;
@@ -664,7 +664,7 @@ export class SkillManager {
       if (!stored?.enabled || stored.sourceEnv !== envName || !expected) continue;
       const targetPath = this.providerPath(provider, stored.targetPath);
       const target = join(targetPath, skillId);
-      if (await isLinkTo(target, expected)) await rm(target, { recursive: true, force: true });
+      if (await isLinkTo(target, expected)) await removeManagedLink(target);
       delete file.managed[provider.id]?.[skillId];
     }
     await this.writeBindingFile(file);
@@ -982,6 +982,14 @@ async function isLinkTo(path: string, expectedTarget: string): Promise<boolean> 
     if (!info.isSymbolicLink()) return false;
     return resolve(await realpath(path)) === resolve(await realpath(expectedTarget));
   } catch { return false; }
+}
+
+async function removeManagedLink(path: string): Promise<void> {
+  const info = await lstat(path).catch(() => undefined);
+  if (!info) return;
+  // Windows junctions are reported as symbolic links. Never pass recursive
+  // removal for a managed link, otherwise fs.rm can traverse its target.
+  await rm(path, { force: true, recursive: !info.isSymbolicLink() });
 }
 
 function isInside(root: string, candidate: string): boolean {
