@@ -23,6 +23,10 @@ export interface GeneratedImageRecoverySettings {
   enabled: boolean;
 }
 
+export interface AppEnvironmentBadgeSettings {
+  enabled: boolean;
+}
+
 export interface AppWindowSettings {
   counts: Record<string, number>;
 }
@@ -35,6 +39,7 @@ interface DesktopSettingsFile {
   routerPort?: Partial<RouterPortSettings>;
   envHistoryRetention?: Partial<EnvHistoryRetentionSettings>;
   generatedImageRecovery?: Partial<GeneratedImageRecoverySettings>;
+  appEnvironmentBadges?: Partial<AppEnvironmentBadgeSettings>;
   appWindowCounts?: Record<string, unknown>;
 }
 
@@ -46,6 +51,7 @@ export const DEFAULT_ENV_HISTORY_RETENTION_SETTINGS: EnvHistoryRetentionSettings
   retentionDays: 30,
 };
 export const DEFAULT_GENERATED_IMAGE_RECOVERY_SETTINGS: GeneratedImageRecoverySettings = { enabled: false };
+export const DEFAULT_APP_ENVIRONMENT_BADGE_SETTINGS: AppEnvironmentBadgeSettings = { enabled: false };
 export const DEFAULT_APP_WINDOW_COUNT = 1;
 export const MAX_APP_WINDOW_COUNT = 8;
 
@@ -126,6 +132,22 @@ export async function saveGeneratedImageRecoverySettings(
   const normalized = { enabled: value.enabled === true };
   const settings = await readSettings(path);
   settings.generatedImageRecovery = normalized;
+  await writeSettings(path, settings);
+  return normalized;
+}
+
+export async function readAppEnvironmentBadgeSettings(path: string): Promise<AppEnvironmentBadgeSettings> {
+  const settings = await readSettings(path);
+  return { enabled: settings.appEnvironmentBadges?.enabled === true };
+}
+
+export async function saveAppEnvironmentBadgeSettings(
+  path: string,
+  value: AppEnvironmentBadgeSettings,
+): Promise<AppEnvironmentBadgeSettings> {
+  const normalized = { enabled: value.enabled === true };
+  const settings = await readSettings(path);
+  settings.appEnvironmentBadges = normalized;
   await writeSettings(path, settings);
   return normalized;
 }

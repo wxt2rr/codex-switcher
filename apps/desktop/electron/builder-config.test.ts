@@ -61,6 +61,10 @@ test("desktop package defines electron packaging entrypoints", () => {
       from: "resources/skills",
       to: "skills",
     },
+    {
+      from: "resources/native",
+      to: "native",
+    },
   ]);
   assert.deepEqual(desktopPackage.build.mac?.target, ["dmg", "zip", "dir"]);
   assert.equal(desktopPackage.build.mac?.icon, "build/icon.icns");
@@ -69,6 +73,25 @@ test("desktop package defines electron packaging entrypoints", () => {
   assert.equal(desktopPackage.build.nsis?.installerIcon, "build/icon.ico");
   assert.equal(desktopPackage.build.nsis?.uninstallerIcon, "build/icon.ico");
   assert.equal(desktopPackage.build.nsis?.include, "build/installer.nsh");
+  const nativeBuildSource = readFileSync(join(desktopRoot, "scripts", "build-native-helpers.mjs"), "utf8");
+  assert.match(nativeBuildSource, /AppEnvironmentBadgeNative\.mm/);
+  assert.match(nativeBuildSource, /app-environment-badge-native\.node/);
+  assert.doesNotMatch(nativeBuildSource, /swiftc/);
+  const nativeModuleSource = readFileSync(join(desktopRoot, "resources", "native", "macos", "AppEnvironmentBadgeNative.mm"), "utf8");
+  assert.match(nativeModuleSource, /hidesOnDeactivate = NO/);
+  assert.match(nativeModuleSource, /canHide = NO/);
+  assert.match(nativeModuleSource, /NSWindowStyleMaskNonactivatingPanel/);
+  assert.match(nativeModuleSource, /NSWindowAnimationBehaviorNone/);
+  assert.match(nativeModuleSource, /NSWindowCollectionBehaviorStationary/);
+  assert.match(nativeModuleSource, /NSWindowCollectionBehaviorIgnoresCycle/);
+  assert.match(nativeModuleSource, /NSWindowCollectionBehaviorFullScreenNone/);
+  assert.doesNotMatch(nativeModuleSource, /NSWindowCollectionBehaviorCanJoinAllSpaces \|/);
+  assert.match(nativeModuleSource, /AXObserverCreate/);
+  assert.match(nativeModuleSource, /kAXMovedNotification/);
+  assert.match(nativeModuleSource, /kAXHiddenAttribute/);
+  assert.match(nativeModuleSource, /CGWindowListCopyWindowInfo/);
+  assert.match(nativeModuleSource, /NSWorkspaceActiveSpaceDidChangeNotification/);
+  assert.match(nativeModuleSource, /CGDisplayBounds/);
   const installerInclude = readFileSync(join(desktopRoot, "build", "installer.nsh"), "utf8");
   assert.match(installerInclude, /!macro customCheckAppRunning/);
   assert.match(installerInclude, /taskkill\.exe/);

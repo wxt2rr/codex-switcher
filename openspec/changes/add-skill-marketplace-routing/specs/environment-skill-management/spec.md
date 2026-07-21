@@ -18,9 +18,9 @@ The system SHALL stage an installation, resolve its immutable source revision, v
 - **WHEN** the user confirms a valid skill source and selected environment
 - **THEN** the system installs only the selected skill subtree, records its resolved revision and hashes, and reports it as installed
 
-#### Scenario: User selects multiple installation targets
-- **WHEN** the user selects multiple Codex environments and/or global providers in the installation view
-- **THEN** the system installs the canonical skill once in every required Codex source environment and reconciles each selected global provider through its chosen single source environment
+#### Scenario: Direct installation reaches every Codex environment
+- **WHEN** the user installs a marketplace or Git skill
+- **THEN** the system installs the canonical skill once in every Codex environment shown as always enabled, deduplicates any source environments required by enabled provider bindings, and reconciles each enabled global provider through its chosen single source environment
 
 #### Scenario: Archive attempts path traversal
 - **WHEN** a source contains an entry or symbolic link that escapes the staged skill root

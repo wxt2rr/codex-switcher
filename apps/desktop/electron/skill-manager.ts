@@ -21,13 +21,13 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const LOCK_VERSION = 1 as const;
-const BINDINGS_VERSION = 1 as const;
+const BINDINGS_VERSION = 2 as const;
 const MAX_SKILL_FILES = 2_000;
 const MAX_SKILL_BYTES = 25 * 1024 * 1024;
 const BACKUP_LIMIT = 3;
 const DEFAULT_SKILLS_CATALOG_URL = "https://skills.sh/api/search";
 
-export type SkillProviderId = "claude-code" | "qoder" | "zcode" | "codebuddy" | "cursor";
+export type SkillProviderId = string;
 export type SkillScopeKind = "marketplace" | "codex" | "provider";
 export type InstalledSkillState = "healthy" | "modified" | "missing" | "conflict";
 
@@ -41,10 +41,13 @@ export interface SkillProviderDefinition {
   name: string;
   aliases: string[];
   defaultPath: string;
+  custom: boolean;
 }
 
 export interface ProviderBinding {
   providerId: SkillProviderId;
+  name: string;
+  custom: boolean;
   enabled: boolean;
   sourceEnv?: string;
   targetPath: string;
@@ -129,6 +132,11 @@ export interface SetProviderBindingInput {
   targetPath?: string;
 }
 
+export interface CreateSkillProviderInput {
+  name: string;
+  targetPath: string;
+}
+
 interface SkillLockEntry {
   id: string;
   name: string;
@@ -156,8 +164,9 @@ interface StoredProviderBinding {
 
 interface BindingFile {
   version: typeof BINDINGS_VERSION;
-  bindings: Partial<Record<SkillProviderId, StoredProviderBinding>>;
-  managed: Partial<Record<SkillProviderId, Record<string, string>>>;
+  customProviders: Record<SkillProviderId, { name: string; targetPath: string }>;
+  bindings: Record<SkillProviderId, StoredProviderBinding | undefined>;
+  managed: Record<SkillProviderId, Record<string, string> | undefined>;
 }
 
 interface SkillCandidate {
@@ -180,11 +189,11 @@ export interface SkillManagerOptions {
 const queues = new Map<string, Promise<unknown>>();
 
 export const SKILL_PROVIDERS: SkillProviderDefinition[] = [
-  { id: "claude-code", name: "Claude Code", aliases: ["Claude"], defaultPath: ".claude/skills" },
-  { id: "qoder", name: "Qoder", aliases: ["Qoder CN"], defaultPath: ".qoder/skills" },
-  { id: "zcode", name: "ZCode", aliases: [], defaultPath: ".zcode/skills" },
-  { id: "codebuddy", name: "CodeBuddy / WorkBuddy", aliases: ["WorkBuddy"], defaultPath: ".codebuddy/skills" },
-  { id: "cursor", name: "Cursor", aliases: [], defaultPath: ".cursor/skills" },
+  { id: "claude-code", name: "Claude Code", aliases: ["Claude"], defaultPath: ".claude/skills", custom: false },
+  { id: "qoder", name: "Qoder", aliases: ["Qoder CN"], defaultPath: ".qoder/skills", custom: false },
+  { id: "zcode", name: "ZCode", aliases: [], defaultPath: ".zcode/skills", custom: false },
+  { id: "codebuddy", name: "CodeBuddy / WorkBuddy", aliases: ["WorkBuddy"], defaultPath: ".codebuddy/skills", custom: false },
+  { id: "cursor", name: "Cursor", aliases: [], defaultPath: ".cursor/skills", custom: false },
 ];
 
 export class SkillManager {
@@ -204,7 +213,8 @@ export class SkillManager {
       this.getMarketplace(options.refreshMarketplace ?? false),
       this.readBindingFile(),
     ]);
-    const bindings = await Promise.all(SKILL_PROVIDERS.map((provider) => (
+    const providers = this.providersFor(bindingFile);
+    const bindings = await Promise.all(providers.map((provider) => (
       this.describeBinding(provider, bindingFile, environments)
     )));
     const codexScopes = await Promise.all(environments.map(async (environment) => ({
@@ -215,7 +225,7 @@ export class SkillManager {
       envName: environment.name,
       skills: await this.scanCodexEnvironment(environment),
     })));
-    const providerScopes = await Promise.all(SKILL_PROVIDERS.map(async (provider) => {
+    const providerScopes = await Promise.all(providers.map(async (provider) => {
       const binding = bindings.find((item) => item.providerId === provider.id);
       const path = binding?.targetPath ?? this.providerPath(provider);
       return {
@@ -354,14 +364,15 @@ export class SkillManager {
   }
 
   async setProviderBinding(input: SetProviderBindingInput): Promise<ProviderBinding> {
-    if (!SKILL_PROVIDERS.some((provider) => provider.id === input.providerId)) {
+    const file = await this.readBindingFile();
+    const provider = this.providersFor(file).find((item) => item.id === input.providerId);
+    if (!provider) {
       throw new Error(`Unsupported skill provider '${input.providerId}'`);
     }
     const environments = await this.getEnvironments();
     if (input.enabled && !environments.some((environment) => environment.name === input.sourceEnv)) {
       throw new Error("An enabled provider must select an existing Codex source environment");
     }
-    const file = await this.readBindingFile();
     file.bindings[input.providerId] = {
       enabled: input.enabled,
       sourceEnv: input.enabled ? input.sourceEnv : undefined,
@@ -369,17 +380,54 @@ export class SkillManager {
     };
     await this.reconcileProvider(input.providerId, file, environments);
     await this.writeBindingFile(file);
-    const provider = SKILL_PROVIDERS.find((item) => item.id === input.providerId)!;
     return this.describeBinding(provider, file, environments);
+  }
+
+  async createProvider(input: CreateSkillProviderInput): Promise<ProviderBinding> {
+    const name = input.name.trim();
+    if (!name || name.length > 64) throw new Error("Provider name must contain 1 to 64 characters");
+    const targetPath = this.normalizeCustomProviderPath(input.targetPath);
+    const environments = await this.getEnvironments();
+    const protectedPaths = [resolve(this.options.stateDir), ...environments.map((environment) => resolve(this.skillsPath(environment)))];
+    if (targetPath === resolve(dirname(targetPath)) || targetPath === resolve(this.homeDir) ||
+        protectedPaths.some((path) => isInside(path, targetPath) || isInside(targetPath, path))) {
+      throw new Error("Provider Skill directory must not contain application state or a Codex Skill directory");
+    }
+    const file = await this.readBindingFile();
+    const providers = this.providersFor(file);
+    if (providers.some((provider) => provider.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+      throw new Error(`Skill provider '${name}' already exists`);
+    }
+    if (providers.some((provider) => this.providerPath(provider, file.bindings[provider.id]?.targetPath) === targetPath)) {
+      throw new Error(`Skill provider directory '${targetPath}' is already configured`);
+    }
+    const providerId = `custom:${randomUUID()}`;
+    file.customProviders[providerId] = { name, targetPath };
+    file.bindings[providerId] = { enabled: false, targetPath };
+    await this.writeBindingFile(file);
+    return this.describeBinding(this.providersFor(file).find((provider) => provider.id === providerId)!, file, environments);
+  }
+
+  async deleteProvider(providerId: SkillProviderId): Promise<void> {
+    const file = await this.readBindingFile();
+    const provider = this.providersFor(file).find((item) => item.id === providerId);
+    if (!provider?.custom) throw new Error("Only custom skill providers can be deleted");
+    const environments = await this.getEnvironments();
+    file.bindings[providerId] = { ...file.bindings[providerId], enabled: false, targetPath: provider.defaultPath };
+    await this.reconcileProvider(providerId, file, environments);
+    delete file.bindings[providerId];
+    delete file.managed[providerId];
+    delete file.customProviders[providerId];
+    await this.writeBindingFile(file);
   }
 
   async repairProvider(providerId: SkillProviderId): Promise<ProviderBinding> {
     const file = await this.readBindingFile();
     const environments = await this.getEnvironments();
+    const provider = this.providersFor(file).find((item) => item.id === providerId);
+    if (!provider) throw new Error(`Unsupported skill provider '${providerId}'`);
     await this.reconcileProvider(providerId, file, environments);
     await this.writeBindingFile(file);
-    const provider = SKILL_PROVIDERS.find((item) => item.id === providerId);
-    if (!provider) throw new Error(`Unsupported skill provider '${providerId}'`);
     return this.describeBinding(provider, file, environments);
   }
 
@@ -405,7 +453,35 @@ export class SkillManager {
   }
 
   private providerPath(provider: SkillProviderDefinition, override?: string): string {
-    return override?.trim() || join(this.homeDir, ...provider.defaultPath.split("/"));
+    const configured = override?.trim() || provider.defaultPath;
+    if (configured === "~") return this.homeDir;
+    if (configured.startsWith(`~${sep}`) || configured.startsWith("~/")) {
+      return join(this.homeDir, configured.slice(2));
+    }
+    return isAbsolute(configured) ? resolve(configured) : join(this.homeDir, ...configured.split("/"));
+  }
+
+  private normalizeCustomProviderPath(input: string): string {
+    const value = input.trim();
+    if (!value) throw new Error("Provider Skill directory is required");
+    const expanded = value === "~" ? this.homeDir
+      : value.startsWith(`~${sep}`) || value.startsWith("~/") ? join(this.homeDir, value.slice(2))
+        : value;
+    if (!isAbsolute(expanded)) throw new Error("Provider Skill directory must be an absolute path");
+    return resolve(expanded);
+  }
+
+  private providersFor(file: BindingFile): SkillProviderDefinition[] {
+    return [
+      ...SKILL_PROVIDERS,
+      ...Object.entries(file.customProviders).map(([id, provider]) => ({
+        id,
+        name: provider.name,
+        aliases: [],
+        defaultPath: provider.targetPath,
+        custom: true,
+      })),
+    ];
   }
 
   private bindingPath(): string {
@@ -435,12 +511,31 @@ export class SkillManager {
 
   private async readBindingFile(): Promise<BindingFile> {
     const parsed = await readJson<unknown>(this.bindingPath(), undefined);
-    if (!isRecord(parsed) || parsed.version !== BINDINGS_VERSION || !isRecord(parsed.bindings)) {
-      return { version: BINDINGS_VERSION, bindings: {}, managed: {} };
+    if (!isRecord(parsed) || (parsed.version !== 1 && parsed.version !== BINDINGS_VERSION) || !isRecord(parsed.bindings)) {
+      return { version: BINDINGS_VERSION, customProviders: {}, bindings: {}, managed: {} };
     }
     const bindings: BindingFile["bindings"] = {};
     const managed: BindingFile["managed"] = {};
-    for (const provider of SKILL_PROVIDERS) {
+    const customProviders: BindingFile["customProviders"] = {};
+    if (parsed.version === BINDINGS_VERSION && isRecord(parsed.customProviders)) {
+      for (const [id, value] of Object.entries(parsed.customProviders)) {
+        if (!id.startsWith("custom:") || !isRecord(value)) continue;
+        if (typeof value.name !== "string" || !value.name.trim() || value.name.length > 64) continue;
+        if (typeof value.targetPath !== "string") continue;
+        try {
+          customProviders[id] = { name: value.name.trim(), targetPath: this.normalizeCustomProviderPath(value.targetPath) };
+        } catch {
+          // Invalid custom records are ignored rather than gaining filesystem access.
+        }
+      }
+    }
+    const providers = [
+      ...SKILL_PROVIDERS,
+      ...Object.entries(customProviders).map(([id, provider]) => ({
+        id, name: provider.name, aliases: [], defaultPath: provider.targetPath, custom: true,
+      })),
+    ];
+    for (const provider of providers) {
       const value = parsed.bindings[provider.id];
       if (isRecord(value) && typeof value.enabled === "boolean") {
         bindings[provider.id] = {
@@ -456,7 +551,7 @@ export class SkillManager {
         );
       }
     }
-    return { version: BINDINGS_VERSION, bindings, managed };
+    return { version: BINDINGS_VERSION, customProviders, bindings, managed };
   }
 
   private async writeBindingFile(file: BindingFile): Promise<void> {
@@ -486,10 +581,12 @@ export class SkillManager {
     const targetPath = this.providerPath(provider, stored?.targetPath);
     const managed = file.managed[provider.id] ?? {};
     if (!stored?.enabled) {
-      return { providerId: provider.id, enabled: false, targetPath, status: "disabled", managedLinks: 0, conflicts: 0 };
+      return { providerId: provider.id, name: provider.name, custom: provider.custom,
+        enabled: false, targetPath, status: "disabled", managedLinks: 0, conflicts: 0 };
     }
     if (!environments.some((environment) => environment.name === stored.sourceEnv)) {
-      return { providerId: provider.id, enabled: true, sourceEnv: stored.sourceEnv, targetPath,
+      return { providerId: provider.id, name: provider.name, custom: provider.custom,
+        enabled: true, sourceEnv: stored.sourceEnv, targetPath,
         status: "missing-source", managedLinks: Object.keys(managed).length, conflicts: 0,
         message: "The selected Codex environment no longer exists" };
     }
@@ -502,6 +599,8 @@ export class SkillManager {
     }
     return {
       providerId: provider.id,
+      name: provider.name,
+      custom: provider.custom,
       enabled: true,
       sourceEnv: stored.sourceEnv,
       targetPath,
@@ -515,7 +614,7 @@ export class SkillManager {
   private async reconcileBindingsForEnvironment(envName: string): Promise<void> {
     const file = await this.readBindingFile();
     const environments = await this.getEnvironments();
-    for (const provider of SKILL_PROVIDERS) {
+    for (const provider of this.providersFor(file)) {
       if (file.bindings[provider.id]?.enabled && file.bindings[provider.id]?.sourceEnv === envName) {
         await this.reconcileProvider(provider.id, file, environments);
       }
@@ -528,7 +627,7 @@ export class SkillManager {
     file: BindingFile,
     environments: CodexSkillEnvironment[],
   ): Promise<void> {
-    const provider = SKILL_PROVIDERS.find((item) => item.id === providerId);
+    const provider = this.providersFor(file).find((item) => item.id === providerId);
     if (!provider) throw new Error(`Unsupported skill provider '${providerId}'`);
     const stored = file.bindings[providerId] ?? { enabled: false };
     const targetPath = this.providerPath(provider, stored.targetPath);
@@ -559,7 +658,7 @@ export class SkillManager {
 
   private async removeManagedLinksForSkill(envName: string, skillId: string): Promise<void> {
     const file = await this.readBindingFile();
-    for (const provider of SKILL_PROVIDERS) {
+    for (const provider of this.providersFor(file)) {
       const stored = file.bindings[provider.id];
       const expected = file.managed[provider.id]?.[skillId];
       if (!stored?.enabled || stored.sourceEnv !== envName || !expected) continue;

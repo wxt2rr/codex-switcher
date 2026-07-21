@@ -32,6 +32,7 @@
 - [ ] 4.4 Implement managed per-skill projection, copy fallback, ownership markers, conflict detection, and foreign-content preservation.
 - [ ] 4.5 Implement dry-run audit, missing/stale/conflicted/copied-drifted/orphaned classification, repair, active-environment switch reconciliation, and environment-delete cleanup.
 - [ ] 4.6 Add cross-platform routing tests with mocked filesystem capabilities, disabled defaults, source-binding changes, collision cases, and orphan cleanup.
+- [x] 4.7 Persist custom provider definitions and expose safe create/delete operations through the typed Electron bridge.
 
 ## 5. Electron bridge and task integration
 
@@ -50,6 +51,9 @@
 - [ ] 6.6 Add renderer component/view-model tests for navigation, filtering, state badges, confirmation requirements, and operation refreshes.
 - [x] 6.7 Unify marketplace and installed Skill cards, add explicit accessible detail drawers, and align provider-sync switches and Codex environment rows with the shared Settings visual system.
 - [x] 6.8 Clarify provider-directory sync actions and explain that enabled providers receive Skills through managed symbolic links without separate installation.
+- [x] 6.9 Fan out direct marketplace and Git installations to every always-enabled Codex environment before reconciling provider-directory bindings.
+- [x] 6.10 Derive the provider-sync summary from all Codex environments and external provider bindings instead of a hard-coded external-provider count.
+- [x] 6.11 Add custom provider controls and an overflow-aware, scrollbar-free horizontal scope strip with directional edge fades.
 
 ## 7. Documentation, rollout, and verification
 

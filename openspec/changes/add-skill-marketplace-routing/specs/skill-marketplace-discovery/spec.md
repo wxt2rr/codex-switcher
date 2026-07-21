@@ -3,6 +3,10 @@
 ### Requirement: Skills page and soft navigation
 The desktop application SHALL expose a Skills page through the existing soft-navigation model and SHALL restore `?view=skills` on reload.
 
+#### Scenario: Scope strip overflows horizontally
+- **WHEN** the number of Codex environments or providers exceeds the available width
+- **THEN** the scope strip can scroll horizontally without displaying a scrollbar, and each edge shows a fade only while more scopes remain in that direction
+
 #### Scenario: User navigates to Skills
 - **WHEN** the user selects Skills in the desktop sidebar
 - **THEN** the application displays the Skills page without launching a new window or reloading the Electron shell

@@ -47,11 +47,31 @@ test("provider sync is global and each provider selects one Codex source environ
 });
 
 test("provider directory sync copy explains symlink behavior and avoids ambiguous actions", () => {
-  assert.match(source, /服务商目录同步 \$\{enabledBindings\}\/5/);
+  assert.match(source, /enabledSyncScopes = codexScopes\.length \+ providerBindings\.filter/);
+  assert.match(source, /totalSyncScopes = codexScopes\.length \+ providerBindings\.length/);
+  assert.match(source, /服务商目录同步 \$\{enabledSyncScopes\}\/\$\{totalSyncScopes\}/);
   assert.match(source, /开启后，将所选 Codex 环境中的 Skill 以软链接方式同步到对应服务商目录，无需重复安装。/);
   assert.match(source, /Provider directory sync/);
   assert.match(source, /symlinked into the provider's Skill directory/);
-  assert.doesNotMatch(source, /`同步 \$\{enabledBindings\}\/5`/);
+  assert.doesNotMatch(source, /\/5`/);
+});
+
+test("custom providers can be created and removed from the provider sync drawer", () => {
+  assert.match(source, /bridge\.createSkillProvider/);
+  assert.match(source, /bridge\.deleteSkillProvider/);
+  assert.match(source, /添加服务商/);
+  assert.match(source, /服务商名称/);
+  assert.match(source, /Skill 目录/);
+  assert.match(source, /binding\.custom \? \(\) => setRemoveProvider/);
+});
+
+test("skill scope tabs hide their scrollbar and expose directional edge fades", () => {
+  assert.match(source, /scopeScrollerRef/);
+  assert.match(source, /scrollWidth - scroller\.clientWidth/);
+  assert.match(source, /scroller\.scrollLeft > 1/);
+  assert.match(source, /horizontal-scroll-no-bar overflow-x-auto/);
+  assert.match(source, /data-visible=\{scopeOverflow\.left\}/);
+  assert.match(source, /data-visible=\{scopeOverflow\.right\}/);
 });
 
 test("skills page exposes lifecycle operations and security copy", () => {
@@ -81,13 +101,18 @@ test("marketplace installation is immediate and Git installation does not ask fo
   assert.doesNotMatch(source, /toggleInstallProvider/);
 });
 
-test("installation follows existing provider bindings without changing sync configuration", () => {
+test("installation targets every Codex environment and follows provider bindings without changing sync configuration", () => {
   const installFlow = source.slice(source.indexOf("function installEnvironmentNames"), source.indexOf("async function checkUpdates"));
-  assert.match(installFlow, /defaultCodexScope\?\.envName/);
+  assert.match(installFlow, /codexScopes\.map\(\(scope\) => scope\.envName\)/);
   assert.match(installFlow, /filter\(\(binding\) => binding\.enabled\)/);
   assert.match(installFlow, /map\(\(binding\) => binding\.sourceEnv\)/);
   assert.match(installFlow, /await bridge\.installSkill/);
   assert.doesNotMatch(installFlow, /setSkillProviderBinding/);
+});
+
+test("Git installation explains that every Codex environment receives the skill", () => {
+  assert.match(source, /安装到全部 Codex 环境/);
+  assert.match(source, /Installs to every Codex environment/);
 });
 
 test("skills route is wired into the desktop shell", () => {

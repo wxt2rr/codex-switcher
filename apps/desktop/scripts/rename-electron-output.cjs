@@ -15,6 +15,8 @@ const commonJsModules = [
   "codex-projects",
   "codex-tool-paths",
   "desktop-settings",
+  "app-environment-badges",
+  "app-environment-badge-adapters",
   "generated-image-recovery-skill",
   "cli-terminal-settings",
   "env-file-history",

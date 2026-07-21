@@ -123,14 +123,14 @@ function EnvCard({
           <div className="flex min-w-0 items-center gap-3">
             <h3 className="truncate text-[15px] font-semibold tracking-[-0.02em] text-neutral-950">{env.name}</h3>
           </div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {env.isCurrentCli ? <SoftBadge tone="brand" label="CLI" /> : null}
-            {env.isCurrentApp ? <SoftBadge tone="brand" label="App" /> : null}
-            <SoftBadge tone="neutral" label={language === "zh" ? `${accountCount} 个账号` : `${accountCount} accounts`} />
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {env.isCurrentCli ? <SoftBadge tone="brand" label="CLI" className="h-5 px-2 text-[10px]" /> : null}
+            {env.isCurrentApp ? <SoftBadge tone="brand" label="App" className="h-5 px-2 text-[10px]" /> : null}
+            <SoftBadge tone="neutral" label={language === "zh" ? `${accountCount} 个账号` : `${accountCount} accounts`} className="h-5 px-2 text-[10px]" />
             {routeStatus?.enabled ? (
               <SoftBadge
                 tone="success"
-                className="text-[10px]"
+                className="h-5 px-2 text-[10px]"
                 label={
                   language === "zh"
                     ? `已开启路由 · 127.0.0.1:${routeStatus.port} · ${routeStatus.routedAccounts} 个账号`
@@ -149,8 +149,8 @@ function EnvCard({
 
       <div className="responsive-priority-secondary flex min-w-0 items-center pl-5">
         <div className="flex gap-1.5">
-          <SoftBadge tone={env.isCurrentCli ? "brand" : "neutral"} label="CLI" />
-          <SoftBadge tone={env.isCurrentApp ? "brand" : "neutral"} label="App" />
+          <SoftBadge tone={env.isCurrentCli ? "brand" : "neutral"} label="CLI" className="h-5 px-2 text-[10px]" />
+          <SoftBadge tone={env.isCurrentApp ? "brand" : "neutral"} label="App" className="h-5 px-2 text-[10px]" />
         </div>
       </div>
 

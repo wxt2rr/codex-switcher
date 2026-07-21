@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   getCliAutoResumeSettings: () => ipcRenderer.invoke("desktop:getCliAutoResumeSettings"),
   getEnvHistoryRetentionSettings: () => ipcRenderer.invoke("desktop:getEnvHistoryRetentionSettings"),
   getGeneratedImageRecoverySettings: () => ipcRenderer.invoke("desktop:getGeneratedImageRecoverySettings"),
+  getAppEnvironmentBadgeStatus: () => ipcRenderer.invoke("desktop:getAppEnvironmentBadgeStatus"),
   getRouterLifecycleSettings: () => ipcRenderer.invoke("desktop:getRouterLifecycleSettings"),
   getRouterPortSettings: () => ipcRenderer.invoke("desktop:getRouterPortSettings"),
   detectCodexToolPaths: () => ipcRenderer.invoke("desktop:detectCodexToolPaths"),
@@ -18,6 +19,9 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     ipcRenderer.invoke("desktop:setEnvHistoryRetentionSettings", value),
   setGeneratedImageRecoverySettings: (value: { enabled: boolean }) =>
     ipcRenderer.invoke("desktop:setGeneratedImageRecoverySettings", value),
+  requestAppEnvironmentBadgePermission: () => ipcRenderer.invoke("desktop:requestAppEnvironmentBadgePermission"),
+  setAppEnvironmentBadgeSettings: (value: { enabled: boolean }) =>
+    ipcRenderer.invoke("desktop:setAppEnvironmentBadgeSettings", value),
   setRouterLifecycleSettings: (value: { stopOnAppQuit: boolean }) =>
     ipcRenderer.invoke("desktop:setRouterLifecycleSettings", value),
   setRouterPortSettings: (value: { preferredPort: number }) =>
@@ -149,5 +153,7 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   updateSkill: (input: unknown) => ipcRenderer.invoke("desktop:updateSkill", input),
   uninstallSkill: (envName: string, skillId: string) => ipcRenderer.invoke("desktop:uninstallSkill", envName, skillId),
   setSkillProviderBinding: (input: unknown) => ipcRenderer.invoke("desktop:setSkillProviderBinding", input),
+  createSkillProvider: (input: unknown) => ipcRenderer.invoke("desktop:createSkillProvider", input),
+  deleteSkillProvider: (providerId: string) => ipcRenderer.invoke("desktop:deleteSkillProvider", providerId),
   repairSkillProvider: (providerId: string) => ipcRenderer.invoke("desktop:repairSkillProvider", providerId),
 });

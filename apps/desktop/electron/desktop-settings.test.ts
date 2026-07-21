@@ -4,6 +4,8 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  DEFAULT_APP_ENVIRONMENT_BADGE_SETTINGS,
+  readAppEnvironmentBadgeSettings,
   readAppWindowSettings,
   readCliAutoResumeSettings,
   readEnvHistoryRetentionSettings,
@@ -13,6 +15,7 @@ import {
   removeAppWindowCount,
   renameAppWindowCount,
   saveAppWindowCount,
+  saveAppEnvironmentBadgeSettings,
   saveCliAutoResumeSettings,
   saveEnvHistoryRetentionSettings,
   saveGeneratedImageRecoverySettings,
@@ -32,6 +35,16 @@ test("generated image recovery defaults off and persists independently", async (
   await saveCliAutoResumeSettings(path, { enabled: true, sessionNumber: 2 });
   assert.deepEqual(await saveGeneratedImageRecoverySettings(path, { enabled: true }), { enabled: true });
   assert.deepEqual(await readGeneratedImageRecoverySettings(path), { enabled: true });
+  assert.deepEqual(await readCliAutoResumeSettings(path), { enabled: true, sessionNumber: 2 });
+});
+
+test("App environment badges default off and persist independently", async () => {
+  const root = await mkdtemp(join(tmpdir(), "desktop-app-badges-"));
+  const path = join(root, "settings.json");
+  assert.deepEqual(await readAppEnvironmentBadgeSettings(path), DEFAULT_APP_ENVIRONMENT_BADGE_SETTINGS);
+  await saveCliAutoResumeSettings(path, { enabled: true, sessionNumber: 2 });
+  assert.deepEqual(await saveAppEnvironmentBadgeSettings(path, { enabled: true }), { enabled: true });
+  assert.deepEqual(await readAppEnvironmentBadgeSettings(path), { enabled: true });
   assert.deepEqual(await readCliAutoResumeSettings(path), { enabled: true, sessionNumber: 2 });
 });
 

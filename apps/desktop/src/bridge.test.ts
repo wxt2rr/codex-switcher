@@ -55,6 +55,7 @@ test("desktop bridge forwards calls to injected electron api", async () => {
     getGeneratedImageRecoverySettings: async () => ({
       enabled: false, installedEnvironments: 0, totalEnvironments: 2, conflicts: [],
     }),
+    getAppEnvironmentBadgeStatus: async () => ({ enabled: false, supported: true, platform: "macos", permission: "denied", applied: 0, unresolved: 0 }),
     getRouterLifecycleSettings: async () => {
       calls.push("getRouterLifecycleSettings");
       return { stopOnAppQuit: false };
@@ -77,6 +78,8 @@ test("desktop bridge forwards calls to injected electron api", async () => {
     setGeneratedImageRecoverySettings: async (value) => ({
       enabled: value.enabled, installedEnvironments: value.enabled ? 2 : 0, totalEnvironments: 2, conflicts: [],
     }),
+    requestAppEnvironmentBadgePermission: async () => ({ enabled: false, supported: true, platform: "macos", permission: "granted", applied: 0, unresolved: 0 }),
+    setAppEnvironmentBadgeSettings: async (value) => ({ enabled: value.enabled, supported: true, platform: "macos", permission: "granted", applied: value.enabled ? 2 : 0, unresolved: 0 }),
     setRouterLifecycleSettings: async (value) => {
       calls.push(`setRouterLifecycleSettings:${value.stopOnAppQuit}`);
       return value;
@@ -286,10 +289,13 @@ test("desktop bridge forwards calls to injected electron api", async () => {
     updateSkill: async (input) => ({ id: input.skillId, name: input.skillId, description: "", path: "/tmp/skill",
       scopeId: `codex:${input.envName}`, managed: true, linked: false, state: "healthy" }),
     uninstallSkill: async () => undefined,
-    setSkillProviderBinding: async (input) => ({ providerId: input.providerId, enabled: input.enabled,
+    setSkillProviderBinding: async (input) => ({ providerId: input.providerId, name: input.providerId, custom: false, enabled: input.enabled,
       sourceEnv: input.sourceEnv, targetPath: input.targetPath ?? "/tmp/skills",
       status: input.enabled ? "healthy" : "disabled", managedLinks: 0, conflicts: 0 }),
-    repairSkillProvider: async (providerId) => ({ providerId, enabled: false, targetPath: "/tmp/skills",
+    createSkillProvider: async (input) => ({ providerId: "custom:test", name: input.name, custom: true,
+      enabled: false, targetPath: input.targetPath, status: "disabled", managedLinks: 0, conflicts: 0 }),
+    deleteSkillProvider: async () => undefined,
+    repairSkillProvider: async (providerId) => ({ providerId, name: providerId, custom: false, enabled: false, targetPath: "/tmp/skills",
       status: "disabled", managedLinks: 0, conflicts: 0 }),
   });
 

@@ -36,6 +36,7 @@ apps/desktop/node_modules/
 apps/desktop/dist/
 apps/desktop/electron-dist/
 apps/desktop/release/
+apps/desktop/resources/native/macos/app-environment-badge-native.node
 apps/website/.astro/
 apps/website/dist/
 

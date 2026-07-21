@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { mergeAccountUsageMetrics, mergeOverviewWithAuthMetrics } from "@/auth-metrics";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/components/theme-provider";
-import type { AccountPoolInput, AccountPoolStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry, DesktopLaunchStrategy, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, RouterLifecycleSettings, RouterPortSettings } from "./bridge";
+import type { AccountPoolInput, AccountPoolStatus, AppEnvironmentBadgeStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry, DesktopLaunchStrategy, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, RouterLifecycleSettings, RouterPortSettings } from "./bridge";
 import { DesktopShell } from "./components/desktop-shell";
 import type { AccountSummary, AuthMetricsPayload, EnvironmentRouteStatus, NavView, OverviewPayload } from "./desktop-model";
 import { resolveDesktopBridge } from "./bridge";
@@ -83,6 +83,9 @@ export function App() {
     enabled: false, installedEnvironments: 0, totalEnvironments: 0, conflicts: [],
   });
   const [generatedImageRecoverySaving, setGeneratedImageRecoverySaving] = useState(false);
+  const [appEnvironmentBadges, setAppEnvironmentBadges] = useState<AppEnvironmentBadgeStatus>({ enabled: false, supported: false, platform: "unsupported", permission: "unsupported", applied: 0, unresolved: 0 });
+  const [appEnvironmentBadgesSaving, setAppEnvironmentBadgesSaving] = useState(false);
+  const [appEnvironmentBadgePermissionPending, setAppEnvironmentBadgePermissionPending] = useState(false);
   const [cliTerminalSettings, setCliTerminalSettings] = useState<CliTerminalSettings | null>(null);
   const [cliTerminalSaving, setCliTerminalSaving] = useState(false);
   const [routeStatuses, setRouteStatuses] = useState<EnvironmentRouteStatus[]>([]);
@@ -168,7 +171,38 @@ export function App() {
     void bridge.getRouterPortSettings().then(setRouterPort).catch(setErrorMessage);
     void bridge.getEnvHistoryRetentionSettings().then(setEnvHistoryRetention).catch(setErrorMessage);
     void bridge.getGeneratedImageRecoverySettings().then(setGeneratedImageRecovery).catch(setErrorMessage);
+    void bridge.getAppEnvironmentBadgeStatus().then(setAppEnvironmentBadges).catch(setErrorMessage);
   }, [view]);
+
+  useEffect(() => {
+    if (!appEnvironmentBadgePermissionPending) return;
+    let timer: number | undefined;
+    const onFocus = () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        void bridge.getAppEnvironmentBadgeStatus().then(async (status) => {
+          setAppEnvironmentBadges(status);
+          if (status.permission !== "granted" || status.enabled) return;
+          setAppEnvironmentBadgesSaving(true);
+          try {
+            const enabled = await bridge.setAppEnvironmentBadgeSettings({ enabled: true });
+            setAppEnvironmentBadges(enabled);
+            setAppEnvironmentBadgePermissionPending(false);
+            setSuccessMessage(appBadgeNotice(enabled, true));
+          } catch (error) {
+            setErrorMessage(error);
+          } finally {
+            setAppEnvironmentBadgesSaving(false);
+          }
+        }).catch(setErrorMessage);
+      }, 250);
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [appEnvironmentBadgePermissionPending]);
 
   async function initializeApp() {
     setInitialLoadingProgress(12);
@@ -265,6 +299,54 @@ export function App() {
       setErrorMessage(error);
     } finally {
       setGeneratedImageRecoverySaving(false);
+    }
+  }
+
+  function appBadgeNotice(status: AppEnvironmentBadgeStatus, enabled: boolean): string {
+    if (!enabled) return language === "zh" ? "Codex App 环境标识已关闭" : "Codex App environment badges disabled";
+    if (status.unresolved > 0) return language === "zh"
+      ? `环境标识已开启，当前有 ${status.unresolved} 个窗口尚未生效。请重新打开 Codex App 后重试。`
+      : `Environment badges enabled; ${status.unresolved} window(s) were not updated. Reopen Codex App and try again.`;
+    return language === "zh"
+      ? "Codex App 环境标识已开启。若未看到效果，请重新打开 Codex App 后重试。"
+      : "Codex App environment badges enabled. Reopen Codex App and try again if they are not visible.";
+  }
+
+  async function handleAppEnvironmentBadgesChange(enabled: boolean) {
+    if (!enabled) setAppEnvironmentBadgePermissionPending(false);
+    const previous = appEnvironmentBadges;
+    setAppEnvironmentBadges((current) => ({ ...current, enabled }));
+    setAppEnvironmentBadgesSaving(true);
+    try {
+      const next = await bridge.setAppEnvironmentBadgeSettings({ enabled });
+      setAppEnvironmentBadges(next);
+      setSuccessMessage(appBadgeNotice(next, enabled));
+    } catch (error) {
+      setAppEnvironmentBadges(previous);
+      setErrorMessage(error);
+    } finally {
+      setAppEnvironmentBadgesSaving(false);
+    }
+  }
+
+  async function handleRequestAppEnvironmentBadgePermission() {
+    setAppEnvironmentBadgesSaving(true);
+    try {
+      const permission = await bridge.requestAppEnvironmentBadgePermission();
+      setAppEnvironmentBadges(permission);
+      if (permission.permission !== "granted") {
+        setAppEnvironmentBadgePermissionPending(true);
+        setSuccessMessage(language === "zh"
+          ? "请在系统设置中允许辅助功能，然后返回此窗口，环境标识会自动继续开启。"
+          : "Allow Accessibility access in System Settings, then return to this window to continue automatically.");
+        return;
+      }
+      setAppEnvironmentBadgePermissionPending(false);
+      await handleAppEnvironmentBadgesChange(true);
+    } catch (error) {
+      setErrorMessage(error);
+    } finally {
+      setAppEnvironmentBadgesSaving(false);
     }
   }
 
@@ -1105,6 +1187,10 @@ export function App() {
           generatedImageRecovery={generatedImageRecovery}
           generatedImageRecoverySaving={generatedImageRecoverySaving}
           onGeneratedImageRecoveryChange={(enabled) => void handleGeneratedImageRecoveryChange(enabled)}
+          appEnvironmentBadges={appEnvironmentBadges}
+          appEnvironmentBadgesSaving={appEnvironmentBadgesSaving}
+          onAppEnvironmentBadgesChange={(enabled) => void handleAppEnvironmentBadgesChange(enabled)}
+          onRequestAppEnvironmentBadgePermission={() => void handleRequestAppEnvironmentBadgePermission()}
         />
       ) : null}
 

@@ -450,6 +450,49 @@ body {
   background: oklch(0.76 0 0);
 }
 
+.horizontal-scroll-no-bar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.horizontal-scroll-no-bar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.skill-scope-edge-fade {
+  position: absolute;
+  inset-block: 1px;
+  z-index: 10;
+  width: 2.5rem;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 140ms ease-out;
+}
+
+.skill-scope-edge-fade[data-visible="true"] {
+  opacity: 1;
+}
+
+.skill-scope-edge-fade-left {
+  left: 1px;
+  background: linear-gradient(to right, rgb(255 255 255) 24%, rgb(255 255 255 / 0));
+}
+
+.skill-scope-edge-fade-right {
+  right: 1px;
+  background: linear-gradient(to left, rgb(255 255 255) 24%, rgb(255 255 255 / 0));
+}
+
+.dark .skill-scope-edge-fade-left {
+  background: linear-gradient(to right, rgb(20 26 34) 24%, rgb(20 26 34 / 0));
+}
+
+.dark .skill-scope-edge-fade-right {
+  background: linear-gradient(to left, rgb(20 26 34) 24%, rgb(20 26 34 / 0));
+}
+
 /* Shared selected state for navigation, segmented controls, and active targets. */
 .ui-selected-control {
   border-color: var(--selected-border-color);

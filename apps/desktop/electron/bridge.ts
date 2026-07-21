@@ -45,6 +45,7 @@ import {
   readAppWindowSettings,
   readEnvHistoryRetentionSettings,
   readGeneratedImageRecoverySettings,
+  readAppEnvironmentBadgeSettings,
   readRouterLifecycleSettings,
   readRouterPortSettings,
   saveCliAutoResumeSettings,
@@ -53,11 +54,13 @@ import {
   removeAppWindowCount,
   saveEnvHistoryRetentionSettings,
   saveGeneratedImageRecoverySettings,
+  saveAppEnvironmentBadgeSettings,
   saveRouterLifecycleSettings,
   saveRouterPortSettings,
   type CliAutoResumeSettings,
   type EnvHistoryRetentionSettings,
   type GeneratedImageRecoverySettings,
+  type AppEnvironmentBadgeSettings,
   type RouterLifecycleSettings,
   type RouterPortSettings,
   MAX_APP_WINDOW_COUNT,
@@ -75,6 +78,7 @@ import {
 } from "./account-model-catalog.js";
 import {
   SkillManager,
+  type CreateSkillProviderInput,
   type InstallSkillInput,
   type SetProviderBindingInput,
   type SkillProviderId,
@@ -85,6 +89,8 @@ import {
   reconcileGeneratedImageRecoverySkill,
   type CodexSkillEnvironment,
 } from "./generated-image-recovery-skill.js";
+import { AppEnvironmentBadgeManager, createUnsupportedBadgeAdapter, type AppEnvironmentBadgeStatus } from "./app-environment-badges.js";
+import { MacDockBadgeAdapter, WindowsTaskbarBadgeAdapter } from "./app-environment-badge-adapters.js";
 
 const execFileAsync = promisify(execFile);
 const currentDir = resolveCurrentDir();
@@ -188,6 +194,14 @@ export function uninstallSkill(envName: string, skillId: string) {
 
 export function setSkillProviderBinding(input: SetProviderBindingInput) {
   return getSkillManager().setProviderBinding(input);
+}
+
+export function createSkillProvider(input: CreateSkillProviderInput) {
+  return getSkillManager().createProvider(input);
+}
+
+export function deleteSkillProvider(providerId: SkillProviderId) {
+  return getSkillManager().deleteProvider(providerId);
 }
 
 export function repairSkillProvider(providerId: SkillProviderId) {
@@ -1473,6 +1487,52 @@ export async function getGeneratedImageRecoverySettings() {
   const environments = await listCodexSkillEnvironments();
   if (settings.enabled) return reconcileGeneratedImageRecoveryForEnvironments(true, environments);
   return inspectGeneratedImageRecoverySkill(false, environments);
+}
+
+let appEnvironmentBadgeManager: AppEnvironmentBadgeManager | undefined;
+
+function getAppEnvironmentBadgeManager(): AppEnvironmentBadgeManager {
+  if (!appEnvironmentBadgeManager) {
+    const adapter = process.platform === "darwin"
+      ? new MacDockBadgeAdapter(currentDir)
+      : process.platform === "win32"
+        ? new WindowsTaskbarBadgeAdapter(currentDir)
+        : createUnsupportedBadgeAdapter();
+    const settingsPath = getCodexToolPathOptions().settingsPath;
+    appEnvironmentBadgeManager = new AppEnvironmentBadgeManager({
+      adapter,
+      readEnabled: async () => (await readAppEnvironmentBadgeSettings(settingsPath)).enabled,
+      saveEnabled: async (enabled) => { await saveAppEnvironmentBadgeSettings(settingsPath, { enabled }); },
+      listInstances: async () => {
+        const support = await loadCoreSupportModules();
+        return support.listManagedAppInstances(support.resolveManagedAppStatePaths(getStateDir()));
+      },
+    });
+  }
+  return appEnvironmentBadgeManager;
+}
+
+export async function getAppEnvironmentBadgeStatus(): Promise<AppEnvironmentBadgeStatus> {
+  return getAppEnvironmentBadgeManager().getStatus();
+}
+
+export async function requestAppEnvironmentBadgePermission(): Promise<AppEnvironmentBadgeStatus> {
+  return getAppEnvironmentBadgeManager().requestPermission();
+}
+
+export async function setAppEnvironmentBadgeSettings(value: AppEnvironmentBadgeSettings): Promise<AppEnvironmentBadgeStatus> {
+  return getAppEnvironmentBadgeManager().setEnabled(value.enabled === true);
+}
+
+export async function synchronizeAppEnvironmentBadges(): Promise<AppEnvironmentBadgeStatus> {
+  return getAppEnvironmentBadgeManager().sync();
+}
+
+function scheduleAppEnvironmentBadgeSync(): void {
+  for (const delayMs of [0, 900, 2_500]) {
+    const timer = setTimeout(() => { void synchronizeAppEnvironmentBadges().catch(() => undefined); }, delayMs);
+    timer.unref();
+  }
 }
 
 export async function setRouterLifecycleSettings(value: RouterLifecycleSettings): Promise<RouterLifecycleSettings> {
@@ -4196,6 +4256,7 @@ async function launchAppTarget(
         restart: async () => { throw new Error("Invalid packaged App window launch plan"); },
         launchNew,
       });
+      scheduleAppEnvironmentBadgeSync();
     } catch (error) {
       await persistPartialWindowCount(state.targets.app.env, mode, error);
       throw error;
@@ -4214,6 +4275,7 @@ async function launchAppTarget(
       restart: async () => { await support.restartCurrentCodexApp(launchInput); },
       launchNew: async () => { await support.launchNewCodexApp(launchInput); },
     });
+    scheduleAppEnvironmentBadgeSync();
   } catch (error) {
     await persistPartialWindowCount(state.targets.app.env, mode, error);
     throw error;

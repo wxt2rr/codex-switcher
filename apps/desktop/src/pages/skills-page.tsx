@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowDownToLine,
   ArrowUpCircle,
@@ -9,6 +9,7 @@ import {
   Link2,
   LoaderCircle,
   PackageOpen,
+  Plus,
   RefreshCw,
   Search,
   Trash2,
@@ -30,14 +31,6 @@ import type {
   SkillScope,
 } from "../bridge";
 import type { UiLanguage } from "../i18n";
-
-const providerNames: Record<SkillProviderId, string> = {
-  "claude-code": "Claude Code",
-  qoder: "Qoder",
-  zcode: "ZCode",
-  codebuddy: "CodeBuddy / WorkBuddy",
-  cursor: "Cursor",
-};
 
 interface BindingDraft {
   enabled: boolean;
@@ -76,19 +69,46 @@ export function SkillsPage({
   const [skillDetail, setSkillDetail] = useState<SkillDetailSelection>();
   const [updates, setUpdates] = useState<Record<string, boolean>>({});
   const [bindingDrafts, setBindingDrafts] = useState<Record<string, BindingDraft>>({});
+  const [addProviderOpen, setAddProviderOpen] = useState(false);
+  const [customProviderName, setCustomProviderName] = useState("");
+  const [customProviderPath, setCustomProviderPath] = useState("");
+  const [removeProvider, setRemoveProvider] = useState<ProviderBinding>();
+  const scopeScrollerRef = useRef<HTMLDivElement>(null);
+  const [scopeOverflow, setScopeOverflow] = useState({ left: false, right: false });
 
   useEffect(() => { void loadSnapshot(); }, []);
 
-  async function loadSnapshot(refreshMarketplace = false) {
+  useEffect(() => {
+    const scroller = scopeScrollerRef.current;
+    if (!scroller) return;
+    const update = () => {
+      const maxScrollLeft = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+      setScopeOverflow({ left: scroller.scrollLeft > 1, right: scroller.scrollLeft < maxScrollLeft - 1 });
+    };
+    update();
+    const frame = requestAnimationFrame(update);
+    scroller.addEventListener("scroll", update, { passive: true });
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(update);
+    observer?.observe(scroller);
+    return () => {
+      cancelAnimationFrame(frame);
+      scroller.removeEventListener("scroll", update);
+      observer?.disconnect();
+    };
+  }, [snapshot?.scopes.length]);
+
+  async function loadSnapshot(refreshMarketplace = false, preserveBindingDrafts = false) {
     setLoading(true);
     try {
       const next = await bridge.getSkillSnapshot(refreshMarketplace);
       setSnapshot(next);
-      setBindingDrafts(Object.fromEntries(next.bindings.map((binding) => [binding.providerId, {
-        enabled: binding.enabled,
-        sourceEnv: binding.sourceEnv,
-        targetPath: binding.targetPath,
-      }])));
+      setBindingDrafts((current) => Object.fromEntries(next.bindings.map((binding) => [binding.providerId,
+        preserveBindingDrafts && current[binding.providerId] ? current[binding.providerId] : {
+          enabled: binding.enabled,
+          sourceEnv: binding.sourceEnv,
+          targetPath: binding.targetPath,
+        },
+      ])));
       if (!next.scopes.some((scope) => scope.id === activeScopeId)) setActiveScopeId("marketplace");
     } catch (error) {
       onError(error);
@@ -107,7 +127,9 @@ export function SkillsPage({
   const installedItems = useMemo(() => (activeScope?.skills ?? []).filter((skill) =>
     !normalizedQuery || `${skill.name} ${skill.id} ${skill.description}`.toLowerCase().includes(normalizedQuery)),
   [activeScope?.skills, normalizedQuery]);
-  const enabledBindings = snapshot?.bindings.filter((binding) => binding.enabled).length ?? 0;
+  const providerBindings = snapshot?.bindings ?? [];
+  const enabledSyncScopes = codexScopes.length + providerBindings.filter((binding) => binding.enabled).length;
+  const totalSyncScopes = codexScopes.length + providerBindings.length;
 
   function beginGitInstall() {
     setSourceUrl("");
@@ -117,7 +139,7 @@ export function SkillsPage({
 
   function installEnvironmentNames(): string[] {
     return [...new Set([
-      defaultCodexScope?.envName,
+      ...codexScopes.map((scope) => scope.envName),
       ...(snapshot?.bindings ?? [])
         .filter((binding) => binding.enabled)
         .map((binding) => binding.sourceEnv),
@@ -141,7 +163,7 @@ export function SkillsPage({
     setInstallingSkillId(skill.id);
     try {
       await installIntoSyncedEnvironments({ sourceUrl: skill.installUrl, skillName: skill.slug });
-      onSuccess(zh ? "Skill 已安装，已开启的服务商目录将自动同步" : ja ? "Skill をインストールしました" : "Skill installed; enabled provider directories will sync automatically");
+      onSuccess(zh ? "Skill 已安装到全部 Codex 环境，已开启的服务商目录将自动同步" : ja ? "すべての Codex 環境に Skill をインストールしました" : "Skill installed in every Codex environment; enabled provider directories will sync automatically");
     } catch (error) {
       onError(error);
     } finally {
@@ -156,7 +178,7 @@ export function SkillsPage({
     try {
       await installIntoSyncedEnvironments({ sourceUrl: sourceUrl.trim(), skillName: skillName.trim() || undefined });
       setInstallOpen(false);
-      onSuccess(zh ? "Skill 已安装，已开启的服务商目录将自动同步" : ja ? "Skill をインストールしました" : "Skill installed; enabled provider directories will sync automatically");
+      onSuccess(zh ? "Skill 已安装到全部 Codex 环境，已开启的服务商目录将自动同步" : ja ? "すべての Codex 環境に Skill をインストールしました" : "Skill installed in every Codex environment; enabled provider directories will sync automatically");
     } catch (error) {
       onError(error);
     } finally {
@@ -224,6 +246,33 @@ export function SkillsPage({
     finally { setBusy(false); }
   }
 
+  async function createProvider() {
+    if (busy || !customProviderName.trim() || !customProviderPath.trim()) return;
+    setBusy(true);
+    try {
+      await bridge.createSkillProvider({ name: customProviderName.trim(), targetPath: customProviderPath.trim() });
+      setCustomProviderName("");
+      setCustomProviderPath("");
+      setAddProviderOpen(false);
+      await loadSnapshot(false, true);
+      onSuccess(zh ? "自定义服务商已添加" : ja ? "カスタムプロバイダーを追加しました" : "Custom provider added");
+    } catch (error) { onError(error); }
+    finally { setBusy(false); }
+  }
+
+  async function deleteProvider() {
+    if (!removeProvider || busy) return;
+    setBusy(true);
+    try {
+      await bridge.deleteSkillProvider(removeProvider.providerId);
+      if (activeScopeId === `provider:${removeProvider.providerId}`) setActiveScopeId("marketplace");
+      setRemoveProvider(undefined);
+      await loadSnapshot(false, true);
+      onSuccess(zh ? "自定义服务商已删除" : ja ? "カスタムプロバイダーを削除しました" : "Custom provider deleted");
+    } catch (error) { onError(error); }
+    finally { setBusy(false); }
+  }
+
   function updateBinding(providerId: SkillProviderId, patch: Partial<BindingDraft>) {
     setBindingDrafts((current) => {
       const existing = current[providerId] ?? { enabled: false, targetPath: "" };
@@ -258,10 +307,10 @@ export function SkillsPage({
               <Button variant="secondary" size="sm" onClick={() => setSyncOpen(true)}>
                 <Link2 className="size-4" />
                 {zh
-                  ? `服务商目录同步 ${enabledBindings}/5`
+                  ? `服务商目录同步 ${enabledSyncScopes}/${totalSyncScopes}`
                   : ja
-                    ? `プロバイダーディレクトリ同期 ${enabledBindings}/5`
-                    : `Provider directory sync ${enabledBindings}/5`}
+                    ? `プロバイダーディレクトリ同期 ${enabledSyncScopes}/${totalSyncScopes}`
+                    : `Provider directory sync ${enabledSyncScopes}/${totalSyncScopes}`}
               </Button>
               <Button variant="secondary" size="icon" className="size-8" onClick={() => void loadSnapshot(activeScopeId === "marketplace")} disabled={loading} title={zh ? "刷新" : "Refresh"} aria-label={zh ? "刷新" : "Refresh"}>
                 <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
@@ -269,8 +318,8 @@ export function SkillsPage({
             </div>
           </div>
 
-          <div className="rounded-[14px] border border-black/[0.05] bg-white px-2.5 py-2 dark:border-white/[0.07] dark:bg-[#141a22]">
-            <div className="overflow-x-auto">
+          <div className="relative overflow-hidden rounded-[14px] border border-black/[0.05] bg-white px-2.5 py-2 dark:border-white/[0.07] dark:bg-[#141a22]">
+            <div ref={scopeScrollerRef} className="horizontal-scroll-no-bar overflow-x-auto">
             <div className="flex min-w-max items-center gap-1.5" role="tablist" aria-label={zh ? "Skill 范围" : "Skill scopes"}>
               {(snapshot?.scopes ?? [{ id: "marketplace", kind: "marketplace" as const, name: "Marketplace", skills: [] }]).map((scope) => (
                 <button key={scope.id} type="button" role="tab" aria-selected={activeScopeId === scope.id}
@@ -286,6 +335,8 @@ export function SkillsPage({
               ))}
             </div>
             </div>
+            <div aria-hidden="true" data-visible={scopeOverflow.left} className="skill-scope-edge-fade skill-scope-edge-fade-left" />
+            <div aria-hidden="true" data-visible={scopeOverflow.right} className="skill-scope-edge-fade skill-scope-edge-fade-right" />
           </div>
 
           <div className="rounded-[14px] border border-black/[0.05] bg-white px-3 py-2.5 dark:border-white/[0.07] dark:bg-[#141a22]">
@@ -339,8 +390,8 @@ export function SkillsPage({
 
       <SidePanel open={installOpen} title={zh ? "从 Git 安装" : "Install from Git"}
         description={zh
-          ? `安装到 ${defaultCodexScope?.name ?? "默认 Codex 环境"}；已开启的服务商目录会按同步设置自动获得此 Skill。`
-          : `Installs to ${defaultCodexScope?.name ?? "the default Codex environment"}; enabled provider directories sync it automatically.`}
+          ? "安装到全部 Codex 环境；已开启的服务商目录会按同步设置自动获得此 Skill。"
+          : "Installs to every Codex environment; enabled provider directories sync it automatically."}
         onClose={() => setInstallOpen(false)} closeLabel={zh ? "关闭" : "Close"}>
         <div className="space-y-4">
           <Field label={zh ? "Git 仓库" : "Git repository"} hint={zh ? "支持 GitHub HTTPS 地址或 owner/repository" : "GitHub HTTPS URL or owner/repository"}>
@@ -368,10 +419,38 @@ export function SkillsPage({
             : "When enabled, Skills from the selected Codex environment are symlinked into the provider's Skill directory, so they do not need to be installed separately."}
         onClose={() => setSyncOpen(false)} closeLabel={zh ? "关闭" : "Close"}>
         <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[13px] font-semibold text-neutral-900 dark:text-neutral-100">{zh ? "同步目录" : ja ? "同期ディレクトリ" : "Sync directories"}</div>
+              <div className="mt-0.5 text-[11px] text-slate-400">{zh ? "内置与自定义服务商统一管理" : "Manage built-in and custom providers"}</div>
+            </div>
+            <Button type="button" variant="secondary" size="sm" onClick={() => setAddProviderOpen((value) => !value)}>
+              <Plus className="size-4" />{zh ? "添加服务商" : ja ? "プロバイダーを追加" : "Add provider"}
+            </Button>
+          </div>
+          {addProviderOpen ? (
+            <section className="rounded-lg border border-black/[0.06] bg-[#f7f8fa] p-4 dark:border-white/[0.08] dark:bg-[#1b2129]">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label={zh ? "服务商名称" : "Provider name"}>
+                  <Input value={customProviderName} onChange={(event) => setCustomProviderName(event.target.value)} placeholder={zh ? "例如：Trae" : "For example: Trae"} maxLength={64} />
+                </Field>
+                <Field label={zh ? "Skill 目录" : "Skill directory"} hint={zh ? "请输入绝对路径" : "Enter an absolute path"}>
+                  <Input value={customProviderPath} onChange={(event) => setCustomProviderPath(event.target.value)} placeholder="/Users/name/.provider/skills" />
+                </Field>
+              </div>
+              <div className="mt-3 flex justify-end gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={() => setAddProviderOpen(false)}>{zh ? "取消" : "Cancel"}</Button>
+                <Button type="button" size="sm" onClick={() => void createProvider()} disabled={busy || !customProviderName.trim() || !customProviderPath.trim()}>
+                  {busy ? <LoaderCircle className="size-4 animate-spin" /> : <Plus className="size-4" />}{zh ? "添加" : "Add"}
+                </Button>
+              </div>
+            </section>
+          ) : null}
           {codexScopes.map((scope) => <CodexEnvironmentBinding key={scope.id} scope={scope} language={language} />)}
           {(snapshot?.bindings ?? []).map((binding) => (
             <ProviderBindingEditor key={binding.providerId} binding={binding} draft={bindingDrafts[binding.providerId]}
-              codexScopes={codexScopes} language={language} onChange={(patch) => updateBinding(binding.providerId, patch)} />
+              codexScopes={codexScopes} language={language} onChange={(patch) => updateBinding(binding.providerId, patch)}
+              onDelete={binding.custom ? () => setRemoveProvider(binding) : undefined} />
           ))}
           <div className="mt-6 flex justify-end gap-2"><Button variant="outline" onClick={() => setSyncOpen(false)}>{zh ? "取消" : "Cancel"}</Button>
             <Button onClick={() => void saveBindings()} disabled={busy}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : <Check className="size-4" />}{zh ? "应用更改" : "Apply changes"}</Button></div>
@@ -392,6 +471,12 @@ export function SkillsPage({
         description={zh ? `将从当前 Codex 环境删除 ${removeSkill?.name ?? ""}，并清理它的受管软链接。` : `Remove ${removeSkill?.name ?? ""} from this Codex environment and clean up its managed links.`}
         confirmLabel={zh ? "卸载" : "Uninstall"} cancelLabel={zh ? "取消" : "Cancel"}
         onConfirm={() => void uninstall()} onCancel={() => setRemoveSkill(undefined)} />
+      <ConfirmDialog open={Boolean(removeProvider)} title={zh ? "删除自定义服务商" : "Delete custom provider"}
+        description={zh
+          ? `将删除 ${removeProvider?.name ?? ""} 的同步配置，并清理 codex-switcher 管理的软链接；目录中的其它内容会保留。`
+          : `Delete the sync configuration for ${removeProvider?.name ?? ""} and clean up links managed by codex-switcher. Other directory contents are preserved.`}
+        confirmLabel={zh ? "删除" : "Delete"} cancelLabel={zh ? "取消" : "Cancel"}
+        onConfirm={() => void deleteProvider()} onCancel={() => setRemoveProvider(undefined)} />
     </ListPageFrame>
   );
 }
@@ -474,22 +559,27 @@ function CodexEnvironmentBinding({ scope, language }: { scope: SkillScope; langu
   );
 }
 
-function ProviderBindingEditor({ binding, draft, codexScopes, language, onChange }: {
+function ProviderBindingEditor({ binding, draft, codexScopes, language, onChange, onDelete }: {
   binding: ProviderBinding; draft?: BindingDraft; codexScopes: SkillScope[]; language: UiLanguage;
   onChange: (patch: Partial<BindingDraft>) => void;
+  onDelete?: () => void;
 }) {
   const zh = language === "zh";
   const value = draft ?? { enabled: binding.enabled, sourceEnv: binding.sourceEnv, targetPath: binding.targetPath };
   return (
     <section className="rounded-lg border border-black/[0.06] p-4 dark:border-white/[0.08]">
       <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0"><div className="text-[13px] font-semibold text-neutral-900 dark:text-neutral-100">{providerNames[binding.providerId]}</div>
+        <div className="min-w-0"><div className="text-[13px] font-semibold text-neutral-900 dark:text-neutral-100">{binding.name}</div>
           <div className="mt-1 truncate font-mono text-[10px] text-slate-400">{value.targetPath}</div></div>
-        <label className={`motion-toggle relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer items-center rounded-full ${value.enabled ? "bg-[#34C759]" : "bg-[#d1d1d6] dark:bg-slate-700"}`}>
-          <input type="checkbox" checked={value.enabled} onChange={(event) => onChange({ enabled: event.target.checked,
-            sourceEnv: event.target.checked ? value.sourceEnv ?? codexScopes[0]?.envName : value.sourceEnv })} className="peer sr-only" />
-          <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${value.enabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
-        </label>
+        <div className="flex shrink-0 items-center gap-2">
+          {onDelete ? <Button type="button" variant="ghost" size="icon" className="size-8 text-slate-400 hover:bg-rose-50 hover:text-rose-600" onClick={onDelete}
+            title={zh ? "删除自定义服务商" : "Delete custom provider"} aria-label={zh ? `删除 ${binding.name}` : `Delete ${binding.name}`}><Trash2 className="size-4" /></Button> : null}
+          <label className={`motion-toggle relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer items-center rounded-full ${value.enabled ? "bg-[#34C759]" : "bg-[#d1d1d6] dark:bg-slate-700"}`}>
+            <input type="checkbox" checked={value.enabled} onChange={(event) => onChange({ enabled: event.target.checked,
+              sourceEnv: event.target.checked ? value.sourceEnv ?? codexScopes[0]?.envName : value.sourceEnv })} className="peer sr-only" />
+            <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${value.enabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
+          </label>
+        </div>
       </div>
       {value.enabled ? <div className="mt-3"><Field label={zh ? "来源环境" : "Source environment"}>
         <Select value={value.sourceEnv} onValueChange={(sourceEnv) => onChange({ sourceEnv })}

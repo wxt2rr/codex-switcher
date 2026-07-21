@@ -25,6 +25,14 @@ const i18n = readFileSync(new URL("../i18n.ts", import.meta.url), "utf8");
 const desktopCopy = readFileSync(new URL("../desktop-copy.ts", import.meta.url), "utf8");
 const adaptiveMenuPlacement = readFileSync(new URL("./adaptive-menu-placement.ts", import.meta.url), "utf8");
 
+test("horizontal skill scopes hide the scrollbar and fade only overflowing edges", () => {
+  assert.match(css, /\.horizontal-scroll-no-bar\s*\{[^}]*scrollbar-width:\s*none/s);
+  assert.match(css, /\.horizontal-scroll-no-bar::-webkit-scrollbar\s*\{[^}]*display:\s*none/s);
+  assert.match(css, /\.skill-scope-edge-fade\[data-visible="true"\]\s*\{[^}]*opacity:\s*1/s);
+  assert.match(css, /\.skill-scope-edge-fade-left\s*\{[^}]*linear-gradient\(to right/s);
+  assert.match(css, /\.skill-scope-edge-fade-right\s*\{[^}]*linear-gradient\(to left/s);
+});
+
 test("adaptive menus remeasure their natural height when layout changes", () => {
   assert.match(adaptiveMenuPlacement, /Math\.max\(menu\.height, menuElement\.scrollHeight\)/);
   assert.match(adaptiveMenuPlacement, /new ResizeObserver\(update\)/);
@@ -63,6 +71,8 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.doesNotMatch(accounts, /当前激活目标/);
   assert.doesNotMatch(environments, /环境总数/);
   assert.doesNotMatch(environments, /当前激活环境/);
+  assert.match(environments, /mt-1\.5 flex flex-wrap gap-1\.5/);
+  assert.match(environments, /className="h-5 px-2 text-\[10px\]"/);
   assert.doesNotMatch(accounts, /function StatCard\(/);
   assert.match(accounts, /className="page-scroll-gutter h-full min-h-0"/);
   assert.match(accounts, /<ListStack className="mt-0 min-h-full">/);
@@ -426,7 +436,7 @@ test("system tools use clear navigation and page naming", () => {
   assert.match(operations, /language === "zh" \? "第" : "#"/);
   assert.match(operations, /autoResumeSaving/);
   assert.equal((operations.match(/Codex CLI/g) ?? []).length, 0);
-  assert.equal((operations.match(/Codex App/g) ?? []).length, 0);
+  assert.match(operations, /Codex App 环境标识/);
   assert.doesNotMatch(operations, /保存设置/);
   assert.doesNotMatch(operations, /autoResumeDirty/);
   assert.doesNotMatch(operations, /rounded-xl bg-\[#f7f8fa\] p-4/);
@@ -473,7 +483,7 @@ test("usage visualizations draw in once without replaying on background refresh"
 });
 
 test("environment route hints match account status typography", () => {
-  assert.match(environments, /tone="success"\s+className="text-\[10px\]"/);
+  assert.match(environments, /tone="success"\s+className="h-5 px-2 text-\[10px\]"/);
   assert.match(accounts, /truncate text-\[10px\] font-medium text-emerald-700/);
 });
 

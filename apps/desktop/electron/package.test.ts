@@ -15,6 +15,8 @@ test("desktop build emits electron main entry and preload bundle", async () => {
   const codexToolPathsPath = join(desktopRoot, "electron-dist", "electron", "codex-tool-paths.cjs");
   const codexProjectsPath = join(desktopRoot, "electron-dist", "electron", "codex-projects.cjs");
   const desktopSettingsPath = join(desktopRoot, "electron-dist", "electron", "desktop-settings.cjs");
+  const appEnvironmentBadgesPath = join(desktopRoot, "electron-dist", "electron", "app-environment-badges.cjs");
+  const appEnvironmentBadgeAdaptersPath = join(desktopRoot, "electron-dist", "electron", "app-environment-badge-adapters.cjs");
   const generatedImageRecoverySkillPath = join(desktopRoot, "electron-dist", "electron", "generated-image-recovery-skill.cjs");
   const envHistoryRetentionPath = join(desktopRoot, "electron-dist", "electron", "env-history-retention.cjs");
   const cliTerminalSettingsPath = join(desktopRoot, "electron-dist", "electron", "cli-terminal-settings.cjs");
@@ -29,6 +31,8 @@ test("desktop build emits electron main entry and preload bundle", async () => {
   await access(codexToolPathsPath, constants.F_OK);
   await access(codexProjectsPath, constants.F_OK);
   await access(desktopSettingsPath, constants.F_OK);
+  await access(appEnvironmentBadgesPath, constants.F_OK);
+  await access(appEnvironmentBadgeAdaptersPath, constants.F_OK);
   await access(generatedImageRecoverySkillPath, constants.F_OK);
   await access(envHistoryRetentionPath, constants.F_OK);
   await access(cliTerminalSettingsPath, constants.F_OK);
@@ -58,6 +62,8 @@ test("desktop build emits electron main entry and preload bundle", async () => {
   assert.match(bridgeSource, /require\("\.\/codex-projects\.cjs"\)/);
   assert.doesNotMatch(bridgeSource, /require\("\.\/codex-projects\.js"\)/);
   assert.match(bridgeSource, /require\("\.\/desktop-settings\.cjs"\)/);
+  assert.match(bridgeSource, /require\("\.\/app-environment-badges\.cjs"\)/);
+  assert.match(bridgeSource, /require\("\.\/app-environment-badge-adapters\.cjs"\)/);
   assert.match(bridgeSource, /require\("\.\/generated-image-recovery-skill\.cjs"\)/);
   assert.match(bridgeSource, /require\("\.\/env-history-retention\.cjs"\)/);
   assert.doesNotMatch(bridgeSource, /require\("\.\/desktop-settings\.js"\)/);

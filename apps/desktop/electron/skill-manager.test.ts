@@ -107,6 +107,59 @@ test("binds a global provider to one Codex environment without replacing foreign
   assert.deepEqual(cursor?.skills.map((skill) => skill.id), ["apple-design", "local-only"]);
 });
 
+test("persists custom providers and removes only their managed links when deleted", async () => {
+  const workspace = await makeWorkspace();
+  const source = join(workspace.personal, "skills", "custom-skill");
+  await mkdir(source, { recursive: true });
+  await writeFile(join(source, "SKILL.md"), "---\nname: custom-skill\ndescription: Custom provider test\n---\n", "utf8");
+  const targetPath = join(workspace.root, "custom-provider-skills");
+  const options = {
+    stateDir: join(workspace.root, "state"),
+    homeDir: join(workspace.root, "user"),
+    environments: async () => [{ name: "personal", homePath: workspace.personal }],
+  };
+  const manager = new SkillManager(options);
+  const created = await manager.createProvider({ name: "My Provider", targetPath });
+  assert.equal(created.custom, true);
+  assert.equal(created.enabled, false);
+
+  await manager.setProviderBinding({ providerId: created.providerId, enabled: true, sourceEnv: "personal" });
+  assert.equal(await realpath(join(targetPath, "custom-skill")), await realpath(source));
+
+  const restored = await new SkillManager(options).getSnapshot();
+  assert.equal(restored.bindings.find((binding) => binding.providerId === created.providerId)?.name, "My Provider");
+  assert.ok(restored.scopes.some((scope) => scope.id === `provider:${created.providerId}`));
+
+  await manager.deleteProvider(created.providerId);
+  await assert.rejects(realpath(join(targetPath, "custom-skill")));
+  const deleted = await manager.getSnapshot();
+  assert.ok(!deleted.bindings.some((binding) => binding.providerId === created.providerId));
+  assert.ok(!deleted.scopes.some((scope) => scope.id === `provider:${created.providerId}`));
+});
+
+test("migrates version 1 provider bindings without losing built-in configuration", async () => {
+  const workspace = await makeWorkspace();
+  const stateDir = join(workspace.root, "state");
+  const bindingDir = join(stateDir, "skills");
+  const cursorPath = join(workspace.root, "legacy-cursor-skills");
+  await mkdir(bindingDir, { recursive: true });
+  await writeFile(join(bindingDir, "provider-bindings.json"), JSON.stringify({
+    version: 1,
+    bindings: { cursor: { enabled: true, sourceEnv: "personal", targetPath: cursorPath } },
+    managed: {},
+  }), "utf8");
+  const manager = new SkillManager({
+    stateDir,
+    homeDir: join(workspace.root, "user"),
+    environments: async () => [{ name: "personal", homePath: workspace.personal }],
+  });
+
+  const binding = (await manager.getSnapshot()).bindings.find((item) => item.providerId === "cursor");
+  assert.equal(binding?.enabled, true);
+  assert.equal(binding?.sourceEnv, "personal");
+  assert.equal(binding?.targetPath, cursorPath);
+});
+
 test("loads the public skills.sh search catalog by default", async () => {
   const workspace = await makeWorkspace();
   let requestedUrl = "";

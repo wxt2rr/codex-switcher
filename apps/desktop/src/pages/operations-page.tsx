@@ -15,10 +15,11 @@ import {
   ListStack,
 } from "../components/account-list-primitives";
 import { Field, Input, Select } from "../components/form-primitives";
+import { ConfirmDialog } from "../components/admin-primitives";
 import { getDesktopCopy } from "../desktop-copy";
 import { localizeLogKind } from "../desktop-utils";
 import type { UiLanguage } from "../i18n";
-import type { CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, RouterLifecycleSettings, RouterPortSettings } from "../bridge";
+import type { AppEnvironmentBadgeStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, RouterLifecycleSettings, RouterPortSettings } from "../bridge";
 
 function pageTitle(language: UiLanguage) {
   if (language === "zh") return "设置";
@@ -90,6 +91,10 @@ export function OperationsPage({
   generatedImageRecovery,
   generatedImageRecoverySaving,
   onGeneratedImageRecoveryChange,
+  appEnvironmentBadges,
+  appEnvironmentBadgesSaving,
+  onAppEnvironmentBadgesChange,
+  onRequestAppEnvironmentBadgePermission,
 }: {
   language: UiLanguage;
   languageOptions: Array<{ value: UiLanguage; label: string }>;
@@ -126,11 +131,16 @@ export function OperationsPage({
   generatedImageRecovery: GeneratedImageRecoveryStatus;
   generatedImageRecoverySaving: boolean;
   onGeneratedImageRecoveryChange: (enabled: boolean) => void;
+  appEnvironmentBadges: AppEnvironmentBadgeStatus;
+  appEnvironmentBadgesSaving: boolean;
+  onAppEnvironmentBadgesChange: (enabled: boolean) => void;
+  onRequestAppEnvironmentBadgePermission: () => void;
 }) {
   const pageCopy = getDesktopCopy(language);
   const [sessionNumberDraft, setSessionNumberDraft] = useState(String(cliAutoResume.sessionNumber));
   const [retentionDaysDraft, setRetentionDaysDraft] = useState(String(envHistoryRetention.retentionDays));
   const [routerPortDraft, setRouterPortDraft] = useState(String(routerPort.preferredPort));
+  const [showBadgePermissionDialog, setShowBadgePermissionDialog] = useState(false);
 
   useEffect(() => {
     setSessionNumberDraft(String(cliAutoResume.sessionNumber));
@@ -259,6 +269,41 @@ export function OperationsPage({
           </div>
         </OperationCard>
 
+        <OperationCard
+          title={language === "zh" ? "Codex App 环境标识" : language === "ja" ? "Codex App 環境バッジ" : "Codex App environment badges"}
+          subtitle={language === "zh" ? "多开窗口时，在 Dock 或任务栏图标上区分环境" : language === "ja" ? "複数ウィンドウを Dock またはタスクバーで識別" : "Distinguish multiple environments in the Dock or taskbar"}
+        >
+          <div className="flex items-center gap-3 rounded-lg bg-[#f7f8fa] px-4 py-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-[12px] font-medium text-neutral-800">
+                {language === "zh" ? "显示环境首字母标识" : language === "ja" ? "環境の頭文字を表示" : "Show environment initials"}
+              </div>
+              <div className="mt-0.5 text-[11px] text-slate-400">
+                {!appEnvironmentBadges.supported
+                  ? language === "zh" ? "当前系统或原生组件暂不支持" : language === "ja" ? "現在のシステムでは利用できません" : "Unavailable on this system"
+                  : language === "zh" ? "默认关闭；不会修改 Codex App，也不会自动重启" : language === "ja" ? "既定ではオフ。Codex App の変更や自動再起動は行いません" : "Off by default; never modifies or automatically restarts Codex App"}
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-label={language === "zh" ? "显示 Codex App 环境标识" : "Show Codex App environment badges"}
+              aria-checked={appEnvironmentBadges.enabled}
+              disabled={appEnvironmentBadgesSaving || !appEnvironmentBadges.supported}
+              onClick={() => {
+                if (!appEnvironmentBadges.enabled && appEnvironmentBadges.platform === "macos" && appEnvironmentBadges.permission !== "granted") {
+                  setShowBadgePermissionDialog(true);
+                  return;
+                }
+                onAppEnvironmentBadgesChange(!appEnvironmentBadges.enabled);
+              }}
+              className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:cursor-not-allowed disabled:opacity-50 ${appEnvironmentBadges.enabled ? "bg-[#34C759]" : "bg-[#d1d1d6] dark:bg-slate-700"}`}
+            >
+              <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${appEnvironmentBadges.enabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
+            </button>
+          </div>
+        </OperationCard>
+
         <ListCard className="responsive-record-row overflow-visible px-5 py-0">
           <div className="grid min-h-[116px] items-center gap-5 lg:grid-cols-[minmax(180px,0.62fr)_minmax(0,1.55fr)]">
             <div><h3 className="text-[15px] font-semibold tracking-[-0.02em] text-neutral-950">{language === "zh" ? "CLI 启动" : "CLI Launch"}</h3><p className="mt-1 text-[12px] text-slate-500">{language === "zh" ? "设置启动终端与对话恢复方式" : "Configure the terminal and session resume behavior"}</p></div>
@@ -370,6 +415,23 @@ export function OperationsPage({
           </div>
         </OperationCard>
       </ListStack>
+      <ConfirmDialog
+        open={showBadgePermissionDialog}
+        title={language === "zh" ? "需要辅助功能权限" : language === "ja" ? "アクセシビリティ権限が必要です" : "Accessibility permission required"}
+        description={language === "zh"
+          ? "为识别 Codex App 在 Dock 中的位置，需要使用 macOS 辅助功能权限。此功能仅用于定位窗口和 Dock 图标，不会读取或记录键盘输入。"
+          : language === "ja"
+            ? "Dock 内の Codex App の位置を特定するためにアクセシビリティ権限を使用します。キーボード入力の読み取りや記録は行いません。"
+            : "Accessibility access is used only to locate Codex App windows and Dock icons. Keyboard input is never read or recorded."}
+        confirmLabel={language === "zh" ? "继续" : language === "ja" ? "続ける" : "Continue"}
+        cancelLabel={language === "zh" ? "取消" : language === "ja" ? "キャンセル" : "Cancel"}
+        tone="default"
+        onCancel={() => setShowBadgePermissionDialog(false)}
+        onConfirm={() => {
+          setShowBadgePermissionDialog(false);
+          onRequestAppEnvironmentBadgePermission();
+        }}
+      />
 
     </ListPageFrame>
   );

@@ -57,6 +57,7 @@ import {
   getCliAutoResumeSettings,
   getEnvHistoryRetentionSettings,
   getGeneratedImageRecoverySettings,
+  getAppEnvironmentBadgeStatus,
   getRouterLifecycleSettings,
   getRouterPortSettings,
   detectCodexToolPaths,
@@ -64,6 +65,9 @@ import {
   setCliAutoResumeSettings,
   setEnvHistoryRetentionSettings,
   setGeneratedImageRecoverySettings,
+  requestAppEnvironmentBadgePermission,
+  setAppEnvironmentBadgeSettings,
+  synchronizeAppEnvironmentBadges,
   setRouterLifecycleSettings,
   setRouterPortSettings,
   clearCodexToolPath,
@@ -90,6 +94,8 @@ import {
   updateSkill,
   uninstallSkill,
   setSkillProviderBinding,
+  createSkillProvider,
+  deleteSkillProvider,
   repairSkillProvider,
 } from "./bridge.js";
 
@@ -151,11 +157,13 @@ app.whenReady().then(async () => {
   registerHandlers();
   await createWindow();
   startEnvHistoryCleanupSchedule();
+  void synchronizeAppEnvironmentBadges().catch(() => undefined);
 
   app.on("activate", async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       await createWindow();
     }
+    void synchronizeAppEnvironmentBadges().catch(() => undefined);
   });
 });
 
@@ -225,6 +233,7 @@ function registerHandlers() {
   ipcMain.handle("desktop:getCliAutoResumeSettings", () => getCliAutoResumeSettings());
   ipcMain.handle("desktop:getEnvHistoryRetentionSettings", () => getEnvHistoryRetentionSettings());
   ipcMain.handle("desktop:getGeneratedImageRecoverySettings", () => getGeneratedImageRecoverySettings());
+  ipcMain.handle("desktop:getAppEnvironmentBadgeStatus", () => getAppEnvironmentBadgeStatus());
   ipcMain.handle("desktop:getRouterLifecycleSettings", () => getRouterLifecycleSettings());
   ipcMain.handle("desktop:getRouterPortSettings", () => getRouterPortSettings());
   ipcMain.handle("desktop:detectCodexToolPaths", () => detectCodexToolPaths());
@@ -233,6 +242,8 @@ function registerHandlers() {
   ipcMain.handle("desktop:setCliAutoResumeSettings", (_event, value) => setCliAutoResumeSettings(value));
   ipcMain.handle("desktop:setEnvHistoryRetentionSettings", (_event, value) => setEnvHistoryRetentionSettings(value));
   ipcMain.handle("desktop:setGeneratedImageRecoverySettings", (_event, value) => setGeneratedImageRecoverySettings(value));
+  ipcMain.handle("desktop:requestAppEnvironmentBadgePermission", () => requestAppEnvironmentBadgePermission());
+  ipcMain.handle("desktop:setAppEnvironmentBadgeSettings", (_event, value) => setAppEnvironmentBadgeSettings(value));
   ipcMain.handle("desktop:setRouterLifecycleSettings", (_event, value) => setRouterLifecycleSettings(value));
   ipcMain.handle("desktop:setRouterPortSettings", (_event, value) => setRouterPortSettings(value));
   ipcMain.handle("desktop:getCliTerminalSettings", async () => withTerminalIcons(await getCliTerminalSettings()));
@@ -374,5 +385,7 @@ function registerHandlers() {
   ipcMain.handle("desktop:uninstallSkill", (_event: IpcMainInvokeEvent, envName: string, skillId: string) =>
     uninstallSkill(envName, skillId));
   ipcMain.handle("desktop:setSkillProviderBinding", (_event: IpcMainInvokeEvent, input) => setSkillProviderBinding(input));
+  ipcMain.handle("desktop:createSkillProvider", (_event: IpcMainInvokeEvent, input) => createSkillProvider(input));
+  ipcMain.handle("desktop:deleteSkillProvider", (_event: IpcMainInvokeEvent, providerId) => deleteSkillProvider(providerId));
   ipcMain.handle("desktop:repairSkillProvider", (_event: IpcMainInvokeEvent, providerId) => repairSkillProvider(providerId));
 }

@@ -3,6 +3,14 @@
 ### Requirement: Data-driven provider routing registry
 The system SHALL define provider IDs, aliases, detected/configured skill directories, isolation capability, and supported link modes in a versioned registry.
 
+#### Scenario: User adds a custom provider
+- **WHEN** the user provides a unique provider name and an absolute Skill directory
+- **THEN** the provider is persisted, appears as a provider inventory and sync row, starts disabled, and follows the same single-source routing rules as built-in providers
+
+#### Scenario: User removes a custom provider
+- **WHEN** the user confirms removal of a custom provider
+- **THEN** the system removes only its codex-switcher-managed projections and configuration while preserving all other directory content
+
 #### Scenario: Initial providers are enumerated
 - **WHEN** provider routing settings are loaded
 - **THEN** Codex, Claude Code, Qoder, ZCode, CodeBuddy/WorkBuddy, and Cursor are available with their detected or configured paths
@@ -73,6 +81,10 @@ For a provider that scans one fixed global skill directory, the system SHALL mai
 
 ### Requirement: Codex environment inventories and global provider inventories
 The system SHALL expose one inventory for each Codex environment and one inventory for each supported non-Codex global skill directory.
+
+#### Scenario: Sync summary counts every displayed scope
+- **WHEN** the provider-sync summary is displayed
+- **THEN** its enabled and total counts include every always-enabled Codex environment plus every enabled or available non-Codex provider binding
 
 #### Scenario: Codex environments are listed
 - **WHEN** Personal and Company Codex environments exist

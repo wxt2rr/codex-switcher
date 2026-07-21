@@ -10,6 +10,11 @@ export interface EnvHistoryRetentionSettings { enabled: boolean; retentionDays: 
 export interface GeneratedImageRecoveryStatus {
   enabled: boolean; installedEnvironments: number; totalEnvironments: number; conflicts: string[];
 }
+export interface AppEnvironmentBadgeStatus {
+  enabled: boolean; supported: boolean; platform: "macos" | "windows" | "unsupported";
+  permission: "granted" | "denied" | "not-required" | "unsupported";
+  applied: number; unresolved: number; message?: string;
+}
 export type CliTerminalId = "iterm" | "terminal" | "warp" | "ghostty" | "windows-terminal" | "powershell7" | "windows-powershell" | "command-prompt";
 export interface CliTerminalOption { id: CliTerminalId; label: string; supportsCurrentWindow: boolean; iconUrl?: string; }
 export interface CliTerminalSettings { selectedId: CliTerminalId; terminals: CliTerminalOption[]; }
@@ -132,7 +137,7 @@ export interface ModelCatalogSnapshot {
 }
 export interface SaveCustomModelRequest { id?: string; entry: Record<string, unknown>; }
 
-export type SkillProviderId = "claude-code" | "qoder" | "zcode" | "codebuddy" | "cursor";
+export type SkillProviderId = string;
 export interface MarketplaceSkill {
   id: string; slug: string; name: string; source: string; installs?: number;
   installUrl: string; url: string; description?: string;
@@ -152,7 +157,7 @@ export interface SkillScope {
   envName?: string; providerId?: SkillProviderId; sourceEnv?: string; skills: InstalledSkill[];
 }
 export interface ProviderBinding {
-  providerId: SkillProviderId; enabled: boolean; sourceEnv?: string; targetPath: string;
+  providerId: SkillProviderId; name: string; custom: boolean; enabled: boolean; sourceEnv?: string; targetPath: string;
   status: "disabled" | "healthy" | "conflict" | "missing-source" | "error";
   managedLinks: number; conflicts: number; message?: string;
 }
@@ -164,6 +169,7 @@ export interface UpdateSkillRequest { envName: string; skillId: string; force?: 
 export interface SetProviderBindingRequest {
   providerId: SkillProviderId; enabled: boolean; sourceEnv?: string; targetPath?: string;
 }
+export interface CreateSkillProviderRequest { name: string; targetPath: string; }
 
 import type {
   EnvironmentRouteStatus,
@@ -181,6 +187,7 @@ export interface DesktopElectronApi {
   getCliAutoResumeSettings(): Promise<CliAutoResumeSettings>;
   getEnvHistoryRetentionSettings(): Promise<EnvHistoryRetentionSettings>;
   getGeneratedImageRecoverySettings(): Promise<GeneratedImageRecoveryStatus>;
+  getAppEnvironmentBadgeStatus(): Promise<AppEnvironmentBadgeStatus>;
   getRouterLifecycleSettings(): Promise<RouterLifecycleSettings>;
   getRouterPortSettings(): Promise<RouterPortSettings>;
   detectCodexToolPaths(): Promise<CodexToolStatus[]>;
@@ -189,6 +196,8 @@ export interface DesktopElectronApi {
   setCliAutoResumeSettings(value: CliAutoResumeSettings): Promise<CliAutoResumeSettings>;
   setEnvHistoryRetentionSettings(value: EnvHistoryRetentionSettings): Promise<EnvHistoryRetentionSettings>;
   setGeneratedImageRecoverySettings(value: { enabled: boolean }): Promise<GeneratedImageRecoveryStatus>;
+  requestAppEnvironmentBadgePermission(): Promise<AppEnvironmentBadgeStatus>;
+  setAppEnvironmentBadgeSettings(value: { enabled: boolean }): Promise<AppEnvironmentBadgeStatus>;
   setRouterLifecycleSettings(value: RouterLifecycleSettings): Promise<RouterLifecycleSettings>;
   setRouterPortSettings(value: RouterPortSettings): Promise<RouterPortSettings>;
   getCliTerminalSettings(): Promise<CliTerminalSettings>;
@@ -263,6 +272,8 @@ export interface DesktopElectronApi {
   updateSkill(input: UpdateSkillRequest): Promise<InstalledSkill>;
   uninstallSkill(envName: string, skillId: string): Promise<void>;
   setSkillProviderBinding(input: SetProviderBindingRequest): Promise<ProviderBinding>;
+  createSkillProvider(input: CreateSkillProviderRequest): Promise<ProviderBinding>;
+  deleteSkillProvider(providerId: SkillProviderId): Promise<void>;
   repairSkillProvider(providerId: SkillProviderId): Promise<ProviderBinding>;
 }
 
@@ -273,6 +284,7 @@ export interface DesktopBridge {
   getCliAutoResumeSettings(): Promise<CliAutoResumeSettings>;
   getEnvHistoryRetentionSettings(): Promise<EnvHistoryRetentionSettings>;
   getGeneratedImageRecoverySettings(): Promise<GeneratedImageRecoveryStatus>;
+  getAppEnvironmentBadgeStatus(): Promise<AppEnvironmentBadgeStatus>;
   getRouterLifecycleSettings(): Promise<RouterLifecycleSettings>;
   getRouterPortSettings(): Promise<RouterPortSettings>;
   detectCodexToolPaths(): Promise<CodexToolStatus[]>;
@@ -281,6 +293,8 @@ export interface DesktopBridge {
   setCliAutoResumeSettings(value: CliAutoResumeSettings): Promise<CliAutoResumeSettings>;
   setEnvHistoryRetentionSettings(value: EnvHistoryRetentionSettings): Promise<EnvHistoryRetentionSettings>;
   setGeneratedImageRecoverySettings(value: { enabled: boolean }): Promise<GeneratedImageRecoveryStatus>;
+  requestAppEnvironmentBadgePermission(): Promise<AppEnvironmentBadgeStatus>;
+  setAppEnvironmentBadgeSettings(value: { enabled: boolean }): Promise<AppEnvironmentBadgeStatus>;
   setRouterLifecycleSettings(value: RouterLifecycleSettings): Promise<RouterLifecycleSettings>;
   setRouterPortSettings(value: RouterPortSettings): Promise<RouterPortSettings>;
   getCliTerminalSettings(): Promise<CliTerminalSettings>;
@@ -355,6 +369,8 @@ export interface DesktopBridge {
   updateSkill(input: UpdateSkillRequest): Promise<InstalledSkill>;
   uninstallSkill(envName: string, skillId: string): Promise<void>;
   setSkillProviderBinding(input: SetProviderBindingRequest): Promise<ProviderBinding>;
+  createSkillProvider(input: CreateSkillProviderRequest): Promise<ProviderBinding>;
+  deleteSkillProvider(providerId: SkillProviderId): Promise<void>;
   repairSkillProvider(providerId: SkillProviderId): Promise<ProviderBinding>;
 }
 
@@ -367,6 +383,7 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       getCliAutoResumeSettings: unavailable,
       getEnvHistoryRetentionSettings: unavailable,
       getGeneratedImageRecoverySettings: unavailable,
+      getAppEnvironmentBadgeStatus: unavailable,
       getRouterLifecycleSettings: unavailable,
       getRouterPortSettings: unavailable,
       detectCodexToolPaths: unavailable,
@@ -375,6 +392,8 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       setCliAutoResumeSettings: unavailable,
       setEnvHistoryRetentionSettings: unavailable,
       setGeneratedImageRecoverySettings: unavailable,
+      requestAppEnvironmentBadgePermission: unavailable,
+      setAppEnvironmentBadgeSettings: unavailable,
       setRouterLifecycleSettings: unavailable,
       setRouterPortSettings: unavailable,
       getCliTerminalSettings: unavailable,
@@ -443,6 +462,8 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       updateSkill: unavailable,
       uninstallSkill: unavailable,
       setSkillProviderBinding: unavailable,
+      createSkillProvider: unavailable,
+      deleteSkillProvider: unavailable,
       repairSkillProvider: unavailable,
     };
   }
@@ -554,6 +575,7 @@ function createBrowserPreviewBridge(): DesktopBridge {
     getCliAutoResumeSettings: async () => ({ enabled: false, sessionNumber: 1 }),
     getEnvHistoryRetentionSettings: async () => ({ enabled: false, retentionDays: 30 }),
     getRouterLifecycleSettings: async () => ({ stopOnAppQuit: false }),
+    getAppEnvironmentBadgeStatus: async () => ({ enabled: false, supported: true, platform: "macos", permission: "denied", applied: 0, unresolved: 0 }),
     getRouterPortSettings: async () => ({ preferredPort: 17832 }),
     detectCodexToolPaths: async () => [],
     setCodexToolPath: async (kind, path) => ({ kind, path, detectedPath: "", manualPath: path, source: "manual", available: true }),
@@ -562,6 +584,8 @@ function createBrowserPreviewBridge(): DesktopBridge {
     setEnvHistoryRetentionSettings: async (value) => value,
     setRouterLifecycleSettings: async (value) => value,
     setRouterPortSettings: async (value) => value,
+    requestAppEnvironmentBadgePermission: async () => ({ enabled: false, supported: true, platform: "macos", permission: "granted", applied: 0, unresolved: 0 }),
+    setAppEnvironmentBadgeSettings: async (value) => ({ enabled: value.enabled, supported: true, platform: "macos", permission: "granted", applied: value.enabled ? 2 : 0, unresolved: 0 }),
     getCliTerminalSettings: async () => ({ selectedId: "terminal", terminals: [{ id: "terminal", label: "Terminal", supportsCurrentWindow: true }] }),
     scanCliTerminalSettings: async () => ({ selectedId: "terminal", terminals: [{ id: "terminal", label: "Terminal", supportsCurrentWindow: true }] }),
     setCliTerminalSelection: async (id) => ({ selectedId: id, terminals: [{ id, label: id, supportsCurrentWindow: false }] }),
@@ -691,12 +715,19 @@ function createBrowserPreviewBridge(): DesktopBridge {
     }),
     uninstallSkill: async () => undefined,
     setSkillProviderBinding: async (input) => ({
-      providerId: input.providerId, enabled: input.enabled, sourceEnv: input.sourceEnv,
+      providerId: input.providerId, name: input.providerId, custom: input.providerId.startsWith("custom:"),
+      enabled: input.enabled, sourceEnv: input.sourceEnv,
       targetPath: input.targetPath ?? `~/.${input.providerId}/skills`, status: input.enabled ? "healthy" : "disabled",
       managedLinks: input.enabled ? 3 : 0, conflicts: 0,
     }),
+    createSkillProvider: async (input) => ({
+      providerId: `custom:${crypto.randomUUID()}`, name: input.name, custom: true, enabled: false,
+      targetPath: input.targetPath, status: "disabled", managedLinks: 0, conflicts: 0,
+    }),
+    deleteSkillProvider: async () => undefined,
     repairSkillProvider: async (providerId) => ({
-      providerId, enabled: true, sourceEnv: "personal", targetPath: `~/.${providerId}/skills`,
+      providerId, name: providerId, custom: providerId.startsWith("custom:"), enabled: true,
+      sourceEnv: "personal", targetPath: `~/.${providerId}/skills`,
       status: "healthy", managedLinks: 3, conflicts: 0,
     }),
   };
@@ -739,11 +770,11 @@ const previewSkillSnapshot: SkillManagerSnapshot = {
     { id: "provider:cursor", kind: "provider", name: "Cursor", providerId: "cursor", path: "~/.cursor/skills", skills: [] },
   ],
   bindings: [
-    { providerId: "claude-code", enabled: false, targetPath: "~/.claude/skills", status: "disabled", managedLinks: 0, conflicts: 0 },
-    { providerId: "qoder", enabled: false, targetPath: "~/.qoder/skills", status: "disabled", managedLinks: 0, conflicts: 0 },
-    { providerId: "zcode", enabled: false, targetPath: "~/.zcode/skills", status: "disabled", managedLinks: 0, conflicts: 0 },
-    { providerId: "codebuddy", enabled: false, targetPath: "~/.codebuddy/skills", status: "disabled", managedLinks: 0, conflicts: 0 },
-    { providerId: "cursor", enabled: false, targetPath: "~/.cursor/skills", status: "disabled", managedLinks: 0, conflicts: 0 },
+    { providerId: "claude-code", name: "Claude Code", custom: false, enabled: false, targetPath: "~/.claude/skills", status: "disabled", managedLinks: 0, conflicts: 0 },
+    { providerId: "qoder", name: "Qoder", custom: false, enabled: false, targetPath: "~/.qoder/skills", status: "disabled", managedLinks: 0, conflicts: 0 },
+    { providerId: "zcode", name: "ZCode", custom: false, enabled: false, targetPath: "~/.zcode/skills", status: "disabled", managedLinks: 0, conflicts: 0 },
+    { providerId: "codebuddy", name: "CodeBuddy / WorkBuddy", custom: false, enabled: false, targetPath: "~/.codebuddy/skills", status: "disabled", managedLinks: 0, conflicts: 0 },
+    { providerId: "cursor", name: "Cursor", custom: false, enabled: false, targetPath: "~/.cursor/skills", status: "disabled", managedLinks: 0, conflicts: 0 },
   ],
 };
 
