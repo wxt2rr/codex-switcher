@@ -45,6 +45,45 @@ test("manager only persists enable after permission and clears on disable", asyn
   assert.equal(clearCalls, 1);
 });
 
+test("permission request atomically enables after trust is granted", async () => {
+  let enabled = false;
+  const manager = new AppEnvironmentBadgeManager({
+    adapter: {
+      platform: "macos", supported: true,
+      checkPermission: async () => "granted",
+      requestPermission: async () => "granted",
+      sync: async (instances) => ({ applied: instances.length, unresolved: 0 }),
+      clear: async () => undefined,
+    },
+    readEnabled: async () => enabled,
+    saveEnabled: async (value) => { enabled = value; },
+    listInstances: async () => [{ instanceId: "1", pid: 42, targetKey: "personal" }],
+  });
+  const status = await manager.requestPermission();
+  assert.equal(enabled, true);
+  assert.equal(status.enabled, true);
+  assert.equal(status.applied, 1);
+});
+
+test("denied permission request keeps the setting disabled", async () => {
+  let enabled = true;
+  const manager = new AppEnvironmentBadgeManager({
+    adapter: {
+      platform: "macos", supported: true,
+      checkPermission: async () => "denied",
+      requestPermission: async () => "denied",
+      sync: async () => ({ applied: 0, unresolved: 0 }),
+      clear: async () => undefined,
+    },
+    readEnabled: async () => enabled,
+    saveEnabled: async (value) => { enabled = value; },
+    listInstances: async () => [],
+  });
+  const status = await manager.requestPermission();
+  assert.equal(enabled, false);
+  assert.equal(status.enabled, false);
+});
+
 test("adapter failures become partial status without rejecting", async () => {
   const manager = new AppEnvironmentBadgeManager({
     adapter: {

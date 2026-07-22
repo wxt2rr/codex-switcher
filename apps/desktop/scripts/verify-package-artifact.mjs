@@ -34,4 +34,14 @@ assert.equal(plist.CFBundleIdentifier, "com.wangxt.codex-switcher");
 assert.equal(plist.CFBundleIconFile, "icon.icns");
 assert.equal(md5(packagedIconPath), md5(sourceIconPath), "Packaged icon does not match build/icon.icns");
 
+if (process.platform === "darwin") {
+  execFileSync("/usr/bin/codesign", [
+    "--verify",
+    "--deep",
+    "--strict",
+    "--verbose=2",
+    appRoot,
+  ], { stdio: "inherit" });
+}
+
 console.log(`Verified packaged app: ${appRoot}`);

@@ -30,10 +30,36 @@ static NSMutableArray<NSPanel *> *gBadgePanels;
 static NSArray<NSDictionary *> *gBadgeItems;
 static AXObserverRef gDockObserver;
 static id gActiveSpaceObserver;
+static CFMachPortRef gInputEventTap;
+static CFRunLoopSourceRef gInputEventSource;
+static id gGlobalGestureMonitor;
+static id gLocalGestureMonitor;
+static id gGlobalScrollFallbackMonitor;
+static id gLocalScrollFallbackMonitor;
 static BOOL gRefreshScheduled;
+static BOOL gSuppressForDockTransition;
+static uint64_t gDockTransitionGeneration;
+static NSArray<NSValue *> *gLastDockRects;
+static CFAbsoluteTime gIgnoreSpaceInputUntil;
 
 void RefreshBadgePanels();
 void StartDockObservation();
+void HideBadgePanels();
+
+void SuppressBadgesForSpaceTransition() {
+  if (gSuppressForDockTransition || gBadgeItems.count == 0) return;
+  gSuppressForDockTransition = YES;
+  const uint64_t generation = ++gDockTransitionGeneration;
+  HideBadgePanels();
+  // Horizontal scrolling can also be ordinary application content. Restore
+  // automatically when no Space change follows; a real Space transition is
+  // restored by NSWorkspaceActiveSpaceDidChangeNotification instead.
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 450 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+    if (generation != gDockTransitionGeneration) return;
+    gSuppressForDockTransition = NO;
+    RefreshBadgePanels();
+  });
+}
 
 NSColor *ColorFromHex(NSString *hex) {
   unsigned value = 0;
@@ -45,6 +71,10 @@ NSColor *ColorFromHex(NSString *hex) {
 void ClearBadgePanels() {
   for (NSPanel *panel in gBadgePanels) [panel orderOut:nil];
   [gBadgePanels removeAllObjects];
+}
+
+void HideBadgePanels() {
+  for (NSPanel *panel in gBadgePanels) [panel orderOut:nil];
 }
 
 bool CopyStringAttribute(AXUIElementRef element, CFStringRef name, NSString **result) {
@@ -93,6 +123,15 @@ bool CopyBooleanAttribute(AXUIElementRef element, CFStringRef name, bool *result
   return true;
 }
 
+bool IsTargetDockApplication(NSString *title, NSString *role, NSString *subrole) {
+  NSString *normalizedTitle = [[title ?: @"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
+  const bool matchesTitle = [normalizedTitle isEqualToString:@"codex"]
+    || [normalizedTitle isEqualToString:@"chatgpt"];
+  return matchesTitle
+    && [role isEqualToString:(__bridge NSString *)kAXDockItemRole]
+    && [subrole isEqualToString:(__bridge NSString *)kAXApplicationDockItemSubrole];
+}
+
 bool DisplayAtPointIsFullscreen(CGPoint point) {
   CGRect displayBounds = CGRectZero;
   bool foundDisplay = false;
@@ -126,10 +165,17 @@ bool DisplayAtPointIsFullscreen(CGPoint point) {
       continue;
     }
     const CGFloat tolerance = 2;
-    if (fabs(bounds.origin.x - displayBounds.origin.x) <= tolerance
-        && fabs(bounds.origin.y - displayBounds.origin.y) <= tolerance
-        && fabs(bounds.size.width - displayBounds.size.width) <= tolerance
-        && fabs(bounds.size.height - displayBounds.size.height) <= tolerance) {
+    const CGRect intersection = CGRectIntersection(bounds, displayBounds);
+    const bool matchesFullscreenSize = fabs(bounds.size.width - displayBounds.size.width) <= tolerance
+      && fabs(bounds.size.height - displayBounds.size.height) <= tolerance;
+    const bool intersectsDisplay = !CGRectIsNull(intersection)
+      && intersection.size.width > tolerance
+      && intersection.size.height > tolerance;
+    // During a Space swipe, macOS translates the destination fullscreen
+    // window horizontally before it reaches the display origin. Treat a
+    // display-sized window as fullscreen as soon as it intersects this
+    // display, otherwise an all-Spaces badge is composited for a few frames.
+    if (matchesFullscreenSize && intersectsDisplay) {
       fullscreen = true;
       break;
     }
@@ -142,11 +188,11 @@ void VisitDockElement(AXUIElementRef element, int depth, NSMutableArray<NSValue 
   if (depth > 5) return;
   NSString *title = nil;
   NSString *role = nil;
+  NSString *subrole = nil;
   CopyStringAttribute(element, kAXTitleAttribute, &title);
   CopyStringAttribute(element, kAXRoleAttribute, &role);
-  const NSString *lowered = title.lowercaseString ?: @"";
-  const bool matchesApp = [lowered containsString:@"codex"] || [lowered containsString:@"chatgpt"];
-  if (matchesApp && [role containsString:@"Dock"]) {
+  CopyStringAttribute(element, kAXSubroleAttribute, &subrole);
+  if (IsTargetDockApplication(title, role, subrole)) {
     bool hidden = false;
     // Hidden/auto-hidden Dock items can remain in the AX tree with a stale
     // frame. Do not leave a badge behind unless the item is currently visible.
@@ -185,10 +231,25 @@ NSMutableArray<NSValue *> *DiscoverDockRects() {
   NSMutableArray<NSValue *> *rects = [NSMutableArray array];
   VisitDockElement(dock, 0, rects, [NSMutableSet set]);
   CFRelease(dock);
+  CGFloat minimumX = CGFLOAT_MAX;
+  CGFloat maximumX = -CGFLOAT_MAX;
+  CGFloat minimumY = CGFLOAT_MAX;
+  CGFloat maximumY = -CGFLOAT_MAX;
+  for (NSValue *value in rects) {
+    const NSRect rect = value.rectValue;
+    minimumX = MIN(minimumX, NSMidX(rect));
+    maximumX = MAX(maximumX, NSMidX(rect));
+    minimumY = MIN(minimumY, NSMidY(rect));
+    maximumY = MAX(maximumY, NSMidY(rect));
+  }
+  // A bottom Dock lays items out horizontally; left and right Docks lay them
+  // out vertically. Select the ordering axis from the discovered geometry so
+  // badge identity remains aligned with the same item on every Dock edge.
+  const bool sortAlongY = rects.count > 1 && (maximumY - minimumY) > (maximumX - minimumX);
   [rects sortUsingComparator:^NSComparisonResult(NSValue *left, NSValue *right) {
-    const CGFloat leftX = left.rectValue.origin.x;
-    const CGFloat rightX = right.rectValue.origin.x;
-    return leftX < rightX ? NSOrderedAscending : leftX > rightX ? NSOrderedDescending : NSOrderedSame;
+    const CGFloat leftPosition = sortAlongY ? NSMidY(left.rectValue) : NSMidX(left.rectValue);
+    const CGFloat rightPosition = sortAlongY ? NSMidY(right.rectValue) : NSMidX(right.rectValue);
+    return leftPosition < rightPosition ? NSOrderedAscending : leftPosition > rightPosition ? NSOrderedDescending : NSOrderedSame;
   }];
   return rects;
 }
@@ -225,7 +286,155 @@ NSRect BadgePanelRectForDockRect(NSRect dockRect) {
   );
 }
 
+bool DockRectsMoveOutward(NSArray<NSValue *> *previous, NSArray<NSValue *> *current) {
+  if (previous.count == 0 || previous.count != current.count) return false;
+  const CGFloat movementTolerance = 0.5;
+  const CGFloat sizeTolerance = 1;
+  for (NSUInteger index = 0; index < previous.count; index += 1) {
+    const NSRect oldRect = previous[index].rectValue;
+    const NSRect newRect = current[index].rectValue;
+    if (fabs(oldRect.size.width - newRect.size.width) > sizeTolerance
+        || fabs(oldRect.size.height - newRect.size.height) > sizeTolerance) {
+      return false;
+    }
+    const NSPoint oldCenter = NSMakePoint(NSMidX(oldRect), NSMidY(oldRect));
+    CGRect displayBounds = CGRectZero;
+    bool foundDisplay = false;
+    for (NSScreen *screen in NSScreen.screens) {
+      NSNumber *screenNumber = screen.deviceDescription[@"NSScreenNumber"];
+      if (screenNumber == nil) continue;
+      const CGRect candidate = CGDisplayBounds(screenNumber.unsignedIntValue);
+      if (CGRectContainsPoint(candidate, oldCenter)) {
+        displayBounds = candidate;
+        foundDisplay = true;
+        break;
+      }
+    }
+    if (!foundDisplay) return false;
+    const CGFloat distanceToBottom = fabs(CGRectGetMaxY(displayBounds) - NSMaxY(oldRect));
+    const CGFloat distanceToLeft = fabs(NSMinX(oldRect) - CGRectGetMinX(displayBounds));
+    const CGFloat distanceToRight = fabs(CGRectGetMaxX(displayBounds) - NSMaxX(oldRect));
+    const CGFloat deltaX = newRect.origin.x - oldRect.origin.x;
+    const CGFloat deltaY = newRect.origin.y - oldRect.origin.y;
+    const bool bottomDockMovesDown = distanceToBottom <= distanceToLeft
+      && distanceToBottom <= distanceToRight
+      && deltaY > movementTolerance;
+    const bool leftDockMovesLeft = distanceToLeft < distanceToBottom
+      && distanceToLeft <= distanceToRight
+      && deltaX < -movementTolerance;
+    const bool rightDockMovesRight = distanceToRight < distanceToBottom
+      && distanceToRight < distanceToLeft
+      && deltaX > movementTolerance;
+    if (!bottomDockMovesDown && !leftDockMovesLeft && !rightDockMovesRight) return false;
+  }
+  return true;
+}
+
+CGEventRef InputEventTapCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *refcon) {
+  (void)proxy;
+  (void)refcon;
+  if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
+    if (gInputEventTap != nullptr) CGEventTapEnable(gInputEventTap, true);
+    return event;
+  }
+  if (CFAbsoluteTimeGetCurrent() < gIgnoreSpaceInputUntil) return event;
+
+  bool beginsSpaceTransition = false;
+  if (type == kCGEventScrollWheel) {
+    const int64_t horizontal = llabs(CGEventGetIntegerValueField(event, kCGScrollWheelEventPointDeltaAxis2));
+    const int64_t vertical = llabs(CGEventGetIntegerValueField(event, kCGScrollWheelEventPointDeltaAxis1));
+    beginsSpaceTransition = horizontal > 0 && horizontal > vertical;
+  }
+  if (beginsSpaceTransition) SuppressBadgesForSpaceTransition();
+  return event;
+}
+
+void StopInputObservation() {
+  if (gGlobalGestureMonitor != nil) {
+    [NSEvent removeMonitor:gGlobalGestureMonitor];
+    gGlobalGestureMonitor = nil;
+  }
+  if (gLocalGestureMonitor != nil) {
+    [NSEvent removeMonitor:gLocalGestureMonitor];
+    gLocalGestureMonitor = nil;
+  }
+  if (gGlobalScrollFallbackMonitor != nil) {
+    [NSEvent removeMonitor:gGlobalScrollFallbackMonitor];
+    gGlobalScrollFallbackMonitor = nil;
+  }
+  if (gLocalScrollFallbackMonitor != nil) {
+    [NSEvent removeMonitor:gLocalScrollFallbackMonitor];
+    gLocalScrollFallbackMonitor = nil;
+  }
+  if (gInputEventSource != nullptr) {
+    CFRunLoopRemoveSource(CFRunLoopGetMain(), gInputEventSource, kCFRunLoopCommonModes);
+    CFRelease(gInputEventSource);
+    gInputEventSource = nullptr;
+  }
+  if (gInputEventTap != nullptr) {
+    CGEventTapEnable(gInputEventTap, false);
+    CFRelease(gInputEventTap);
+    gInputEventTap = nullptr;
+  }
+}
+
+void StartInputObservation() {
+  StopInputObservation();
+  const CGEventMask eventMask = CGEventMaskBit(kCGEventScrollWheel);
+  gInputEventTap = CGEventTapCreate(
+    kCGSessionEventTap,
+    kCGHeadInsertEventTap,
+    kCGEventTapOptionListenOnly,
+    eventMask,
+    InputEventTapCallback,
+    nullptr
+  );
+  if (gInputEventTap != nullptr) {
+    gInputEventSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, gInputEventTap, 0);
+    if (gInputEventSource != nullptr) {
+      CFRunLoopAddSource(CFRunLoopGetMain(), gInputEventSource, kCFRunLoopCommonModes);
+      CGEventTapEnable(gInputEventTap, true);
+    } else {
+      CFRelease(gInputEventTap);
+      gInputEventTap = nullptr;
+    }
+  }
+
+  void (^handleGesture)(NSEvent *) = ^(NSEvent *event) {
+    if (CFAbsoluteTimeGetCurrent() < gIgnoreSpaceInputUntil) return;
+    if (event.type == NSEventTypeSwipe
+        && fabs(event.deltaX) > 0
+        && fabs(event.deltaX) >= fabs(event.deltaY)) {
+      SuppressBadgesForSpaceTransition();
+    }
+  };
+  gGlobalGestureMonitor = [NSEvent addGlobalMonitorForEventsMatchingMask:NSEventMaskSwipe handler:handleGesture];
+  gLocalGestureMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskSwipe handler:^NSEvent *(NSEvent *event) {
+    handleGesture(event);
+    return event;
+  }];
+
+  // A listen-only CGEvent tap is preferred for scroll-based Space gestures.
+  // Some macOS/trackpad configurations instead emit NSEventTypeSwipe, which
+  // is observed above. If the OS declines the tap, retain a no-polling AppKit
+  // scroll fallback for both active and inactive application states.
+  if (gInputEventTap == nullptr) {
+    void (^handleScroll)(NSEvent *) = ^(NSEvent *event) {
+      if (CFAbsoluteTimeGetCurrent() < gIgnoreSpaceInputUntil) return;
+      if (fabs(event.scrollingDeltaX) > 0 && fabs(event.scrollingDeltaX) > fabs(event.scrollingDeltaY)) {
+        SuppressBadgesForSpaceTransition();
+      }
+    };
+    gGlobalScrollFallbackMonitor = [NSEvent addGlobalMonitorForEventsMatchingMask:NSEventMaskScrollWheel handler:handleScroll];
+    gLocalScrollFallbackMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskScrollWheel handler:^NSEvent *(NSEvent *event) {
+      handleScroll(event);
+      return event;
+    }];
+  }
+}
+
 void StopDockObservation() {
+  StopInputObservation();
   if (gActiveSpaceObserver != nil) {
     [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:gActiveSpaceObserver];
     gActiveSpaceObserver = nil;
@@ -263,8 +472,28 @@ void DockObserverCallback(AXObserverRef observer, AXUIElementRef element, CFStri
   (void)observer;
   (void)element;
   (void)refcon;
+  NSArray<NSValue *> *currentRects = [DiscoverDockRects() copy];
+  const bool beginsDockTransition = DockRectsMoveOutward(gLastDockRects, currentRects);
+  if (beginsDockTransition || gSuppressForDockTransition) {
+    gSuppressForDockTransition = YES;
+    const uint64_t generation = ++gDockTransitionGeneration;
+    HideBadgePanels();
+    // Keep the marks hidden until Dock geometry has been quiet for a short
+    // interval. ActiveSpaceDidChange normally restores them sooner, at the
+    // exact end of a Space transition.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 350 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+      if (generation != gDockTransitionGeneration) return;
+      gSuppressForDockTransition = NO;
+      RefreshBadgePanels();
+    });
+    return;
+  }
   if (gRefreshScheduled) return;
   gRefreshScheduled = YES;
+  // Reconcile on the first Dock movement before the next display frame. This
+  // catches a display-sized fullscreen window while it is still sliding into
+  // place and prevents the stationary panel from flashing in that Space.
+  RefreshBadgePanels();
   const bool topologyChanged = CFEqual(notification, kAXLayoutChangedNotification)
     || CFEqual(notification, kAXUIElementDestroyedNotification);
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 16 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
@@ -286,14 +515,17 @@ void StartDockObservation() {
   }
   ObserveDockTree(gDockObserver, dock, 0);
   CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(gDockObserver), kCFRunLoopCommonModes);
+  StartInputObservation();
   gActiveSpaceObserver = [NSWorkspace.sharedWorkspace.notificationCenter
     addObserverForName:NSWorkspaceActiveSpaceDidChangeNotification
     object:nil
     queue:NSOperationQueue.mainQueue
     usingBlock:^(__unused NSNotification *notification) {
-      // Remove the old-space panels before AppKit paints the new Space. A
-      // fullscreen Space must never show a one-frame stale badge.
-      ClearBadgePanels();
+      // Restore only after the Space transition has completed. If the
+      // destination is fullscreen, discovery keeps the panels hidden.
+      gDockTransitionGeneration += 1;
+      gSuppressForDockTransition = NO;
+      gIgnoreSpaceInputUntil = CFAbsoluteTimeGetCurrent() + 0.25;
       RefreshBadgePanels();
     }];
   CFRelease(dock);
@@ -306,9 +538,15 @@ Napi::Value IsTrusted(const Napi::CallbackInfo &info) {
   return Napi::Boolean::New(env, AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options));
 }
 
+Napi::Value BundleIdentifier(const Napi::CallbackInfo &info) {
+  NSString *bundleIdentifier = NSBundle.mainBundle.bundleIdentifier ?: @"";
+  return Napi::String::New(info.Env(), bundleIdentifier.UTF8String ?: "");
+}
+
 Napi::Value DockRects(const Napi::CallbackInfo &info) {
   Napi::Env env = info.Env();
   NSMutableArray<NSValue *> *rects = DiscoverDockRects();
+  gLastDockRects = [rects copy];
 
   Napi::Array output = Napi::Array::New(env, rects.count);
   for (NSUInteger index = 0; index < rects.count; index += 1) {
@@ -356,10 +594,12 @@ void RefreshBadgePanels() {
       panel.excludedFromWindowsMenu = YES;
       panel.animationBehavior = NSWindowAnimationBehaviorNone;
       panel.level = CGWindowLevelForKey(kCGDockWindowLevelKey) + 1;
-      // Keep the panel scoped to the Space in which it was created. Joining
-      // all Spaces lets AppKit carry it into a fullscreen Space for one frame
-      // before the AX/CG refresh can hide it.
-      panel.collectionBehavior = NSWindowCollectionBehaviorStationary | NSWindowCollectionBehaviorIgnoresCycle | NSWindowCollectionBehaviorFullScreenNone;
+      // Stationary + CanJoinAllSpaces anchors the mark in display coordinates
+      // while ordinary Spaces slide. FullScreenPrimary opts the panel out of
+      // other applications' fullscreen window sets; FullScreenNone only says
+      // that this panel cannot itself enter fullscreen and does not provide
+      // that exclusion. Deliberately omit Auxiliary/CanJoinAllApplications.
+      panel.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorStationary | NSWindowCollectionBehaviorIgnoresCycle | NSWindowCollectionBehaviorFullScreenPrimary | NSWindowCollectionBehaviorFullScreenDisallowsTiling;
       panel.contentView = [[CodexBadgeView alloc] initWithFrame:NSMakeRect(0, 0, 18, 18)];
       [gBadgePanels addObject:panel];
       [panel orderFrontRegardless];
@@ -370,6 +610,7 @@ void RefreshBadgePanels() {
     view.badgeLabel = label.length > 0 ? label : @"?";
     view.badgeColor = ColorFromHex(color);
     [view setNeedsDisplay:YES];
+    if (!panel.isVisible) [panel orderFrontRegardless];
   }
 }
 
@@ -377,6 +618,9 @@ Napi::Value SetEnvironmentBadges(const Napi::CallbackInfo &info) {
   Napi::Env env = info.Env();
   if (info.Length() == 0 || !info[0].IsArray()) {
     gBadgeItems = nil;
+    gLastDockRects = nil;
+    gSuppressForDockTransition = NO;
+    gDockTransitionGeneration += 1;
     StopDockObservation();
     ClearBadgePanels();
     return Napi::Number::New(env, 0);
@@ -400,6 +644,9 @@ Napi::Value SetEnvironmentBadges(const Napi::CallbackInfo &info) {
 
 Napi::Value ClearEnvironmentBadges(const Napi::CallbackInfo &info) {
   gBadgeItems = nil;
+  gLastDockRects = nil;
+  gSuppressForDockTransition = NO;
+  gDockTransitionGeneration += 1;
   StopDockObservation();
   ClearBadgePanels();
   return info.Env().Undefined();
@@ -407,6 +654,7 @@ Napi::Value ClearEnvironmentBadges(const Napi::CallbackInfo &info) {
 
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("isTrustedAccessibilityClient", Napi::Function::New(env, IsTrusted));
+  exports.Set("getBundleIdentifier", Napi::Function::New(env, BundleIdentifier));
   exports.Set("getCodexDockRects", Napi::Function::New(env, DockRects));
   exports.Set("setEnvironmentBadges", Napi::Function::New(env, SetEnvironmentBadges));
   exports.Set("clearEnvironmentBadges", Napi::Function::New(env, ClearEnvironmentBadges));

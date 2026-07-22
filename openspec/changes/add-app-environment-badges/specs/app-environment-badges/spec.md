@@ -20,7 +20,11 @@ On macOS the application SHALL explain why Accessibility access is needed before
 
 #### Scenario: User grants permission in System Settings
 - **WHEN** the system permission request initially returns untrusted and the user grants access in System Settings
-- **THEN** returning focus to codex-switcher triggers a permission recheck and automatically completes enablement
+- **THEN** codex-switcher performs immediate, focus, visibility, and bounded authorization rechecks and automatically completes enablement without requiring another click
+
+#### Scenario: A local unsigned update leaves a stale permission entry
+- **WHEN** the user explicitly continues the enable flow while the current bundle is untrusted
+- **THEN** codex-switcher resets only its own Accessibility entry before requesting access for the currently running bundle
 
 ### Requirement: Supported platforms receive managed instance identity
 The application SHALL synchronize each live managed Codex App PID with its full environment name, deterministic monogram, and deterministic color to the active platform adapter.
@@ -60,22 +64,42 @@ The badge manager SHALL serialize and coalesce synchronization, use bounded help
 
 ### Requirement: Dock badge placement follows Dock geometry only
 
-On macOS, the badge overlay SHALL remain stable across application focus changes and SHALL be present only in a Space where the Dock is available; Space/Mission Control transitions may recreate the overlay in the destination Space, but a fullscreen Space SHALL never receive it.
+On macOS, the badge overlay SHALL remain stable across application focus changes, SHALL follow the visibility lifecycle of the corresponding Dock item, and SHALL be present only where the Dock is available. Its AppKit collection behavior SHALL opt out of other applications' fullscreen window sets rather than relying only on post-transition visibility checks; a fullscreen Space SHALL never receive it.
+
+#### Scenario: Another application has a similar Dock title
+
+- **WHEN** a Dock application title merely contains `Codex` or `ChatGPT`, including `codex-switcher`
+- **THEN** it is excluded from badge target discovery and cannot shift the environment-to-Codex-item mapping
 
 #### Scenario: User switches app or Space
 
-- **WHEN** badges are enabled and the user activates another app, changes Space, or opens ordinary windows
+- **WHEN** badges are enabled and the user activates another app or opens ordinary windows
 - **THEN** existing badges remain visible and their positions are not refreshed solely because of that activity
+
+#### Scenario: User changes Space and the Dock retreats
+
+- **WHEN** a scroll-based or AppKit `Swipe` trackpad gesture begins a Space transition
+- **THEN** the event-driven native adapter hides badges before WindowServer moves either Space and restores them after the active-Space completion notification
+
+#### Scenario: User scrolls horizontal application content
+
+- **WHEN** horizontal input does not result in a Space change
+- **THEN** badges restore after a bounded quiet interval without starting periodic polling
 
 #### Scenario: Dock item moves or magnifies
 
-- **WHEN** the Dock item is reordered, magnified, moved to another edge/display, or the Dock layout changes
-- **THEN** the native observer coalesces the event and updates the affected badge positions
+- **WHEN** the Dock item is reordered, magnified, auto-hidden or restored, moved to the bottom, left, or right edge, moved to another display, or the Dock layout changes
+- **THEN** the native observer coalesces the event and updates the affected badge positions from the item's actual accessibility rectangle without assuming a fixed Dock edge
 
 #### Scenario: Dock is hidden or the current Space is fullscreen
 
 - **WHEN** the Dock is configured to auto-hide, is not visible on the current display, or a fullscreen application owns the current Space
 - **THEN** badges belonging to that Dock are hidden and are restored when the Dock becomes visible again
+
+#### Scenario: A fullscreen Space is entering or leaving
+
+- **WHEN** a display-sized application window begins intersecting the target display during a Space transition
+- **THEN** the native observer hides the corresponding badges before the destination fullscreen Space is composited and restores them only after the fullscreen window has completely left the display
 
 #### Scenario: Feature remains enabled while no lifecycle event occurs
 - **WHEN** the desktop application and Codex windows are idle

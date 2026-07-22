@@ -86,7 +86,12 @@ export class AppEnvironmentBadgeManager {
   requestPermission(): Promise<AppEnvironmentBadgeStatus> {
     return this.enqueue(async () => {
       const permission = await this.options.adapter.requestPermission();
-      return this.status(await this.options.readEnabled(), permission);
+      if (!this.options.adapter.supported || !new Set<AppEnvironmentBadgePermission>(["granted", "not-required"]).has(permission)) {
+        await this.options.saveEnabled(false);
+        return this.status(false, permission);
+      }
+      await this.options.saveEnabled(true);
+      return this.syncUnlocked(permission);
     });
   }
 

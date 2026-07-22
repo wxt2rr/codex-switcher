@@ -13,7 +13,7 @@ Current scope:
 
 Current limitation:
 - Default Electron icon is still used
-- macOS code signing / notarization is not configured yet
+- macOS release signing / notarization is not configured yet; unsigned builds receive a complete ad-hoc resource seal so local packages are internally valid
 - Some desktop actions still use the legacy CLI compatibility path and have not been migrated to direct core services yet
 - Live log streaming and richer task history UX are not implemented yet
 
@@ -30,7 +30,8 @@ Commands:
 Packaging notes:
 - Build macOS installers on macOS for best results.
 - Build Windows installers on Windows for best results.
-- macOS code signing / notarization is still not configured, so local packages are unsigned.
+- macOS Developer ID signing / notarization is still not configured. Local packages use ad-hoc signing and remain unidentified to Gatekeeper when downloaded.
+- Ad-hoc signatures do not provide a stable TCC identity across rebuilt versions, so local macOS updates may require Accessibility authorization again. Developer ID signing is required to preserve that authorization across releases.
 - After installing the unsigned macOS package, remove the quarantine attribute and launch it with:
 
 ```bash
@@ -52,7 +53,7 @@ git push origin desktop-v0.1.4
 
 - Tag builds create a GitHub Pre-release containing the DMG, macOS ZIP, Windows EXE, and blockmap files.
 - The workflow also keeps `codex-switcher-macos-arm64` and `codex-switcher-windows-x64` Actions artifacts for 14 days for build diagnostics.
-- GitHub Pre-release packages are unsigned. Signing and notarization require a separate release-hardening configuration.
+- GitHub Pre-release packages are ad-hoc signed but not notarized. Developer ID signing and notarization require a separate release-hardening configuration.
 
 Verification status:
 - `npm run desktop:test`: passing

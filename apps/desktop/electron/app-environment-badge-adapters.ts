@@ -15,11 +15,22 @@ import { getConfiguredResourcesPath, resolveRuntimeResource } from "./runtime-pa
 
 const execFileAsync = promisify(execFile);
 
-interface MacBadgeNativeModule {
+export interface MacBadgeNativeModule {
   isTrustedAccessibilityClient(prompt: boolean): boolean;
+  getBundleIdentifier(): string;
   getCodexDockRects(): Array<{ x: number; y: number; width: number; height: number }>;
   setEnvironmentBadges(instances: Array<{ label: string; color: string }>): number;
   clearEnvironmentBadges(): void;
+}
+
+interface MacDockBadgeAdapterOptions {
+  native?: MacBadgeNativeModule;
+  resetAccessibilityPermission?: (bundleIdentifier: string) => Promise<void>;
+}
+
+async function resetAccessibilityPermission(bundleIdentifier: string): Promise<void> {
+  if (bundleIdentifier !== "com.wangxt.codex-switcher") return;
+  await execFileAsync("/usr/bin/tccutil", ["reset", "Accessibility", bundleIdentifier], { timeout: 5_000 });
 }
 
 function nativeResource(relativePath: string, currentFile: string): string {
@@ -33,8 +44,15 @@ export class MacDockBadgeAdapter implements AppEnvironmentBadgeAdapter {
   readonly platform = "macos" as const;
   readonly supported: boolean;
   private readonly native?: MacBadgeNativeModule;
+  private readonly resetAccessibilityPermission: (bundleIdentifier: string) => Promise<void>;
 
-  constructor(currentFile: string) {
+  constructor(currentFile: string, options: MacDockBadgeAdapterOptions = {}) {
+    this.resetAccessibilityPermission = options.resetAccessibilityPermission ?? resetAccessibilityPermission;
+    if (options.native) {
+      this.native = options.native;
+      this.supported = true;
+      return;
+    }
     const nativePath = nativeResource(join("macos", "app-environment-badge-native.node"), currentFile);
     if (existsSync(nativePath)) {
       try {
@@ -54,6 +72,14 @@ export class MacDockBadgeAdapter implements AppEnvironmentBadgeAdapter {
 
   async requestPermission(): Promise<AppEnvironmentBadgePermission> {
     if (!this.native) return "unsupported";
+    if (this.native.isTrustedAccessibilityClient(false)) return "granted";
+    const bundleIdentifier = this.native.getBundleIdentifier().trim();
+    if (bundleIdentifier) {
+      // App updates signed without a stable Developer ID can leave a checked
+      // but unusable TCC entry. Reset only this app when the user explicitly
+      // chooses Continue, then register the currently running bundle again.
+      await this.resetAccessibilityPermission(bundleIdentifier).catch(() => undefined);
+    }
     return this.native.isTrustedAccessibilityClient(true) ? "granted" : "denied";
   }
 

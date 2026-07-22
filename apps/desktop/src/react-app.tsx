@@ -176,33 +176,56 @@ export function App() {
 
   useEffect(() => {
     if (!appEnvironmentBadgePermissionPending) return;
-    let timer: number | undefined;
-    const onFocus = () => {
-      if (timer !== undefined) window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        void bridge.getAppEnvironmentBadgeStatus().then(async (status) => {
-          setAppEnvironmentBadges(status);
-          if (status.permission !== "granted" || status.enabled) return;
-          setAppEnvironmentBadgesSaving(true);
-          try {
-            const enabled = await bridge.setAppEnvironmentBadgeSettings({ enabled: true });
-            setAppEnvironmentBadges(enabled);
-            setAppEnvironmentBadgePermissionPending(false);
-            setSuccessMessage(appBadgeNotice(enabled, true));
-          } catch (error) {
-            setErrorMessage(error);
-          } finally {
-            setAppEnvironmentBadgesSaving(false);
-          }
-        }).catch(setErrorMessage);
-      }, 250);
+    let stopped = false;
+    let checking = false;
+    let debounceTimer: number | undefined;
+    const recheckPermission = async () => {
+      if (stopped || checking) return;
+      checking = true;
+      try {
+        const status = await bridge.getAppEnvironmentBadgeStatus();
+        if (stopped) return;
+        setAppEnvironmentBadges(status);
+        if (status.permission !== "granted") return;
+        const enabled = status.enabled
+          ? status
+          : await bridge.setAppEnvironmentBadgeSettings({ enabled: true });
+        if (stopped) return;
+        setAppEnvironmentBadges(enabled);
+        setAppEnvironmentBadgePermissionPending(false);
+        setSuccessMessage(appBadgeNotice(enabled, true));
+      } catch (error) {
+        if (!stopped) setErrorMessage(error);
+      } finally {
+        checking = false;
+      }
     };
-    window.addEventListener("focus", onFocus);
+    const scheduleRecheck = () => {
+      if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => { void recheckPermission(); }, 150);
+    };
+    const interval = window.setInterval(() => { void recheckPermission(); }, 750);
+    const timeout = window.setTimeout(() => {
+      setAppEnvironmentBadgePermissionPending(false);
+      setErrorMessage(language === "zh"
+        ? "系统仍未确认辅助功能权限。请移除系统设置中的旧 codex-switcher 条目，再重新开启此功能。"
+        : "Accessibility access is still unavailable. Remove the old codex-switcher entry in System Settings, then enable this feature again.");
+    }, 90_000);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") scheduleRecheck();
+    };
+    window.addEventListener("focus", scheduleRecheck);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    void recheckPermission();
     return () => {
-      window.removeEventListener("focus", onFocus);
-      if (timer !== undefined) window.clearTimeout(timer);
+      stopped = true;
+      window.removeEventListener("focus", scheduleRecheck);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.clearInterval(interval);
+      window.clearTimeout(timeout);
+      if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
     };
-  }, [appEnvironmentBadgePermissionPending]);
+  }, [appEnvironmentBadgePermissionPending, language]);
 
   async function initializeApp() {
     setInitialLoadingProgress(12);
@@ -334,6 +357,11 @@ export function App() {
     try {
       const permission = await bridge.requestAppEnvironmentBadgePermission();
       setAppEnvironmentBadges(permission);
+      if (permission.enabled) {
+        setAppEnvironmentBadgePermissionPending(false);
+        setSuccessMessage(appBadgeNotice(permission, true));
+        return;
+      }
       if (permission.permission !== "granted") {
         setAppEnvironmentBadgePermissionPending(true);
         setSuccessMessage(language === "zh"

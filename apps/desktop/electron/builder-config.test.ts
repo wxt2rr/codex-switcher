@@ -13,6 +13,7 @@ const desktopPackage = JSON.parse(
   main: string;
   scripts: Record<string, string>;
   build: {
+    afterPack?: string;
     appId: string;
     files: string[];
     extraResources: Array<{
@@ -37,6 +38,7 @@ const desktopPackage = JSON.parse(
 
 test("desktop package defines electron packaging entrypoints", () => {
   assert.equal(desktopPackage.main, "electron-dist/electron/main.cjs");
+  assert.equal(desktopPackage.build.afterPack, "scripts/after-pack.cjs");
   assert.equal(desktopPackage.scripts["package:dir"], "electron-builder --dir");
   assert.equal(desktopPackage.build.appId, "com.wangxt.codex-switcher");
   assert.deepEqual(desktopPackage.build.files, ["dist/**", "electron-dist/**", "package.json"]);
@@ -83,19 +85,52 @@ test("desktop package defines electron packaging entrypoints", () => {
   assert.match(nativeModuleSource, /NSWindowStyleMaskNonactivatingPanel/);
   assert.match(nativeModuleSource, /NSWindowAnimationBehaviorNone/);
   assert.match(nativeModuleSource, /NSWindowCollectionBehaviorStationary/);
+  assert.match(nativeModuleSource, /NSWindowCollectionBehaviorCanJoinAllSpaces/);
   assert.match(nativeModuleSource, /NSWindowCollectionBehaviorIgnoresCycle/);
-  assert.match(nativeModuleSource, /NSWindowCollectionBehaviorFullScreenNone/);
-  assert.doesNotMatch(nativeModuleSource, /NSWindowCollectionBehaviorCanJoinAllSpaces \|/);
+  assert.match(nativeModuleSource, /NSWindowCollectionBehaviorFullScreenPrimary/);
+  assert.match(nativeModuleSource, /NSWindowCollectionBehaviorFullScreenDisallowsTiling/);
+  assert.doesNotMatch(nativeModuleSource, /NSWindowCollectionBehaviorFullScreenNone/);
+  assert.doesNotMatch(nativeModuleSource, /NSWindowCollectionBehaviorFullScreenAuxiliary/);
+  assert.doesNotMatch(nativeModuleSource, /NSWindowCollectionBehaviorCanJoinAllApplications/);
   assert.match(nativeModuleSource, /AXObserverCreate/);
   assert.match(nativeModuleSource, /kAXMovedNotification/);
   assert.match(nativeModuleSource, /kAXHiddenAttribute/);
+  assert.match(nativeModuleSource, /IsTargetDockApplication/);
+  assert.match(nativeModuleSource, /isEqualToString:@"codex"/);
+  assert.match(nativeModuleSource, /isEqualToString:@"chatgpt"/);
+  assert.match(nativeModuleSource, /kAXApplicationDockItemSubrole/);
+  assert.doesNotMatch(nativeModuleSource, /containsString:@"codex"/);
   assert.match(nativeModuleSource, /CGWindowListCopyWindowInfo/);
+  assert.match(nativeModuleSource, /CGRectIntersection/);
+  assert.match(nativeModuleSource, /matchesFullscreenSize/);
   assert.match(nativeModuleSource, /NSWorkspaceActiveSpaceDidChangeNotification/);
   assert.match(nativeModuleSource, /CGDisplayBounds/);
+  assert.match(nativeModuleSource, /sortAlongY/);
+  assert.match(nativeModuleSource, /DockRectsMoveOutward/);
+  assert.match(nativeModuleSource, /gSuppressForDockTransition/);
+  assert.match(nativeModuleSource, /350 \* NSEC_PER_MSEC/);
+  assert.match(nativeModuleSource, /CGEventTapCreate/);
+  assert.match(nativeModuleSource, /kCGEventTapOptionListenOnly/);
+  assert.match(nativeModuleSource, /kCGEventScrollWheel/);
+  assert.match(nativeModuleSource, /NSEventMaskSwipe/);
+  assert.match(nativeModuleSource, /NSEventTypeSwipe/);
+  assert.match(nativeModuleSource, /gGlobalGestureMonitor/);
+  assert.match(nativeModuleSource, /gLocalGestureMonitor/);
+  assert.doesNotMatch(nativeModuleSource, /NSEventMaskKeyDown/);
+  assert.doesNotMatch(nativeModuleSource, /NSEventModifierFlagControl/);
+  assert.match(nativeModuleSource, /gGlobalScrollFallbackMonitor/);
   const installerInclude = readFileSync(join(desktopRoot, "build", "installer.nsh"), "utf8");
   assert.match(installerInclude, /!macro customCheckAppRunning/);
   assert.match(installerInclude, /taskkill\.exe/);
   assert.match(installerInclude, /\/F \/T \/IM/);
   assert.match(installerInclude, /APP_EXECUTABLE_FILENAME/);
   assert.match(installerInclude, /nsProcess::FindProcess/);
+  const afterPackSource = readFileSync(join(desktopRoot, "scripts", "after-pack.cjs"), "utf8");
+  assert.match(afterPackSource, /codesign/);
+  assert.match(afterPackSource, /--deep/);
+  assert.match(afterPackSource, /--timestamp=none/);
+  assert.match(afterPackSource, /CSC_LINK/);
+  const packageVerifierSource = readFileSync(join(desktopRoot, "scripts", "verify-package-artifact.mjs"), "utf8");
+  assert.match(packageVerifierSource, /--verify/);
+  assert.match(packageVerifierSource, /--strict/);
 });

@@ -15,7 +15,10 @@ test("settings page exposes the opt-in environment badge flow", async () => {
 test("permission flow rechecks after returning from System Settings", async () => {
   const source = await readFile(sourcePath("../react-app.tsx"), "utf8");
   assert.match(source, /appEnvironmentBadgePermissionPending/);
-  assert.match(source, /window\.addEventListener\("focus", onFocus\)/);
+  assert.match(source, /window\.addEventListener\("focus", scheduleRecheck\)/);
+  assert.match(source, /document\.addEventListener\("visibilitychange", onVisibilityChange\)/);
+  assert.match(source, /window\.setInterval\(\(\) => \{ void recheckPermission\(\); \}, 750\)/);
+  assert.match(source, /void recheckPermission\(\)/);
   assert.match(source, /返回此窗口，环境标识会自动继续开启/);
   assert.doesNotMatch(source, /未获得辅助功能权限，环境标识尚未开启/);
 });
