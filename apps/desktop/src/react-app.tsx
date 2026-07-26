@@ -835,8 +835,10 @@ export function App() {
 
     setBusy(true);
     try {
-      await bridge.nativeLogin({
-        mode: accountModeDraft === "apikey" || accountModeDraft === "sub2api" ? accountModeDraft : "auth",
+      const result = await bridge.nativeLogin({
+        mode: accountModeDraft === "apikey" || accountModeDraft === "sub2api" || accountModeDraft === "cpa"
+          ? accountModeDraft
+          : "auth",
         account: accountNameDraft.trim(),
         envName: accountEnvDraft.trim(),
         target: "none",
@@ -844,7 +846,7 @@ export function App() {
         apiKey: accountApiKeyDraft,
         baseUrlMode: accountBaseUrlModeDraft === "custom" ? "custom" : "default",
         baseUrl: accountBaseUrlDraft.trim() || undefined,
-        sub2apiPayload: accountSub2ApiDraft,
+        credentialPayload: accountSub2ApiDraft,
         apiProtocol: effectiveProtocolSettings.apiProtocol,
         compatibilityEnabled: effectiveProtocolSettings.compatibilityEnabled,
         upstreamModel: effectiveProtocolSettings.upstreamModel,
@@ -853,10 +855,22 @@ export function App() {
         instructionRole: effectiveProtocolSettings.instructionRole,
         requestOverrides: effectiveProtocolSettings.requestOverrides,
       });
-      setTranslatedSuccessMessage(action === "relogin" ? copy.message.reloginCompleted : copy.message.loginCompleted, {
-        env: accountEnvDraft.trim(),
-        account: accountNameDraft.trim(),
-      });
+      if (accountModeDraft === "sub2api" || accountModeDraft === "cpa") {
+        const importedCount = result.output?.split(/\r?\n/).filter(Boolean).length || 1;
+        const sourceLabel = accountModeDraft === "cpa" ? "CPA" : "Sub2API";
+        setSuccessMessage(
+          language === "zh"
+            ? `已导入 ${importedCount} 个 ${sourceLabel} 账号`
+            : language === "ja"
+              ? `${sourceLabel} アカウントを ${importedCount} 件インポートしました`
+              : `Imported ${importedCount} ${sourceLabel} account${importedCount === 1 ? "" : "s"}`,
+        );
+      } else {
+        setTranslatedSuccessMessage(action === "relogin" ? copy.message.reloginCompleted : copy.message.loginCompleted, {
+          env: accountEnvDraft.trim(),
+          account: accountNameDraft.trim(),
+        });
+      }
       await refreshOverview({ loadMetrics: true });
       return true;
     } catch (error) {

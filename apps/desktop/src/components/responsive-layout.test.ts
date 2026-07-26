@@ -167,7 +167,8 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.match(accounts, /compatibilityEnabled:\s*apiProtocolDraft === "chat_completions" && compatibilityEnabled/);
   assert.match(reactApp, /compatibilityEnabled:\s*effectiveProtocolSettings\.compatibilityEnabled/);
   assert.match(reactApp, /account\.route\?\.originalBaseUrl \?\? account\.runtime\.openaiBaseUrl/);
-  assert.match(accounts, /保存 sub2api/);
+  assert.match(accounts, /导入 Sub2API/);
+  assert.match(accounts, /导入 CPA/);
   assert.doesNotMatch(environments, /<RunStatusBadge/);
   assert.doesNotMatch(select, /focus-visible:ring/);
   assert.match(select, /collisionPadding=\{12\}/);

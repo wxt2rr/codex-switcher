@@ -91,6 +91,12 @@ import {
 } from "./generated-image-recovery-skill.js";
 import { AppEnvironmentBadgeManager, createUnsupportedBadgeAdapter, type AppEnvironmentBadgeStatus } from "./app-environment-badges.js";
 import { MacDockBadgeAdapter, WindowsTaskbarBadgeAdapter } from "./app-environment-badge-adapters.js";
+import {
+  buildCodexChatGptAuthJson,
+  buildImportedAccountNames,
+  parseExternalCodexCredentials,
+  type ExternalCodexCredentialSource,
+} from "./external-codex-credential-import.js";
 
 const execFileAsync = promisify(execFile);
 const currentDir = resolveCurrentDir();
@@ -1416,7 +1422,7 @@ export async function updateIndependentModel(request: {
 }
 
 export async function nativeLogin(request: {
-  mode: "auth" | "apikey" | "sub2api";
+  mode: "auth" | "apikey" | "sub2api" | "cpa";
   account: string;
   envName: string;
   target: "cli" | "app" | "both" | "none";
@@ -1425,6 +1431,7 @@ export async function nativeLogin(request: {
   apiKey?: string;
   baseUrlMode?: "default" | "custom";
   baseUrl?: string;
+  credentialPayload?: string;
   sub2apiPayload?: string;
   apiProtocol?: "responses" | "chat_completions";
   compatibilityEnabled?: boolean;
@@ -1440,7 +1447,8 @@ export async function nativeLogin(request: {
     case "apikey":
       return nativeApiKeyLogin(request);
     case "sub2api":
-      return nativeSub2ApiLogin(request);
+    case "cpa":
+      return nativeExternalCredentialLogin(request, request.mode);
     default:
       throw new Error(`unsupported login mode: ${request.mode}`);
   }
@@ -2562,29 +2570,39 @@ async function nativeApiKeyLogin(request: {
   };
 }
 
-async function nativeSub2ApiLogin(request: {
+async function nativeExternalCredentialLogin(request: {
   account: string;
   envName: string;
   target: "cli" | "app" | "both" | "none";
+  credentialPayload?: string;
   sub2apiPayload?: string;
-}): Promise<DesktopActionResult> {
-  const payload = parseSub2ApiPayload(request.sub2apiPayload);
-  const authJson = buildSub2ApiAuthJson(payload);
-  await saveAccountArtifacts({
-    envName: request.envName,
-    account: request.account,
-    runtime: {
-      preferredAuthMethod: "chatgpt",
-      openaiBaseUrlMode: "default",
-      openaiBaseUrl: undefined,
-    },
-    authJsonContent: `${JSON.stringify(authJson, null, 2)}\n`,
-    target: request.target,
-  });
+}, source: ExternalCodexCredentialSource): Promise<DesktopActionResult> {
+  const credentials = parseExternalCodexCredentials(
+    request.credentialPayload ?? request.sub2apiPayload,
+    source,
+  );
+  const accountNames = buildImportedAccountNames(request.account, credentials.length);
+  const authJsonDocuments = credentials.map((credential) =>
+    `${JSON.stringify(buildCodexChatGptAuthJson(credential), null, 2)}\n`
+  );
+
+  for (const [index, account] of accountNames.entries()) {
+    await saveAccountArtifacts({
+      envName: request.envName,
+      account,
+      runtime: {
+        preferredAuthMethod: "chatgpt",
+        openaiBaseUrlMode: "default",
+        openaiBaseUrl: undefined,
+      },
+      authJsonContent: authJsonDocuments[index]!,
+      target: request.target,
+    });
+  }
 
   return {
-    message: `Logged in ${request.envName}/${request.account}`,
-    output: `Logged in account: ${request.envName}/${request.account}`,
+    message: `Imported ${accountNames.length} ${source === "cpa" ? "CPA" : "Sub2API"} account${accountNames.length === 1 ? "" : "s"}`,
+    output: accountNames.map((account) => `${request.envName}/${account}`).join("\n"),
   };
 }
 
@@ -2731,46 +2749,6 @@ async function executeCommandPlan(
     );
     child.stdin?.end(plan.stdin);
   });
-}
-
-function parseSub2ApiPayload(raw: string | undefined): Record<string, unknown> {
-  if (!raw?.trim()) {
-    throw new Error("sub2api JSON is required");
-  }
-
-  try {
-    return JSON.parse(raw) as Record<string, unknown>;
-  } catch (error) {
-    throw new Error(`invalid sub2api JSON: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-function buildSub2ApiAuthJson(data: Record<string, unknown>) {
-  const accessToken = String(data.access_token ?? "").trim();
-  const idToken = String(data.id_token ?? "").trim();
-  if (!accessToken) {
-    throw new Error("sub2api JSON missing access_token");
-  }
-  if (!idToken) {
-    throw new Error("sub2api JSON missing id_token");
-  }
-
-  const payload: Record<string, unknown> = {
-    auth_mode: "chatgpt",
-    tokens: {
-      access_token: accessToken,
-      id_token: idToken,
-    },
-  };
-
-  for (const key of ["refresh_token", "last_refresh", "email", "account_id", "expired"] as const) {
-    const value = String(data[key] ?? "").trim();
-    if (value) {
-      payload[key] = value;
-    }
-  }
-
-  return payload;
 }
 
 function resolveLogPath(kind: string): string {
@@ -3220,8 +3198,9 @@ end if
 
 export const __testUtils = {
   resolveLogPath,
-  parseSub2ApiPayload,
-  buildSub2ApiAuthJson,
+  parseExternalCodexCredentials,
+  buildCodexChatGptAuthJson,
+  buildImportedAccountNames,
   expandTargets,
   quoteShellArg,
   quoteCmdArg,

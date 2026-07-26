@@ -43,25 +43,33 @@ test("electron bridge resolves log paths from env overrides and defaults", () =>
   else process.env.CODEX_SWITCHER_TOKEN_REFRESH_LOG = previousRefreshLog;
 });
 
-test("electron bridge validates sub2api payloads before account artifact generation", () => {
-  assert.throws(() => __testUtils.parseSub2ApiPayload(""), /sub2api JSON is required/);
-  assert.throws(() => __testUtils.parseSub2ApiPayload("{bad json}"), /invalid sub2api JSON/);
-  assert.throws(() => __testUtils.buildSub2ApiAuthJson({ id_token: "id-only" }), /missing access_token/);
-  assert.throws(() => __testUtils.buildSub2ApiAuthJson({ access_token: "access-only" }), /missing id_token/);
-
+test("electron bridge validates imports and builds official Codex auth JSON", () => {
+  assert.throws(
+    () => __testUtils.parseExternalCodexCredentials("", "sub2api"),
+    /Sub2API import: credential JSON is required/,
+  );
+  assert.throws(
+    () => __testUtils.parseExternalCodexCredentials("{bad json}", "cpa"),
+    /CPA import: credential JSON is invalid/,
+  );
+  const [credential] = __testUtils.parseExternalCodexCredentials(JSON.stringify({
+    access_token: "access-token",
+    id_token: "id-token",
+    refresh_token: "refresh-token",
+    account_id: "account-id",
+  }), "cpa");
   assert.deepEqual(
-    __testUtils.buildSub2ApiAuthJson({
-      access_token: "access-token",
-      id_token: "id-token",
-      refresh_token: "refresh-token",
-    }),
+    __testUtils.buildCodexChatGptAuthJson(credential!, new Date("2026-07-26T12:00:00.000Z")),
     {
       auth_mode: "chatgpt",
+      OPENAI_API_KEY: null,
       tokens: {
         access_token: "access-token",
         id_token: "id-token",
+        refresh_token: "refresh-token",
+        account_id: "account-id",
       },
-      refresh_token: "refresh-token",
+      last_refresh: "2026-07-26T12:00:00.000Z",
     },
   );
 });

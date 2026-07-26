@@ -33,7 +33,7 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   setLanguage: (language: "zh" | "en" | "ja") => ipcRenderer.invoke("desktop:setLanguage", language),
   writeClipboardText: (value: string) => ipcRenderer.invoke("desktop:writeClipboardText", value),
   nativeLogin: (request: {
-    mode: "auth" | "apikey" | "sub2api";
+    mode: "auth" | "apikey" | "sub2api" | "cpa";
     account: string;
     envName: string;
     target: "cli" | "app" | "both" | "none";
@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     apiKey?: string;
     baseUrlMode?: "default" | "custom";
     baseUrl?: string;
+    credentialPayload?: string;
     sub2apiPayload?: string;
     apiProtocol?: "responses" | "chat_completions";
     compatibilityEnabled?: boolean;

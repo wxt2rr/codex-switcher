@@ -130,6 +130,7 @@ type DesktopCopy = {
     mode: string;
     baseUrlMode: string;
     sub2api: string;
+    cpa: string;
     apiKey: string;
     independentModel: string;
     independentModelNotSet: string;
@@ -321,7 +322,8 @@ const copy: Record<UiLanguage, DesktopCopy> = {
       target: "目标",
       mode: "模式",
       baseUrlMode: "Base URL 设置",
-      sub2api: "sub2api 配置",
+      sub2api: "Sub2API 官方凭据 JSON",
+      cpa: "CPA 官方凭据 JSON",
       apiKey: "API Key",
       independentModel: "独立 Model",
       independentModelNotSet: "未设置独立模型",
@@ -511,7 +513,8 @@ const copy: Record<UiLanguage, DesktopCopy> = {
       target: "Target",
       mode: "Mode",
       baseUrlMode: "Base URL Mode",
-      sub2api: "sub2api Payload",
+      sub2api: "Sub2API credential JSON",
+      cpa: "CPA credential JSON",
       apiKey: "API Key",
       independentModel: "Independent Model",
       independentModelNotSet: "Independent model not set",
@@ -701,7 +704,8 @@ const copy: Record<UiLanguage, DesktopCopy> = {
       target: "ターゲット",
       mode: "モード",
       baseUrlMode: "Base URL 設定",
-      sub2api: "sub2api 設定",
+      sub2api: "Sub2API 認証情報 JSON",
+      cpa: "CPA 認証情報 JSON",
       apiKey: "API Key",
       independentModel: "独立 Model",
       independentModelNotSet: "独立モデル未設定",

@@ -100,6 +100,7 @@ type TranslationTree = {
     authMode: string;
     apiKeyMode: string;
     sub2apiMode: string;
+    cpaMode: string;
     chatgptMode: string;
     defaultValue: string;
     customValue: string;
@@ -238,7 +239,8 @@ const translations: Record<UiLanguage, TranslationTree> = {
       loadFailed: "数据加载失败",
       authMode: "授权登录",
       apiKeyMode: "API Key",
-      sub2apiMode: "sub2api",
+      sub2apiMode: "Sub2API",
+      cpaMode: "CPA",
       chatgptMode: "chatgpt",
       defaultValue: "默认",
       customValue: "自定义",
@@ -374,7 +376,8 @@ const translations: Record<UiLanguage, TranslationTree> = {
       loadFailed: "Unable to load data",
       authMode: "Auth",
       apiKeyMode: "API Key",
-      sub2apiMode: "sub2api",
+      sub2apiMode: "Sub2API",
+      cpaMode: "CPA",
       chatgptMode: "chatgpt",
       defaultValue: "Default",
       customValue: "Custom",
@@ -510,7 +513,8 @@ const translations: Record<UiLanguage, TranslationTree> = {
       loadFailed: "データの読み込みに失敗しました",
       authMode: "認証ログイン",
       apiKeyMode: "API Key",
-      sub2apiMode: "sub2api",
+      sub2apiMode: "Sub2API",
+      cpaMode: "CPA",
       chatgptMode: "chatgpt",
       defaultValue: "デフォルト",
       customValue: "カスタム",

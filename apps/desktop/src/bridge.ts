@@ -47,7 +47,7 @@ export interface DesktopCreateEnvRequest {
 }
 
 export interface DesktopNativeLoginRequest {
-  mode: "auth" | "apikey" | "sub2api";
+  mode: "auth" | "apikey" | "sub2api" | "cpa";
   account: string;
   envName: string;
   target: "cli" | "app" | "both" | "none";
@@ -56,6 +56,7 @@ export interface DesktopNativeLoginRequest {
   apiKey?: string;
   baseUrlMode?: "default" | "custom";
   baseUrl?: string;
+  credentialPayload?: string;
   sub2apiPayload?: string;
   apiProtocol?: "responses" | "chat_completions";
   compatibilityEnabled?: boolean;

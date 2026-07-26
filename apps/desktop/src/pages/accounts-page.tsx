@@ -51,6 +51,9 @@ function formatAccountAuthLabel(mode: string) {
   if (mode === "sub2api") {
     return "SUB2API";
   }
+  if (mode === "cpa") {
+    return "CPA";
+  }
   if (mode === "auth") {
     return "AUTH";
   }
@@ -283,7 +286,9 @@ export function AccountsPage({
   );
 
   const loginModeNeedsApiKey = accountModeDraft === "apikey";
-  const loginModeNeedsSub2Api = accountModeDraft === "sub2api";
+  const credentialImportSource = accountModeDraft === "sub2api" || accountModeDraft === "cpa"
+    ? accountModeDraft
+    : undefined;
   const customBaseUrl = accountBaseUrlModeDraft === "custom";
   const selectedTargetLabel =
     accountTargetDraft === "both"
@@ -350,6 +355,15 @@ export function AccountsPage({
   }, [selectedAccount]);
 
   function buildProtocolSettings(): AccountProtocolSettings | null {
+    if (credentialImportSource) {
+      return {
+        apiProtocol: "responses",
+        compatibilityEnabled: false,
+        reasoningProfile: "auto",
+        longConversationStrategy: "safe",
+        instructionRole: "auto",
+      };
+    }
     try {
       let requestOverrides: Record<string, unknown> | undefined;
       if (compatibilityOverrides.trim()) {
@@ -447,7 +461,6 @@ export function AccountsPage({
                   { value: "all", label: pageCopy.accounts.allModes },
                   { value: "apikey", label: localizeAuthMode("apikey", language) },
                   { value: "auth", label: localizeAuthMode("auth", language) },
-                  { value: "sub2api", label: localizeAuthMode("sub2api", language) },
                 ]}
                 className="h-8 w-[128px] rounded-lg border-transparent bg-[#fbfbfc] px-3 text-[12px] shadow-none"
               />
@@ -628,6 +641,7 @@ export function AccountsPage({
                   { value: "auth", label: localizeAuthMode("auth", language) },
                   { value: "apikey", label: localizeAuthMode("apikey", language) },
                   { value: "sub2api", label: localizeAuthMode("sub2api", language) },
+                  { value: "cpa", label: localizeAuthMode("cpa", language) },
                 ]}
               />
             </Field>
@@ -678,25 +692,29 @@ export function AccountsPage({
               </div>
             </Field>
           ) : null}
-          <Field label={pageCopy.accounts.baseUrlMode}>
-            <Select
-              value={accountBaseUrlModeDraft}
-              onValueChange={onAccountBaseUrlModeDraftChange}
-              openOnHover={false}
-              items={[
-                { value: "default", label: pageCopy.accounts.defaultValue },
-                { value: "custom", label: pageCopy.accounts.custom },
-              ]}
-            />
-          </Field>
-          {customBaseUrl ? (
-            <Field label={pageCopy.accounts.baseUrlLabel}>
-              <Input
-                value={accountBaseUrlDraft}
-                onChange={(event) => onAccountBaseUrlDraftChange(event.target.value)}
-                placeholder={text.inputs.baseUrl}
-              />
-            </Field>
+          {!credentialImportSource ? (
+            <>
+              <Field label={pageCopy.accounts.baseUrlMode}>
+                <Select
+                  value={accountBaseUrlModeDraft}
+                  onValueChange={onAccountBaseUrlModeDraftChange}
+                  openOnHover={false}
+                  items={[
+                    { value: "default", label: pageCopy.accounts.defaultValue },
+                    { value: "custom", label: pageCopy.accounts.custom },
+                  ]}
+                />
+              </Field>
+              {customBaseUrl ? (
+                <Field label={pageCopy.accounts.baseUrlLabel}>
+                  <Input
+                    value={accountBaseUrlDraft}
+                    onChange={(event) => onAccountBaseUrlDraftChange(event.target.value)}
+                    placeholder={text.inputs.baseUrl}
+                  />
+                </Field>
+              ) : null}
+            </>
           ) : null}
           {loginModeNeedsApiKey ? (
             <Field label={language === "zh" ? "API 协议" : language === "ja" ? "API プロトコル" : "API protocol"}>
@@ -780,9 +798,15 @@ export function AccountsPage({
               </div>
             </div>
           ) : null}
-          {loginModeNeedsSub2Api ? (
-            <Field label={pageCopy.accounts.sub2api}>
-              <Textarea value={accountSub2ApiDraft} onChange={(event) => onAccountSub2ApiDraftChange(event.target.value)} placeholder='{"apiKey":"..."}' />
+          {credentialImportSource ? (
+            <Field label={credentialImportSource === "cpa" ? pageCopy.accounts.cpa : pageCopy.accounts.sub2api}>
+              <Textarea
+                value={accountSub2ApiDraft}
+                onChange={(event) => onAccountSub2ApiDraftChange(event.target.value)}
+                placeholder={credentialImportSource === "cpa"
+                  ? '{"type":"codex","access_token":"...","refresh_token":"...","id_token":"...","account_id":"..."}'
+                  : '{"tokens":{"access_token":"...","refresh_token":"...","id_token":"..."}}'}
+              />
             </Field>
           ) : null}
           <div className="grid gap-3 sm:grid-cols-2">
@@ -805,7 +829,9 @@ export function AccountsPage({
                 : accountModeDraft === "apikey"
                   ? language === "zh" ? "保存 API Key" : language === "ja" ? "API Key を保存" : "Save API Key"
                   : accountModeDraft === "sub2api"
-                    ? language === "zh" ? "保存 sub2api" : language === "ja" ? "sub2api を保存" : "Save sub2api"
+                    ? language === "zh" ? "导入 Sub2API" : language === "ja" ? "Sub2API をインポート" : "Import Sub2API"
+                    : accountModeDraft === "cpa"
+                      ? language === "zh" ? "导入 CPA" : language === "ja" ? "CPA をインポート" : "Import CPA"
                     : language === "zh" ? "授权登录" : language === "ja" ? "認証ログイン" : "Authorize login"}
             </Button>
           </div>

@@ -167,6 +167,124 @@ test("desktop bridge saves an API key account without a Codex CLI or changing ta
   }
 });
 
+test("desktop bridge imports Sub2API and CPA batches as official Codex auth accounts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-credential-import-"));
+  const previousEnv = { ...process.env };
+  try {
+    process.env.HOME = root;
+    process.env.PATH = "";
+    process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
+    process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
+    process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
+    await writeFileRecursive(join(root, "state", "current_cli_env"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_cli_account"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_app_env"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_app_account"), "default\n");
+
+    const sub2apiResult = await bridge.nativeLogin({
+      mode: "sub2api",
+      account: "sub",
+      envName: "default",
+      target: "none",
+      relogin: false,
+      credentialPayload: JSON.stringify([
+        { tokens: { access_token: "sub-access-1", refresh_token: "sub-refresh-1", account_id: "sub-account-1" } },
+        { accessToken: "sub-access-2", idToken: "sub-id-2" },
+      ]),
+    });
+    assert.equal(sub2apiResult.message, "Imported 2 Sub2API accounts");
+    assert.equal(sub2apiResult.output, "default/sub\ndefault/sub-2");
+
+    const subAuth = JSON.parse(await readFile(
+      join(root, "state", "env-accounts", "default", "sub", "auth.json"),
+      "utf8",
+    )) as Record<string, unknown>;
+    assert.equal(subAuth.auth_mode, "chatgpt");
+    assert.equal(subAuth.OPENAI_API_KEY, null);
+    assert.deepEqual(subAuth.tokens, {
+      access_token: "sub-access-1",
+      refresh_token: "sub-refresh-1",
+      account_id: "sub-account-1",
+    });
+    assert.equal(typeof subAuth.last_refresh, "string");
+
+    await bridge.nativeLogin({
+      mode: "cpa",
+      account: "cpa",
+      envName: "default",
+      target: "none",
+      relogin: false,
+      credentialPayload: JSON.stringify({
+        type: "codex",
+        access_token: "cpa-access",
+        refresh_token: "cpa-refresh",
+        id_token: "cpa-id",
+        account_id: "cpa-account",
+        last_refresh: "2026-07-26T10:00:00Z",
+      }),
+    });
+
+    const cpaAuth = JSON.parse(await readFile(
+      join(root, "state", "env-accounts", "default", "cpa", "auth.json"),
+      "utf8",
+    )) as Record<string, unknown>;
+    assert.deepEqual(cpaAuth, {
+      auth_mode: "chatgpt",
+      OPENAI_API_KEY: null,
+      tokens: {
+        access_token: "cpa-access",
+        id_token: "cpa-id",
+        refresh_token: "cpa-refresh",
+        account_id: "cpa-account",
+      },
+      last_refresh: "2026-07-26T10:00:00Z",
+    });
+
+    const runtime = JSON.parse(await readFile(
+      join(root, "state", "env-accounts", "default", "cpa", "runtime.json"),
+      "utf8",
+    )) as Record<string, unknown>;
+    assert.equal(runtime.preferred_auth_method, "chatgpt");
+    assert.equal(runtime.openai_base_url_mode, "default");
+    assert.equal(String(runtime.openai_base_url ?? ""), "");
+  } finally {
+    restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("desktop bridge validates a complete import batch before writing accounts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-invalid-import-"));
+  const previousEnv = { ...process.env };
+  try {
+    process.env.HOME = root;
+    process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
+    process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
+    process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
+
+    await assert.rejects(
+      bridge.nativeLogin({
+        mode: "cpa",
+        account: "invalid-batch",
+        envName: "default",
+        target: "none",
+        relogin: false,
+        credentialPayload: JSON.stringify([
+          { type: "codex", access_token: "valid-secret" },
+          { type: "codex", refresh_token: "invalid-secret" },
+        ]),
+      }),
+      /CPA import: item 2 is missing access_token/,
+    );
+    await assert.rejects(
+      access(join(root, "state", "env-accounts", "default", "invalid-batch")),
+    );
+  } finally {
+    restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("desktop bridge saves Chat compatibility settings through the account update flow", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-account-chat-save-"));
   const previousEnv = { ...process.env };

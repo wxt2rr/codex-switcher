@@ -1,7 +1,7 @@
 {
   "name": "appsdesktop",
   "private": true,
-  "version": "0.1.21",
+  "version": "0.1.22",
   "description": "Electron desktop shell for codex-switcher",
   "author": "wangxt",
   "type": "module",
@@ -12,7 +12,7 @@
     "electron": "electron electron-dist/electron/main.cjs",
     "electron:dev": "concurrently -k \"vite\" \"wait-on tcp:1420 && cross-env CODEX_SWITCHER_DESKTOP_DEV_SERVER_URL=http://127.0.0.1:1420 electron electron-dist/electron/main.cjs\"",
     "preview": "vite preview",
-    "test:desktop": "tsx --test electron/model-catalog-store.test.ts electron/account-model-catalog.test.ts electron/windows-packaged-app-profile.test.ts electron/skill-manager.test.ts electron/app-environment-badges.test.ts electron/app-environment-badge-adapters.test.ts src/model-editor.test.ts src/pages/models-page.test.ts src/pages/skills-page.test.ts src/pages/operations-page.test.ts src/api-key-display.test.ts electron/cli-terminal-settings.test.ts src/bridge.test.ts src/view-model.test.ts src/operation-result.test.ts src/desktop-feedback.test.ts src/account-usage.test.ts src/auth-metrics.test.ts src/proxy-status.test.ts src/refresh-policy.test.ts src/components/adaptive-menu-placement.test.ts src/components/hover-menu-intent.test.ts src/components/desktop-shell.test.ts src/components/responsive-layout.test.ts src/components/select-field.test.ts src/components/usage-trend-chart-model.test.ts electron/package.test.ts electron/builder-config.test.ts electron/bridge-smoke.test.ts electron/bridge-core-ops.test.ts electron/codex-projects.test.ts electron/codex-tool-paths.test.ts electron/desktop-settings.test.ts electron/runtime-paths.test.ts electron/usage-routing-model.test.ts electron/usage-store.test.ts electron/usage-router-service.test.ts electron/usage-router-manager.test.ts",
+    "test:desktop": "tsx --test electron/model-catalog-store.test.ts electron/account-model-catalog.test.ts electron/windows-packaged-app-profile.test.ts electron/skill-manager.test.ts electron/app-environment-badges.test.ts electron/app-environment-badge-adapters.test.ts electron/external-codex-credential-import.test.ts src/model-editor.test.ts src/pages/models-page.test.ts src/pages/skills-page.test.ts src/pages/operations-page.test.ts src/api-key-display.test.ts electron/cli-terminal-settings.test.ts src/bridge.test.ts src/view-model.test.ts src/operation-result.test.ts src/desktop-feedback.test.ts src/account-usage.test.ts src/auth-metrics.test.ts src/proxy-status.test.ts src/refresh-policy.test.ts src/components/adaptive-menu-placement.test.ts src/components/hover-menu-intent.test.ts src/components/desktop-shell.test.ts src/components/responsive-layout.test.ts src/components/select-field.test.ts src/components/usage-trend-chart-model.test.ts electron/package.test.ts electron/builder-config.test.ts electron/bridge-smoke.test.ts electron/bridge-core-ops.test.ts electron/codex-projects.test.ts electron/codex-tool-paths.test.ts electron/desktop-settings.test.ts electron/runtime-paths.test.ts electron/usage-routing-model.test.ts electron/usage-store.test.ts electron/usage-router-service.test.ts electron/usage-router-manager.test.ts",
     "test:pools": "tsx --test electron/account-pool-routing.test.ts electron/account-pool-store.test.ts electron/usage-router-service.test.ts",
     "test:app-windows": "tsx --test electron/app-window-lifecycle.test.ts electron/desktop-settings.test.ts electron/windows-packaged-app-profile.test.ts",
     "test:retention": "tsx --test electron/env-history-retention.test.ts electron/desktop-settings.test.ts",

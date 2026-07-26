@@ -27,6 +27,9 @@ export function localizeAuthMode(value: string, language: UiLanguage) {
   if (value === "sub2api") {
     return text.labels.sub2apiMode;
   }
+  if (value === "cpa") {
+    return text.labels.cpaMode;
+  }
   if (value === "chatgpt") {
     return text.labels.chatgptMode;
   }
