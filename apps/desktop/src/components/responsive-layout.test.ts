@@ -165,7 +165,7 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.match(accounts, /保存 API Key/);
   assert.doesNotMatch(accounts, /保存设置/);
   assert.match(accounts, /compatibilityEnabled:\s*apiProtocolDraft === "chat_completions" && compatibilityEnabled/);
-  assert.match(reactApp, /compatibilityEnabled:\s*effectiveProtocolSettings\.compatibilityEnabled/);
+  assert.match(reactApp, /compatibilityEnabled:\s*accountProviderDraft === "deepseek" \? false : effectiveProtocolSettings\.compatibilityEnabled/);
   assert.match(reactApp, /account\.route\?\.originalBaseUrl \?\? account\.runtime\.openaiBaseUrl/);
   assert.match(accounts, /导入 Sub2API/);
   assert.match(accounts, /导入 CPA/);
@@ -349,7 +349,7 @@ test("shared selects open on hover without button press scaling", () => {
 
 test("account side panel selects require a manual click", () => {
   const clickOnlySelects = accounts.match(/openOnHover=\{false\}/g) ?? [];
-  assert.equal(clickOnlySelects.length, 9);
+  assert.equal(clickOnlySelects.length, 10);
   assert.match(accounts, /API protocol/);
   assert.match(accounts, /长会话处理/);
   assert.match(accounts, /安全压缩（推荐）/);
