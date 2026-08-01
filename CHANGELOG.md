@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.12 - 2026-08-01
+
+- Added DeepSeek official Codex Responses model catalog filling for supported models and kept existing provider selection logic intact.
+- Extended the independent model flow so active accounts can pick up DeepSeek model metadata without overwriting user-owned config.
+
 ## 0.8.11 - 2026-05-13
 
 - Fixed `status` card layout so account blocks wrap earlier and remain readable when one environment has many accounts.

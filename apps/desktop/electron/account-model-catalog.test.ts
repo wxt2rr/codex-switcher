@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -79,4 +79,59 @@ test("bundled catalog command wraps Windows command shims", () => {
     command: "cmd.exe",
     args: ["/d", "/s", "/c", '"C:\\Tools\\codex.cmd" debug models --bundled'],
   });
+});
+
+test("DeepSeek official model preset is filled into models.json without overwriting existing entries", async () => {
+  const root = await mkdtemp(join(tmpdir(), "account-model-catalog-deepseek-"));
+  const homePath = join(root, "home");
+  await mkdir(homePath, { recursive: true });
+  await writeFile(
+    join(homePath, "models.json"),
+    JSON.stringify({ models: [{ slug: "user-model", display_name: "User Model" }] }, null, 2),
+  );
+  await writeFile(join(homePath, "config.toml"), 'model = "deepseek-v4-flash"\n');
+  const store = createModelCatalogStore(join(root, "custom-models.json"));
+
+  const result = await synchronizeAccountModelCatalog({
+    envName: "work",
+    accountName: "alice",
+    homePath,
+    baseUrl: "https://api.deepseek.com/",
+    store,
+    loadBundledCatalog: async () => ({ models: [] }),
+  });
+
+  assert.equal(result.enabled, false);
+  assert.equal(result.preset, "deepseek");
+  const catalog = JSON.parse(await readFile(join(homePath, "models.json"), "utf8")) as {
+    models: Array<Record<string, unknown>>;
+  };
+  assert.deepEqual(catalog.models.map((model) => model.slug), ["user-model", "deepseek-v4-flash"]);
+  assert.match(await readFile(join(homePath, "config.toml"), "utf8"), /model_catalog_json = .*models\.json/);
+});
+
+test("DeepSeek preset does not replace an existing model with the same slug", async () => {
+  const root = await mkdtemp(join(tmpdir(), "account-model-catalog-deepseek-existing-"));
+  const homePath = join(root, "home");
+  await mkdir(homePath, { recursive: true });
+  await writeFile(
+    join(homePath, "models.json"),
+    JSON.stringify({ models: [{ slug: "deepseek-v4-flash", display_name: "User Override" }] }, null, 2),
+  );
+  const store = createModelCatalogStore(join(root, "custom-models.json"));
+
+  await synchronizeAccountModelCatalog({
+    envName: "work",
+    accountName: "alice",
+    homePath,
+    baseUrl: "https://api.deepseek.com",
+    model: "deepseek-v4-flash",
+    store,
+    loadBundledCatalog: async () => ({ models: [] }),
+  });
+
+  const catalog = JSON.parse(await readFile(join(homePath, "models.json"), "utf8")) as {
+    models: Array<Record<string, unknown>>;
+  };
+  assert.deepEqual(catalog.models, [{ slug: "deepseek-v4-flash", display_name: "User Override" }]);
 });

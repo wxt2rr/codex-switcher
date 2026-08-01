@@ -22,6 +22,7 @@ test("desktop build emits electron main entry and preload bundle", async () => {
   const cliTerminalSettingsPath = join(desktopRoot, "electron-dist", "electron", "cli-terminal-settings.cjs");
   const modelCatalogStorePath = join(desktopRoot, "electron-dist", "electron", "model-catalog-store.cjs");
   const accountModelCatalogPath = join(desktopRoot, "electron-dist", "electron", "account-model-catalog.cjs");
+  const providerModelPresetsPath = join(desktopRoot, "electron-dist", "electron", "provider-model-presets.js");
   const compatibilityHandlerPath = join(desktopRoot, "electron-dist", "electron", "openai-chat-compat", "compatibility-handler.js");
   const electronModuleBoundaryPath = join(desktopRoot, "electron-dist", "electron", "package.json");
 
@@ -38,6 +39,7 @@ test("desktop build emits electron main entry and preload bundle", async () => {
   await access(cliTerminalSettingsPath, constants.F_OK);
   await access(modelCatalogStorePath, constants.F_OK);
   await access(accountModelCatalogPath, constants.F_OK);
+  await access(providerModelPresetsPath, constants.F_OK);
   await access(compatibilityHandlerPath, constants.F_OK);
   await access(electronModuleBoundaryPath, constants.F_OK);
 
@@ -75,6 +77,7 @@ test("desktop build emits electron main entry and preload bundle", async () => {
 
   const accountModelCatalogSource = await readFile(accountModelCatalogPath, "utf8");
   assert.match(accountModelCatalogSource, /require\("\.\/model-catalog-store\.cjs"\)/);
+  assert.match(accountModelCatalogSource, /require\("\.\/provider-model-presets\.js"\)/);
   assert.deepEqual(JSON.parse(await readFile(electronModuleBoundaryPath, "utf8")), { type: "commonjs" });
   const compatibilitySource = await readFile(compatibilityHandlerPath, "utf8");
   assert.match(compatibilitySource, /handleChatCompatibilityRequest/);

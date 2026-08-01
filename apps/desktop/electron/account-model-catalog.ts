@@ -8,6 +8,7 @@ import {
   type ModelCatalogEntry,
   type ModelCatalogStore,
 } from "./model-catalog-store.js";
+import { resolveProviderModelPreset } from "./provider-model-presets.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -50,18 +51,27 @@ export async function synchronizeAccountModelCatalog(options: {
   homePath: string;
   store: ModelCatalogStore;
   loadBundledCatalog: () => Promise<BundledModelCatalog>;
-}): Promise<{ enabled: boolean; catalogPath?: string }> {
+  baseUrl?: string;
+  model?: string;
+}): Promise<{ enabled: boolean; catalogPath?: string; preset?: string }> {
   const snapshot = await options.store.load();
   const bindingIds = snapshot.accountBindings[
     accountModelBindingKey(options.envName, options.accountName)
   ] ?? [];
   const configPath = join(options.homePath, "config.toml");
   const catalogPath = join(options.homePath, "model-catalogs", "codex-switcher-models.json");
+  const configuredModel = options.model ?? await readConfiguredModel(configPath);
+  const preset = resolveProviderModelPreset({ baseUrl: options.baseUrl, model: configuredModel });
+
+  if (preset) {
+    await mergeModelCatalogFile(join(options.homePath, preset.catalogPath), preset.entries);
+  }
 
   if (bindingIds.length === 0) {
-    await removeModelCatalogConfig(configPath);
+    if (preset) await setModelCatalogConfig(configPath, join(options.homePath, preset.catalogPath));
+    else await removeModelCatalogConfig(configPath);
     await rm(catalogPath, { force: true });
-    return { enabled: false };
+    return { enabled: false, preset: preset?.providerId };
   }
 
   const byId = new Map(snapshot.models.map((model) => [model.id, model]));
@@ -71,13 +81,39 @@ export async function synchronizeAccountModelCatalog(options: {
     return model.entry;
   });
   const bundled = await options.loadBundledCatalog();
-  const bundledSlugs = new Set(bundled.models.map((model) => model.slug));
+  const catalogEntries = preset ? [...bundled.models, ...preset.entries] : bundled.models;
+  const bundledSlugs = new Set(catalogEntries.map((model) => model.slug));
   const collision = customEntries.find((model) => bundledSlugs.has(model.slug));
   if (collision) throw new Error(`Custom model '${collision.slug}' conflicts with a bundled model`);
 
-  await atomicWriteJson(catalogPath, { models: [...bundled.models, ...customEntries] });
+  await atomicWriteJson(catalogPath, { models: [...catalogEntries, ...customEntries] });
   await setModelCatalogConfig(configPath, catalogPath);
-  return { enabled: true, catalogPath };
+  return { enabled: true, catalogPath, preset: preset?.providerId };
+}
+
+async function mergeModelCatalogFile(path: string, entries: ModelCatalogEntry[]): Promise<void> {
+  const existing = await readFile(path, "utf8").catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
+    throw error;
+  });
+  let models: ModelCatalogEntry[] = [];
+  if (existing.trim()) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(existing);
+    } catch (error) {
+      throw new Error(`Failed to read model catalog '${path}': ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!isRecord(parsed) || !Array.isArray(parsed.models)) {
+      throw new Error(`Model catalog '${path}' must contain a models array`);
+    }
+    models = parsed.models.map(validateCatalogEntry);
+  }
+
+  const knownSlugs = new Set(models.map((model) => model.slug));
+  const additions = entries.filter((entry) => !knownSlugs.has(entry.slug));
+  if (additions.length === 0) return;
+  await atomicWriteJson(path, { models: [...models, ...additions] });
 }
 
 async function setModelCatalogConfig(configPath: string, catalogPath: string): Promise<void> {
@@ -100,6 +136,22 @@ function removeModelCatalogLine(content: string): string {
     .filter((line) => !/^\s*model_catalog_json\s*=/.test(line))
     .join("\n")
     .trim();
+}
+
+async function readConfiguredModel(configPath: string): Promise<string | undefined> {
+  const content = await readFile(configPath, "utf8").catch(() => "");
+  let insideSection = false;
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("[")) {
+      insideSection = true;
+      continue;
+    }
+    if (insideSection || trimmed.startsWith("#")) continue;
+    const match = trimmed.match(/^model\s*=\s*"([^"]+)"\s*(?:#.*)?$/);
+    if (match?.[1]) return match[1];
+  }
+  return undefined;
 }
 
 async function atomicWriteJson(path: string, value: unknown): Promise<void> {

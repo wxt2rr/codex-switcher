@@ -84,12 +84,13 @@ async function writeManagedConfig(
   }
   if (runtime.independentModelEnabled && runtime.preferredAuthMethod === "chatgpt") {
     const providerId = normalizeProviderId(runtime.independentModelProviderId);
+    const independentModelSlug = resolveIndependentModelSlug(runtime.independentModelBaseUrl) ?? "gpt-5.4";
     managedLines.push("");
     managedLines.push(`model_provider = ${quoteTomlString(providerId)}`);
     managedLines.push("");
     managedLines.push(`[model_providers.${providerId}]`);
     managedLines.push(`name = ${quoteTomlString(providerId)}`);
-    managedLines.push('model = "gpt-5.4"');
+    managedLines.push(`model = ${quoteTomlString(independentModelSlug)}`);
     managedLines.push(`base_url = ${quoteTomlString(runtime.independentModelBaseUrl ?? "")}`);
     managedLines.push(
       `experimental_bearer_token = ${quoteTomlString(runtime.independentModelApiKey ?? "")}`,
@@ -177,6 +178,13 @@ function removeManagedConfigLines(content: string): string {
 
 function quoteTomlString(value: string): string {
   return JSON.stringify(value);
+}
+
+function resolveIndependentModelSlug(baseUrl?: string): string | undefined {
+  const normalized = baseUrl?.trim().toLowerCase();
+  if (!normalized || normalized === "default") return undefined;
+  if (normalized.startsWith("https://api.deepseek.com")) return "deepseek-v4-flash";
+  return undefined;
 }
 
 function normalizeProviderId(value: string | undefined): string {

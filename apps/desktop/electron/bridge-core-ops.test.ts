@@ -697,6 +697,54 @@ test("desktop bridge recreates Chat compatibility routing for the copied account
   }
 });
 
+test("desktop bridge updates independent model config and DeepSeek catalog for active accounts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-independent-model-"));
+  const previousEnv = { ...process.env };
+
+  try {
+    process.env.HOME = root;
+    process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
+    process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
+    process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
+    bridge.__testUtils.resetUsageRouterManagerForTest();
+
+    await writeFileRecursive(join(root, "state", "current_cli_env"), "project\n");
+    await writeFileRecursive(join(root, "state", "current_cli_account"), "personal\n");
+    await writeFileRecursive(join(root, "state", "current_app_env"), "project\n");
+    await writeFileRecursive(join(root, "state", "current_app_account"), "personal\n");
+    await writeFileRecursive(join(root, "envs", "project", "home", "config.toml"), "model = 'gpt-5'\n");
+    await writeFileRecursive(
+      join(root, "state", "env-accounts", "project", "personal", "runtime.json"),
+      `${JSON.stringify({
+        preferred_auth_method: "chatgpt",
+        openai_base_url_mode: "default",
+      }, null, 2)}\n`,
+    );
+
+    const result = await bridge.updateIndependentModel({
+      envName: "project",
+      accountName: "personal",
+      enabled: true,
+      providerId: "custom",
+      apiKey: "sk-indie",
+      baseUrl: "https://api.deepseek.com/",
+    });
+
+    assert.match(result.message, /Updated independent model/);
+    const config = await readFile(join(root, "envs", "project", "home", "config.toml"), "utf8");
+    assert.match(config, /model = "deepseek-v4-flash"/);
+    assert.match(config, /model_provider = "custom"/);
+    const catalog = JSON.parse(await readFile(join(root, "envs", "project", "home", "models.json"), "utf8")) as {
+      models: Array<{ slug: string }>;
+    };
+    assert.ok(catalog.models.some((model) => model.slug === "deepseek-v4-flash"));
+  } finally {
+    bridge.__testUtils.resetUsageRouterManagerForTest();
+    restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("desktop bridge deleteEnv also removes lingering usage routes for that environment", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-env-route-delete-"));
   const previousEnv = { ...process.env };

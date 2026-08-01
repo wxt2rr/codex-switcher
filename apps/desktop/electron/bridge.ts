@@ -77,6 +77,12 @@ import {
   synchronizeAccountModelCatalog,
 } from "./account-model-catalog.js";
 import {
+  DEEPSEEK_DEFAULT_MODEL_SLUG,
+  isDeepSeekOfficialBaseUrl,
+  resolveProviderDefaultPreset,
+  resolveProviderModelPreset,
+} from "./provider-model-presets.js";
+import {
   SkillManager,
   type CreateSkillProviderInput,
   type InstallSkillInput,
@@ -1415,6 +1421,16 @@ export async function updateIndependentModel(request: {
     runtime: account.runtime,
   });
 
+  for (const currentTarget of ["cli", "app"] as const) {
+    const pointer = next.targets[currentTarget];
+    if (pointer.env === request.envName && pointer.account === request.accountName) {
+      await applyTargetHomeStateWithHistory(runtime, next, currentTarget, currentTarget === "cli" ? "switch-cli" : "switch-app");
+    }
+  }
+  if (request.enabled && isDeepSeekOfficialBaseUrl(request.baseUrl)) {
+    await ensureDeepSeekIndependentModelSlug(state.envs[request.envName]!.path);
+  }
+
   return {
     message: `Updated independent model for ${request.envName}/${request.accountName}`,
     output: `${request.envName}/${request.accountName} ${request.enabled ? "enabled" : "disabled"}\n`,
@@ -2267,12 +2283,23 @@ async function applyTargetHomeStateWithHistory(
   try {
     await runtime.applyTargetHomeState({ state, target });
     const pointer = state.targets[target];
+    const account = state.envs[pointer.env]?.accounts[pointer.account];
     const cliStatus = await getCodexToolStatus("cli", getCodexToolPathOptions());
+    const catalogBaseUrl = account?.runtime.independentModelEnabled
+      ? account.runtime.independentModelBaseUrl ?? account.runtime.openaiBaseUrl
+      : account?.runtime.openaiBaseUrl;
+    const catalogPreset = account?.runtime.independentModelEnabled
+      ? resolveProviderDefaultPreset(catalogBaseUrl)
+      : resolveProviderModelPreset({ baseUrl: catalogBaseUrl, model: account?.runtime.model });
     await synchronizeAccountModelCatalog({
       envName: pointer.env,
       accountName: pointer.account,
       homePath: env.path,
       store: getModelCatalogStore(),
+      baseUrl: catalogBaseUrl,
+      model: catalogPreset?.entries[0]?.slug
+        ?? account?.runtime.model
+        ?? (account?.runtime.independentModelEnabled ? DEEPSEEK_DEFAULT_MODEL_SLUG : undefined),
       loadBundledCatalog: async () => {
         if (!cliStatus.available) {
           throw new Error("Codex CLI is required to generate the merged model catalog");
@@ -2664,6 +2691,16 @@ async function saveAccountArtifacts(options: {
   }
 
   await syncEnvironmentRouteIfEnabled(options.envName);
+}
+
+async function ensureDeepSeekIndependentModelSlug(homePath: string): Promise<void> {
+  const configPath = join(homePath, "config.toml");
+  const content = await readFile(configPath, "utf8").catch(() => "");
+  if (!content || !content.includes('model = "gpt-5.4"')) return;
+  const next = content.replace('model = "gpt-5.4"', `model = "${DEEPSEEK_DEFAULT_MODEL_SLUG}"`);
+  if (next !== content) {
+    await writeFile(configPath, next, "utf8");
+  }
 }
 
 function expandTargets(target: "cli" | "app" | "both"): Array<"cli" | "app"> {
