@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.13 - 2026-08-01
+
+- Added provider-first account creation so OpenAI keeps the existing login/import modes while DeepSeek uses an API-key-only flow.
+- Added DeepSeek provider presets with locked official Base URL and automatic default model binding for `deepseek-v4-flash` and `deepseek-v4-pro`.
+
 ## 0.8.12 - 2026-08-01
 
 - Added DeepSeek official Codex Responses model catalog filling for supported models and kept existing provider selection logic intact.
