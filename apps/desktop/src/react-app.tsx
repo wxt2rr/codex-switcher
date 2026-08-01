@@ -24,8 +24,10 @@ import {
   buildDesktopNotice,
   type DesktopNotice,
 } from "./desktop-feedback";
+import type { AccountProviderId } from "./pages/accounts-page";
 
 const bridge = resolveDesktopBridge();
+const DEEPSEEK_OFFICIAL_BASE_URL = "https://api.deepseek.com";
 
 function resolveInitialView(): NavView {
   if (typeof window === "undefined") {
@@ -62,6 +64,7 @@ export function App() {
   const [accountNameDraft, setAccountNameDraft] = useState("");
   const [accountTargetDraft, setAccountTargetDraft] = useState("cli");
   const [accountModeDraft, setAccountModeDraft] = useState("auth");
+  const [accountProviderDraft, setAccountProviderDraft] = useState<AccountProviderId>("openai");
   const [accountApiKeyDraft, setAccountApiKeyDraft] = useState("");
   const [accountBaseUrlModeDraft, setAccountBaseUrlModeDraft] = useState("default");
   const [accountBaseUrlDraft, setAccountBaseUrlDraft] = useState("");
@@ -836,6 +839,7 @@ export function App() {
     setBusy(true);
     try {
       const result = await bridge.nativeLogin({
+        providerId: accountProviderDraft,
         mode: accountModeDraft === "apikey" || accountModeDraft === "sub2api" || accountModeDraft === "cpa"
           ? accountModeDraft
           : "auth",
@@ -844,11 +848,17 @@ export function App() {
         target: "none",
         relogin: action === "relogin",
         apiKey: accountApiKeyDraft,
-        baseUrlMode: accountBaseUrlModeDraft === "custom" ? "custom" : "default",
-        baseUrl: accountBaseUrlDraft.trim() || undefined,
+        baseUrlMode: accountProviderDraft === "deepseek"
+          ? "custom"
+          : accountBaseUrlModeDraft === "custom"
+            ? "custom"
+            : "default",
+        baseUrl: accountProviderDraft === "deepseek"
+          ? DEEPSEEK_OFFICIAL_BASE_URL
+          : accountBaseUrlDraft.trim() || undefined,
         credentialPayload: accountSub2ApiDraft,
-        apiProtocol: effectiveProtocolSettings.apiProtocol,
-        compatibilityEnabled: effectiveProtocolSettings.compatibilityEnabled,
+        apiProtocol: accountProviderDraft === "deepseek" ? "responses" : effectiveProtocolSettings.apiProtocol,
+        compatibilityEnabled: accountProviderDraft === "deepseek" ? false : effectiveProtocolSettings.compatibilityEnabled,
         upstreamModel: effectiveProtocolSettings.upstreamModel,
         reasoningProfile: effectiveProtocolSettings.reasoningProfile,
         longConversationStrategy: effectiveProtocolSettings.longConversationStrategy,
@@ -978,6 +988,7 @@ export function App() {
       setAccountNameDraft("");
       setAccountTargetDraft("cli");
       setAccountModeDraft("auth");
+      setAccountProviderDraft("openai");
       setAccountApiKeyDraft("");
       setAccountBaseUrlModeDraft("default");
       setAccountBaseUrlDraft("");
@@ -988,6 +999,9 @@ export function App() {
     setAccountEnvDraft(account.envName);
     setAccountNameDraft(account.name);
     setAccountModeDraft(account.authMode === "apikey" || account.authMode === "sub2api" ? account.authMode : "auth");
+    setAccountProviderDraft(
+      account.runtime.openaiBaseUrl?.trim().startsWith(DEEPSEEK_OFFICIAL_BASE_URL) ? "deepseek" : "openai",
+    );
     setAccountApiKeyDraft(account.apiKeyValue ?? "");
     setAccountBaseUrlModeDraft(account.runtime.openaiBaseUrlMode);
     setAccountBaseUrlDraft(account.route?.originalBaseUrl ?? account.runtime.openaiBaseUrl ?? "");
@@ -1121,6 +1135,7 @@ export function App() {
           accountNameDraft={accountNameDraft}
           accountTargetDraft={accountTargetDraft}
           accountModeDraft={accountModeDraft}
+          accountProviderDraft={accountProviderDraft}
           accountApiKeyDraft={accountApiKeyDraft}
           accountBaseUrlModeDraft={accountBaseUrlModeDraft}
           accountBaseUrlDraft={accountBaseUrlDraft}
@@ -1139,6 +1154,7 @@ export function App() {
           }}
           onAccountNameDraftChange={setAccountNameDraft}
           onAccountModeDraftChange={setAccountModeDraft}
+          onAccountProviderDraftChange={setAccountProviderDraft}
           onAccountApiKeyDraftChange={setAccountApiKeyDraft}
           onAccountBaseUrlModeDraftChange={setAccountBaseUrlModeDraft}
           onAccountBaseUrlDraftChange={setAccountBaseUrlDraft}

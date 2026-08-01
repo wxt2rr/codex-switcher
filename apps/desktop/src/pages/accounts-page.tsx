@@ -87,6 +87,43 @@ function getApiUsageHint(language: UiLanguage) {
 }
 
 const DEFAULT_ACCOUNT_ENVIRONMENT_KEY = "codex-switcher.accounts.default-environment";
+const DEEPSEEK_OFFICIAL_BASE_URL = "https://api.deepseek.com";
+
+export type AccountProviderId = "openai" | "deepseek";
+
+function getAccountProviderLabel(providerId: AccountProviderId, language: UiLanguage): string {
+  if (providerId === "deepseek") {
+    return language === "zh" ? "DeepSeek" : language === "ja" ? "DeepSeek" : "DeepSeek";
+  }
+  return language === "zh" ? "OpenAI" : language === "ja" ? "OpenAI" : "OpenAI";
+}
+
+function getAccountProviderHint(providerId: AccountProviderId, language: UiLanguage): string {
+  if (providerId === "deepseek") {
+    return language === "zh"
+      ? "使用 DeepSeek 官方 Responses 配置，Base URL 会自动锁定。"
+      : language === "ja"
+        ? "DeepSeek の公式 Responses 設定を使います。Base URL は自動で固定されます。"
+        : "Uses DeepSeek's official Responses preset. Base URL is locked automatically.";
+  }
+  return language === "zh"
+    ? "保留现有的四种接入方式。"
+    : language === "ja"
+      ? "既存の 4 つの接続方式を利用します。"
+      : "Keeps the existing four connection modes.";
+}
+
+function getAccountModeItems(providerId: AccountProviderId, language: UiLanguage) {
+  if (providerId === "deepseek") {
+    return [{ value: "apikey", label: localizeAuthMode("apikey", language) }];
+  }
+  return [
+    { value: "auth", label: localizeAuthMode("auth", language) },
+    { value: "apikey", label: localizeAuthMode("apikey", language) },
+    { value: "sub2api", label: localizeAuthMode("sub2api", language) },
+    { value: "cpa", label: localizeAuthMode("cpa", language) },
+  ];
+}
 
 function readDefaultAccountEnvironment(): string {
   if (typeof window === "undefined") return "default";
@@ -114,6 +151,7 @@ export function AccountsPage({
   accountNameDraft,
   accountTargetDraft,
   accountModeDraft,
+  accountProviderDraft,
   accountApiKeyDraft,
   accountBaseUrlModeDraft,
   accountBaseUrlDraft,
@@ -126,6 +164,7 @@ export function AccountsPage({
   onRefreshAuthMetrics,
   onAccountNameDraftChange,
   onAccountModeDraftChange,
+  onAccountProviderDraftChange,
   onAccountApiKeyDraftChange,
   onAccountBaseUrlModeDraftChange,
   onAccountBaseUrlDraftChange,
@@ -157,6 +196,7 @@ export function AccountsPage({
   accountNameDraft: string;
   accountTargetDraft: string;
   accountModeDraft: string;
+  accountProviderDraft: AccountProviderId;
   accountApiKeyDraft: string;
   accountBaseUrlModeDraft: string;
   accountBaseUrlDraft: string;
@@ -169,6 +209,7 @@ export function AccountsPage({
   onRefreshAuthMetrics: () => void;
   onAccountNameDraftChange: (value: string) => void;
   onAccountModeDraftChange: (value: string) => void;
+  onAccountProviderDraftChange: (value: AccountProviderId) => void;
   onAccountApiKeyDraftChange: (value: string) => void;
   onAccountBaseUrlModeDraftChange: (value: string) => void;
   onAccountBaseUrlDraftChange: (value: string) => void;
@@ -286,6 +327,7 @@ export function AccountsPage({
   );
 
   const loginModeNeedsApiKey = accountModeDraft === "apikey";
+  const isDeepSeekProvider = accountProviderDraft === "deepseek";
   const credentialImportSource = accountModeDraft === "sub2api" || accountModeDraft === "cpa"
     ? accountModeDraft
     : undefined;
@@ -331,6 +373,38 @@ export function AccountsPage({
       setShowApiKeyDraft(false);
     }
   }, [loginDrawerOpen]);
+
+  useEffect(() => {
+    if (isDeepSeekProvider) {
+      if (accountModeDraft !== "apikey") {
+        onAccountModeDraftChange("apikey");
+      }
+      if (apiProtocolDraft !== "responses") {
+        setApiProtocolDraft("responses");
+      }
+      if (accountBaseUrlModeDraft !== "custom") {
+        onAccountBaseUrlModeDraftChange("custom");
+      }
+      if (accountBaseUrlDraft.trim() !== DEEPSEEK_OFFICIAL_BASE_URL) {
+        onAccountBaseUrlDraftChange(DEEPSEEK_OFFICIAL_BASE_URL);
+      }
+      return;
+    }
+
+    if (accountBaseUrlDraft.trim() === DEEPSEEK_OFFICIAL_BASE_URL) {
+      onAccountBaseUrlModeDraftChange("default");
+      onAccountBaseUrlDraftChange("");
+    }
+  }, [
+    accountBaseUrlDraft,
+    accountBaseUrlModeDraft,
+    accountModeDraft,
+    apiProtocolDraft,
+    isDeepSeekProvider,
+    onAccountBaseUrlDraftChange,
+    onAccountBaseUrlModeDraftChange,
+    onAccountModeDraftChange,
+  ]);
 
   useEffect(() => {
     if (!selectedAccount) {
@@ -619,6 +693,20 @@ export function AccountsPage({
         closeLabel={pageCopy.common.close}
       >
         <div className="space-y-4">
+          <Field
+            label={language === "zh" ? "服务商" : language === "ja" ? "サービスプロバイダー" : "Provider"}
+            hint={getAccountProviderHint(accountProviderDraft, language)}
+          >
+            <Select
+              value={accountProviderDraft}
+              onValueChange={(value) => onAccountProviderDraftChange(value as AccountProviderId)}
+              openOnHover={false}
+              items={[
+                { value: "openai", label: getAccountProviderLabel("openai", language) },
+                { value: "deepseek", label: getAccountProviderLabel("deepseek", language) },
+              ]}
+            />
+          </Field>
           <Field label={pageCopy.common.environment}>
             <Select
               value={accountEnvDraft}
@@ -637,12 +725,7 @@ export function AccountsPage({
                 value={accountModeDraft}
                 onValueChange={onAccountModeDraftChange}
                 openOnHover={false}
-                items={[
-                  { value: "auth", label: localizeAuthMode("auth", language) },
-                  { value: "apikey", label: localizeAuthMode("apikey", language) },
-                  { value: "sub2api", label: localizeAuthMode("sub2api", language) },
-                  { value: "cpa", label: localizeAuthMode("cpa", language) },
-                ]}
+                items={getAccountModeItems(accountProviderDraft, language)}
               />
             </Field>
           </div>
@@ -692,7 +775,7 @@ export function AccountsPage({
               </div>
             </Field>
           ) : null}
-          {!credentialImportSource ? (
+          {!credentialImportSource && !isDeepSeekProvider ? (
             <>
               <Field label={pageCopy.accounts.baseUrlMode}>
                 <Select
@@ -716,7 +799,12 @@ export function AccountsPage({
               ) : null}
             </>
           ) : null}
-          {loginModeNeedsApiKey ? (
+          {!credentialImportSource && isDeepSeekProvider ? (
+            <Field label={pageCopy.accounts.baseUrlLabel}>
+              <Input value={DEEPSEEK_OFFICIAL_BASE_URL} disabled />
+            </Field>
+          ) : null}
+          {loginModeNeedsApiKey && !isDeepSeekProvider ? (
             <Field label={language === "zh" ? "API 协议" : language === "ja" ? "API プロトコル" : "API protocol"}>
               <Select value={apiProtocolDraft} onValueChange={(value) => {
                 const protocol = value as typeof apiProtocolDraft;
@@ -729,7 +817,7 @@ export function AccountsPage({
                 ]} />
             </Field>
           ) : null}
-          {loginModeNeedsApiKey && (apiProtocolDraft === "chat_completions" || compatibilityEnabled) && selectedAccount ? (
+          {loginModeNeedsApiKey && !isDeepSeekProvider && (apiProtocolDraft === "chat_completions" || compatibilityEnabled) && selectedAccount ? (
             <div className="space-y-3 border-t border-neutral-200/80 pt-4">
               <div className="flex items-center justify-between gap-4">
                 <div className="min-w-0">

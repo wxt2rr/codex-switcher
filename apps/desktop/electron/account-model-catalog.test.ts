@@ -106,7 +106,7 @@ test("DeepSeek official model preset is filled into models.json without overwrit
   const catalog = JSON.parse(await readFile(join(homePath, "models.json"), "utf8")) as {
     models: Array<Record<string, unknown>>;
   };
-  assert.deepEqual(catalog.models.map((model) => model.slug), ["user-model", "deepseek-v4-flash"]);
+  assert.deepEqual(catalog.models.map((model) => model.slug), ["user-model", "deepseek-v4-flash", "deepseek-v4-pro"]);
   assert.match(await readFile(join(homePath, "config.toml"), "utf8"), /model_catalog_json = .*models\.json/);
 });
 
@@ -133,5 +133,8 @@ test("DeepSeek preset does not replace an existing model with the same slug", as
   const catalog = JSON.parse(await readFile(join(homePath, "models.json"), "utf8")) as {
     models: Array<Record<string, unknown>>;
   };
-  assert.deepEqual(catalog.models, [{ slug: "deepseek-v4-flash", display_name: "User Override" }]);
+  assert.equal(catalog.models.length, 2);
+  assert.equal(catalog.models[0]?.slug, "deepseek-v4-flash");
+  assert.equal(catalog.models[0]?.display_name, "User Override");
+  assert.equal(catalog.models[1]?.slug, "deepseek-v4-pro");
 });

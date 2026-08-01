@@ -167,6 +167,56 @@ test("desktop bridge saves an API key account without a Codex CLI or changing ta
   }
 });
 
+test("desktop bridge seeds DeepSeek default model bindings when creating an API key account", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-deepseek-api-key-"));
+  const previousEnv = { ...process.env };
+  try {
+    process.env.HOME = root;
+    process.env.PATH = "";
+    delete process.env.CODEX_SWITCHER_CODEX_BIN;
+    delete process.env.CODEX_BIN;
+    process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
+    process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
+    process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
+    await writeFileRecursive(join(root, "state", "current_cli_env"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_cli_account"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_app_env"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_app_account"), "default\n");
+
+    const result = await bridge.nativeLogin({
+      providerId: "deepseek",
+      mode: "apikey",
+      account: "deepseek",
+      envName: "default",
+      target: "none",
+      relogin: false,
+      apiKey: "sk-deepseek",
+    });
+
+    assert.equal(result.message, "Saved API key for default/deepseek");
+    const runtime = JSON.parse(await readFile(join(root, "state", "env-accounts", "default", "deepseek", "runtime.json"), "utf8")) as {
+      preferred_auth_method: string;
+      openai_base_url_mode: string;
+      openai_base_url?: string;
+      api_protocol?: string;
+    };
+    assert.equal(runtime.preferred_auth_method, "apikey");
+    assert.equal(runtime.openai_base_url_mode, "custom");
+    assert.equal(runtime.openai_base_url, "https://api.deepseek.com");
+    assert.equal(runtime.api_protocol, "responses");
+
+    const catalog = JSON.parse(await readFile(join(root, "state", "custom-model-catalogs.json"), "utf8")) as {
+      models: Array<{ id: string; entry: { slug: string } }>;
+      accountBindings: Record<string, string[]>;
+    };
+    assert.deepEqual(catalog.models.map((model) => model.entry.slug), ["deepseek-v4-flash", "deepseek-v4-pro"]);
+    assert.equal(catalog.accountBindings["default/deepseek"]?.length, 2);
+  } finally {
+    restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("desktop bridge imports Sub2API and CPA batches as official Codex auth accounts", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-credential-import-"));
   const previousEnv = { ...process.env };

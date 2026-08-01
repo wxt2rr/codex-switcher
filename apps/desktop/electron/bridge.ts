@@ -78,6 +78,8 @@ import {
 } from "./account-model-catalog.js";
 import {
   DEEPSEEK_DEFAULT_MODEL_SLUG,
+  getProviderDefaultBaseUrl,
+  getProviderDefaultModelEntries,
   isDeepSeekOfficialBaseUrl,
   resolveProviderDefaultPreset,
   resolveProviderModelPreset,
@@ -1438,6 +1440,7 @@ export async function updateIndependentModel(request: {
 }
 
 export async function nativeLogin(request: {
+  providerId?: string;
   mode: "auth" | "apikey" | "sub2api" | "cpa";
   account: string;
   envName: string;
@@ -2520,6 +2523,7 @@ async function nativeAuthLogin(request: {
 }
 
 async function nativeApiKeyLogin(request: {
+  providerId?: string;
   account: string;
   envName: string;
   target: "cli" | "app" | "both" | "none";
@@ -2538,6 +2542,8 @@ async function nativeApiKeyLogin(request: {
     throw new Error("API key is required");
   }
 
+  const providerId = normalizeProviderId(request.providerId);
+  const providerBaseUrl = getProviderDefaultBaseUrl(providerId);
   const runtime = await loadCoreRuntime();
   const state = await runtime.readLegacyState(getLegacyOptions());
   const env = state.envs[request.envName];
@@ -2553,9 +2559,10 @@ async function nativeApiKeyLogin(request: {
       && route.protocol === "chat_completions",
   );
   const requestedBaseUrl = request.baseUrl?.trim() || undefined;
-  const effectiveBaseUrl = requestedBaseUrl && requestedBaseUrl === existing?.runtime.compatibilityRouteBaseUrl
+  const effectiveBaseUrl = providerBaseUrl ?? (requestedBaseUrl && requestedBaseUrl === existing?.runtime.compatibilityRouteBaseUrl
     ? existingCompatibilityRoute?.originalBaseUrl ?? requestedBaseUrl
-    : requestedBaseUrl;
+    : requestedBaseUrl);
+  const hasCustomBaseUrl = providerBaseUrl !== undefined || request.baseUrlMode === "custom";
   if (existing?.runtime.compatibilityRouteEnabled === true || existingCompatibilityRoute) {
     await disableAccountCompatibility(request.envName, request.account);
   }
@@ -2565,21 +2572,23 @@ async function nativeApiKeyLogin(request: {
     account: request.account,
     runtime: {
       preferredAuthMethod: "apikey",
-      openaiBaseUrlMode: request.baseUrlMode === "custom" ? "custom" : "default",
-      openaiBaseUrl: request.baseUrlMode === "custom" ? effectiveBaseUrl : undefined,
-      apiProtocol: "responses",
+      openaiBaseUrlMode: hasCustomBaseUrl ? "custom" : "default",
+      openaiBaseUrl: hasCustomBaseUrl ? effectiveBaseUrl : undefined,
+      apiProtocol: providerId === "deepseek" ? "responses" : request.apiProtocol ?? "responses",
       compatibilityRouteEnabled: false,
       compatibilityUpstreamModel: request.upstreamModel?.trim() || undefined,
-      compatibilityReasoningProfile: request.reasoningProfile ?? "auto",
-      compatibilityLongConversationStrategy: request.longConversationStrategy ?? "safe",
-      compatibilityInstructionRole: request.instructionRole ?? "auto",
+      compatibilityReasoningProfile: providerId === "deepseek" ? "auto" : request.reasoningProfile ?? "auto",
+      compatibilityLongConversationStrategy: providerId === "deepseek" ? "safe" : request.longConversationStrategy ?? "safe",
+      compatibilityInstructionRole: providerId === "deepseek" ? "auto" : request.instructionRole ?? "auto",
       compatibilityRequestOverrides: request.requestOverrides,
     },
     authJsonContent: `${JSON.stringify({ OPENAI_API_KEY: request.apiKey.trim() }, null, 2)}\n`,
     target: request.target,
   });
 
-  if (request.apiProtocol === "chat_completions" && request.compatibilityEnabled === true) {
+  await ensureProviderDefaultModelBindings(request.envName, request.account, providerId);
+
+  if (providerId !== "deepseek" && request.apiProtocol === "chat_completions" && request.compatibilityEnabled === true) {
     await enableAccountCompatibility({
       envName: request.envName,
       accountName: request.account,
@@ -2693,6 +2702,31 @@ async function saveAccountArtifacts(options: {
   await syncEnvironmentRouteIfEnabled(options.envName);
 }
 
+async function ensureProviderDefaultModelBindings(
+  envName: string,
+  accountName: string,
+  providerId?: string,
+): Promise<void> {
+  const entries = getProviderDefaultModelEntries(providerId);
+  if (!entries?.length) return;
+
+  const store = getModelCatalogStore();
+  const snapshot = await store.load();
+  const modelIds: string[] = [];
+  for (const entry of entries) {
+    const existing = snapshot.models.find((model) => model.entry.slug === entry.slug);
+    if (existing) {
+      modelIds.push(existing.id);
+      continue;
+    }
+    const created = await store.saveModel({ entry });
+    snapshot.models.push(created);
+    modelIds.push(created.id);
+  }
+
+  await store.setAccountBindings(`${envName}/${accountName}`, modelIds);
+}
+
 async function ensureDeepSeekIndependentModelSlug(homePath: string): Promise<void> {
   const configPath = join(homePath, "config.toml");
   const content = await readFile(configPath, "utf8").catch(() => "");
@@ -2701,6 +2735,14 @@ async function ensureDeepSeekIndependentModelSlug(homePath: string): Promise<voi
   if (next !== content) {
     await writeFile(configPath, next, "utf8");
   }
+}
+
+function normalizeProviderId(value?: string): string | undefined {
+  const trimmed = value?.trim().toLowerCase();
+  if (!trimmed) return undefined;
+  if (trimmed === "deepseek") return "deepseek";
+  if (trimmed === "openai") return "openai";
+  return trimmed;
 }
 
 function expandTargets(target: "cli" | "app" | "both"): Array<"cli" | "app"> {

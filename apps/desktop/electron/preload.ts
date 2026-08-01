@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   setLanguage: (language: "zh" | "en" | "ja") => ipcRenderer.invoke("desktop:setLanguage", language),
   writeClipboardText: (value: string) => ipcRenderer.invoke("desktop:writeClipboardText", value),
   nativeLogin: (request: {
+    providerId?: "openai" | "deepseek";
     mode: "auth" | "apikey" | "sub2api" | "cpa";
     account: string;
     envName: string;
