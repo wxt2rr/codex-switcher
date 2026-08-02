@@ -28,6 +28,7 @@ import type { AccountProviderId } from "./pages/accounts-page";
 
 const bridge = resolveDesktopBridge();
 const DEEPSEEK_OFFICIAL_BASE_URL = "https://api.deepseek.com";
+const MIMO_OFFICIAL_BASE_URL = "https://api.xiaomimimo.com/v1";
 
 function resolveInitialView(): NavView {
   if (typeof window === "undefined") {
@@ -838,6 +839,12 @@ export function App() {
 
     setBusy(true);
     try {
+      const isPresetApiKeyProvider = accountProviderDraft === "deepseek" || accountProviderDraft === "mimo";
+      const providerBaseUrl = accountProviderDraft === "deepseek"
+        ? DEEPSEEK_OFFICIAL_BASE_URL
+        : accountProviderDraft === "mimo"
+          ? MIMO_OFFICIAL_BASE_URL
+          : undefined;
       const result = await bridge.nativeLogin({
         providerId: accountProviderDraft,
         mode: accountModeDraft === "apikey" || accountModeDraft === "sub2api" || accountModeDraft === "cpa"
@@ -848,17 +855,15 @@ export function App() {
         target: "none",
         relogin: action === "relogin",
         apiKey: accountApiKeyDraft,
-        baseUrlMode: accountProviderDraft === "deepseek"
+        baseUrlMode: isPresetApiKeyProvider
           ? "custom"
           : accountBaseUrlModeDraft === "custom"
             ? "custom"
             : "default",
-        baseUrl: accountProviderDraft === "deepseek"
-          ? DEEPSEEK_OFFICIAL_BASE_URL
-          : accountBaseUrlDraft.trim() || undefined,
+        baseUrl: providerBaseUrl ?? (accountBaseUrlDraft.trim() || undefined),
         credentialPayload: accountSub2ApiDraft,
-        apiProtocol: accountProviderDraft === "deepseek" ? "responses" : effectiveProtocolSettings.apiProtocol,
-        compatibilityEnabled: accountProviderDraft === "deepseek" ? false : effectiveProtocolSettings.compatibilityEnabled,
+        apiProtocol: isPresetApiKeyProvider ? "responses" : effectiveProtocolSettings.apiProtocol,
+        compatibilityEnabled: isPresetApiKeyProvider ? false : effectiveProtocolSettings.compatibilityEnabled,
         upstreamModel: effectiveProtocolSettings.upstreamModel,
         reasoningProfile: effectiveProtocolSettings.reasoningProfile,
         longConversationStrategy: effectiveProtocolSettings.longConversationStrategy,
@@ -1000,7 +1005,13 @@ export function App() {
     setAccountNameDraft(account.name);
     setAccountModeDraft(account.authMode === "apikey" || account.authMode === "sub2api" ? account.authMode : "auth");
     setAccountProviderDraft(
-      account.runtime.openaiBaseUrl?.trim().startsWith(DEEPSEEK_OFFICIAL_BASE_URL) ? "deepseek" : "openai",
+      account.runtime.providerId === "mimo"
+        || account.runtime.openaiBaseUrl?.trim().startsWith(MIMO_OFFICIAL_BASE_URL)
+        ? "mimo"
+        : account.runtime.providerId === "deepseek"
+          || account.runtime.openaiBaseUrl?.trim().startsWith(DEEPSEEK_OFFICIAL_BASE_URL)
+          ? "deepseek"
+          : "openai",
     );
     setAccountApiKeyDraft(account.apiKeyValue ?? "");
     setAccountBaseUrlModeDraft(account.runtime.openaiBaseUrlMode);

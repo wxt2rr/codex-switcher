@@ -51,6 +51,7 @@ export async function synchronizeAccountModelCatalog(options: {
   homePath: string;
   store: ModelCatalogStore;
   loadBundledCatalog: () => Promise<BundledModelCatalog>;
+  providerId?: string;
   baseUrl?: string;
   model?: string;
 }): Promise<{ enabled: boolean; catalogPath?: string; preset?: string }> {
@@ -61,17 +62,23 @@ export async function synchronizeAccountModelCatalog(options: {
   const configPath = join(options.homePath, "config.toml");
   const catalogPath = join(options.homePath, "model-catalogs", "codex-switcher-models.json");
   const configuredModel = options.model ?? await readConfiguredModel(configPath);
-  const preset = resolveProviderModelPreset({ baseUrl: options.baseUrl, model: configuredModel });
+  const preset = resolveProviderModelPreset({
+    providerId: options.providerId,
+    baseUrl: options.baseUrl,
+    model: configuredModel,
+  });
 
   if (preset) {
-    await mergeModelCatalogFile(join(options.homePath, preset.catalogPath), preset.entries);
+    await writePresetModelCatalog(join(options.homePath, preset.catalogPath), preset.entries);
+    await setModelCatalogConfig(configPath, join(options.homePath, preset.catalogPath));
+    await rm(catalogPath, { force: true });
+    return { enabled: true, catalogPath: join(options.homePath, preset.catalogPath), preset: preset.providerId };
   }
 
   if (bindingIds.length === 0) {
-    if (preset) await setModelCatalogConfig(configPath, join(options.homePath, preset.catalogPath));
-    else await removeModelCatalogConfig(configPath);
+    await removeModelCatalogConfig(configPath);
     await rm(catalogPath, { force: true });
-    return { enabled: false, preset: preset?.providerId };
+    return { enabled: false };
   }
 
   const byId = new Map(snapshot.models.map((model) => [model.id, model]));
@@ -81,14 +88,14 @@ export async function synchronizeAccountModelCatalog(options: {
     return model.entry;
   });
   const bundled = await options.loadBundledCatalog();
-  const catalogEntries = preset ? [...bundled.models, ...preset.entries] : bundled.models;
+  const catalogEntries = bundled.models;
   const bundledSlugs = new Set(catalogEntries.map((model) => model.slug));
   const collision = customEntries.find((model) => bundledSlugs.has(model.slug));
   if (collision) throw new Error(`Custom model '${collision.slug}' conflicts with a bundled model`);
 
   await atomicWriteJson(catalogPath, { models: [...catalogEntries, ...customEntries] });
   await setModelCatalogConfig(configPath, catalogPath);
-  return { enabled: true, catalogPath, preset: preset?.providerId };
+  return { enabled: true, catalogPath };
 }
 
 async function mergeModelCatalogFile(path: string, entries: ModelCatalogEntry[]): Promise<void> {
@@ -114,6 +121,10 @@ async function mergeModelCatalogFile(path: string, entries: ModelCatalogEntry[])
   const additions = entries.filter((entry) => !knownSlugs.has(entry.slug));
   if (additions.length === 0) return;
   await atomicWriteJson(path, { models: [...models, ...additions] });
+}
+
+async function writePresetModelCatalog(path: string, entries: ModelCatalogEntry[]): Promise<void> {
+  await atomicWriteJson(path, { models: [...entries] });
 }
 
 async function setModelCatalogConfig(configPath: string, catalogPath: string): Promise<void> {

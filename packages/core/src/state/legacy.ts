@@ -52,6 +52,7 @@ interface LegacyRuntimeRecord {
   preferred_auth_method?: string;
   openai_base_url_mode?: string;
   openai_base_url?: string;
+  provider_id?: string;
   independent_model_enabled?: boolean;
   independent_model_provider_id?: string;
   independent_model_api_key?: string;
@@ -133,6 +134,7 @@ export async function writeLegacyRuntime(
         preferred_auth_method: options.runtime.preferredAuthMethod,
         openai_base_url_mode: options.runtime.openaiBaseUrlMode,
         openai_base_url: options.runtime.openaiBaseUrl ?? "",
+        provider_id: options.runtime.providerId ?? "",
         independent_model_enabled: options.runtime.independentModelEnabled ?? false,
         independent_model_provider_id: options.runtime.independentModelProviderId ?? "custom",
         independent_model_api_key: options.runtime.independentModelApiKey ?? "",
@@ -240,6 +242,7 @@ async function readLegacyAccountState(
           runtimeRecord.openai_base_url_mode,
         ),
         openaiBaseUrl: runtimeRecord.openai_base_url || undefined,
+        providerId: runtimeRecord.provider_id || undefined,
         independentModelEnabled: runtimeRecord.independent_model_enabled === true,
         independentModelProviderId: runtimeRecord.independent_model_provider_id || "custom",
         independentModelApiKey: runtimeRecord.independent_model_api_key || undefined,

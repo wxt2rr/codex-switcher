@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.14 - 2026-08-02
+
+- Added Xiaomi MiMo as a provider-first API key account flow with locked official Responses Base URL and automatic model binding for `mimo-v2.5-pro` and `mimo-v2.5`.
+- Added MiMo model catalog presets and official Base URL detection, including Token Plan endpoint recognition.
+- Fixed custom model account counts so stale bindings from deleted accounts no longer inflate the displayed binding total.
+- Improved provider preset synchronization so DeepSeek and MiMo accounts keep generated `models.json` aligned with the active account.
+
 ## 0.8.13 - 2026-08-01
 
 - Added provider-first account creation so OpenAI keeps the existing login/import modes while DeepSeek uses an API-key-only flow.

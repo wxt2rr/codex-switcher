@@ -1,6 +1,6 @@
 import type { ModelCatalogEntry } from "./model-catalog-store.js";
 
-export type ProviderModelPresetProviderId = "deepseek";
+export type ProviderModelPresetProviderId = "deepseek" | "mimo";
 
 export interface ProviderModelPresetMatch {
   providerId: string;
@@ -9,6 +9,7 @@ export interface ProviderModelPresetMatch {
 }
 
 const DEEPSEEK_OFFICIAL_HOSTS = new Set(["api.deepseek.com"]);
+const MIMO_OFFICIAL_HOSTS = new Set(["api.xiaomimimo.com", "token-plan-cn.xiaomimimo.com"]);
 
 function createDeepSeekPresetEntry(input: {
   slug: string;
@@ -85,10 +86,53 @@ const DEEPSEEK_DEFAULT_ENTRIES = [DEEPSEEK_V4_FLASH, DEEPSEEK_V4_PRO] as const;
 export const DEEPSEEK_DEFAULT_MODEL_SLUG = DEEPSEEK_V4_FLASH.slug;
 export const DEEPSEEK_DEFAULT_MODEL_SLUGS = DEEPSEEK_DEFAULT_ENTRIES.map((entry) => entry.slug);
 
+const MIMO_V2_5_PRO: ModelCatalogEntry = {
+  slug: "mimo-v2.5-pro",
+  display_name: "mimo-v2.5-pro",
+  description: "MiMo-v2.5-Pro: Trillion-parameter Flagship Agent Foundation",
+  default_reasoning_level: "high",
+  supported_reasoning_levels: [
+    { effort: "none", description: "Disable Thinking" },
+    { effort: "high", description: "Enabled Thinking" },
+  ],
+  shell_type: "shell_command",
+  visibility: "list",
+  supported_in_api: true,
+  priority: 1,
+  base_instructions: "You are MiMo, an AI assistant developed by Xiaomi.",
+  supports_reasoning_summaries: true,
+  default_reasoning_summary: "none",
+  support_verbosity: false,
+  truncation_policy: { mode: "bytes", limit: 10000 },
+  supports_parallel_tool_calls: false,
+  supports_image_detail_original: false,
+  context_window: 1048576,
+  max_context_window: 1048576,
+  effective_context_window_percent: 95,
+  experimental_supported_tools: [],
+  input_modalities: ["text"],
+  supports_search_tool: false,
+};
+
+const MIMO_V2_5: ModelCatalogEntry = {
+  ...MIMO_V2_5_PRO,
+  slug: "mimo-v2.5",
+  display_name: "mimo-v2.5",
+  description: "MiMo-V2.5: Native Omni-modal Perception Model",
+  priority: 2,
+};
+
+const MIMO_DEFAULT_ENTRIES = [MIMO_V2_5_PRO, MIMO_V2_5] as const;
+
+export const MIMO_DEFAULT_MODEL_SLUG = MIMO_V2_5_PRO.slug;
+export const MIMO_DEFAULT_MODEL_SLUGS = MIMO_DEFAULT_ENTRIES.map((entry) => entry.slug);
+
 export function getProviderDefaultModelEntries(providerId?: string): ModelCatalogEntry[] | undefined {
-  if (normalizeProviderId(providerId) === "deepseek") {
+  const normalized = normalizeProviderId(providerId);
+  if (normalized === "deepseek") {
     return [...DEEPSEEK_DEFAULT_ENTRIES];
   }
+  if (normalized === "mimo") return [...MIMO_DEFAULT_ENTRIES];
   return undefined;
 }
 
@@ -97,15 +141,15 @@ export function getProviderDefaultModelSlug(providerId?: string): string | undef
 }
 
 export function getProviderDefaultBaseUrl(providerId?: string): string | undefined {
-  if (normalizeProviderId(providerId) === "deepseek") {
-    return "https://api.deepseek.com";
-  }
+  if (normalizeProviderId(providerId) === "deepseek") return "https://api.deepseek.com";
+  if (normalizeProviderId(providerId) === "mimo") return "https://api.xiaomimimo.com/v1";
   return undefined;
 }
 
 function normalizeProviderId(value?: string): ProviderModelPresetProviderId | undefined {
   const trimmed = value?.trim().toLowerCase();
   if (trimmed === "deepseek") return "deepseek";
+  if (trimmed === "mimo") return "mimo";
   return undefined;
 }
 
@@ -114,15 +158,24 @@ export function resolveProviderModelPreset(input: {
   baseUrl?: string;
   model?: string;
 }): ProviderModelPresetMatch | undefined {
-  if (normalizeProviderId(input.providerId) === "deepseek" || isDeepSeekOfficialBaseUrl(input.baseUrl)) {
+  const providerId = normalizeProviderId(input.providerId);
+  if (providerId === "deepseek" || isDeepSeekOfficialBaseUrl(input.baseUrl)) {
     return { providerId: "deepseek", catalogPath: "models.json", entries: [...DEEPSEEK_DEFAULT_ENTRIES] };
+  }
+  if (providerId === "mimo" || isMimoOfficialBaseUrl(input.baseUrl)) {
+    return { providerId: "mimo", catalogPath: "models.json", entries: [...MIMO_DEFAULT_ENTRIES] };
   }
   return undefined;
 }
 
 export function resolveProviderDefaultPreset(baseUrl?: string): ProviderModelPresetMatch | undefined {
-  if (!isDeepSeekOfficialBaseUrl(baseUrl)) return undefined;
-  return { providerId: "deepseek", catalogPath: "models.json", entries: [...DEEPSEEK_DEFAULT_ENTRIES] };
+  if (isDeepSeekOfficialBaseUrl(baseUrl)) {
+    return { providerId: "deepseek", catalogPath: "models.json", entries: [...DEEPSEEK_DEFAULT_ENTRIES] };
+  }
+  if (isMimoOfficialBaseUrl(baseUrl)) {
+    return { providerId: "mimo", catalogPath: "models.json", entries: [...MIMO_DEFAULT_ENTRIES] };
+  }
+  return undefined;
 }
 
 export function isDeepSeekOfficialBaseUrl(value?: string): boolean {
@@ -130,6 +183,16 @@ export function isDeepSeekOfficialBaseUrl(value?: string): boolean {
   try {
     const parsed = new URL(value.trim());
     return parsed.protocol === "https:" && DEEPSEEK_OFFICIAL_HOSTS.has(parsed.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+export function isMimoOfficialBaseUrl(value?: string): boolean {
+  if (!value?.trim() || value.trim() === "default") return false;
+  try {
+    const parsed = new URL(value.trim());
+    return parsed.protocol === "https:" && MIMO_OFFICIAL_HOSTS.has(parsed.hostname.toLowerCase());
   } catch {
     return false;
   }

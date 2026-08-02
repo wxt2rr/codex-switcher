@@ -165,7 +165,8 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.match(accounts, /保存 API Key/);
   assert.doesNotMatch(accounts, /保存设置/);
   assert.match(accounts, /compatibilityEnabled:\s*apiProtocolDraft === "chat_completions" && compatibilityEnabled/);
-  assert.match(reactApp, /compatibilityEnabled:\s*accountProviderDraft === "deepseek" \? false : effectiveProtocolSettings\.compatibilityEnabled/);
+  assert.match(reactApp, /const isPresetApiKeyProvider = accountProviderDraft === "deepseek" \|\| accountProviderDraft === "mimo"/);
+  assert.match(reactApp, /compatibilityEnabled:\s*isPresetApiKeyProvider \? false : effectiveProtocolSettings\.compatibilityEnabled/);
   assert.match(reactApp, /account\.route\?\.originalBaseUrl \?\? account\.runtime\.openaiBaseUrl/);
   assert.match(accounts, /导入 Sub2API/);
   assert.match(accounts, /导入 CPA/);

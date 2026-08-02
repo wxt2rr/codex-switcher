@@ -201,6 +201,7 @@ export interface AccountSummary {
     preferredAuthMethod: string;
     openaiBaseUrlMode: string;
     openaiBaseUrl?: string;
+    providerId?: string;
     independentModelEnabled?: boolean;
     independentModelProviderId?: string;
     independentModelApiKey?: string;

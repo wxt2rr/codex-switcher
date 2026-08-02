@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import {
   createModelCatalogStore,
+  filterModelCatalogBindings,
   normalizeCustomModelInput,
 } from "./model-catalog-store.js";
 
@@ -65,4 +66,20 @@ test("model bindings replace all account relations in one atomic update", async 
     "work/two": [model.id],
     "work/three": [model.id],
   });
+});
+
+test("model catalog binding filter hides stale account keys", () => {
+  const snapshot = {
+    version: 1 as const,
+    models: [],
+    accountBindings: {
+      "default/live": ["model-1"],
+      "old/missing": ["model-1"],
+    },
+  };
+
+  assert.deepEqual(
+    filterModelCatalogBindings(snapshot, new Set(["default/live"])).accountBindings,
+    { "default/live": ["model-1"] },
+  );
 });

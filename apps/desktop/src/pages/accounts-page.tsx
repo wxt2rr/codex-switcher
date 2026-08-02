@@ -88,14 +88,15 @@ function getApiUsageHint(language: UiLanguage) {
 
 const DEFAULT_ACCOUNT_ENVIRONMENT_KEY = "codex-switcher.accounts.default-environment";
 const DEEPSEEK_OFFICIAL_BASE_URL = "https://api.deepseek.com";
+const MIMO_OFFICIAL_BASE_URL = "https://api.xiaomimimo.com/v1";
 
-export type AccountProviderId = "openai" | "deepseek";
+export type AccountProviderId = "openai" | "deepseek" | "mimo";
 
 function getAccountProviderLabel(providerId: AccountProviderId, language: UiLanguage): string {
-  if (providerId === "deepseek") {
-    return language === "zh" ? "DeepSeek" : language === "ja" ? "DeepSeek" : "DeepSeek";
-  }
-  return language === "zh" ? "OpenAI" : language === "ja" ? "OpenAI" : "OpenAI";
+  void language;
+  if (providerId === "deepseek") return "DeepSeek";
+  if (providerId === "mimo") return "MiMo";
+  return "OpenAI";
 }
 
 function getAccountProviderHint(providerId: AccountProviderId, language: UiLanguage): string {
@@ -106,6 +107,13 @@ function getAccountProviderHint(providerId: AccountProviderId, language: UiLangu
         ? "DeepSeek の公式 Responses 設定を使います。Base URL は自動で固定されます。"
         : "Uses DeepSeek's official Responses preset. Base URL is locked automatically.";
   }
+  if (providerId === "mimo") {
+    return language === "zh"
+      ? "使用小米 MiMo 官方 Responses 配置，Base URL 会自动锁定。"
+      : language === "ja"
+        ? "Xiaomi MiMo の公式 Responses 設定を使います。Base URL は自動で固定されます。"
+        : "Uses Xiaomi MiMo's official Responses preset. Base URL is locked automatically.";
+  }
   return language === "zh"
     ? "保留现有的四种接入方式。"
     : language === "ja"
@@ -114,7 +122,7 @@ function getAccountProviderHint(providerId: AccountProviderId, language: UiLangu
 }
 
 function getAccountModeItems(providerId: AccountProviderId, language: UiLanguage) {
-  if (providerId === "deepseek") {
+  if (providerId === "deepseek" || providerId === "mimo") {
     return [{ value: "apikey", label: localizeAuthMode("apikey", language) }];
   }
   return [
@@ -327,7 +335,12 @@ export function AccountsPage({
   );
 
   const loginModeNeedsApiKey = accountModeDraft === "apikey";
-  const isDeepSeekProvider = accountProviderDraft === "deepseek";
+  const isPresetApiKeyProvider = accountProviderDraft === "deepseek" || accountProviderDraft === "mimo";
+  const presetProviderBaseUrl = accountProviderDraft === "deepseek"
+    ? DEEPSEEK_OFFICIAL_BASE_URL
+    : accountProviderDraft === "mimo"
+      ? MIMO_OFFICIAL_BASE_URL
+      : "";
   const credentialImportSource = accountModeDraft === "sub2api" || accountModeDraft === "cpa"
     ? accountModeDraft
     : undefined;
@@ -375,7 +388,7 @@ export function AccountsPage({
   }, [loginDrawerOpen]);
 
   useEffect(() => {
-    if (isDeepSeekProvider) {
+    if (isPresetApiKeyProvider) {
       if (accountModeDraft !== "apikey") {
         onAccountModeDraftChange("apikey");
       }
@@ -385,13 +398,13 @@ export function AccountsPage({
       if (accountBaseUrlModeDraft !== "custom") {
         onAccountBaseUrlModeDraftChange("custom");
       }
-      if (accountBaseUrlDraft.trim() !== DEEPSEEK_OFFICIAL_BASE_URL) {
-        onAccountBaseUrlDraftChange(DEEPSEEK_OFFICIAL_BASE_URL);
+      if (accountBaseUrlDraft.trim() !== presetProviderBaseUrl) {
+        onAccountBaseUrlDraftChange(presetProviderBaseUrl);
       }
       return;
     }
 
-    if (accountBaseUrlDraft.trim() === DEEPSEEK_OFFICIAL_BASE_URL) {
+    if (accountBaseUrlDraft.trim() === DEEPSEEK_OFFICIAL_BASE_URL || accountBaseUrlDraft.trim() === MIMO_OFFICIAL_BASE_URL) {
       onAccountBaseUrlModeDraftChange("default");
       onAccountBaseUrlDraftChange("");
     }
@@ -400,10 +413,11 @@ export function AccountsPage({
     accountBaseUrlModeDraft,
     accountModeDraft,
     apiProtocolDraft,
-    isDeepSeekProvider,
+    isPresetApiKeyProvider,
     onAccountBaseUrlDraftChange,
     onAccountBaseUrlModeDraftChange,
     onAccountModeDraftChange,
+    presetProviderBaseUrl,
   ]);
 
   useEffect(() => {
@@ -704,6 +718,7 @@ export function AccountsPage({
               items={[
                 { value: "openai", label: getAccountProviderLabel("openai", language) },
                 { value: "deepseek", label: getAccountProviderLabel("deepseek", language) },
+                { value: "mimo", label: getAccountProviderLabel("mimo", language) },
               ]}
             />
           </Field>
@@ -775,7 +790,7 @@ export function AccountsPage({
               </div>
             </Field>
           ) : null}
-          {!credentialImportSource && !isDeepSeekProvider ? (
+          {!credentialImportSource && !isPresetApiKeyProvider ? (
             <>
               <Field label={pageCopy.accounts.baseUrlMode}>
                 <Select
@@ -799,12 +814,12 @@ export function AccountsPage({
               ) : null}
             </>
           ) : null}
-          {!credentialImportSource && isDeepSeekProvider ? (
+          {!credentialImportSource && isPresetApiKeyProvider ? (
             <Field label={pageCopy.accounts.baseUrlLabel}>
-              <Input value={DEEPSEEK_OFFICIAL_BASE_URL} disabled />
+              <Input value={presetProviderBaseUrl} disabled />
             </Field>
           ) : null}
-          {loginModeNeedsApiKey && !isDeepSeekProvider ? (
+          {loginModeNeedsApiKey && !isPresetApiKeyProvider ? (
             <Field label={language === "zh" ? "API 协议" : language === "ja" ? "API プロトコル" : "API protocol"}>
               <Select value={apiProtocolDraft} onValueChange={(value) => {
                 const protocol = value as typeof apiProtocolDraft;
@@ -817,7 +832,7 @@ export function AccountsPage({
                 ]} />
             </Field>
           ) : null}
-          {loginModeNeedsApiKey && !isDeepSeekProvider && (apiProtocolDraft === "chat_completions" || compatibilityEnabled) && selectedAccount ? (
+          {loginModeNeedsApiKey && !isPresetApiKeyProvider && (apiProtocolDraft === "chat_completions" || compatibilityEnabled) && selectedAccount ? (
             <div className="space-y-3 border-t border-neutral-200/80 pt-4">
               <div className="flex items-center justify-between gap-4">
                 <div className="min-w-0">

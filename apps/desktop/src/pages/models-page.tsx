@@ -63,13 +63,19 @@ export function ModelsPage({
     }
     return groups;
   }, [visibleAccounts]);
+  const knownAccountKeys = useMemo(
+    () => new Set(overview.accounts.map((account) => `${account.envName}/${account.name}`)),
+    [overview.accounts],
+  );
 
   useEffect(() => {
     void bridge.listCustomModels().then(setSnapshot).catch(onError).finally(() => setLoading(false));
   }, []);
 
   function bindingCount(modelId: string): number {
-    return Object.values(snapshot.accountBindings).filter((ids) => ids.includes(modelId)).length;
+    return Object.entries(snapshot.accountBindings)
+      .filter(([accountKey, ids]) => knownAccountKeys.has(accountKey) && ids.includes(modelId))
+      .length;
   }
 
   function openEditor(model?: CustomModelRecord) {
@@ -85,7 +91,7 @@ export function ModelsPage({
     setActiveModelId(model.id);
     setBindingDraft(
       Object.entries(snapshot.accountBindings)
-        .filter(([, modelIds]) => modelIds.includes(model.id))
+        .filter(([accountKey, modelIds]) => knownAccountKeys.has(accountKey) && modelIds.includes(model.id))
         .map(([accountKey]) => accountKey),
     );
     setBindingSearch("");

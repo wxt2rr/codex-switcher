@@ -198,11 +198,13 @@ test("desktop bridge seeds DeepSeek default model bindings when creating an API 
       preferred_auth_method: string;
       openai_base_url_mode: string;
       openai_base_url?: string;
+      provider_id?: string;
       api_protocol?: string;
     };
     assert.equal(runtime.preferred_auth_method, "apikey");
     assert.equal(runtime.openai_base_url_mode, "custom");
     assert.equal(runtime.openai_base_url, "https://api.deepseek.com");
+    assert.equal(runtime.provider_id, "deepseek");
     assert.equal(runtime.api_protocol, "responses");
 
     const catalog = JSON.parse(await readFile(join(root, "state", "custom-model-catalogs.json"), "utf8")) as {
@@ -211,6 +213,49 @@ test("desktop bridge seeds DeepSeek default model bindings when creating an API 
     };
     assert.deepEqual(catalog.models.map((model) => model.entry.slug), ["deepseek-v4-flash", "deepseek-v4-pro"]);
     assert.equal(catalog.accountBindings["default/deepseek"]?.length, 2);
+  } finally {
+    restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("desktop bridge seeds MiMo default model bindings when creating an API key account", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-mimo-api-key-"));
+  const previousEnv = { ...process.env };
+
+  try {
+    process.env.HOME = root;
+    process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
+    process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
+    process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
+
+    const result = await bridge.nativeLogin({
+      providerId: "mimo",
+      mode: "apikey",
+      account: "mimo",
+      envName: "default",
+      target: "none",
+      relogin: false,
+      apiKey: "sk-mimo",
+      baseUrl: "https://api.xiaomimimo.com/v1",
+      baseUrlMode: "custom",
+      apiProtocol: "responses",
+    });
+
+    assert.equal(result.message, "Saved API key for default/mimo");
+    const runtime = JSON.parse(await readFile(
+      join(root, "state", "env-accounts", "default", "mimo", "runtime.json"),
+      "utf8",
+    )) as Record<string, unknown>;
+    assert.equal(runtime.openai_base_url, "https://api.xiaomimimo.com/v1");
+    assert.equal(runtime.provider_id, "mimo");
+
+    const catalog = JSON.parse(await readFile(join(root, "state", "custom-model-catalogs.json"), "utf8")) as {
+      models: Array<{ entry: { slug: string } }>;
+      accountBindings: Record<string, string[]>;
+    };
+    assert.deepEqual(catalog.models.map((model) => model.entry.slug), ["mimo-v2.5-pro", "mimo-v2.5"]);
+    assert.equal(catalog.accountBindings["default/mimo"]?.length, 2);
   } finally {
     restoreEnv(previousEnv);
     await rm(root, { recursive: true, force: true });
@@ -653,6 +698,42 @@ test("desktop bridge copies complete account data, model bindings, and resolves 
     assert.deepEqual(catalog.accountBindings["source/key-copy-2"], ["model-1"]);
   } finally {
     bridge.__testUtils.resetUsageRouterManagerForTest();
+    restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("desktop bridge custom model listing ignores stale account bindings", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-model-list-"));
+  const previousEnv = { ...process.env };
+
+  try {
+    process.env.HOME = root;
+    process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
+    process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
+    process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
+
+    await writeFileRecursive(join(root, "state", "current_cli_env"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_cli_account"), "live\n");
+    await writeFileRecursive(join(root, "state", "current_app_env"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_app_account"), "live\n");
+    await writeFileRecursive(join(root, "default-home", "config.toml"), "model = 'gpt-5'\n");
+    await writeFileRecursive(join(root, "state", "env-accounts", "default", "live", "auth.json"), "{}\n");
+    await writeFileRecursive(
+      join(root, "state", "custom-model-catalogs.json"),
+      `${JSON.stringify({
+        version: 1,
+        models: [{ id: "model-1", entry: { slug: "custom-model", display_name: "Custom Model" }, createdAt: "2026-07-13T00:00:00.000Z", updatedAt: "2026-07-13T00:00:00.000Z" }],
+        accountBindings: {
+          "default/live": ["model-1"],
+          "old/missing": ["model-1"],
+        },
+      }, null, 2)}\n`,
+    );
+
+    const catalog = await bridge.listCustomModels();
+    assert.deepEqual(catalog.accountBindings, { "default/live": ["model-1"] });
+  } finally {
     restoreEnv(previousEnv);
     await rm(root, { recursive: true, force: true });
   }

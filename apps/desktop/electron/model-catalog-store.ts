@@ -146,6 +146,18 @@ export function accountModelBindingKey(envName: string, accountName: string): st
   return `${envName}/${accountName}`;
 }
 
+export function filterModelCatalogBindings(
+  snapshot: ModelCatalogSnapshot,
+  accountKeys: ReadonlySet<string>,
+): ModelCatalogSnapshot {
+  return {
+    ...snapshot,
+    accountBindings: Object.fromEntries(
+      Object.entries(snapshot.accountBindings).filter(([accountKey]) => accountKeys.has(accountKey)),
+    ),
+  };
+}
+
 async function readSnapshot(path: string): Promise<ModelCatalogSnapshot> {
   let parsed: unknown;
   try {

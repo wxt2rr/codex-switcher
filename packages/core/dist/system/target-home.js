@@ -1,5 +1,5 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 export async function applyTargetHomeState(options) {
     const pointer = options.state.targets[options.target];
     const env = options.state.envs[pointer.env];
@@ -36,7 +36,12 @@ export async function clearTargetHomeState(homePath) {
 }
 async function writeManagedConfig(configPath, runtime) {
     const existing = await readText(configPath);
-    const cleaned = removeManagedConfigLines(existing);
+    const managedModelSlug = resolveManagedModelSlug(runtime);
+    const managedModelCatalogPath = resolveManagedModelCatalogPath(configPath, runtime);
+    const cleaned = removeManagedConfigLines(existing, {
+        removeModel: managedModelSlug !== undefined,
+        removeModelCatalogJson: managedModelCatalogPath !== undefined,
+    });
     const managedLines = [`preferred_auth_method = "${runtime.preferredAuthMethod}"`];
     const compatibilityRouteActive = runtime.apiProtocol === "chat_completions" &&
         runtime.compatibilityRouteEnabled &&
@@ -47,6 +52,12 @@ async function writeManagedConfig(configPath, runtime) {
     if (!compatibilityRouteActive && runtime.apiProtocol !== "chat_completions"
         && runtime.openaiBaseUrlMode === "custom" && runtime.openaiBaseUrl) {
         managedLines.push(`openai_base_url = "${runtime.openaiBaseUrl}"`);
+    }
+    if (managedModelSlug) {
+        managedLines.push(`model = ${quoteTomlString(managedModelSlug)}`);
+    }
+    if (managedModelCatalogPath) {
+        managedLines.push(`model_catalog_json = ${quoteTomlString(managedModelCatalogPath)}`);
     }
     if (runtime.preferredAuthMethod === "apikey") {
         managedLines.push("requires_openai_auth = false");
@@ -77,7 +88,7 @@ async function clearManagedConfig(configPath) {
     const cleaned = removeManagedConfigLines(existing);
     await writeFile(configPath, cleaned ? `${cleaned}\n` : "", "utf8");
 }
-function removeManagedConfigLines(content) {
+function removeManagedConfigLines(content, options) {
     const lines = content.split(/\r?\n/);
     const kept = [];
     const managedProviderIds = new Set(lines
@@ -115,6 +126,8 @@ function removeManagedConfigLines(content) {
         }
         if (trimmed.startsWith("preferred_auth_method") ||
             trimmed.startsWith("openai_base_url") ||
+            (options?.removeModel === true && trimmed.startsWith("model = ")) ||
+            (options?.removeModelCatalogJson === true && trimmed.startsWith("model_catalog_json = ")) ||
             trimmed.startsWith("model_provider = ") ||
             (!insideTomlSection &&
                 (trimmed.startsWith("requires_openai_auth") || trimmed.startsWith("http_headers")))) {
@@ -139,7 +152,24 @@ function resolveIndependentModelSlug(baseUrl) {
         return undefined;
     if (normalized.startsWith("https://api.deepseek.com"))
         return "deepseek-v4-flash";
+    if (normalized.startsWith("https://api.xiaomimimo.com/v1"))
+        return "mimo-v2.5-pro";
     return undefined;
+}
+function resolveManagedModelSlug(runtime) {
+    const providerId = (runtime.providerId ?? "").trim().toLowerCase();
+    if (providerId === "deepseek")
+        return "deepseek-v4-flash";
+    if (providerId === "mimo")
+        return "mimo-v2.5-pro";
+    return undefined;
+}
+function resolveManagedModelCatalogPath(configPath, runtime) {
+    const providerId = (runtime.providerId ?? "").trim().toLowerCase();
+    if (providerId !== "deepseek" && providerId !== "mimo") {
+        return undefined;
+    }
+    return join(dirname(configPath), "models.json");
 }
 function normalizeProviderId(value) {
     const trimmed = (value ?? "").trim();

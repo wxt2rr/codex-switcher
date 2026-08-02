@@ -54,6 +54,53 @@ test("target-home writer installs auth.json and managed config for apikey accoun
         await rm(root, { recursive: true, force: true });
     }
 });
+test("target-home writer pins the DeepSeek model for DeepSeek api key accounts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-deepseek-"));
+    const homePath = join(root, "home");
+    const state = {
+        schemaVersion: DEFAULT_SCHEMA_VERSION,
+        generatedAt: "2026-08-01T10:00:00.000Z",
+        targets: {
+            cli: { env: "default", account: "deepseek" },
+            app: { env: "default", account: "deepseek" },
+        },
+        envs: {
+            default: {
+                name: "default",
+                path: homePath,
+                accounts: {
+                    deepseek: {
+                        name: "deepseek",
+                        authMode: "apikey",
+                        runtime: {
+                            providerId: "deepseek",
+                            preferredAuthMethod: "apikey",
+                            openaiBaseUrlMode: "custom",
+                            openaiBaseUrl: "http://127.0.0.1:17832/routes/deepseek",
+                            apiProtocol: "responses",
+                        },
+                        authData: {
+                            OPENAI_API_KEY: "sk-deepseek",
+                        },
+                    },
+                },
+            },
+        },
+        tasks: { recent: [] },
+    };
+    try {
+        await applyTargetHomeState({ state, target: "cli" });
+        const config = await readFile(join(homePath, "config.toml"), "utf8");
+        assert.match(config, /preferred_auth_method = "apikey"/);
+        assert.match(config, /model = "deepseek-v4-flash"/);
+        assert.match(config, /model_catalog_json = ".*\/models\.json"/);
+        assert.doesNotMatch(config, /model = "gpt-5\.5"/);
+        assert.match(config, /http_headers = \{ "x-openai-actor-authorization" = "codex-sw\.app" \}/);
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
 test("target-home writer materializes an enabled Chat compatibility route without exposing the upstream key", async () => {
     const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-chat-route-"));
     const homePath = join(root, "home");

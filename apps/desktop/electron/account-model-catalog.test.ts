@@ -81,7 +81,7 @@ test("bundled catalog command wraps Windows command shims", () => {
   });
 });
 
-test("DeepSeek official model preset is filled into models.json without overwriting existing entries", async () => {
+test("DeepSeek official model preset replaces models.json with only the DeepSeek entries", async () => {
   const root = await mkdtemp(join(tmpdir(), "account-model-catalog-deepseek-"));
   const homePath = join(root, "home");
   await mkdir(homePath, { recursive: true });
@@ -96,21 +96,22 @@ test("DeepSeek official model preset is filled into models.json without overwrit
     envName: "work",
     accountName: "alice",
     homePath,
-    baseUrl: "https://api.deepseek.com/",
+    providerId: "deepseek",
+    baseUrl: "http://127.0.0.1:17832/routes/aa341ac093cfd6b261c7",
     store,
     loadBundledCatalog: async () => ({ models: [] }),
   });
 
-  assert.equal(result.enabled, false);
+  assert.equal(result.enabled, true);
   assert.equal(result.preset, "deepseek");
   const catalog = JSON.parse(await readFile(join(homePath, "models.json"), "utf8")) as {
     models: Array<Record<string, unknown>>;
   };
-  assert.deepEqual(catalog.models.map((model) => model.slug), ["user-model", "deepseek-v4-flash", "deepseek-v4-pro"]);
+  assert.deepEqual(catalog.models.map((model) => model.slug), ["deepseek-v4-flash", "deepseek-v4-pro"]);
   assert.match(await readFile(join(homePath, "config.toml"), "utf8"), /model_catalog_json = .*models\.json/);
 });
 
-test("DeepSeek preset does not replace an existing model with the same slug", async () => {
+test("DeepSeek preset overwrites existing model entries with the official catalog", async () => {
   const root = await mkdtemp(join(tmpdir(), "account-model-catalog-deepseek-existing-"));
   const homePath = join(root, "home");
   await mkdir(homePath, { recursive: true });
@@ -135,6 +136,35 @@ test("DeepSeek preset does not replace an existing model with the same slug", as
   };
   assert.equal(catalog.models.length, 2);
   assert.equal(catalog.models[0]?.slug, "deepseek-v4-flash");
-  assert.equal(catalog.models[0]?.display_name, "User Override");
+  assert.equal(catalog.models[0]?.display_name, "DeepSeek-V4-Flash");
   assert.equal(catalog.models[1]?.slug, "deepseek-v4-pro");
+});
+
+test("MiMo official model preset replaces models.json with the two MiMo models", async () => {
+  const root = await mkdtemp(join(tmpdir(), "account-model-catalog-mimo-"));
+  const homePath = join(root, "home");
+  await mkdir(homePath, { recursive: true });
+  await writeFile(
+    join(homePath, "models.json"),
+    JSON.stringify({ models: [{ slug: "user-model", display_name: "User Model" }] }, null, 2),
+  );
+  const store = createModelCatalogStore(join(root, "custom-models.json"));
+
+  const result = await synchronizeAccountModelCatalog({
+    envName: "work",
+    accountName: "alice",
+    homePath,
+    store,
+    providerId: "mimo",
+    baseUrl: "https://api.xiaomimimo.com/v1",
+    loadBundledCatalog: async () => ({ models: [] }),
+  });
+
+  assert.equal(result.enabled, true);
+  assert.equal(result.preset, "mimo");
+  const catalog = JSON.parse(await readFile(join(homePath, "models.json"), "utf8")) as {
+    models: Array<Record<string, unknown>>;
+  };
+  assert.deepEqual(catalog.models.map((model) => model.slug), ["mimo-v2.5-pro", "mimo-v2.5"]);
+  assert.match(await readFile(join(homePath, "config.toml"), "utf8"), /model_catalog_json = .*models\.json/);
 });

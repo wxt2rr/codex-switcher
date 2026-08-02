@@ -70,6 +70,8 @@ import { AppWindowLaunchError, assertCanMultiOpen, buildAppWindowLaunchPlan, exe
 import { getCliTerminalSettings as readCliTerminalSettings, saveCliTerminalSelection, type CliTerminalId, type CliTerminalSettings } from "./cli-terminal-settings.js";
 import {
   createModelCatalogStore,
+  accountModelBindingKey,
+  filterModelCatalogBindings,
   type SaveCustomModelInput,
 } from "./model-catalog-store.js";
 import {
@@ -78,9 +80,14 @@ import {
 } from "./account-model-catalog.js";
 import {
   DEEPSEEK_DEFAULT_MODEL_SLUG,
+  DEEPSEEK_DEFAULT_MODEL_SLUGS,
+  MIMO_DEFAULT_MODEL_SLUG,
+  MIMO_DEFAULT_MODEL_SLUGS,
   getProviderDefaultBaseUrl,
   getProviderDefaultModelEntries,
+  getProviderDefaultModelSlug,
   isDeepSeekOfficialBaseUrl,
+  isMimoOfficialBaseUrl,
   resolveProviderDefaultPreset,
   resolveProviderModelPreset,
 } from "./provider-model-presets.js";
@@ -1429,8 +1436,11 @@ export async function updateIndependentModel(request: {
       await applyTargetHomeStateWithHistory(runtime, next, currentTarget, currentTarget === "cli" ? "switch-cli" : "switch-app");
     }
   }
-  if (request.enabled && isDeepSeekOfficialBaseUrl(request.baseUrl)) {
-    await ensureDeepSeekIndependentModelSlug(state.envs[request.envName]!.path);
+  if (request.enabled && (isDeepSeekOfficialBaseUrl(request.baseUrl) || isMimoOfficialBaseUrl(request.baseUrl))) {
+    await ensureIndependentModelSlug(
+      state.envs[request.envName]!.path,
+      isMimoOfficialBaseUrl(request.baseUrl) ? "mimo-v2.5-pro" : DEEPSEEK_DEFAULT_MODEL_SLUG,
+    );
   }
 
   return {
@@ -1617,31 +1627,43 @@ function getModelCatalogStore() {
 }
 
 export async function listCustomModels() {
-  return getModelCatalogStore().load();
+  return filterModelCatalogBindings(
+    await getModelCatalogStore().load(),
+    await loadKnownAccountKeys(),
+  );
 }
 
 export async function saveCustomModel(input: SaveCustomModelInput) {
   await getModelCatalogStore().saveModel(input);
   await resynchronizeActiveModelCatalogs();
-  return getModelCatalogStore().load();
+  return listCustomModels();
 }
 
 export async function deleteCustomModel(id: string) {
   await getModelCatalogStore().deleteModel(id);
   await resynchronizeActiveModelCatalogs();
-  return getModelCatalogStore().load();
+  return listCustomModels();
 }
 
 export async function setAccountModelBindings(accountKey: string, modelIds: string[]) {
   const snapshot = await getModelCatalogStore().setAccountBindings(accountKey, modelIds);
   await resynchronizeActiveModelCatalogs(accountKey);
-  return snapshot;
+  return filterModelCatalogBindings(snapshot, await loadKnownAccountKeys());
 }
 
 export async function setModelAccountBindings(modelId: string, accountKeys: string[]) {
   const snapshot = await getModelCatalogStore().setModelBindings(modelId, accountKeys);
   await resynchronizeActiveModelCatalogs();
-  return snapshot;
+  return filterModelCatalogBindings(snapshot, await loadKnownAccountKeys());
+}
+
+async function loadKnownAccountKeys(): Promise<ReadonlySet<string>> {
+  const state = await (await loadCoreRuntime()).readLegacyState(getLegacyOptions());
+  return new Set(
+    Object.values(state.envs).flatMap((env) =>
+      Object.keys(env.accounts).map((accountName) => accountModelBindingKey(env.name, accountName)),
+    ),
+  );
 }
 
 async function resynchronizeActiveModelCatalogs(accountKey?: string): Promise<void> {
@@ -2282,27 +2304,32 @@ async function applyTargetHomeStateWithHistory(
     throw new Error(`Env '${envName}' not found`);
   }
 
+  const pointer = state.targets[target];
+  await inferLegacyProviderId(runtime, state, pointer.env, pointer.account);
+
   const before = await readEnvFileSnapshot(env.path);
   try {
     await runtime.applyTargetHomeState({ state, target });
-    const pointer = state.targets[target];
-    const account = state.envs[pointer.env]?.accounts[pointer.account];
+    const refreshedAccount = state.envs[pointer.env]?.accounts[pointer.account];
     const cliStatus = await getCodexToolStatus("cli", getCodexToolPathOptions());
-    const catalogBaseUrl = account?.runtime.independentModelEnabled
-      ? account.runtime.independentModelBaseUrl ?? account.runtime.openaiBaseUrl
-      : account?.runtime.openaiBaseUrl;
-    const catalogPreset = account?.runtime.independentModelEnabled
+    const catalogBaseUrl = refreshedAccount?.runtime.independentModelEnabled
+      ? refreshedAccount.runtime.independentModelBaseUrl ?? refreshedAccount.runtime.openaiBaseUrl
+      : refreshedAccount?.runtime.openaiBaseUrl;
+    const catalogPreset = refreshedAccount?.runtime.independentModelEnabled
       ? resolveProviderDefaultPreset(catalogBaseUrl)
-      : resolveProviderModelPreset({ baseUrl: catalogBaseUrl, model: account?.runtime.model });
+      : resolveProviderModelPreset({ baseUrl: catalogBaseUrl, model: refreshedAccount?.runtime.model });
     await synchronizeAccountModelCatalog({
       envName: pointer.env,
       accountName: pointer.account,
       homePath: env.path,
       store: getModelCatalogStore(),
+      providerId: refreshedAccount?.runtime.providerId,
       baseUrl: catalogBaseUrl,
       model: catalogPreset?.entries[0]?.slug
-        ?? account?.runtime.model
-        ?? (account?.runtime.independentModelEnabled ? DEEPSEEK_DEFAULT_MODEL_SLUG : undefined),
+        ?? refreshedAccount?.runtime.model
+        ?? (refreshedAccount?.runtime.independentModelEnabled
+          ? getProviderDefaultModelSlug(refreshedAccount.runtime.independentModelProviderId) ?? DEEPSEEK_DEFAULT_MODEL_SLUG
+          : undefined),
       loadBundledCatalog: async () => {
         if (!cliStatus.available) {
           throw new Error("Codex CLI is required to generate the merged model catalog");
@@ -2316,6 +2343,35 @@ async function applyTargetHomeStateWithHistory(
   }
   const after = await readEnvFileSnapshot(env.path);
   await recordEnvFileDiffHistory(envName, before, after, source);
+}
+
+async function inferLegacyProviderId(
+  runtime: CoreRuntime,
+  state: Awaited<ReturnType<CoreRuntime["readLegacyState"]>>,
+  envName: string,
+  accountName: string,
+): Promise<void> {
+  const account = state.envs[envName]?.accounts[accountName];
+  if (!account || account.runtime.providerId) return;
+
+  const snapshot = await getModelCatalogStore().load();
+  const boundIds = snapshot.accountBindings[accountModelBindingKey(envName, accountName)] ?? [];
+  const boundSlugs = boundIds
+    .map((id) => snapshot.models.find((model) => model.id === id)?.entry.slug)
+    .filter((slug): slug is string => Boolean(slug));
+  if (boundSlugs.some((slug) => MIMO_DEFAULT_MODEL_SLUGS.includes(slug))) {
+    account.runtime.providerId = "mimo";
+  } else if (boundSlugs.some((slug) => DEEPSEEK_DEFAULT_MODEL_SLUGS.includes(slug))) {
+    account.runtime.providerId = "deepseek";
+  } else {
+    return;
+  }
+  await runtime.writeLegacyRuntime({
+    stateDir: getStateDir(),
+    envName,
+    accountName,
+    runtime: account.runtime,
+  });
 }
 
 async function restoreEnvFileSnapshot(
@@ -2543,6 +2599,7 @@ async function nativeApiKeyLogin(request: {
   }
 
   const providerId = normalizeProviderId(request.providerId);
+  const isPresetProvider = providerId === "deepseek" || providerId === "mimo";
   const providerBaseUrl = getProviderDefaultBaseUrl(providerId);
   const runtime = await loadCoreRuntime();
   const state = await runtime.readLegacyState(getLegacyOptions());
@@ -2571,15 +2628,16 @@ async function nativeApiKeyLogin(request: {
     envName: request.envName,
     account: request.account,
     runtime: {
+      providerId,
       preferredAuthMethod: "apikey",
       openaiBaseUrlMode: hasCustomBaseUrl ? "custom" : "default",
       openaiBaseUrl: hasCustomBaseUrl ? effectiveBaseUrl : undefined,
-      apiProtocol: providerId === "deepseek" ? "responses" : request.apiProtocol ?? "responses",
+      apiProtocol: isPresetProvider ? "responses" : request.apiProtocol ?? "responses",
       compatibilityRouteEnabled: false,
       compatibilityUpstreamModel: request.upstreamModel?.trim() || undefined,
-      compatibilityReasoningProfile: providerId === "deepseek" ? "auto" : request.reasoningProfile ?? "auto",
-      compatibilityLongConversationStrategy: providerId === "deepseek" ? "safe" : request.longConversationStrategy ?? "safe",
-      compatibilityInstructionRole: providerId === "deepseek" ? "auto" : request.instructionRole ?? "auto",
+      compatibilityReasoningProfile: isPresetProvider ? "auto" : request.reasoningProfile ?? "auto",
+      compatibilityLongConversationStrategy: isPresetProvider ? "safe" : request.longConversationStrategy ?? "safe",
+      compatibilityInstructionRole: isPresetProvider ? "auto" : request.instructionRole ?? "auto",
       compatibilityRequestOverrides: request.requestOverrides,
     },
     authJsonContent: `${JSON.stringify({ OPENAI_API_KEY: request.apiKey.trim() }, null, 2)}\n`,
@@ -2588,7 +2646,7 @@ async function nativeApiKeyLogin(request: {
 
   await ensureProviderDefaultModelBindings(request.envName, request.account, providerId);
 
-  if (providerId !== "deepseek" && request.apiProtocol === "chat_completions" && request.compatibilityEnabled === true) {
+  if (!isPresetProvider && request.apiProtocol === "chat_completions" && request.compatibilityEnabled === true) {
     await enableAccountCompatibility({
       envName: request.envName,
       accountName: request.account,
@@ -2627,6 +2685,7 @@ async function nativeExternalCredentialLogin(request: {
       envName: request.envName,
       account,
       runtime: {
+        providerId: undefined,
         preferredAuthMethod: "chatgpt",
         openaiBaseUrlMode: "default",
         openaiBaseUrl: undefined,
@@ -2646,6 +2705,7 @@ async function saveAccountArtifacts(options: {
   envName: string;
   account: string;
   runtime: {
+    providerId?: string;
     preferredAuthMethod: "chatgpt" | "apikey";
     openaiBaseUrlMode: "default" | "custom";
     openaiBaseUrl?: string;
@@ -2727,11 +2787,11 @@ async function ensureProviderDefaultModelBindings(
   await store.setAccountBindings(`${envName}/${accountName}`, modelIds);
 }
 
-async function ensureDeepSeekIndependentModelSlug(homePath: string): Promise<void> {
+async function ensureIndependentModelSlug(homePath: string, slug: string): Promise<void> {
   const configPath = join(homePath, "config.toml");
   const content = await readFile(configPath, "utf8").catch(() => "");
   if (!content || !content.includes('model = "gpt-5.4"')) return;
-  const next = content.replace('model = "gpt-5.4"', `model = "${DEEPSEEK_DEFAULT_MODEL_SLUG}"`);
+  const next = content.replace('model = "gpt-5.4"', `model = "${slug}"`);
   if (next !== content) {
     await writeFile(configPath, next, "utf8");
   }
@@ -2741,6 +2801,7 @@ function normalizeProviderId(value?: string): string | undefined {
   const trimmed = value?.trim().toLowerCase();
   if (!trimmed) return undefined;
   if (trimmed === "deepseek") return "deepseek";
+  if (trimmed === "mimo") return "mimo";
   if (trimmed === "openai") return "openai";
   return trimmed;
 }
