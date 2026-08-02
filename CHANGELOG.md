@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.16 - 2026-08-02
+
+- Updated the built-in DeepSeek presets to match the official catalog JSON and updated MiMo defaults to the Xiaomi preset JSON.
+- Fixed the Models page so built-in DeepSeek and MiMo provider presets are seeded and visible even before a provider account is created.
+
 ## 0.8.14 - 2026-08-02
 
 - Added Xiaomi MiMo as a provider-first API key account flow with locked official Responses Base URL and automatic model binding for `mimo-v2.5-pro` and `mimo-v2.5`.

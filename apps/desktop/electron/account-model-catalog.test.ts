@@ -108,6 +108,7 @@ test("DeepSeek official model preset replaces models.json with only the DeepSeek
     models: Array<Record<string, unknown>>;
   };
   assert.deepEqual(catalog.models.map((model) => model.slug), ["deepseek-v4-flash", "deepseek-v4-pro"]);
+  assert.equal(catalog.models[1]?.description, "Most capable frontier agentic coding model.");
   assert.match(await readFile(join(homePath, "config.toml"), "utf8"), /model_catalog_json = .*models\.json/);
 });
 
@@ -166,5 +167,10 @@ test("MiMo official model preset replaces models.json with the two MiMo models",
     models: Array<Record<string, unknown>>;
   };
   assert.deepEqual(catalog.models.map((model) => model.slug), ["mimo-v2.5-pro", "mimo-v2.5"]);
+  assert.equal(catalog.models[0]?.priority, 0);
+  assert.equal(
+    catalog.models[0]?.base_instructions,
+    "You are MiMo, an AI assistant developed by Xiaomi. Today's date: {date} {week}. Your knowledge cutoff date is December 2024.",
+  );
   assert.match(await readFile(join(homePath, "config.toml"), "utf8"), /model_catalog_json = .*models\.json/);
 });

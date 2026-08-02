@@ -76,7 +76,7 @@ const DEEPSEEK_V4_FLASH: ModelCatalogEntry = createDeepSeekPresetEntry({
 const DEEPSEEK_V4_PRO: ModelCatalogEntry = createDeepSeekPresetEntry({
   slug: "deepseek-v4-pro",
   displayName: "DeepSeek-V4-Pro",
-  description: "Higher-capability DeepSeek Codex preset.",
+  description: "Most capable frontier agentic coding model.",
   priority: 2,
   defaultReasoningLevel: "high",
 });
@@ -86,41 +86,76 @@ const DEEPSEEK_DEFAULT_ENTRIES = [DEEPSEEK_V4_FLASH, DEEPSEEK_V4_PRO] as const;
 export const DEEPSEEK_DEFAULT_MODEL_SLUG = DEEPSEEK_V4_FLASH.slug;
 export const DEEPSEEK_DEFAULT_MODEL_SLUGS = DEEPSEEK_DEFAULT_ENTRIES.map((entry) => entry.slug);
 
-const MIMO_V2_5_PRO: ModelCatalogEntry = {
-  slug: "mimo-v2.5-pro",
-  display_name: "mimo-v2.5-pro",
-  description: "MiMo-v2.5-Pro: Trillion-parameter Flagship Agent Foundation",
-  default_reasoning_level: "high",
-  supported_reasoning_levels: [
-    { effort: "none", description: "Disable Thinking" },
-    { effort: "high", description: "Enabled Thinking" },
-  ],
-  shell_type: "shell_command",
-  visibility: "list",
-  supported_in_api: true,
-  priority: 1,
-  base_instructions: "You are MiMo, an AI assistant developed by Xiaomi.",
-  supports_reasoning_summaries: true,
-  default_reasoning_summary: "none",
-  support_verbosity: false,
-  truncation_policy: { mode: "bytes", limit: 10000 },
-  supports_parallel_tool_calls: false,
-  supports_image_detail_original: false,
-  context_window: 1048576,
-  max_context_window: 1048576,
-  effective_context_window_percent: 95,
-  experimental_supported_tools: [],
-  input_modalities: ["text"],
-  supports_search_tool: false,
-};
+function createMimoPresetEntry(input: {
+  slug: string;
+  displayName: string;
+  description: string;
+  priority: number;
+  supportsImageDetailOriginal: boolean;
+  inputModalities: Array<"text" | "image">;
+}): ModelCatalogEntry {
+  return {
+    slug: input.slug,
+    prefer_websockets: false,
+    support_verbosity: false,
+    apply_patch_tool_type: "freeform",
+    web_search_tool_type: "text",
+    default_verbosity: "low",
+    input_modalities: input.inputModalities,
+    supports_image_detail_original: input.supportsImageDetailOriginal,
+    truncation_policy: { mode: "bytes", limit: 10000 },
+    supports_parallel_tool_calls: false,
+    tool_mode: null,
+    multi_agent_version: "v2",
+    use_responses_lite: false,
+    include_skills_usage_instructions: false,
+    auto_review_model_override: null,
+    context_window: 1048576,
+    max_context_window: 1048576,
+    effective_context_window_percent: 95,
+    auto_compact_token_limit: null,
+    comp_hash: "3000",
+    reasoning_summary_format: "experimental",
+    default_reasoning_summary: "none",
+    display_name: input.displayName,
+    description: input.description,
+    default_reasoning_level: "high",
+    supported_reasoning_levels: [
+      { effort: "none", description: "Disable Thinking" },
+      { effort: "high", description: "Enabled Thinking" },
+    ],
+    shell_type: "shell_command",
+    visibility: "list",
+    supported_in_api: true,
+    availability_nux: null,
+    upgrade: null,
+    priority: input.priority,
+    experimental_supported_tools: [],
+    supports_search_tool: false,
+    default_service_tier: null,
+    supports_reasoning_summaries: true,
+    base_instructions:
+      "You are MiMo, an AI assistant developed by Xiaomi. Today's date: {date} {week}. Your knowledge cutoff date is December 2024.",
+  };
+}
 
-const MIMO_V2_5: ModelCatalogEntry = {
-  ...MIMO_V2_5_PRO,
+const MIMO_V2_5_PRO: ModelCatalogEntry = createMimoPresetEntry({
+  slug: "mimo-v2.5-pro",
+  displayName: "mimo-v2.5-pro",
+  description: "MiMo-v2.5-Pro: Trillion-parameter Flagship Agent Foundation",
+  priority: 0,
+  supportsImageDetailOriginal: false,
+  inputModalities: ["text"],
+});
+
+const MIMO_V2_5: ModelCatalogEntry = createMimoPresetEntry({
   slug: "mimo-v2.5",
-  display_name: "mimo-v2.5",
+  displayName: "mimo-v2.5",
   description: "MiMo-V2.5: Native Omni-modal Perception Model",
-  priority: 2,
-};
+  priority: 1,
+  supportsImageDetailOriginal: true,
+  inputModalities: ["text", "image"],
+});
 
 const MIMO_DEFAULT_ENTRIES = [MIMO_V2_5_PRO, MIMO_V2_5] as const;
 

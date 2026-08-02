@@ -1627,8 +1627,10 @@ function getModelCatalogStore() {
 }
 
 export async function listCustomModels() {
+  const store = getModelCatalogStore();
+  await ensureProviderDefaultModels(store);
   return filterModelCatalogBindings(
-    await getModelCatalogStore().load(),
+    await store.load(),
     await loadKnownAccountKeys(),
   );
 }
@@ -2767,24 +2769,36 @@ async function ensureProviderDefaultModelBindings(
   accountName: string,
   providerId?: string,
 ): Promise<void> {
-  const entries = getProviderDefaultModelEntries(providerId);
-  if (!entries?.length) return;
-
   const store = getModelCatalogStore();
+  const modelIds = await ensureProviderDefaultModels(store, providerId);
+  if (modelIds.length === 0) return;
+  await store.setAccountBindings(`${envName}/${accountName}`, modelIds);
+}
+
+async function ensureProviderDefaultModels(
+  store: ReturnType<typeof getModelCatalogStore>,
+  providerId?: string,
+): Promise<string[]> {
+  const providerIds = providerId ? [providerId] : ["deepseek", "mimo"];
   const snapshot = await store.load();
   const modelIds: string[] = [];
-  for (const entry of entries) {
-    const existing = snapshot.models.find((model) => model.entry.slug === entry.slug);
-    if (existing) {
-      modelIds.push(existing.id);
-      continue;
+
+  for (const currentProviderId of providerIds) {
+    const entries = getProviderDefaultModelEntries(currentProviderId);
+    if (!entries?.length) continue;
+    for (const entry of entries) {
+      const existing = snapshot.models.find((model) => model.entry.slug === entry.slug);
+      if (existing) {
+        modelIds.push(existing.id);
+        continue;
+      }
+      const created = await store.saveModel({ entry });
+      snapshot.models.push(created);
+      modelIds.push(created.id);
     }
-    const created = await store.saveModel({ entry });
-    snapshot.models.push(created);
-    modelIds.push(created.id);
   }
 
-  await store.setAccountBindings(`${envName}/${accountName}`, modelIds);
+  return modelIds;
 }
 
 async function ensureIndependentModelSlug(homePath: string, slug: string): Promise<void> {

@@ -739,6 +739,34 @@ test("desktop bridge custom model listing ignores stale account bindings", async
   }
 });
 
+test("desktop bridge custom model listing seeds built-in provider models without bindings", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-model-list-presets-"));
+  const previousEnv = { ...process.env };
+
+  try {
+    process.env.HOME = root;
+    process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
+    process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
+    process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
+
+    await writeFileRecursive(join(root, "state", "current_cli_env"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_cli_account"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_app_env"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_app_account"), "default\n");
+    await writeFileRecursive(join(root, "default-home", "config.toml"), "model = 'gpt-5'\n");
+
+    const catalog = await bridge.listCustomModels();
+    assert.deepEqual(
+      catalog.models.map((model) => model.entry.slug),
+      ["deepseek-v4-flash", "deepseek-v4-pro", "mimo-v2.5-pro", "mimo-v2.5"],
+    );
+    assert.deepEqual(catalog.accountBindings, {});
+  } finally {
+    restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("desktop bridge recreates Chat compatibility routing for the copied account", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-account-copy-chat-"));
   const previousEnv = { ...process.env };
