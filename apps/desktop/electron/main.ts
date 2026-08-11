@@ -377,8 +377,8 @@ function registerHandlers() {
   ipcMain.handle("desktop:loadUsageRequests", (_event: IpcMainInvokeEvent, query) => loadUsageRequests(query));
   ipcMain.handle("desktop:listUsagePricing", () => listUsagePricing());
   ipcMain.handle("desktop:saveUsagePricing", (_event: IpcMainInvokeEvent, profile) => saveUsagePricing(profile));
-  ipcMain.handle("desktop:getSkillSnapshot", (_event: IpcMainInvokeEvent, refreshMarketplace?: boolean) =>
-    getSkillSnapshot(Boolean(refreshMarketplace)));
+  ipcMain.handle("desktop:getSkillSnapshot", (_event: IpcMainInvokeEvent, request) =>
+    getSkillSnapshot(request));
   ipcMain.handle("desktop:installSkill", (_event: IpcMainInvokeEvent, input) => installSkill(input));
   ipcMain.handle("desktop:checkSkillUpdates", (_event: IpcMainInvokeEvent, envName: string) => checkSkillUpdates(envName));
   ipcMain.handle("desktop:updateSkill", (_event: IpcMainInvokeEvent, input) => updateSkill(input));

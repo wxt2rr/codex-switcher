@@ -18,6 +18,18 @@ test("skills page renders marketplace first and derives the remaining tabs from 
   assert.match(source, /selectScope\(scope\.id\)/);
 });
 
+test("skills page exposes a marketplace source selector and passes source metadata to install", () => {
+  assert.match(source, /marketplaceSourceId/);
+  assert.match(source, /snapshot\?\.catalogSources/);
+  assert.match(source, /selectMarketplaceSource/);
+  assert.match(source, /marketplaceSourceId/);
+  assert.match(source, /sourcePath: skill\.sourcePath/);
+  assert.match(source, /ref: skill\.requestedRef/);
+  const marketplaceToolbar = source.slice(source.indexOf('activeScope?.kind === "marketplace" ?'), source.indexOf(') : activeScope?.kind === "codex"'));
+  assert.match(marketplaceToolbar, /onClick=\{\(\) => void loadSnapshot\(true\)\}/);
+  assert.match(marketplaceToolbar, /刷新技能列表/);
+});
+
 test("skills scope controls stay interactive inside the macOS title-bar drag area", () => {
   assert.match(source, /relative z-20[^\n]*\[-webkit-app-region:no-drag\]/);
   assert.match(source, /active:scale-\[0\.97\][^\n]*\[-webkit-app-region:no-drag\]/);

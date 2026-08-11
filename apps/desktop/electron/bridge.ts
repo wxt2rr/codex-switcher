@@ -97,6 +97,7 @@ import {
   type InstallSkillInput,
   type SetProviderBindingInput,
   type SkillProviderId,
+  type SkillSnapshotOptions,
   type UpdateSkillInput,
 } from "./skill-manager.js";
 import {
@@ -193,8 +194,8 @@ function getSkillManager(): SkillManager {
   return skillManager;
 }
 
-export function getSkillSnapshot(refreshMarketplace = false) {
-  return getSkillManager().getSnapshot({ refreshMarketplace });
+export function getSkillSnapshot(options: SkillSnapshotOptions | boolean = {}) {
+  return getSkillManager().getSnapshot(typeof options === "boolean" ? { refreshMarketplace: options } : options);
 }
 
 export function installSkill(input: InstallSkillInput) {

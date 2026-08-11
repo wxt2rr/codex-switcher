@@ -57,6 +57,7 @@ export function SkillsPage({
   const ja = language === "ja";
   const [snapshot, setSnapshot] = useState<SkillManagerSnapshot>();
   const [activeScopeId, setActiveScopeId] = useState("marketplace");
+  const [marketplaceSourceId, setMarketplaceSourceId] = useState<string>();
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -97,11 +98,12 @@ export function SkillsPage({
     };
   }, [snapshot?.scopes.length]);
 
-  async function loadSnapshot(refreshMarketplace = false, preserveBindingDrafts = false) {
+  async function loadSnapshot(refreshMarketplace = false, preserveBindingDrafts = false, sourceId = marketplaceSourceId) {
     setLoading(true);
     try {
-      const next = await bridge.getSkillSnapshot(refreshMarketplace);
+      const next = await bridge.getSkillSnapshot({ refreshMarketplace, ...(sourceId ? { marketplaceSourceId: sourceId } : {}) });
       setSnapshot(next);
+      setMarketplaceSourceId(next.marketplace.sourceId);
       setBindingDrafts((current) => Object.fromEntries(next.bindings.map((binding) => [binding.providerId,
         preserveBindingDrafts && current[binding.providerId] ? current[binding.providerId] : {
           enabled: binding.enabled,
@@ -146,13 +148,13 @@ export function SkillsPage({
     ].filter((value): value is string => Boolean(value)))];
   }
 
-  async function installIntoSyncedEnvironments(input: { sourceUrl: string; skillName?: string }) {
+  async function installIntoSyncedEnvironments(input: { sourceUrl: string; skillName?: string; sourcePath?: string; ref?: string }) {
     const codexTargets = installEnvironmentNames();
     if (!codexTargets.length) throw new Error(zh ? "未找到可用的 Codex 环境" : "No Codex environment is available");
     for (const envName of codexTargets) {
       const scope = codexScopes.find((item) => item.envName === envName);
       if (input.skillName && scope?.skills.some((skill) => skill.id === input.skillName)) continue;
-      await bridge.installSkill({ envName, sourceUrl: input.sourceUrl, skillName: input.skillName || undefined });
+      await bridge.installSkill({ envName, sourceUrl: input.sourceUrl, skillName: input.skillName || undefined, sourcePath: input.sourcePath, ref: input.ref });
     }
     await loadSnapshot();
   }
@@ -162,7 +164,7 @@ export function SkillsPage({
     setBusy(true);
     setInstallingSkillId(skill.id);
     try {
-      await installIntoSyncedEnvironments({ sourceUrl: skill.installUrl, skillName: skill.slug });
+      await installIntoSyncedEnvironments({ sourceUrl: skill.installUrl, skillName: skill.slug, sourcePath: skill.sourcePath, ref: skill.requestedRef });
       onSuccess(zh ? "Skill 已安装到全部 Codex 环境，已开启的服务商目录将自动同步" : ja ? "すべての Codex 環境に Skill をインストールしました" : "Skill installed in every Codex environment; enabled provider directories will sync automatically");
     } catch (error) {
       onError(error);
@@ -286,12 +288,19 @@ export function SkillsPage({
     setUpdates({});
   }
 
+  function selectMarketplaceSource(sourceId: string) {
+    setMarketplaceSourceId(sourceId);
+    setQuery("");
+    setUpdates({});
+    void loadSnapshot(false, false, sourceId);
+  }
+
   const title = activeScope?.kind === "marketplace"
     ? (zh ? "Skill 市场" : ja ? "Skill マーケット" : "Skill Marketplace")
     : activeScope?.name ?? (zh ? "Skills" : "Skills");
   const subtitle = activeScope?.kind === "marketplace"
-    ? (snapshot?.marketplace.status === "live"
-      ? (zh ? `实时市场目录 · ${snapshot.marketplace.items.length} 个 Skill` : `Live marketplace · ${snapshot.marketplace.items.length} skills`)
+      ? (snapshot?.marketplace.status === "live" || snapshot?.marketplace.status === "cached"
+      ? (zh ? `${snapshot.marketplace.sourceName} · ${snapshot.marketplace.items.length} 个 Skill${snapshot.marketplace.status === "cached" ? " · 缓存" : ""}` : `${snapshot.marketplace.sourceName} · ${snapshot.marketplace.items.length} skills${snapshot.marketplace.status === "cached" ? " · cached" : ""}`)
       : snapshot?.marketplace.message ?? (zh ? "浏览并安装可复用的 Agent Skill" : "Browse and install reusable agent skills"))
     : activeScope?.path ?? "";
 
@@ -311,9 +320,6 @@ export function SkillsPage({
                   : ja
                     ? `プロバイダーディレクトリ同期 ${enabledSyncScopes}/${totalSyncScopes}`
                     : `Provider directory sync ${enabledSyncScopes}/${totalSyncScopes}`}
-              </Button>
-              <Button variant="secondary" size="icon" className="size-8" onClick={() => void loadSnapshot(activeScopeId === "marketplace")} disabled={loading} title={zh ? "刷新" : "Refresh"} aria-label={zh ? "刷新" : "Refresh"}>
-                <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
               </Button>
             </div>
           </div>
@@ -348,7 +354,20 @@ export function SkillsPage({
                 className="h-8 rounded-lg border-transparent bg-[#fbfbfc] pl-10 text-[12px] shadow-none dark:bg-[#1b2129]" />
             </div>
             {activeScope?.kind === "marketplace" ? (
-              <Button size="sm" className="ml-auto" onClick={beginGitInstall}><ArrowDownToLine className="size-4" />{zh ? "从 Git 安装" : "Install from Git"}</Button>
+              <div className="ml-auto flex items-center gap-2">
+                <Select
+                  value={marketplaceSourceId}
+                  onValueChange={selectMarketplaceSource}
+                  openOnHover={false}
+                  items={(snapshot?.catalogSources ?? []).map((source) => ({ value: source.id, label: source.name }))}
+                  placeholder={zh ? "选择来源" : "Select source"}
+                  className="h-8 w-[150px] border-transparent bg-[#f7f8fa] text-[12px] dark:bg-[#1b2129]"
+                />
+                <Button variant="secondary" size="icon" className="size-8" onClick={() => void loadSnapshot(true)} disabled={loading} title={zh ? "刷新技能列表" : "Refresh skill list"} aria-label={zh ? "刷新技能列表" : "Refresh skill list"}>
+                  <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
+                </Button>
+                <Button size="sm" onClick={beginGitInstall}><ArrowDownToLine className="size-4" />{zh ? "从 Git 安装" : "Install from Git"}</Button>
+              </div>
             ) : activeScope?.kind === "codex" ? (
               <Button variant="secondary" size="sm" className="ml-auto" onClick={() => void checkUpdates(activeScope)} disabled={busy}>
                 <ArrowUpCircle className="size-4" />{zh ? "检查更新" : "Check updates"}

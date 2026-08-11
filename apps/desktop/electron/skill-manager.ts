@@ -26,6 +26,8 @@ const MAX_SKILL_FILES = 2_000;
 const MAX_SKILL_BYTES = 25 * 1024 * 1024;
 const BACKUP_LIMIT = 3;
 const DEFAULT_SKILLS_CATALOG_URL = "https://skills.sh/api/search";
+const VERCEL_AGENT_SKILLS_REPOSITORY = "https://github.com/vercel-labs/agent-skills";
+const VERCEL_AGENT_SKILLS_REF = "main";
 
 export type SkillProviderId = string;
 export type SkillScopeKind = "marketplace" | "codex" | "provider";
@@ -62,13 +64,28 @@ export interface MarketplaceSkill {
   slug: string;
   name: string;
   source: string;
+  catalogSourceId?: string;
+  sourcePath?: string;
+  requestedRef?: string;
+  revision?: string;
   installs?: number;
   installUrl: string;
   url: string;
   description?: string;
 }
 
+export interface SkillCatalogSource {
+  id: string;
+  name: string;
+  kind: "api" | "git";
+  sourceUrl: string;
+  externalUrl: string;
+  builtin: boolean;
+}
+
 export interface MarketplaceSnapshot {
+  sourceId: string;
+  sourceName: string;
   items: MarketplaceSkill[];
   status: "live" | "cached" | "link-only" | "error";
   fetchedAt?: string;
@@ -106,6 +123,7 @@ export interface SkillScope {
 
 export interface SkillManagerSnapshot {
   marketplace: MarketplaceSnapshot;
+  catalogSources: SkillCatalogSource[];
   scopes: SkillScope[];
   bindings: ProviderBinding[];
 }
@@ -186,6 +204,11 @@ export interface SkillManagerOptions {
   fetchImpl?: typeof fetch;
 }
 
+export interface SkillSnapshotOptions {
+  refreshMarketplace?: boolean;
+  marketplaceSourceId?: string;
+}
+
 const queues = new Map<string, Promise<unknown>>();
 
 export const SKILL_PROVIDERS: SkillProviderDefinition[] = [
@@ -194,6 +217,33 @@ export const SKILL_PROVIDERS: SkillProviderDefinition[] = [
   { id: "zcode", name: "ZCode", aliases: [], defaultPath: ".zcode/skills", custom: false },
   { id: "codebuddy", name: "CodeBuddy / WorkBuddy", aliases: ["WorkBuddy"], defaultPath: ".codebuddy/skills", custom: false },
   { id: "cursor", name: "Cursor", aliases: [], defaultPath: ".cursor/skills", custom: false },
+];
+
+export const SKILL_CATALOG_SOURCES: SkillCatalogSource[] = [
+  {
+    id: "skills-sh",
+    name: "skills.sh",
+    kind: "api",
+    sourceUrl: DEFAULT_SKILLS_CATALOG_URL,
+    externalUrl: "https://skills.sh",
+    builtin: true,
+  },
+  {
+    id: "vercel-official",
+    name: "Vercel 官方",
+    kind: "git",
+    sourceUrl: VERCEL_AGENT_SKILLS_REPOSITORY,
+    externalUrl: VERCEL_AGENT_SKILLS_REPOSITORY,
+    builtin: true,
+  },
+  {
+    id: "anthropic-official",
+    name: "Anthropic 官方",
+    kind: "git",
+    sourceUrl: "https://github.com/anthropics/skills",
+    externalUrl: "https://github.com/anthropics/skills",
+    builtin: true,
+  },
 ];
 
 export class SkillManager {
@@ -207,10 +257,11 @@ export class SkillManager {
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
-  async getSnapshot(options: { refreshMarketplace?: boolean } = {}): Promise<SkillManagerSnapshot> {
+  async getSnapshot(options: SkillSnapshotOptions = {}): Promise<SkillManagerSnapshot> {
     const environments = await this.getEnvironments();
+    const catalogSources = this.catalogSources();
     const [marketplace, bindingFile] = await Promise.all([
-      this.getMarketplace(options.refreshMarketplace ?? false),
+      this.getMarketplace(options.marketplaceSourceId, options.refreshMarketplace ?? false, catalogSources),
       this.readBindingFile(),
     ]);
     const providers = this.providersFor(bindingFile);
@@ -240,6 +291,7 @@ export class SkillManager {
     }));
     return {
       marketplace,
+      catalogSources,
       scopes: [
         { id: "marketplace", kind: "marketplace", name: "Marketplace", skills: [] },
         ...codexScopes,
@@ -488,8 +540,25 @@ export class SkillManager {
     return join(this.options.stateDir, "skills", "provider-bindings.json");
   }
 
-  private catalogCachePath(): string {
-    return join(this.options.stateDir, "skills", "catalog-cache.json");
+  private catalogSources(): SkillCatalogSource[] {
+    const configuredUrl = this.options.catalogUrl?.trim();
+    if (!configuredUrl || configuredUrl === DEFAULT_SKILLS_CATALOG_URL) return SKILL_CATALOG_SOURCES;
+    return [
+      {
+        id: "custom-configured",
+        name: "自定义目录",
+        kind: "api" as const,
+        sourceUrl: configuredUrl,
+        externalUrl: configuredUrl,
+        builtin: false,
+      },
+      ...SKILL_CATALOG_SOURCES,
+    ];
+  }
+
+  private catalogCachePath(sourceId: string): string {
+    const safeSourceId = sourceId.replace(/[^a-z0-9._-]+/gi, "-");
+    return join(this.options.stateDir, "skills", "catalog-cache", `${safeSourceId}.json`);
   }
 
   private async readSkillLock(environment: CodexSkillEnvironment): Promise<SkillLockFile> {
@@ -702,39 +771,103 @@ export class SkillManager {
     return destination;
   }
 
-  private async getMarketplace(refresh: boolean): Promise<MarketplaceSnapshot> {
-    const cachePath = this.catalogCachePath();
-    const cached = await readJson<MarketplaceSnapshot | undefined>(cachePath, undefined);
-    const catalogUrl = this.options.catalogUrl?.trim() || DEFAULT_SKILLS_CATALOG_URL;
+  private async getMarketplace(sourceId: string | undefined, refresh: boolean, sources: SkillCatalogSource[]): Promise<MarketplaceSnapshot> {
+    const source = sources.find((item) => item.id === sourceId) ?? sources[0]!;
+    const cachePath = this.catalogCachePath(source.id);
+    const legacyCache = source.id === "skills-sh"
+      ? await readJson<MarketplaceSnapshot | undefined>(join(this.options.stateDir, "skills", "catalog-cache.json"), undefined)
+      : undefined;
+    const rawCached = await readJson<MarketplaceSnapshot | undefined>(cachePath, legacyCache);
+    const cached = rawCached
+      ? { ...rawCached, sourceId: rawCached.sourceId || source.id, sourceName: rawCached.sourceName || source.name }
+      : undefined;
     if (!refresh && cached?.items?.length && cached.fetchedAt && Date.now() - Date.parse(cached.fetchedAt) < 60_000) {
       return { ...cached, status: "cached" };
     }
     try {
-      const endpoint = new URL(catalogUrl);
-      if (endpoint.hostname === "skills.sh" && endpoint.pathname === "/api/search") {
-        endpoint.searchParams.set("q", "skill");
-        endpoint.searchParams.set("limit", "100");
-      } else {
-        endpoint.searchParams.set("view", "all-time");
-        endpoint.searchParams.set("per_page", "100");
-      }
-      const response = await this.fetchImpl(endpoint, { signal: AbortSignal.timeout(12_000) });
-      if (!response.ok) throw new Error(`Marketplace returned HTTP ${response.status}`);
-      const payload: unknown = await response.json();
-      const items = normalizeCatalogPayload(payload);
+      const items = source.kind === "git"
+        ? await this.getGitCatalog(source)
+        : await this.getApiCatalog(source);
       const snapshot: MarketplaceSnapshot = {
+        sourceId: source.id,
+        sourceName: source.name,
         items,
         status: "live",
         fetchedAt: new Date().toISOString(),
-        externalUrl: "https://skills.sh",
+        externalUrl: source.externalUrl,
       };
       await writeJsonAtomic(cachePath, snapshot);
       return snapshot;
     } catch (error) {
       return cached?.items?.length
         ? { ...cached, status: "cached", message: errorMessage(error) }
-        : { items: [], status: "error", externalUrl: "https://skills.sh", message: errorMessage(error) };
+        : {
+            sourceId: source.id,
+            sourceName: source.name,
+            items: [],
+            status: "error",
+            externalUrl: source.externalUrl,
+            message: errorMessage(error),
+          };
     }
+  }
+
+  private async getApiCatalog(source: SkillCatalogSource): Promise<MarketplaceSkill[]> {
+    const endpoint = new URL(source.sourceUrl);
+    if (endpoint.hostname === "skills.sh" && endpoint.pathname === "/api/search") {
+      endpoint.searchParams.set("q", "skill");
+      endpoint.searchParams.set("limit", "100");
+    } else {
+      endpoint.searchParams.set("view", "all-time");
+      endpoint.searchParams.set("per_page", "100");
+    }
+    const response = await this.fetchImpl(endpoint, { signal: AbortSignal.timeout(12_000) });
+    if (!response.ok) throw new Error(`Marketplace returned HTTP ${response.status}`);
+    const payload: unknown = await response.json();
+    return normalizeCatalogPayload(payload, source.id);
+  }
+
+  private async getGitCatalog(source: SkillCatalogSource): Promise<MarketplaceSkill[]> {
+    const coordinates = githubCoordinates(source.sourceUrl);
+    if (!coordinates) throw new Error(`Git catalog '${source.name}' must use a public GitHub repository`);
+    const treeEndpoint = `https://api.github.com/repos/${coordinates.owner}/${coordinates.repository}/git/trees/${VERCEL_AGENT_SKILLS_REF}?recursive=1`;
+    const treeResponse = await this.fetchImpl(treeEndpoint, {
+      signal: AbortSignal.timeout(12_000),
+      headers: { accept: "application/vnd.github+json" },
+    });
+    if (!treeResponse.ok) throw new Error(`Git catalog returned HTTP ${treeResponse.status}`);
+    const payload: unknown = await treeResponse.json();
+    if (!isRecord(payload) || !Array.isArray(payload.tree)) throw new Error("Git catalog returned an invalid tree");
+    const revision = typeof payload.sha === "string" ? payload.sha : undefined;
+    const skillPaths = payload.tree.flatMap((entry): string[] => {
+      if (!isRecord(entry) || typeof entry.path !== "string" || entry.type !== "blob" || !entry.path.endsWith("/SKILL.md")) return [];
+      return [entry.path];
+    });
+    const items = await Promise.all(skillPaths.map(async (skillFilePath): Promise<MarketplaceSkill | undefined> => {
+      const rawUrl = `https://raw.githubusercontent.com/${coordinates.owner}/${coordinates.repository}/${VERCEL_AGENT_SKILLS_REF}/${skillFilePath}`;
+      try {
+        const response = await this.fetchImpl(rawUrl, { signal: AbortSignal.timeout(12_000) });
+        if (!response.ok) return undefined;
+        const metadata = parseSkillMetadata(await response.text(), basename(dirname(skillFilePath)));
+        const sourcePath = skillFilePath.slice(0, -"/SKILL.md".length);
+        return {
+          id: `${source.id}/${sourcePath}`,
+          slug: basename(sourcePath),
+          name: metadata.name,
+          source: `${coordinates.owner}/${coordinates.repository}`,
+          catalogSourceId: source.id,
+          sourcePath,
+          requestedRef: VERCEL_AGENT_SKILLS_REF,
+          revision,
+          installUrl: source.sourceUrl,
+          url: `https://github.com/${coordinates.owner}/${coordinates.repository}/tree/${VERCEL_AGENT_SKILLS_REF}/${sourcePath}`,
+          description: metadata.description,
+        } satisfies MarketplaceSkill;
+      } catch {
+        return undefined;
+      }
+    }));
+    return items.filter((item): item is MarketplaceSkill => Boolean(item)).sort((left, right) => left.name.localeCompare(right.name));
   }
 
   private async withEnvironmentLock<T>(envName: string, action: () => Promise<T>): Promise<T> {
@@ -872,6 +1005,10 @@ async function validateSkillDirectory(root: string): Promise<void> {
 
 async function readSkillMetadata(path: string, fallbackName: string): Promise<{ name: string; description: string }> {
   const content = await readFile(path, "utf8").catch(() => "");
+  return parseSkillMetadata(content, fallbackName);
+}
+
+function parseSkillMetadata(content: string, fallbackName: string): { name: string; description: string } {
   const frontmatter = content.match(/^---\s*\r?\n([\s\S]*?)\r?\n---/i)?.[1] ?? "";
   const name = readFrontmatterString(frontmatter, "name") || fallbackName;
   const description = readFrontmatterString(frontmatter, "description") || "No description provided";
@@ -925,7 +1062,7 @@ function normalizeGitSource(value: string): string {
   return url.toString();
 }
 
-function normalizeCatalogPayload(payload: unknown): MarketplaceSkill[] {
+function normalizeCatalogPayload(payload: unknown, catalogSourceId = "skills-sh"): MarketplaceSkill[] {
   if (!isRecord(payload)) throw new Error("Marketplace response has an invalid shape");
   const values = Array.isArray(payload.data) ? payload.data : Array.isArray(payload.skills) ? payload.skills : undefined;
   if (!values) throw new Error("Marketplace response has an invalid shape");
@@ -938,6 +1075,7 @@ function normalizeCatalogPayload(payload: unknown): MarketplaceSkill[] {
         slug: value.skillId,
         name: humanizeSkillName(value.name),
         source: value.source,
+        catalogSourceId,
         installs: typeof value.installs === "number" ? value.installs : undefined,
         installUrl: `https://github.com/${value.source}`,
         url: `https://skills.sh/${value.id}`,
@@ -953,11 +1091,23 @@ function normalizeCatalogPayload(payload: unknown): MarketplaceSkill[] {
       const url = new URL(value.url);
       if (installUrl.protocol !== "https:" || url.protocol !== "https:") return [];
     } catch { return []; }
-    return [{ id: value.id, slug: value.slug, name: value.name, source: value.source,
+    return [{ id: value.id, slug: value.slug, name: value.name, source: value.source, catalogSourceId,
       installs: typeof value.installs === "number" ? value.installs : undefined,
       installUrl: value.installUrl, url: value.url,
       description: typeof value.description === "string" ? value.description.slice(0, 1000) : undefined }];
   }).sort((left, right) => (right.installs ?? 0) - (left.installs ?? 0));
+}
+
+function githubCoordinates(sourceUrl: string): { owner: string; repository: string } | undefined {
+  try {
+    const url = new URL(sourceUrl);
+    if (url.hostname !== "github.com") return undefined;
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length < 2) return undefined;
+    return { owner: parts[0]!, repository: parts[1]!.replace(/\.git$/, "") };
+  } catch {
+    return undefined;
+  }
 }
 
 function humanizeSkillName(value: string): string {

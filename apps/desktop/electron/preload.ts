@@ -149,7 +149,7 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   loadUsageRequests: (query: unknown) => ipcRenderer.invoke("desktop:loadUsageRequests", query),
   listUsagePricing: () => ipcRenderer.invoke("desktop:listUsagePricing"),
   saveUsagePricing: (profile: unknown) => ipcRenderer.invoke("desktop:saveUsagePricing", profile),
-  getSkillSnapshot: (refreshMarketplace?: boolean) => ipcRenderer.invoke("desktop:getSkillSnapshot", refreshMarketplace),
+  getSkillSnapshot: (request?: unknown) => ipcRenderer.invoke("desktop:getSkillSnapshot", request),
   installSkill: (input: unknown) => ipcRenderer.invoke("desktop:installSkill", input),
   checkSkillUpdates: (envName: string) => ipcRenderer.invoke("desktop:checkSkillUpdates", envName),
   updateSkill: (input: unknown) => ipcRenderer.invoke("desktop:updateSkill", input),

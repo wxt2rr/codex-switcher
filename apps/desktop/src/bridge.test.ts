@@ -279,7 +279,8 @@ test("desktop bridge forwards calls to injected electron api", async () => {
     listUsagePricing: async () => [],
     saveUsagePricing: async () => undefined,
     getSkillSnapshot: async () => ({
-      marketplace: { items: [], status: "link-only", externalUrl: "https://skills.sh" },
+      marketplace: { sourceId: "skills-sh", sourceName: "skills.sh", items: [], status: "link-only", externalUrl: "https://skills.sh" },
+      catalogSources: [{ id: "skills-sh", name: "skills.sh", kind: "api", sourceUrl: "https://skills.sh/api/search", externalUrl: "https://skills.sh", builtin: true }],
       scopes: [{ id: "marketplace", kind: "marketplace", name: "Marketplace", skills: [] }],
       bindings: [],
     }),

@@ -203,4 +203,37 @@ test("normalizes and caches a configured marketplace response", async () => {
   const snapshot = await manager.getSnapshot({ refreshMarketplace: true });
   assert.equal(snapshot.marketplace.status, "live");
   assert.equal(snapshot.marketplace.items[0]?.slug, "find-skills");
+  assert.equal(snapshot.marketplace.sourceId, "custom-configured");
+  assert.equal(snapshot.catalogSources[0]?.id, "custom-configured");
+});
+
+test("discovers Vercel skills from the GitHub tree and preserves the source path", async () => {
+  const workspace = await makeWorkspace();
+  const requested: string[] = [];
+  const manager = new SkillManager({
+    stateDir: join(workspace.root, "state"),
+    environments: async () => [],
+    fetchImpl: async (input) => {
+      const url = String(input);
+      requested.push(url);
+      if (url.includes("api.github.com/repos/vercel-labs/agent-skills/git/trees/main")) {
+        return new Response(JSON.stringify({ sha: "vercel-tree-sha", tree: [
+          { path: "skills/react-best-practices/SKILL.md", type: "blob" },
+          { path: "README.md", type: "blob" },
+        ] }), { status: 200 });
+      }
+      if (url.includes("raw.githubusercontent.com/vercel-labs/agent-skills/main/skills/react-best-practices/SKILL.md")) {
+        return new Response("---\nname: react-best-practices\ndescription: React performance guidance\n---\n", { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    },
+  });
+
+  const snapshot = await manager.getSnapshot({ marketplaceSourceId: "vercel-official", refreshMarketplace: true });
+  assert.equal(snapshot.marketplace.sourceId, "vercel-official");
+  assert.equal(snapshot.marketplace.items[0]?.sourcePath, "skills/react-best-practices");
+  assert.equal(snapshot.marketplace.items[0]?.revision, "vercel-tree-sha");
+  assert.equal(snapshot.marketplace.items[0]?.installUrl, "https://github.com/vercel-labs/agent-skills");
+  assert.ok(requested.some((url) => url.includes("api.github.com/repos/vercel-labs/agent-skills/git/trees/main")));
+  assert.ok(requested.some((url) => url.includes("raw.githubusercontent.com/vercel-labs/agent-skills/main/skills/react-best-practices/SKILL.md")));
 });

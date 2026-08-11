@@ -141,10 +141,15 @@ export interface SaveCustomModelRequest { id?: string; entry: Record<string, unk
 
 export type SkillProviderId = string;
 export interface MarketplaceSkill {
-  id: string; slug: string; name: string; source: string; installs?: number;
+  id: string; slug: string; name: string; source: string; catalogSourceId?: string; sourcePath?: string;
+  requestedRef?: string; revision?: string; installs?: number;
   installUrl: string; url: string; description?: string;
 }
+export interface SkillCatalogSource {
+  id: string; name: string; kind: "api" | "git"; sourceUrl: string; externalUrl: string; builtin: boolean;
+}
 export interface MarketplaceSnapshot {
+  sourceId: string; sourceName: string;
   items: MarketplaceSkill[]; status: "live" | "cached" | "link-only" | "error";
   fetchedAt?: string; message?: string; externalUrl: string;
 }
@@ -163,7 +168,8 @@ export interface ProviderBinding {
   status: "disabled" | "healthy" | "conflict" | "missing-source" | "error";
   managedLinks: number; conflicts: number; message?: string;
 }
-export interface SkillManagerSnapshot { marketplace: MarketplaceSnapshot; scopes: SkillScope[]; bindings: ProviderBinding[]; }
+export interface SkillSnapshotRequest { refreshMarketplace?: boolean; marketplaceSourceId?: string; }
+export interface SkillManagerSnapshot { marketplace: MarketplaceSnapshot; catalogSources: SkillCatalogSource[]; scopes: SkillScope[]; bindings: ProviderBinding[]; }
 export interface InstallSkillRequest {
   envName: string; sourceUrl: string; skillName?: string; sourcePath?: string; ref?: string; force?: boolean;
 }
@@ -268,7 +274,7 @@ export interface DesktopElectronApi {
   loadUsageRequests(query: UsageRequestQuery): Promise<UsageRequestPage>;
   listUsagePricing(): Promise<UsagePricingProfile[]>;
   saveUsagePricing(profile: UsagePricingProfile): Promise<void>;
-  getSkillSnapshot(refreshMarketplace?: boolean): Promise<SkillManagerSnapshot>;
+  getSkillSnapshot(request?: SkillSnapshotRequest): Promise<SkillManagerSnapshot>;
   installSkill(input: InstallSkillRequest): Promise<InstalledSkill>;
   checkSkillUpdates(envName: string): Promise<Record<string, boolean>>;
   updateSkill(input: UpdateSkillRequest): Promise<InstalledSkill>;
@@ -365,7 +371,7 @@ export interface DesktopBridge {
   loadUsageRequests(query: UsageRequestQuery): Promise<UsageRequestPage>;
   listUsagePricing(): Promise<UsagePricingProfile[]>;
   saveUsagePricing(profile: UsagePricingProfile): Promise<void>;
-  getSkillSnapshot(refreshMarketplace?: boolean): Promise<SkillManagerSnapshot>;
+  getSkillSnapshot(request?: SkillSnapshotRequest): Promise<SkillManagerSnapshot>;
   installSkill(input: InstallSkillRequest): Promise<InstalledSkill>;
   checkSkillUpdates(envName: string): Promise<Record<string, boolean>>;
   updateSkill(input: UpdateSkillRequest): Promise<InstalledSkill>;
@@ -703,7 +709,7 @@ function createBrowserPreviewBridge(): DesktopBridge {
     setGeneratedImageRecoverySettings: async (value) => ({
       enabled: value.enabled, installedEnvironments: value.enabled ? 2 : 0, totalEnvironments: 2, conflicts: [],
     }),
-    getSkillSnapshot: async (refreshMarketplace) => loadPreviewSkillSnapshot(Boolean(refreshMarketplace)),
+    getSkillSnapshot: async (request) => loadPreviewSkillSnapshot(request ?? {}),
     installSkill: async (input) => ({
       id: input.skillName ?? "preview-skill", name: input.skillName ?? "Preview Skill",
       description: "Preview installation", path: `/preview/${input.envName}/skills/${input.skillName ?? "preview-skill"}`,
@@ -748,7 +754,7 @@ const previewInstalledSkills: InstalledSkill[] = [
 
 const previewSkillSnapshot: SkillManagerSnapshot = {
   marketplace: {
-    status: "live", fetchedAt: new Date().toISOString(), externalUrl: "https://skills.sh",
+    sourceId: "skills-sh", sourceName: "skills.sh", status: "live", fetchedAt: new Date().toISOString(), externalUrl: "https://skills.sh",
     items: [
       { id: "vercel-labs/skills/find-skills", slug: "find-skills", name: "Find Skills", source: "vercel-labs/skills",
         installs: 24531, installUrl: "https://github.com/vercel-labs/skills", url: "https://skills.sh/vercel-labs/skills/find-skills",
@@ -761,6 +767,11 @@ const previewSkillSnapshot: SkillManagerSnapshot = {
         url: "https://skills.sh/vercel-labs/agent-skills/web-design-guidelines", description: "Review UI code against practical web interface guidelines." },
     ],
   },
+  catalogSources: [
+    { id: "skills-sh", name: "skills.sh", kind: "api", sourceUrl: "https://skills.sh/api/search", externalUrl: "https://skills.sh", builtin: true },
+    { id: "vercel-official", name: "Vercel 官方", kind: "git", sourceUrl: "https://github.com/vercel-labs/agent-skills", externalUrl: "https://github.com/vercel-labs/agent-skills", builtin: true },
+    { id: "anthropic-official", name: "Anthropic 官方", kind: "git", sourceUrl: "https://github.com/anthropics/skills", externalUrl: "https://github.com/anthropics/skills", builtin: true },
+  ],
   scopes: [
     { id: "marketplace", kind: "marketplace", name: "Marketplace", skills: [] },
     { id: "codex:personal", kind: "codex", name: "Codex · Personal", envName: "personal", path: "/preview/personal/skills", skills: previewInstalledSkills },
@@ -780,9 +791,13 @@ const previewSkillSnapshot: SkillManagerSnapshot = {
   ],
 };
 
-async function loadPreviewSkillSnapshot(refreshMarketplace: boolean): Promise<SkillManagerSnapshot> {
+async function loadPreviewSkillSnapshot(request: SkillSnapshotRequest): Promise<SkillManagerSnapshot> {
   try {
-    const response = await fetch(`/desktop-preview/skills-snapshot?refresh=${refreshMarketplace}`);
+    const params = new URLSearchParams({
+      refresh: String(Boolean(request.refreshMarketplace)),
+      source: request.marketplaceSourceId ?? "skills-sh",
+    });
+    const response = await fetch(`/desktop-preview/skills-snapshot?${params.toString()}`);
     if (!response.ok) throw new Error(`Marketplace returned HTTP ${response.status}`);
     return await response.json() as SkillManagerSnapshot;
   } catch (error) {
