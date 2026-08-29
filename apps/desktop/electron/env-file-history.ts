@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 export type EnvFileType = "config.toml" | "auth.json";
-export type EnvFileHistorySource = "manual" | "switch-cli" | "switch-app" | "restore";
+export type EnvFileHistorySource = "manual" | "switch-cli" | "switch-app" | "restore" | "migration";
 
 export interface EnvFileSnapshot {
   configToml: string;

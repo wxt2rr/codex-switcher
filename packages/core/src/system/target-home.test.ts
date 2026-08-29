@@ -5,7 +5,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { DEFAULT_SCHEMA_VERSION, type SwitcherState } from "../state/store.js";
-import { applyTargetHomeState, clearTargetHomeState } from "./target-home.js";
+import {
+  applyTargetHomeState,
+  clearTargetHomeState,
+  repairLegacyTargetHomeConfigs,
+} from "./target-home.js";
 
 test("target-home writer installs auth.json and managed config for apikey account", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-"));
@@ -56,8 +60,211 @@ test("target-home writer installs auth.json and managed config for apikey accoun
     const config = await readFile(join(homePath, "config.toml"), "utf8");
     assert.match(config, /preferred_auth_method = "apikey"/);
     assert.match(config, /openai_base_url = "https:\/\/proxy\.example\.test\/v1"/);
-    assert.match(config, /requires_openai_auth = false/);
-    assert.match(config, /http_headers = \{ "x-openai-actor-authorization" = "codex-sw\.app" \}/);
+    assert.doesNotMatch(config, /requires_openai_auth = false/);
+    assert.doesNotMatch(config, /http_headers = \{ "x-openai-actor-authorization" = "codex-sw\.app" \}/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("legacy target-home repair scans every environment and preserves auth.json", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-migration-"));
+  const firstHome = join(root, "first");
+  const secondHome = join(root, "second");
+  const legacyConfig = [
+    'preferred_auth_method = "apikey"',
+    'openai_base_url = "https://proxy.example.test/v1"',
+    "requires_openai_auth = false",
+    'http_headers = { "x-openai-actor-authorization" = "codex-sw.app" }',
+    "",
+    "[history]",
+    'persistence = "save-all"',
+    "",
+  ].join("\n");
+  const state: SwitcherState = {
+    schemaVersion: DEFAULT_SCHEMA_VERSION,
+    generatedAt: "2026-08-29T10:00:00.000Z",
+    targets: {
+      cli: { env: "first", account: "personal" },
+      app: { env: "first", account: "personal" },
+    },
+    envs: {
+      first: {
+        name: "first",
+        path: firstHome,
+        accounts: {
+          personal: {
+            name: "personal",
+            authMode: "apikey",
+            runtime: { preferredAuthMethod: "apikey", openaiBaseUrlMode: "custom" },
+            authData: { OPENAI_API_KEY: "sk-first" },
+          },
+        },
+      },
+      second: {
+        name: "second",
+        path: secondHome,
+        accounts: {
+          work: {
+            name: "work",
+            authMode: "apikey",
+            runtime: { preferredAuthMethod: "apikey", openaiBaseUrlMode: "custom" },
+            authData: { OPENAI_API_KEY: "sk-second" },
+          },
+        },
+      },
+    },
+    tasks: { recent: [] },
+  };
+
+  try {
+    await Promise.all([
+      mkdir(firstHome, { recursive: true }),
+      mkdir(secondHome, { recursive: true }),
+    ]);
+    await Promise.all([
+      writeFile(join(firstHome, "config.toml"), legacyConfig, "utf8"),
+      writeFile(join(secondHome, "config.toml"), legacyConfig, "utf8"),
+      writeFile(join(firstHome, "auth.json"), '{"OPENAI_API_KEY":"sk-first"}\n', "utf8"),
+      writeFile(join(secondHome, "auth.json"), '{"OPENAI_API_KEY":"sk-second"}\n', "utf8"),
+    ]);
+
+    const beforeWrites: string[] = [];
+    const result = await repairLegacyTargetHomeConfigs({
+      state,
+      beforeWrite: async (entry) => {
+        beforeWrites.push(entry.envName);
+      },
+    });
+
+    assert.equal(result.checked, 2);
+    assert.deepEqual(result.repaired.map((entry) => entry.envName), ["first", "second"]);
+    assert.deepEqual(beforeWrites, ["first", "second"]);
+    assert.deepEqual(result.unresolved, []);
+    assert.deepEqual(result.failures, []);
+    for (const [homePath, apiKey] of [[firstHome, "sk-first"], [secondHome, "sk-second"]] as const) {
+      const config = await readFile(join(homePath, "config.toml"), "utf8");
+      assert.doesNotMatch(config, /requires_openai_auth = false/);
+      assert.doesNotMatch(config, /x-openai-actor-authorization/);
+      assert.match(config, /\[history\]/);
+      const auth = JSON.parse(await readFile(join(homePath, "auth.json"), "utf8")) as Record<string, string>;
+      assert.equal(auth.OPENAI_API_KEY, apiKey);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("legacy target-home repair checks matching provider auth before changing requires_openai_auth", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-provider-migration-"));
+  const homePath = join(root, "home");
+  const state: SwitcherState = {
+    schemaVersion: DEFAULT_SCHEMA_VERSION,
+    generatedAt: "2026-08-29T10:00:00.000Z",
+    targets: {
+      cli: { env: "default", account: "personal" },
+      app: { env: "default", account: "personal" },
+    },
+    envs: {
+      default: {
+        name: "default",
+        path: homePath,
+        accounts: {
+          personal: {
+            name: "personal",
+            authMode: "apikey",
+            runtime: { preferredAuthMethod: "apikey", openaiBaseUrlMode: "custom" },
+            authData: { OPENAI_API_KEY: "sk-provider" },
+          },
+        },
+      },
+    },
+    tasks: { recent: [] },
+  };
+
+  try {
+    await mkdir(homePath, { recursive: true });
+    await writeFile(
+      join(homePath, "config.toml"),
+      [
+        'model_provider = "legacy"',
+        'requires_openai_auth = false',
+        'http_headers = { "x-openai-actor-authorization" = "codex-sw.app" }',
+        "",
+        "[model_providers.legacy]",
+        'name = "legacy"',
+        'requires_openai_auth = false',
+        'base_url = "https://proxy.example.test/v1"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(join(homePath, "auth.json"), '{"OPENAI_API_KEY":"sk-provider"}\n', "utf8");
+
+    const result = await repairLegacyTargetHomeConfigs({ state });
+    const config = await readFile(join(homePath, "config.toml"), "utf8");
+    assert.equal(result.repaired[0]?.providerAuthEnabled, true);
+    assert.deepEqual(result.unresolved, []);
+    assert.match(config, /model_provider = "legacy"/);
+    assert.match(config, /\[model_providers\.legacy\]/);
+    assert.match(config, /requires_openai_auth = true/);
+    assert.doesNotMatch(config, /requires_openai_auth = false/);
+    assert.doesNotMatch(config, /x-openai-actor-authorization/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("legacy target-home repair handles provider-only API key settings without touching explicit auth", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-provider-only-migration-"));
+  const homePath = join(root, "home");
+  const state: SwitcherState = {
+    schemaVersion: DEFAULT_SCHEMA_VERSION,
+    generatedAt: "2026-08-29T10:00:00.000Z",
+    targets: {
+      cli: { env: "default", account: "personal" },
+      app: { env: "default", account: "personal" },
+    },
+    envs: {
+      default: {
+        name: "default",
+        path: homePath,
+        accounts: {
+          personal: {
+            name: "personal",
+            authMode: "apikey",
+            runtime: { preferredAuthMethod: "apikey", openaiBaseUrlMode: "custom" },
+            authData: { OPENAI_API_KEY: "sk-provider-only" },
+          },
+        },
+      },
+    },
+    tasks: { recent: [] },
+  };
+
+  try {
+    await mkdir(homePath, { recursive: true });
+    await writeFile(
+      join(homePath, "config.toml"),
+      [
+        'preferred_auth_method = "apikey"',
+        'model_provider = "legacy"',
+        "",
+        "[model_providers.legacy]",
+        'requires_openai_auth = false',
+        'base_url = "https://proxy.example.test/v1"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(join(homePath, "auth.json"), '{"OPENAI_API_KEY":"sk-provider-only"}\n', "utf8");
+
+    const result = await repairLegacyTargetHomeConfigs({ state });
+    const config = await readFile(join(homePath, "config.toml"), "utf8");
+    assert.equal(result.repaired[0]?.providerAuthEnabled, true);
+    assert.match(config, /model_provider = "legacy"/);
+    assert.match(config, /requires_openai_auth = true/);
+    assert.doesNotMatch(config, /requires_openai_auth = false/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -107,7 +314,8 @@ test("target-home writer pins the DeepSeek model for DeepSeek api key accounts",
     assert.match(config, /model = "deepseek-v4-flash"/);
     assert.match(config, /model_catalog_json = ".*\/models\.json"/);
     assert.doesNotMatch(config, /model = "gpt-5\.5"/);
-    assert.match(config, /http_headers = \{ "x-openai-actor-authorization" = "codex-sw\.app" \}/);
+    assert.doesNotMatch(config, /requires_openai_auth = false/);
+    assert.doesNotMatch(config, /http_headers = \{ "x-openai-actor-authorization" = "codex-sw\.app" \}/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -156,8 +364,8 @@ test("target-home writer materializes an enabled Chat compatibility route withou
     assert.doesNotMatch(config, /\[model_providers\./);
     assert.doesNotMatch(config, /wire_api/);
     assert.doesNotMatch(config, /env_key/);
-    assert.match(config, /requires_openai_auth = false/);
-    assert.match(config, /http_headers = \{ "x-openai-actor-authorization" = "codex-sw\.app" \}/);
+    assert.doesNotMatch(config, /requires_openai_auth = false/);
+    assert.doesNotMatch(config, /http_headers = \{ "x-openai-actor-authorization" = "codex-sw\.app" \}/);
     assert.doesNotMatch(config, /sk-upstream-secret/);
   } finally {
     await rm(root, { recursive: true, force: true });

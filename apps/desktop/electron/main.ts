@@ -97,6 +97,7 @@ import {
   createSkillProvider,
   deleteSkillProvider,
   repairSkillProvider,
+  repairLegacyEnvironmentConfigs,
 } from "./bridge.js";
 
 const currentDir = __dirname;
@@ -155,6 +156,9 @@ app.whenReady().then(async () => {
     Menu.setApplicationMenu(null);
   }
   registerHandlers();
+  await repairLegacyEnvironmentConfigs().catch((error) => {
+    console.warn("Codex legacy config migration failed", error);
+  });
   await createWindow();
   startEnvHistoryCleanupSchedule();
   void synchronizeAppEnvironmentBadges().catch(() => undefined);

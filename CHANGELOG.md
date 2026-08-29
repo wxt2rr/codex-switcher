@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.17 - 2026-08-29
+
+- Added automatic migration across all configured environments for Codex 0.149 authentication changes.
+- Removed legacy root-level API-key auth fields while preserving `model_provider`, explicit provider authentication, and `auth.json` data.
+- Safely repairs matching provider-level authentication settings and leaves ambiguous configurations unchanged.
+
 ## 0.8.16 - 2026-08-02
 
 - Updated the built-in DeepSeek presets to match the official catalog JSON and updated MiMo defaults to the Xiaomi preset JSON.

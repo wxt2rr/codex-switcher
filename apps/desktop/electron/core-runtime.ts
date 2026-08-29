@@ -15,6 +15,7 @@ export interface CoreRuntime {
   writeLegacyPointers: typeof import("../../../packages/core/dist/state/legacy.js").writeLegacyPointers;
   writeLegacyRuntime: typeof import("../../../packages/core/dist/state/legacy.js").writeLegacyRuntime;
   applyTargetHomeState: typeof import("../../../packages/core/dist/system/target-home.js").applyTargetHomeState;
+  repairLegacyTargetHomeConfigs: typeof import("../../../packages/core/dist/system/target-home.js").repairLegacyTargetHomeConfigs;
 }
 
 type CoreApiModule = typeof import("../../../packages/core/dist/api/core-api.js");
@@ -78,6 +79,7 @@ export async function loadCoreRuntime(): Promise<CoreRuntime> {
     writeLegacyPointers: legacyModule.writeLegacyPointers,
     writeLegacyRuntime: legacyModule.writeLegacyRuntime,
     applyTargetHomeState: targetHomeModule.applyTargetHomeState,
+    repairLegacyTargetHomeConfigs: targetHomeModule.repairLegacyTargetHomeConfigs,
   };
 }
 

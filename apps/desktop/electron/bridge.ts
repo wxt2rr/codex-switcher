@@ -806,6 +806,30 @@ export async function loadOverview(): Promise<string> {
   return `${JSON.stringify({ ...overview, accounts }, null, 2)}\n`;
 }
 
+export async function repairLegacyEnvironmentConfigs() {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const result = await runtime.repairLegacyTargetHomeConfigs({
+    state,
+    beforeWrite: async (entry) => {
+      await appendEnvFileHistoryEntry({
+        stateDir: getStateDir(),
+        envName: entry.envName,
+        fileType: "config.toml",
+        source: "migration",
+        content: entry.beforeConfigToml,
+      });
+    },
+  });
+  if (result.unresolved.length > 0 || result.failures.length > 0) {
+    console.warn("Codex legacy config migration incomplete", {
+      unresolved: result.unresolved,
+      failures: result.failures,
+    });
+  }
+  return result;
+}
+
 export async function loadAuthMetrics(): Promise<string> {
   const runtime = await loadCoreRuntime();
   const state = await runtime.readLegacyState(getLegacyOptions());

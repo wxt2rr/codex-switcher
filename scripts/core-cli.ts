@@ -14,7 +14,10 @@ import {
   writeLegacyRuntime,
 } from "../packages/core/src/state/legacy.js";
 import type { SwitcherState } from "../packages/core/src/state/store.js";
-import { applyTargetHomeState } from "../packages/core/src/system/target-home.js";
+import {
+  applyTargetHomeState,
+  repairLegacyTargetHomeConfigs,
+} from "../packages/core/src/system/target-home.js";
 
 type Command =
   | "whoami"
@@ -63,6 +66,7 @@ export async function runCoreCli(
     envsDir,
     defaultHome,
   });
+  await repairLegacyTargetHomeConfigs({ state });
 
   switch (command as Command) {
     case "whoami": {
