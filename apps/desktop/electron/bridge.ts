@@ -2373,12 +2373,9 @@ async function applyTargetHomeStateWithHistory(
         ?? (refreshedAccount?.runtime.independentModelEnabled
           ? getProviderDefaultModelSlug(refreshedAccount.runtime.independentModelProviderId) ?? DEEPSEEK_DEFAULT_MODEL_SLUG
           : undefined),
-      loadBundledCatalog: async () => {
-        if (!cliStatus.available) {
-          throw new Error("Codex CLI is required to generate the merged model catalog");
-        }
-        return loadBundledModelCatalog(cliStatus.path);
-      },
+      loadBundledCatalog: cliStatus.available
+        ? () => loadBundledModelCatalog(cliStatus.path)
+        : undefined,
     });
   } catch (error) {
     await restoreEnvFileSnapshot(env.path, before);

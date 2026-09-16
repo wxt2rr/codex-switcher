@@ -50,7 +50,7 @@ export async function synchronizeAccountModelCatalog(options: {
   accountName: string;
   homePath: string;
   store: ModelCatalogStore;
-  loadBundledCatalog: () => Promise<BundledModelCatalog>;
+  loadBundledCatalog?: () => Promise<BundledModelCatalog>;
   providerId?: string;
   baseUrl?: string;
   model?: string;
@@ -87,7 +87,9 @@ export async function synchronizeAccountModelCatalog(options: {
     if (!model) throw new Error(`Bound custom model '${id}' no longer exists`);
     return model.entry;
   });
-  const bundled = await options.loadBundledCatalog();
+  const bundled = options.loadBundledCatalog
+    ? await options.loadBundledCatalog()
+    : { models: [] };
   const catalogEntries = bundled.models;
   const bundledSlugs = new Set(catalogEntries.map((model) => model.slug));
   const collision = customEntries.find((model) => bundledSlugs.has(model.slug));

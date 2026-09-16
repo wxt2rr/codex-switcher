@@ -56,6 +56,24 @@ test("account catalog removes model_catalog_json when the account has no binding
   assert.match(config, /model = "gpt-5.4"/);
 });
 
+test("account catalog keeps custom models when Codex CLI is unavailable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "account-model-catalog-no-cli-"));
+  const store = createModelCatalogStore(join(root, "custom-models.json"));
+  const custom = await store.saveModel({ entry: { slug: "custom-only", display_name: "Custom Only" } });
+  await store.setAccountBindings("work/alice", [custom.id]);
+
+  const result = await synchronizeAccountModelCatalog({
+    envName: "work",
+    accountName: "alice",
+    homePath: join(root, "home"),
+    store,
+  });
+
+  assert.equal(result.enabled, true);
+  const generated = JSON.parse(await readFile(result.catalogPath!, "utf8"));
+  assert.deepEqual(generated.models.map((entry: { slug: string }) => entry.slug), ["custom-only"]);
+});
+
 test("account catalog rejects custom slugs that collide with bundled models", async () => {
   const root = await mkdtemp(join(tmpdir(), "account-model-catalog-collision-"));
   const store = createModelCatalogStore(join(root, "custom-models.json"));
