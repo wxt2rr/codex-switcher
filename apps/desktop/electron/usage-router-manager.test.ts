@@ -144,12 +144,15 @@ test("syncing an enabled environment attaches newly created non-AUTH accounts", 
     assert.equal(await manager.isEnvironmentEnabled("work"), true);
 
     const synced = await manager.syncEnvironmentIfEnabled("work", [
-      { envName: "work", accountName: "existing", authMode: "apikey", baseUrl: values.get("existing") ?? "" },
+      { envName: "work", accountName: "existing", authMode: "apikey", baseUrl: "https://api.changed.example/v1" },
       { envName: "work", accountName: "new-key", authMode: "apikey", baseUrl: "https://api.new.example/v1" },
       { envName: "work", accountName: "new-auth", authMode: "auth", baseUrl: "" },
     ], update);
 
     assert.equal(synced?.routedAccounts, 2);
+    const routes = await manager.listRoutes();
+    assert.equal(routes.find((route) => route.accountName === "existing")?.originalBaseUrl, "https://api.changed.example/v1");
+    assert.equal(routes.some((route) => route.upstreamBaseUrl === "https://api.example.com/v1"), false);
     assert.match(values.get("new-key") ?? "", /^http:\/\/127\.0\.0\.1:\d+\/routes\//);
     assert.equal(values.has("new-auth"), false);
   } finally {

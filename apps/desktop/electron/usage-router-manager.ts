@@ -7,6 +7,7 @@ import {
   type AccountRequestHealth,
   buildLocalRouteBaseUrl,
   createRouteId,
+  isLocalRouterBaseUrl,
   normalizeUpstreamBaseUrl,
   type PricingProfile,
   type RouteTarget,
@@ -566,8 +567,11 @@ export class UsageRouterManager {
     try {
       for (const account of eligible) {
         const prior = existing.find((route) => route.envName === envName && route.accountName === account.accountName);
-        const originalBaseUrl = prior?.originalBaseUrl || account.baseUrl || "default";
-        const upstreamBaseUrl = prior?.upstreamBaseUrl || normalizeUpstreamBaseUrl(
+        const accountBaseUrl = account.baseUrl.trim();
+        const originalBaseUrl = isLocalRouterBaseUrl(accountBaseUrl)
+          ? prior?.originalBaseUrl || "default"
+          : accountBaseUrl || prior?.originalBaseUrl || "default";
+        const upstreamBaseUrl = normalizeUpstreamBaseUrl(
           originalBaseUrl === "default" ? "https://api.openai.com/v1" : originalBaseUrl,
         );
         if (!upstreamBaseUrl) throw new Error(`Account '${envName}/${account.accountName}' has no Base URL`);
@@ -587,6 +591,7 @@ export class UsageRouterManager {
           method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(route),
         });
         await updateBaseUrl(account.accountName, buildLocalRouteBaseUrl(state.port, routeId));
+        if (prior && prior.routeId !== routeId) await this.deleteRoutes([prior]);
         changed.push({ accountName: account.accountName, originalBaseUrl, routeId });
       }
     } catch (error) {
