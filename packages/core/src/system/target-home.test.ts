@@ -321,6 +321,48 @@ test("target-home writer pins the DeepSeek model for DeepSeek api key accounts",
   }
 });
 
+test("target-home writer selects the Kimi preset model and catalog", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-kimi-"));
+  const homePath = join(root, "home");
+  const state: SwitcherState = {
+    schemaVersion: DEFAULT_SCHEMA_VERSION,
+    generatedAt: "2026-09-16T10:00:00.000Z",
+    targets: { cli: { env: "default", account: "kimi" }, app: { env: "default", account: "kimi" } },
+    envs: {
+      default: {
+        name: "default",
+        path: homePath,
+        accounts: {
+          kimi: {
+            name: "kimi",
+            authMode: "apikey",
+            runtime: {
+              providerId: "kimi",
+              preferredAuthMethod: "apikey",
+              openaiBaseUrlMode: "custom",
+              openaiBaseUrl: "https://api.moonshot.ai/v1",
+              apiProtocol: "chat_completions",
+            },
+            authData: { OPENAI_API_KEY: "sk-kimi" },
+          },
+        },
+      },
+    },
+    tasks: { recent: [] },
+  };
+
+  try {
+    await applyTargetHomeState({ state, target: "cli" });
+
+    const config = await readFile(join(homePath, "config.toml"), "utf8");
+    assert.match(config, /model = "kimi-k3"/);
+    assert.match(config, /model_catalog_json = ".*\/models\.json"/);
+    assert.match(config, /preferred_auth_method = "apikey"/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("target-home writer materializes an enabled Chat compatibility route without exposing the upstream key", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-chat-route-"));
   const homePath = join(root, "home");

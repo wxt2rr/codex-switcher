@@ -1,6 +1,6 @@
 import type { ModelCatalogEntry } from "./model-catalog-store.js";
 
-export type ProviderModelPresetProviderId = "deepseek" | "mimo";
+export type ProviderModelPresetProviderId = "deepseek" | "mimo" | "kimi" | "zai";
 
 export interface ProviderModelPresetMatch {
   providerId: string;
@@ -10,6 +10,8 @@ export interface ProviderModelPresetMatch {
 
 const DEEPSEEK_OFFICIAL_HOSTS = new Set(["api.deepseek.com"]);
 const MIMO_OFFICIAL_HOSTS = new Set(["api.xiaomimimo.com", "token-plan-cn.xiaomimimo.com"]);
+const KIMI_OFFICIAL_HOSTS = new Set(["api.moonshot.ai", "api.moonshot.cn", "api.kimi.ai"]);
+const ZAI_OFFICIAL_HOSTS = new Set(["open.bigmodel.cn", "api.z.ai"]);
 
 function createDeepSeekPresetEntry(input: {
   slug: string;
@@ -162,12 +164,129 @@ const MIMO_DEFAULT_ENTRIES = [MIMO_V2_5_PRO, MIMO_V2_5] as const;
 export const MIMO_DEFAULT_MODEL_SLUG = MIMO_V2_5_PRO.slug;
 export const MIMO_DEFAULT_MODEL_SLUGS = MIMO_DEFAULT_ENTRIES.map((entry) => entry.slug);
 
+function createChatPresetEntry(input: {
+  slug: string;
+  displayName: string;
+  description: string;
+  priority: number;
+  contextWindow: number;
+  inputModalities: Array<"text" | "image">;
+  supportsImageDetailOriginal: boolean;
+  supportedReasoningLevels: Array<{ effort: string; description: string }>;
+  defaultReasoningLevel: string;
+  baseInstructions: string;
+}): ModelCatalogEntry {
+  return {
+    slug: input.slug,
+    prefer_websockets: false,
+    support_verbosity: false,
+    default_verbosity: "low",
+    apply_patch_tool_type: "freeform",
+    web_search_tool_type: "text",
+    input_modalities: input.inputModalities,
+    supports_image_detail_original: input.supportsImageDetailOriginal,
+    truncation_policy: { mode: "tokens", limit: 10000 },
+    supports_parallel_tool_calls: false,
+    tool_mode: null,
+    multi_agent_version: "v2",
+    use_responses_lite: false,
+    include_skills_usage_instructions: false,
+    auto_review_model_override: null,
+    context_window: input.contextWindow,
+    max_context_window: input.contextWindow,
+    effective_context_window_percent: 95,
+    auto_compact_token_limit: null,
+    comp_hash: "3000",
+    reasoning_summary_format: "experimental",
+    default_reasoning_summary: "none",
+    display_name: input.displayName,
+    description: input.description,
+    default_reasoning_level: input.defaultReasoningLevel,
+    supported_reasoning_levels: input.supportedReasoningLevels,
+    shell_type: "shell_command",
+    visibility: "list",
+    minimal_client_version: "0.144.0",
+    supported_in_api: true,
+    availability_nux: null,
+    upgrade: null,
+    quality: "stable",
+    priority: input.priority,
+    experimental_supported_tools: [],
+    supports_search_tool: false,
+    default_service_tier: null,
+    supports_reasoning_summaries: true,
+    base_instructions: input.baseInstructions,
+  };
+}
+
+const KIMI_K3: ModelCatalogEntry = createChatPresetEntry({
+  slug: "kimi-k3",
+  displayName: "Kimi K3",
+  description: "Kimi flagship model for long-horizon coding and agent work.",
+  priority: 0,
+  contextWindow: 1048576,
+  inputModalities: ["text", "image"],
+  supportsImageDetailOriginal: false,
+  supportedReasoningLevels: [
+    { effort: "low", description: "Lighter thinking for faster responses" },
+    { effort: "high", description: "Deeper thinking for complex tasks" },
+    { effort: "max", description: "Maximum thinking depth" },
+  ],
+  defaultReasoningLevel: "max",
+  baseInstructions: "You are Kimi, an AI assistant provided by Moonshot AI.",
+});
+
+export const KIMI_DEFAULT_MODEL_SLUG = KIMI_K3.slug;
+export const KIMI_DEFAULT_MODEL_SLUGS = [KIMI_K3.slug];
+
+const GLM_REASONING_LEVELS = [
+  { effort: "low", description: "Light reasoning" },
+  { effort: "high", description: "Enhanced reasoning" },
+  { effort: "max", description: "Maximum reasoning depth" },
+];
+
+const GLM_5_3: ModelCatalogEntry = createChatPresetEntry({
+  slug: "glm-5.3",
+  displayName: "GLM-5.3",
+  description: "Z.AI flagship coding and agent model with controllable reasoning effort.",
+  priority: 0,
+  contextWindow: 1048576,
+  inputModalities: ["text"],
+  supportsImageDetailOriginal: false,
+  supportedReasoningLevels: GLM_REASONING_LEVELS,
+  defaultReasoningLevel: "max",
+  baseInstructions: "You are GLM, a helpful coding assistant from Z.AI.",
+});
+
+const GLM_5_2: ModelCatalogEntry = createChatPresetEntry({
+  slug: "glm-5.2",
+  displayName: "GLM-5.2",
+  description: "Z.AI flagship model for long-context engineering and agent tasks.",
+  priority: 1,
+  contextWindow: 1048576,
+  inputModalities: ["text"],
+  supportsImageDetailOriginal: false,
+  supportedReasoningLevels: [
+    { effort: "none", description: "Disable thinking" },
+    ...GLM_REASONING_LEVELS,
+  ],
+  defaultReasoningLevel: "max",
+  baseInstructions: "You are GLM, a helpful coding assistant from Z.AI.",
+});
+
+const ZAI_DEFAULT_ENTRIES = [GLM_5_3, GLM_5_2] as const;
+
+export const ZAI_DEFAULT_MODEL_SLUG = GLM_5_3.slug;
+export const ZAI_DEFAULT_MODEL_SLUGS = ZAI_DEFAULT_ENTRIES.map((entry) => entry.slug);
+
 export function getProviderDefaultModelEntries(providerId?: string): ModelCatalogEntry[] | undefined {
   const normalized = normalizeProviderId(providerId);
   if (normalized === "deepseek") {
     return [...DEEPSEEK_DEFAULT_ENTRIES];
   }
   if (normalized === "mimo") return [...MIMO_DEFAULT_ENTRIES];
+  if (normalized === "kimi") return [KIMI_K3];
+  if (normalized === "zai") return [...ZAI_DEFAULT_ENTRIES];
   return undefined;
 }
 
@@ -178,6 +297,15 @@ export function getProviderDefaultModelSlug(providerId?: string): string | undef
 export function getProviderDefaultBaseUrl(providerId?: string): string | undefined {
   if (normalizeProviderId(providerId) === "deepseek") return "https://api.deepseek.com";
   if (normalizeProviderId(providerId) === "mimo") return "https://api.xiaomimimo.com/v1";
+  if (normalizeProviderId(providerId) === "kimi") return "https://api.moonshot.ai/v1";
+  if (normalizeProviderId(providerId) === "zai") return "https://open.bigmodel.cn/api/paas/v4";
+  return undefined;
+}
+
+export function getProviderDefaultApiProtocol(providerId?: string): "responses" | "chat_completions" | undefined {
+  const normalized = normalizeProviderId(providerId);
+  if (normalized === "deepseek" || normalized === "mimo") return "responses";
+  if (normalized === "kimi" || normalized === "zai") return "chat_completions";
   return undefined;
 }
 
@@ -185,6 +313,8 @@ function normalizeProviderId(value?: string): ProviderModelPresetProviderId | un
   const trimmed = value?.trim().toLowerCase();
   if (trimmed === "deepseek") return "deepseek";
   if (trimmed === "mimo") return "mimo";
+  if (trimmed === "kimi") return "kimi";
+  if (trimmed === "zai") return "zai";
   return undefined;
 }
 
@@ -200,6 +330,12 @@ export function resolveProviderModelPreset(input: {
   if (providerId === "mimo" || isMimoOfficialBaseUrl(input.baseUrl)) {
     return { providerId: "mimo", catalogPath: "models.json", entries: [...MIMO_DEFAULT_ENTRIES] };
   }
+  if (providerId === "kimi" || isKimiOfficialBaseUrl(input.baseUrl)) {
+    return { providerId: "kimi", catalogPath: "models.json", entries: [KIMI_K3] };
+  }
+  if (providerId === "zai" || isZaiOfficialBaseUrl(input.baseUrl)) {
+    return { providerId: "zai", catalogPath: "models.json", entries: [...ZAI_DEFAULT_ENTRIES] };
+  }
   return undefined;
 }
 
@@ -209,6 +345,12 @@ export function resolveProviderDefaultPreset(baseUrl?: string): ProviderModelPre
   }
   if (isMimoOfficialBaseUrl(baseUrl)) {
     return { providerId: "mimo", catalogPath: "models.json", entries: [...MIMO_DEFAULT_ENTRIES] };
+  }
+  if (isKimiOfficialBaseUrl(baseUrl)) {
+    return { providerId: "kimi", catalogPath: "models.json", entries: [KIMI_K3] };
+  }
+  if (isZaiOfficialBaseUrl(baseUrl)) {
+    return { providerId: "zai", catalogPath: "models.json", entries: [...ZAI_DEFAULT_ENTRIES] };
   }
   return undefined;
 }
@@ -228,6 +370,26 @@ export function isMimoOfficialBaseUrl(value?: string): boolean {
   try {
     const parsed = new URL(value.trim());
     return parsed.protocol === "https:" && MIMO_OFFICIAL_HOSTS.has(parsed.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+export function isKimiOfficialBaseUrl(value?: string): boolean {
+  if (!value?.trim() || value.trim() === "default") return false;
+  try {
+    const parsed = new URL(value.trim());
+    return parsed.protocol === "https:" && KIMI_OFFICIAL_HOSTS.has(parsed.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+export function isZaiOfficialBaseUrl(value?: string): boolean {
+  if (!value?.trim() || value.trim() === "default") return false;
+  try {
+    const parsed = new URL(value.trim());
+    return parsed.protocol === "https:" && ZAI_OFFICIAL_HOSTS.has(parsed.hostname.toLowerCase());
   } catch {
     return false;
   }

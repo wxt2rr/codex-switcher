@@ -391,6 +391,11 @@ function resolveIndependentModelSlug(baseUrl?: string): string | undefined {
   if (!normalized || normalized === "default") return undefined;
   if (normalized.startsWith("https://api.deepseek.com")) return "deepseek-v4-flash";
   if (normalized.startsWith("https://api.xiaomimimo.com/v1")) return "mimo-v2.5-pro";
+  if (normalized.startsWith("https://api.moonshot.ai")
+    || normalized.startsWith("https://api.moonshot.cn")
+    || normalized.startsWith("https://api.kimi.ai")) return "kimi-k3";
+  if (normalized.startsWith("https://open.bigmodel.cn")
+    || normalized.startsWith("https://api.z.ai")) return "glm-5.3";
   return undefined;
 }
 
@@ -398,6 +403,8 @@ function resolveManagedModelSlug(runtime: SwitcherState["envs"][string]["account
   const providerId = (runtime.providerId ?? "").trim().toLowerCase();
   if (providerId === "deepseek") return "deepseek-v4-flash";
   if (providerId === "mimo") return "mimo-v2.5-pro";
+  if (providerId === "kimi") return "kimi-k3";
+  if (providerId === "zai") return "glm-5.3";
   return undefined;
 }
 
@@ -406,7 +413,7 @@ function resolveManagedModelCatalogPath(
   runtime: SwitcherState["envs"][string]["accounts"][string]["runtime"],
 ): string | undefined {
   const providerId = (runtime.providerId ?? "").trim().toLowerCase();
-  if (providerId !== "deepseek" && providerId !== "mimo") {
+  if (providerId !== "deepseek" && providerId !== "mimo" && providerId !== "kimi" && providerId !== "zai") {
     return undefined;
   }
   return join(dirname(configPath), "models.json");

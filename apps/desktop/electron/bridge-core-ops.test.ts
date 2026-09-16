@@ -758,7 +758,15 @@ test("desktop bridge custom model listing seeds built-in provider models without
     const catalog = await bridge.listCustomModels();
     assert.deepEqual(
       catalog.models.map((model) => model.entry.slug),
-      ["deepseek-v4-flash", "deepseek-v4-pro", "mimo-v2.5-pro", "mimo-v2.5"],
+      [
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "mimo-v2.5-pro",
+        "mimo-v2.5",
+        "kimi-k3",
+        "glm-5.3",
+        "glm-5.2",
+      ],
     );
     assert.deepEqual(catalog.accountBindings, {});
   } finally {

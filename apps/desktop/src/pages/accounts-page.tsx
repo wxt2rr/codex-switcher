@@ -89,13 +89,17 @@ function getApiUsageHint(language: UiLanguage) {
 const DEFAULT_ACCOUNT_ENVIRONMENT_KEY = "codex-switcher.accounts.default-environment";
 const DEEPSEEK_OFFICIAL_BASE_URL = "https://api.deepseek.com";
 const MIMO_OFFICIAL_BASE_URL = "https://api.xiaomimimo.com/v1";
+const KIMI_OFFICIAL_BASE_URL = "https://api.moonshot.ai/v1";
+const ZAI_OFFICIAL_BASE_URL = "https://open.bigmodel.cn/api/paas/v4";
 
-export type AccountProviderId = "openai" | "deepseek" | "mimo";
+export type AccountProviderId = "openai" | "deepseek" | "mimo" | "kimi" | "zai";
 
 function getAccountProviderLabel(providerId: AccountProviderId, language: UiLanguage): string {
   void language;
   if (providerId === "deepseek") return "DeepSeek";
   if (providerId === "mimo") return "MiMo";
+  if (providerId === "kimi") return "Kimi";
+  if (providerId === "zai") return "Z.AI / GLM";
   return "OpenAI";
 }
 
@@ -114,6 +118,20 @@ function getAccountProviderHint(providerId: AccountProviderId, language: UiLangu
         ? "Xiaomi MiMo の公式 Responses 設定を使います。Base URL は自動で固定されます。"
         : "Uses Xiaomi MiMo's official Responses preset. Base URL is locked automatically.";
   }
+  if (providerId === "kimi") {
+    return language === "zh"
+      ? "使用 Kimi K3 官方 Chat Completions 配置，Base URL 和兼容路由会自动设置。"
+      : language === "ja"
+        ? "Kimi K3 の公式 Chat Completions 設定を使います。Base URL と互換ルートは自動設定されます。"
+        : "Uses Kimi K3's official Chat Completions preset with automatic compatibility routing.";
+  }
+  if (providerId === "zai") {
+    return language === "zh"
+      ? "使用智谱 GLM 官方 Chat Completions 配置，Base URL 和兼容路由会自动设置。"
+      : language === "ja"
+        ? "Z.AI GLM の公式 Chat Completions 設定を使います。Base URL と互換ルートは自動設定されます。"
+        : "Uses Z.AI GLM's official Chat Completions preset with automatic compatibility routing.";
+  }
   return language === "zh"
     ? "保留现有的四种接入方式。"
     : language === "ja"
@@ -122,7 +140,7 @@ function getAccountProviderHint(providerId: AccountProviderId, language: UiLangu
 }
 
 function getAccountModeItems(providerId: AccountProviderId, language: UiLanguage) {
-  if (providerId === "deepseek" || providerId === "mimo") {
+  if (providerId === "deepseek" || providerId === "mimo" || providerId === "kimi" || providerId === "zai") {
     return [{ value: "apikey", label: localizeAuthMode("apikey", language) }];
   }
   return [
@@ -335,12 +353,19 @@ export function AccountsPage({
   );
 
   const loginModeNeedsApiKey = accountModeDraft === "apikey";
-  const isPresetApiKeyProvider = accountProviderDraft === "deepseek" || accountProviderDraft === "mimo";
+  const isPresetApiKeyProvider = accountProviderDraft === "deepseek"
+    || accountProviderDraft === "mimo"
+    || accountProviderDraft === "kimi"
+    || accountProviderDraft === "zai";
   const presetProviderBaseUrl = accountProviderDraft === "deepseek"
     ? DEEPSEEK_OFFICIAL_BASE_URL
     : accountProviderDraft === "mimo"
       ? MIMO_OFFICIAL_BASE_URL
-      : "";
+      : accountProviderDraft === "kimi"
+        ? KIMI_OFFICIAL_BASE_URL
+        : accountProviderDraft === "zai"
+          ? ZAI_OFFICIAL_BASE_URL
+          : "";
   const credentialImportSource = accountModeDraft === "sub2api" || accountModeDraft === "cpa"
     ? accountModeDraft
     : undefined;
@@ -404,7 +429,12 @@ export function AccountsPage({
       return;
     }
 
-    if (accountBaseUrlDraft.trim() === DEEPSEEK_OFFICIAL_BASE_URL || accountBaseUrlDraft.trim() === MIMO_OFFICIAL_BASE_URL) {
+    if ([
+      DEEPSEEK_OFFICIAL_BASE_URL,
+      MIMO_OFFICIAL_BASE_URL,
+      KIMI_OFFICIAL_BASE_URL,
+      ZAI_OFFICIAL_BASE_URL,
+    ].includes(accountBaseUrlDraft.trim())) {
       onAccountBaseUrlModeDraftChange("default");
       onAccountBaseUrlDraftChange("");
     }
@@ -719,6 +749,8 @@ export function AccountsPage({
                 { value: "openai", label: getAccountProviderLabel("openai", language) },
                 { value: "deepseek", label: getAccountProviderLabel("deepseek", language) },
                 { value: "mimo", label: getAccountProviderLabel("mimo", language) },
+                { value: "kimi", label: getAccountProviderLabel("kimi", language) },
+                { value: "zai", label: getAccountProviderLabel("zai", language) },
               ]}
             />
           </Field>

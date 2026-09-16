@@ -47,7 +47,7 @@ export interface DesktopCreateEnvRequest {
 }
 
 export interface DesktopNativeLoginRequest {
-  providerId?: "openai" | "deepseek" | "mimo";
+  providerId?: "openai" | "deepseek" | "mimo" | "kimi" | "zai";
   mode: "auth" | "apikey" | "sub2api" | "cpa";
   account: string;
   envName: string;

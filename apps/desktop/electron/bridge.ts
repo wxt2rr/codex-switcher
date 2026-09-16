@@ -81,13 +81,20 @@ import {
 import {
   DEEPSEEK_DEFAULT_MODEL_SLUG,
   DEEPSEEK_DEFAULT_MODEL_SLUGS,
+  KIMI_DEFAULT_MODEL_SLUG,
+  KIMI_DEFAULT_MODEL_SLUGS,
   MIMO_DEFAULT_MODEL_SLUG,
   MIMO_DEFAULT_MODEL_SLUGS,
+  ZAI_DEFAULT_MODEL_SLUG,
+  ZAI_DEFAULT_MODEL_SLUGS,
+  getProviderDefaultApiProtocol,
   getProviderDefaultBaseUrl,
   getProviderDefaultModelEntries,
   getProviderDefaultModelSlug,
   isDeepSeekOfficialBaseUrl,
+  isKimiOfficialBaseUrl,
   isMimoOfficialBaseUrl,
+  isZaiOfficialBaseUrl,
   resolveProviderDefaultPreset,
   resolveProviderModelPreset,
 } from "./provider-model-presets.js";
@@ -1461,10 +1468,19 @@ export async function updateIndependentModel(request: {
       await applyTargetHomeStateWithHistory(runtime, next, currentTarget, currentTarget === "cli" ? "switch-cli" : "switch-app");
     }
   }
-  if (request.enabled && (isDeepSeekOfficialBaseUrl(request.baseUrl) || isMimoOfficialBaseUrl(request.baseUrl))) {
+  if (request.enabled && (isDeepSeekOfficialBaseUrl(request.baseUrl)
+    || isMimoOfficialBaseUrl(request.baseUrl)
+    || isKimiOfficialBaseUrl(request.baseUrl)
+    || isZaiOfficialBaseUrl(request.baseUrl))) {
     await ensureIndependentModelSlug(
       state.envs[request.envName]!.path,
-      isMimoOfficialBaseUrl(request.baseUrl) ? "mimo-v2.5-pro" : DEEPSEEK_DEFAULT_MODEL_SLUG,
+      isMimoOfficialBaseUrl(request.baseUrl)
+        ? MIMO_DEFAULT_MODEL_SLUG
+        : isKimiOfficialBaseUrl(request.baseUrl)
+          ? KIMI_DEFAULT_MODEL_SLUG
+          : isZaiOfficialBaseUrl(request.baseUrl)
+            ? ZAI_DEFAULT_MODEL_SLUG
+            : DEEPSEEK_DEFAULT_MODEL_SLUG,
     );
   }
 
@@ -2388,6 +2404,10 @@ async function inferLegacyProviderId(
     .filter((slug): slug is string => Boolean(slug));
   if (boundSlugs.some((slug) => MIMO_DEFAULT_MODEL_SLUGS.includes(slug))) {
     account.runtime.providerId = "mimo";
+  } else if (boundSlugs.some((slug) => KIMI_DEFAULT_MODEL_SLUGS.includes(slug))) {
+    account.runtime.providerId = "kimi";
+  } else if (boundSlugs.some((slug) => ZAI_DEFAULT_MODEL_SLUGS.includes(slug))) {
+    account.runtime.providerId = "zai";
   } else if (boundSlugs.some((slug) => DEEPSEEK_DEFAULT_MODEL_SLUGS.includes(slug))) {
     account.runtime.providerId = "deepseek";
   } else {
@@ -2626,7 +2646,8 @@ async function nativeApiKeyLogin(request: {
   }
 
   const providerId = normalizeProviderId(request.providerId);
-  const isPresetProvider = providerId === "deepseek" || providerId === "mimo";
+  const providerProtocol = getProviderDefaultApiProtocol(providerId);
+  const isPresetProvider = providerProtocol !== undefined;
   const providerBaseUrl = getProviderDefaultBaseUrl(providerId);
   const runtime = await loadCoreRuntime();
   const state = await runtime.readLegacyState(getLegacyOptions());
@@ -2659,7 +2680,7 @@ async function nativeApiKeyLogin(request: {
       preferredAuthMethod: "apikey",
       openaiBaseUrlMode: hasCustomBaseUrl ? "custom" : "default",
       openaiBaseUrl: hasCustomBaseUrl ? effectiveBaseUrl : undefined,
-      apiProtocol: isPresetProvider ? "responses" : request.apiProtocol ?? "responses",
+      apiProtocol: providerProtocol ?? request.apiProtocol ?? "responses",
       compatibilityRouteEnabled: false,
       compatibilityUpstreamModel: request.upstreamModel?.trim() || undefined,
       compatibilityReasoningProfile: isPresetProvider ? "auto" : request.reasoningProfile ?? "auto",
@@ -2673,7 +2694,10 @@ async function nativeApiKeyLogin(request: {
 
   await ensureProviderDefaultModelBindings(request.envName, request.account, providerId);
 
-  if (!isPresetProvider && request.apiProtocol === "chat_completions" && request.compatibilityEnabled === true) {
+  if (
+    (providerProtocol === "chat_completions"
+      || (!isPresetProvider && request.apiProtocol === "chat_completions" && request.compatibilityEnabled === true))
+  ) {
     await enableAccountCompatibility({
       envName: request.envName,
       accountName: request.account,
@@ -2804,7 +2828,7 @@ async function ensureProviderDefaultModels(
   store: ReturnType<typeof getModelCatalogStore>,
   providerId?: string,
 ): Promise<string[]> {
-  const providerIds = providerId ? [providerId] : ["deepseek", "mimo"];
+  const providerIds = providerId ? [providerId] : ["deepseek", "mimo", "kimi", "zai"];
   const snapshot = await store.load();
   const modelIds: string[] = [];
 
