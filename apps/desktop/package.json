@@ -1,7 +1,7 @@
 {
   "name": "appsdesktop",
   "private": true,
-  "version": "0.1.31",
+  "version": "0.1.32",
   "description": "Electron desktop shell for codex-switcher",
   "author": "wangxt",
   "type": "module",
@@ -19,8 +19,8 @@
     "test:image-recovery": "tsx --test electron/generated-image-recovery-skill.test.ts electron/generated-image-recovery-script.test.ts electron/desktop-settings.test.ts src/bridge.test.ts",
     "test:compat": "tsx --test electron/openai-chat-compat/*.test.ts",
     "test:compat:e2e": "CODEX_SWITCHER_RUN_CODEX_E2E=1 tsx --test electron/openai-chat-compat/codex-e2e.test.ts",
-    "package:mac": "electron-builder --mac dmg zip --arm64",
-    "package:mac:dir": "electron-builder --mac dir --arm64",
+    "package:mac": "electron-builder --mac dmg zip --arm64 --x64",
+    "package:mac:dir": "electron-builder --mac dir --arm64 --x64",
     "package:win": "electron-builder --win nsis --x64",
     "package:dir": "electron-builder --dir",
     "package:verify": "node ./scripts/verify-package-artifact.mjs"

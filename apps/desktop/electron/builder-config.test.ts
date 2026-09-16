@@ -40,6 +40,9 @@ test("desktop package defines electron packaging entrypoints", () => {
   assert.equal(desktopPackage.main, "electron-dist/electron/main.cjs");
   assert.equal(desktopPackage.build.afterPack, "scripts/after-pack.cjs");
   assert.equal(desktopPackage.scripts["package:dir"], "electron-builder --dir");
+  assert.equal(desktopPackage.scripts["package:mac"], "electron-builder --mac dmg zip --arm64 --x64");
+  assert.equal(desktopPackage.scripts["package:mac:dir"], "electron-builder --mac dir --arm64 --x64");
+  assert.equal(desktopPackage.scripts["package:win"], "electron-builder --win nsis --x64");
   assert.equal(desktopPackage.build.appId, "com.wangxt.codex-switcher");
   assert.deepEqual(desktopPackage.build.files, ["dist/**", "electron-dist/**", "package.json"]);
   assert.deepEqual(desktopPackage.build.extraResources, [
@@ -78,6 +81,7 @@ test("desktop package defines electron packaging entrypoints", () => {
   const nativeBuildSource = readFileSync(join(desktopRoot, "scripts", "build-native-helpers.mjs"), "utf8");
   assert.match(nativeBuildSource, /AppEnvironmentBadgeNative\.mm/);
   assert.match(nativeBuildSource, /app-environment-badge-native\.node/);
+  assert.match(nativeBuildSource, /\["arm64", "x86_64"\]/);
   assert.doesNotMatch(nativeBuildSource, /swiftc/);
   const nativeModuleSource = readFileSync(join(desktopRoot, "resources", "native", "macos", "AppEnvironmentBadgeNative.mm"), "utf8");
   assert.match(nativeModuleSource, /hidesOnDeactivate = NO/);

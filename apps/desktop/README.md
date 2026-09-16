@@ -22,8 +22,8 @@ Commands:
 - `npm run desktop:dev` from repo root: run Vite + Electron development shell
 - `npm run desktop:electron` from repo root: run the built Electron app
 - `npm run desktop:test` from repo root: run desktop bridge and packaging tests
-- `npm run desktop:package:mac` from repo root: build macOS `dmg` + `zip` installers for Apple Silicon
-- `npm run desktop:package:mac:dir` from repo root: build a directory-style macOS `.app`
+- `npm run desktop:package:mac` from repo root: build macOS `dmg` + `zip` installers for Apple Silicon and Intel
+- `npm run desktop:package:mac:dir` from repo root: build directory-style macOS `.app` packages for Apple Silicon and Intel
 - `npm run desktop:package:win` from repo root: build a Windows `nsis` installer target
 - `npm run package:dir --workspace ./apps/desktop`: build a generic directory-style Electron package
 
@@ -52,14 +52,14 @@ git push origin desktop-v0.1.30
 ```
 
 - Tag builds create a GitHub Pre-release containing the DMG, macOS ZIP, Windows EXE, and blockmap files.
-- The workflow also keeps `codex-switcher-macos-arm64` and `codex-switcher-windows-x64` Actions artifacts for 14 days for build diagnostics.
+- The workflow also keeps `codex-switcher-macos` and `codex-switcher-windows-x64` Actions artifacts for 14 days for build diagnostics.
 - GitHub Pre-release packages are ad-hoc signed but not notarized. Developer ID signing and notarization require a separate release-hardening configuration.
 
 Verification status:
 - `npm run desktop:test`: passing
 - `npm run desktop:build`: passing
 - `npm run package:dir --workspace ./apps/desktop`: passing
-- packaged app startup verified from `release/mac-arm64/codex-switcher.app`
+- packaged app startup verified from `release/mac-arm64/codex-switcher.app` and `release/mac/codex-switcher.app`
 
 Performance note:
 - GUI startup and explicit manual refresh still load auth metrics

@@ -36,12 +36,14 @@ jobs:
         run: npm run desktop:package:mac
 
       - name: Verify packaged macOS application
-        run: npm run package:verify --workspace apps/desktop
+        run: |
+          npm run package:verify --workspace apps/desktop -- release/mac-arm64/codex-switcher.app
+          npm run package:verify --workspace apps/desktop -- release/mac/codex-switcher.app
 
       - name: Upload macOS installers
         uses: actions/upload-artifact@v7
         with:
-          name: codex-switcher-macos-arm64
+          name: codex-switcher-macos
           path: |
             apps/desktop/release/*.dmg
             apps/desktop/release/*.zip
@@ -105,8 +107,10 @@ jobs:
       - name: Validate release assets
         shell: bash
         run: |
-          test -n "$(find release-assets -maxdepth 1 -name '*.dmg' -print -quit)"
-          test -n "$(find release-assets -maxdepth 1 -name '*.zip' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*-arm64.dmg' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*-arm64-mac.zip' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.dmg' ! -name '*-arm64.dmg' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.zip' ! -name '*-arm64-mac.zip' -print -quit)"
           test -n "$(find release-assets -maxdepth 1 -name '*.exe' -print -quit)"
           test -n "$(find release-assets -maxdepth 1 -name '*.blockmap' -print -quit)"
           find release-assets -maxdepth 1 -type f -print

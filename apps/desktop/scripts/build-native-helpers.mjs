@@ -8,13 +8,15 @@ const source = join(root, "resources", "native", "macos", "AppEnvironmentBadgeNa
 const output = join(root, "resources", "native", "macos", "app-environment-badge-native.node");
 const repoRoot = join(root, "..", "..");
 const staleHelper = join(root, "resources", "native", "macos", "codex-switcher-dock-badge-helper");
+const macArchitectures = ["arm64", "x86_64"];
 
 if (existsSync(staleHelper)) unlinkSync(staleHelper);
 
 if (process.platform === "darwin" && existsSync(source)) {
   mkdirSync(dirname(output), { recursive: true });
   execFileSync("xcrun", [
-    "clang++", "-std=c++17", "-fobjc-arc", "-shared", "-undefined", "dynamic_lookup",
+    "clang++", ...macArchitectures.flatMap((architecture) => ["-arch", architecture]),
+    "-std=c++17", "-fobjc-arc", "-shared", "-undefined", "dynamic_lookup",
     "-I", join(repoRoot, "node_modules", "node-addon-api"),
     "-I", join(repoRoot, "node_modules", "node-addon-api", "src"),
     source, "-o", output, "-framework", "AppKit", "-framework", "ApplicationServices",
