@@ -50,7 +50,7 @@
 - Current P8 slice: make a configured desktop update feed require a signed manifest by default; unsigned feeds remain available only through an explicit test/development override.
 - Current P8 slice: route Gateway/provider/agent/group/model/usage/profile domain commands from the cross-platform launcher to the Node CLI on macOS/Linux, while preserving the legacy Bash manual env/account commands.
 - Current P9/P10 slice: add a runner-side package-install smoke that extracts macOS/Linux installers and silently installs the Windows NSIS package into an isolated directory, then uploads redacted install evidence.
-- Current P9 slice: run the existing atomic rollback implementation against the executable materialized by each package-install smoke, simulating a corrupt upgrade and verifying byte-for-byte restoration.
+- Current P9 slice: run the existing atomic rollback implementation against the full installation target materialized by each package-install smoke (macOS app bundle, Windows/Linux install tree), simulating a corrupt upgrade and verifying byte-for-byte restoration of the executable probe.
 - Current P10 slice: add a Gateway lifecycle regression for simultaneous requests from multiple explicit Agent IDs, including fallback dispatch and per-Agent usage records; this slice does not add Prompt analysis or intent routing.
 - Current P6 slice: expose the existing signed/fail-closed Provider Plugin Market through the desktop bridge and Operations UI, including cached entries, explicit refresh, and market-entry installation; this slice does not add Prompt analysis or intent routing.
 - Current P8/P9 slice: make update rollback staging names collision-safe under concurrent checks and preserve the existing fail-closed manifest/hash verification; this slice does not add Prompt analysis or intent routing.
@@ -400,3 +400,8 @@
 - 定向验证：`npx tsx --test scripts/desktop-package-workflow.test.ts` 1/1、`npx tsx --test apps/desktop/electron/update-rollback.test.ts` 4/4、`node --check scripts/package-install-smoke.mjs` 通过。
 - 当前 `main` 提交 `c4667d0` 的三平台打包运行 `37588896102` 已成功：Linux、Windows、macOS package job 全部通过，且三端安装 smoke（包含回滚恢复检查）均通过；release job 按非标签规则跳过。
 - 对应 artifact `codex-switcher-linux-x64`、`codex-switcher-windows-x64`、`codex-switcher-macos` 及三端 sandbox evidence 均成功上传；本次 macOS/Windows 签名、公证步骤因无发布凭据按设计跳过，未将非签名产物当作正式发布结果。
+
+## 2026-10-07 完整安装目标回滚 smoke 加固
+
+- 安装恢复检查现在不再只替换单个可执行文件：macOS 备份并恢复完整 `.app` 目录，Windows/Linux 备份并恢复完整安装树，再通过安装树中的真实可执行文件做 SHA-256 前后校验。
+- 本机 macOS arm64 安装 smoke 通过，证据包含 `rollbackTarget: "app-bundle"` 和 `rollbackSmoke: "passed"`；回滚实现定向测试 4/4，打包工作流契约测试 1/1。

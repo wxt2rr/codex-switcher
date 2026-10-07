@@ -6,20 +6,24 @@ import { copyInstallForRollback, restoreInstallFromRollback } from "../apps/desk
 
 const targetPath = process.argv[2];
 const backupPath = process.argv[3];
+const probePath = process.argv[4] ?? targetPath;
 
 if (!targetPath || !backupPath) {
   throw new Error("target and backup paths are required");
 }
-if (!statSync(targetPath).isFile()) {
-  throw new Error("rollback target must be a file");
+if (!statSync(targetPath).isFile() && !statSync(targetPath).isDirectory()) {
+  throw new Error("rollback target must be a file or directory");
+}
+if (!statSync(probePath).isFile()) {
+  throw new Error("rollback probe must be a file");
 }
 
-const beforeDigest = digest(targetPath);
+const beforeDigest = digest(probePath);
 copyInstallForRollback(targetPath, backupPath);
-writeFileSync(targetPath, Buffer.from("corrupt-upgrade-probe"));
+writeFileSync(probePath, Buffer.from("corrupt-upgrade-probe"));
 restoreInstallFromRollback(targetPath, backupPath);
 
-const afterDigest = digest(targetPath);
+const afterDigest = digest(probePath);
 if (afterDigest !== beforeDigest) {
   throw new Error("rollback did not restore the installed executable byte-for-byte");
 }

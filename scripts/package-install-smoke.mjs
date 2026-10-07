@@ -4,7 +4,7 @@ import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readdirSync,
 import { execFileSync, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { arch, tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 const require = createRequire(import.meta.url);
 
@@ -31,7 +31,9 @@ try {
       ? extractMacOS(artifact, installRoot)
       : extractLinux(artifact, installRoot);
   evidence.installedExecutable = basename(installedExecutable);
-  runRollbackSmoke(installedExecutable, installRoot);
+  const rollbackTarget = platform === "darwin" ? findAncestorBySuffix(installedExecutable, ".app") : installRoot;
+  runRollbackSmoke(rollbackTarget, installedExecutable);
+  evidence.rollbackTarget = platform === "darwin" ? "app-bundle" : "install-tree";
   evidence.rollbackSmoke = "passed";
   evidence.status = "passed";
   writeEvidence(evidencePath, evidence);
@@ -87,12 +89,12 @@ function extractLinux(debPath, destination) {
   return executable;
 }
 
-function runRollbackSmoke(installedExecutable, destination) {
-  const rollbackRoot = join(destination, "..", `${basename(destination)}-rollback`);
-  const rollbackBackup = join(rollbackRoot, basename(installedExecutable));
+function runRollbackSmoke(targetPath, probePath) {
+  const rollbackRoot = join(dirname(targetPath), `${basename(targetPath)}-rollback`);
+  const rollbackBackup = join(rollbackRoot, basename(targetPath));
   const recoveryScript = join(process.cwd(), "scripts", "package-install-recovery.ts");
   const tsxCli = resolveTsxCli();
-  execFileSync(process.execPath, [tsxCli, recoveryScript, installedExecutable, rollbackBackup], { stdio: "inherit" });
+  execFileSync(process.execPath, [tsxCli, recoveryScript, targetPath, rollbackBackup, probePath], { stdio: "inherit" });
 }
 
 function resolveTsxCli() {
@@ -101,6 +103,15 @@ function resolveTsxCli() {
   } catch {
     return require.resolve("tsx/dist/cli.mjs");
   }
+}
+
+function findAncestorBySuffix(path, suffix) {
+  let current = path;
+  while (current !== dirname(current)) {
+    current = dirname(current);
+    if (current.endsWith(suffix)) return current;
+  }
+  throw new Error(`could not locate ${suffix} installation root`);
 }
 
 function findByBasename(root, expectedName) {

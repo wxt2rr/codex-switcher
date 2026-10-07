@@ -113,6 +113,7 @@ test("desktop packaging workflow builds native installers for version tags and m
     assert.ok(workflow.includes(content), `desktop package workflow should include: ${content}`);
   }
   assert.ok(installSmoke.includes("package-install-recovery.ts"));
+  assert.ok(installSmoke.includes('findAncestorBySuffix(installedExecutable, ".app")'));
   assert.ok(installSmoke.includes("rollbackSmoke"));
   assert.equal(workflow.match(/actions\/checkout@v7/g)?.length, 4);
   assert.equal(workflow.match(/actions\/setup-node@v6/g)?.length, 3);
