@@ -1,4 +1,4 @@
-const { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } = require("node:fs");
+const { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { dirname, join } = require("node:path");
 const { spawnSync } = require("node:child_process");
@@ -7,15 +7,17 @@ const args = parseArgs(process.argv.slice(2));
 const launcher = required(args.launcher, "--launcher");
 const node = required(args.node, "--node");
 const evidencePath = args["evidence-out"] || process.env.CODEX_SWITCHER_EVIDENCE_OUT;
-const root = mkdtempSync(join(tmpdir(), "codex-switcher-plugin-sandbox-"));
+const root = mkdtempSync(join(process.cwd(), ".codex-switcher-plugin-sandbox-"));
 const homeRoot = mkdtempSync(join(process.env.USERPROFILE || tmpdir(), "codex-switcher-plugin-home-"));
 const entry = join(root, "plugin.cjs");
 const bootstrapEntry = join(root, "bootstrap.cjs");
+const stagedNode = join(root, "node.exe");
 const marker = join(root, "should-not-exist.txt");
 const homeSecret = join(homeRoot, "secret.txt");
 writeFileSync(homeSecret, "must stay unreadable", "utf8");
 
 try {
+  copyFileSync(node, stagedNode);
   writeFileSync(bootstrapEntry, "process.stdout.write(JSON.stringify({ ready: true })); process.exit(0);\n", "utf8");
   const bootstrap = runLauncher({
     profile: "codex-switcher-smoke-bootstrap",
@@ -112,7 +114,7 @@ function buildSmokePlugin({ marker, expectWriteDenied }) {
 }
 
 function runLauncher({ profile, entry, extraArgs }) {
-  const result = spawnSync(launcher, ["--profile", profile, "--cwd", root, "--node", node, "--entry", entry, "--timeout-ms", "7000", "--debug", ...extraArgs], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15000 });
+  const result = spawnSync(launcher, ["--profile", profile, "--cwd", root, "--node", stagedNode, "--entry", entry, "--timeout-ms", "7000", "--debug", ...extraArgs], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15000 });
   if (result.error) {
     if (result.stdout) process.stdout.write(result.stdout);
     if (result.stderr) process.stderr.write(result.stderr);
