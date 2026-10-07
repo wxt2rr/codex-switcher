@@ -412,3 +412,9 @@
 - `.github/workflows/desktop-package.yml` 保持 `push.tags: ["desktop-v*"]` 和 `workflow_dispatch` 两种入口；推送 `desktop-v*` 标签仍会自动执行 macOS、Windows、Linux 打包并创建预发布 Release。
 - 标签和手动运行统一沿用未签名产物路径，不再因为缺少证书、公证、AuthentiCode 或更新签名密钥而失败；这些密钥存在时仍可作为可选增强，不改变无签名交付的默认行为。
 - 当前交付不创建签名结论；安装包完整性、安装 smoke、完整安装目标回滚和 sandbox evidence 仍由 workflow 强制校验。
+
+## 2026-10-07 Desktop v0.1.34 自动发布闭环
+
+- `apps/desktop/package.json` 已从 `0.1.33` 升级到 `0.1.34`，同步更新 workspace lock 和 `.github/release-notes/desktop-v0.1.34.md`。
+- 推送 `desktop-v0.1.34` 后，GitHub Actions 运行 `37593709022` 的 macOS、Windows、Linux package job 和 release job 全部成功；之前的失败运行 `37591693045` 已定位并修复为 Release job 先扁平化包含安装证据的 artifact 目录，再校验/上传安装包。
+- 预发布 Release 已创建：[desktop-v0.1.34](https://github.com/wxt2rr/codex-switcher/releases/tag/desktop-v0.1.34)，包含 macOS arm64/x64 DMG/ZIP、Windows NSIS、Linux AppImage/deb 及 blockmap；继续按既有未签名交付方式发布。
