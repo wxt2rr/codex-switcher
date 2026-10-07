@@ -75,23 +75,28 @@ function buildSmokePlugin({ marker, expectWriteDenied }) {
     let writeDenied = false;
     let readDenied = false;
     let finished = false;
+    let socket;
     let networkTimer;
-    try { fs.writeFileSync(${JSON.stringify(marker)}, "unexpected"); } catch { writeDenied = true; }
-    try { fs.readFileSync(${JSON.stringify(homeSecret)}, "utf8"); } catch { readDenied = true; }
     const finish = (networkDenied) => {
       if (finished) return;
       finished = true;
       clearTimeout(networkTimer);
+      if (socket) socket.destroy();
       const passed = writeDenied === ${JSON.stringify(expectWriteDenied)} && readDenied && networkDenied;
       process.stdout.write(JSON.stringify({ writeDenied, readDenied, networkDenied }));
       process.exit(passed ? 0 : 1);
     };
-    const socket = net.createConnection({ host: "1.1.1.1", port: 80 });
-    socket.setTimeout(1500);
-    socket.once("connect", () => { socket.destroy(); finish(false); });
-    socket.once("timeout", () => { socket.destroy(); finish(true); });
-    socket.once("error", () => { finish(true); });
-    networkTimer = setTimeout(() => { socket.destroy(); finish(true); }, 3000);
+    networkTimer = setTimeout(() => finish(true), 3000);
+    (async () => {
+      try { await fs.promises.writeFile(${JSON.stringify(marker)}, "unexpected"); } catch { writeDenied = true; }
+      try { await fs.promises.readFile(${JSON.stringify(homeSecret)}, "utf8"); } catch { readDenied = true; }
+      if (finished) return;
+      socket = net.createConnection({ host: "1.1.1.1", port: 80 });
+      socket.setTimeout(1500);
+      socket.once("connect", () => finish(false));
+      socket.once("timeout", () => finish(true));
+      socket.once("error", () => finish(true));
+    })().catch(() => finish(true));
   `;
 }
 
