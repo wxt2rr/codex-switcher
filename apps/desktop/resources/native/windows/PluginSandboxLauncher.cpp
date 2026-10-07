@@ -11,6 +11,7 @@
 
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -232,6 +233,77 @@ bool grantDirectoryAccess(const std::wstring& path, PSID appContainerSid, bool w
   return true;
 }
 
+bool grantDirectoryTraversal(const std::wstring& path, PSID appContainerSid, AclGrant& grant) {
+  const DWORD sidLength = GetLengthSid(appContainerSid);
+  if (sidLength == 0) return false;
+  auto* sidCopy = static_cast<PSID>(LocalAlloc(LMEM_FIXED, sidLength));
+  if (!sidCopy || !CopySid(sidLength, sidCopy, appContainerSid)) {
+    if (sidCopy) LocalFree(sidCopy);
+    return false;
+  }
+  PSECURITY_DESCRIPTOR descriptor = nullptr;
+  PACL oldDacl = nullptr;
+  const DWORD result = GetNamedSecurityInfoW(
+    const_cast<LPWSTR>(path.c_str()),
+    SE_FILE_OBJECT,
+    DACL_SECURITY_INFORMATION,
+    nullptr,
+    nullptr,
+    &oldDacl,
+    nullptr,
+    &descriptor
+  );
+  if (result != ERROR_SUCCESS) {
+    LocalFree(sidCopy);
+    return false;
+  }
+
+  EXPLICIT_ACCESSW entry{};
+  entry.grfAccessPermissions = FILE_TRAVERSE | FILE_READ_ATTRIBUTES | FILE_READ_EA | SYNCHRONIZE;
+  entry.grfAccessMode = GRANT_ACCESS;
+  entry.grfInheritance = NO_INHERITANCE;
+  entry.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+  entry.Trustee.ptstrName = reinterpret_cast<LPWSTR>(appContainerSid);
+
+  PACL newDacl = nullptr;
+  if (SetEntriesInAclW(1, &entry, oldDacl, &newDacl) != ERROR_SUCCESS) {
+    LocalFree(descriptor);
+    LocalFree(sidCopy);
+    return false;
+  }
+  const DWORD updateResult = SetNamedSecurityInfoW(
+    const_cast<LPWSTR>(path.c_str()),
+    SE_FILE_OBJECT,
+    DACL_SECURITY_INFORMATION,
+    nullptr,
+    nullptr,
+    newDacl,
+    nullptr
+  );
+  LocalFree(newDacl);
+  if (updateResult != ERROR_SUCCESS) {
+    LocalFree(descriptor);
+    LocalFree(sidCopy);
+    return false;
+  }
+  grant.path = path;
+  grant.sid = sidCopy;
+  grant.changed = true;
+  LocalFree(descriptor);
+  return true;
+}
+
+bool grantDirectoryAncestors(const std::wstring& path, PSID appContainerSid, std::vector<std::unique_ptr<AclGrant>>& grants) {
+  std::filesystem::path current = std::filesystem::path(path).parent_path();
+  while (!current.empty() && current != current.parent_path()) {
+    auto grant = std::make_unique<AclGrant>();
+    if (!grantDirectoryTraversal(current.wstring(), appContainerSid, *grant)) return false;
+    grants.push_back(std::move(grant));
+    current = current.parent_path();
+  }
+  return true;
+}
+
 int fail(const wchar_t* message, HRESULT error = S_OK) {
   std::wcerr << message;
   if (error != S_OK) std::wcerr << L" (0x" << std::hex << static_cast<unsigned long>(error) << L")";
@@ -268,7 +340,11 @@ int wmain(int argc, wchar_t** argv) {
 
   AclGrant nodeGrant;
   const std::wstring nodeDirectory = std::filesystem::path(node).parent_path().wstring();
-  if (nodeDirectory.empty() || !grantDirectoryAccess(nodeDirectory, appContainerSid, false, nodeGrant)) {
+  std::vector<std::unique_ptr<AclGrant>> traversalGrants;
+  if (nodeDirectory.empty()
+      || !grantDirectoryAncestors(nodeDirectory, appContainerSid, traversalGrants)
+      || !grantDirectoryAncestors(cwd, appContainerSid, traversalGrants)
+      || !grantDirectoryAccess(nodeDirectory, appContainerSid, false, nodeGrant)) {
     FreeSid(appContainerSid);
     return fail(L"cannot grant AppContainer access to Node runtime directory", HRESULT_FROM_WIN32(GetLastError()));
   }

@@ -312,7 +312,7 @@ test("target-home writer pins the DeepSeek model for DeepSeek api key accounts",
     const config = await readFile(join(homePath, "config.toml"), "utf8");
     assert.match(config, /preferred_auth_method = "apikey"/);
     assert.match(config, /model = "deepseek-v4-flash"/);
-    assert.match(config, /model_catalog_json = ".*\/models\.json"/);
+    assert.match(config, /model_catalog_json = ".*models\.json"/);
     assert.doesNotMatch(config, /model = "gpt-5\.5"/);
     assert.doesNotMatch(config, /requires_openai_auth = false/);
     assert.doesNotMatch(config, /http_headers = \{ "x-openai-actor-authorization" = "codex-sw\.app" \}/);
@@ -356,7 +356,7 @@ test("target-home writer selects the Kimi preset model and catalog", async () =>
 
     const config = await readFile(join(homePath, "config.toml"), "utf8");
     assert.match(config, /model = "kimi-k3"/);
-    assert.match(config, /model_catalog_json = ".*\/models\.json"/);
+    assert.match(config, /model_catalog_json = ".*models\.json"/);
     assert.match(config, /preferred_auth_method = "apikey"/);
   } finally {
     await rm(root, { recursive: true, force: true });

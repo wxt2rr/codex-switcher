@@ -30,9 +30,9 @@ test("resolveRuntimePaths derives switcher directories from home", () => {
     "darwin",
   );
 
-  assert.equal(paths.stateDir, "/Users/alice/.codex-switcher");
-  assert.equal(paths.envsDir, "/Users/alice/.codex-envs");
-  assert.equal(paths.defaultHome, "/Users/alice/.codex");
+  assert.equal(paths.stateDir, join("/Users/alice", ".codex-switcher"));
+  assert.equal(paths.envsDir, join("/Users/alice", ".codex-envs"));
+  assert.equal(paths.defaultHome, join("/Users/alice", ".codex"));
 });
 
 test("resolveRuntimePaths honors explicit environment overrides", () => {
@@ -85,6 +85,6 @@ test("getPlatformRuntime exposes platform-specific defaults", () => {
 
   assert.equal(runtime.platform, "windows");
   assert.equal(runtime.npmCommand, "npm.cmd");
-  assert.equal(runtime.paths.stateDir, "C:\\Users\\alice/.codex-switcher");
+  assert.equal(runtime.paths.stateDir, join("C:\\Users\\alice", ".codex-switcher"));
   assert.match(runtime.codexCliCandidates.join(","), /codex\.exe/);
 });

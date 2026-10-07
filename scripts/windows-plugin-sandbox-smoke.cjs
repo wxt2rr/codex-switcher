@@ -90,7 +90,11 @@ function runLauncher({ profile, entry, extraArgs }) {
   if (result.error) throw result.error;
   process.stdout.write(result.stdout || "");
   if (result.stderr) process.stderr.write(result.stderr);
-  return { result, observation: JSON.parse((result.stdout || "").trim()) };
+  const output = (result.stdout || "").trim();
+  if (!output) {
+    throw new Error(`sandbox child emitted no JSON (status=${result.status ?? "null"}, stderr=${(result.stderr || "").trim() || "<empty>"})`);
+  }
+  return { result, observation: JSON.parse(output) };
 }
 
 function writeEvidence(path, value) {

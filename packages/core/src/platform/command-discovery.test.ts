@@ -26,7 +26,7 @@ test("resolveCommandPath finds a PATH executable on unix-like platforms", async 
     const result = await resolveCommandPath(
       "codex",
       {
-        PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
+        PATH: binDir,
       },
       "darwin",
     );
@@ -128,7 +128,7 @@ test("resolveWindowsLauncherCommands reports launcher executables from PATH on w
 
     const result = await resolveWindowsLauncherCommands(
       {
-        PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
+        PATH: binDir,
       },
       "win32",
     );
@@ -191,7 +191,7 @@ test("getWindowsReadinessSnapshot aggregates launcher commands, candidates, and 
     const snapshot = await getWindowsReadinessSnapshot(
       {
         USERPROFILE: "C:\\Users\\alice",
-        PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
+        PATH: binDir,
       },
       "win32",
     );

@@ -34,6 +34,7 @@ test("launchCodexApp passes CODEX_HOME and managed marker to the runner", async 
       codexHome: "/tmp/codex-home",
       env: {
         CODEX_SWITCHER_APP_BIN: "/tmp/Codex",
+        CODEX_SWITCHER_TEST_PLATFORM: "darwin",
       },
     },
     async (command, args, env) => {
@@ -155,6 +156,7 @@ test("launchNewCodexApp records the managed app pid", async () => {
         stateDir: root,
         env: {
           CODEX_SWITCHER_APP_BIN: "/tmp/Codex",
+          CODEX_SWITCHER_TEST_PLATFORM: "darwin",
         },
       },
       async (_command, args) => {
@@ -214,7 +216,7 @@ test("managed app launches are serialized so instance profiles cannot collide", 
     const input = {
       codexHome: "/tmp/codex-home",
       stateDir: root,
-      env: { CODEX_SWITCHER_APP_BIN: "/tmp/Codex" },
+      env: { CODEX_SWITCHER_APP_BIN: "/tmp/Codex", CODEX_SWITCHER_TEST_PLATFORM: "darwin" },
     };
     await Promise.all([
       launchNewCodexApp(input, async (_command, args) => {

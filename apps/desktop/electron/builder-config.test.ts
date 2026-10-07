@@ -123,6 +123,8 @@ test("desktop package defines electron packaging entrypoints", () => {
   assert.match(windowsSandboxSource, /REVOKE_ACCESS/);
   assert.match(windowsSandboxSource, /currentDacl/);
   assert.doesNotMatch(windowsSandboxSource, /originalDacl/);
+  assert.match(windowsSandboxSource, /FILE_TRAVERSE/);
+  assert.match(windowsSandboxSource, /grantDirectoryAncestors/);
   const nativeModuleSource = readFileSync(join(desktopRoot, "resources", "native", "macos", "AppEnvironmentBadgeNative.mm"), "utf8");
   assert.match(nativeModuleSource, /hidesOnDeactivate = NO/);
   assert.match(nativeModuleSource, /canHide = NO/);

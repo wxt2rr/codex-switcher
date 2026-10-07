@@ -282,3 +282,9 @@
 - 远端 CI 对提交 `a236dda` 的真实失败日志确认了三类问题：Windows Node 20 测试 runner 通过 loader 直接启动时无法处理盘符 URL；Windows MSVC 回退构建的 `VsDevCmd.bat` 引号被重复转义；Ubuntu runner 的 AppArmor 限制阻止 bubblewrap 配置隔离网络命名空间。
 - Core、Gateway、Desktop 测试 runner 已统一改为调用 `tsx/dist/cli.mjs`；Windows 原生 helper 构建改用 `ComSpec`、`windowsVerbatimArguments` 和不重复转义的命令参数；CI 与桌面打包 workflow 在 Linux smoke 前安装并加载最小 bubblewrap AppArmor userns profile；POSIX smoke 在子进程无 JSON 输出时也会给出明确失败诊断。
 - 本地回归：Core 157/157、Gateway 79/79、脚本/工作流 33/33、Desktop 390/391（1 个显式外部 Codex E2E skip）、builder contract 1/1、lint 和 `git diff --check` 通过；远端 CI 将在本次提交后重新取得 Windows/Linux 真机证据。
+
+## 2026-10-07 CI 失败项收口
+
+- 提交后的远端 CI 继续暴露了宿主平台差异：Windows/macOS 测试不能依赖 runner 自带 PATH，Unix 启动断言不能假设 Windows 命令包装方式，路径断言也不能写死 POSIX 分隔符；相关测试已改为显式平台与隔离 PATH，并按宿主路径规则生成期望值。
+- Windows AppContainer smoke 的失败原因已定位为 Node 目录和工作目录的父目录缺少仅遍历权限。原生 helper 现在沿父级目录授予 `FILE_TRAVERSE`、只读属性和同步权限，同时仍只给 Node 目录与工作目录授予实际读取/执行或写入权限，不扩大文件内容可读范围；无 JSON 输出时 smoke 脚本也会保留子进程状态和 stderr。
+- 本地修复后回归：`npm test` 通过 Core 157/157、Gateway 79/79、脚本/工作流 33/33、legacy-bash 1/1；`npm run desktop:test` 通过；builder contract 1/1、`npm run lint` 和 `git diff --check` 通过。下一次远端 CI 用于确认 Windows AppContainer 真机 smoke 和跨平台测试闭环。
