@@ -17,23 +17,30 @@ test("codex-sw launcher keeps the legacy bash entrypoint on macos", async () => 
   const legacyScript = join(root, "legacy.sh");
 
   try {
-    await writeFile(
-      legacyScript,
-      `#!/usr/bin/env bash
+    const legacySource = process.platform === "win32"
+      ? `@echo off
+>"${legacyLog}" echo args=%*
+>>"${legacyLog}" echo invoked=%CODEX_SWITCHER_INVOKED_AS%
+`
+      : `#!/usr/bin/env bash
 set -euo pipefail
 printf 'args=%s\\n' "$*" > "${legacyLog}"
 printf 'invoked=%s\\n' "$CODEX_SWITCHER_INVOKED_AS" >> "${legacyLog}"
-`,
+`;
+    await writeFile(
+      legacyScript.replace(/\.sh$/, process.platform === "win32" ? ".cmd" : ".sh"),
+      legacySource,
       "utf8",
     );
-    await chmod(legacyScript, 0o755);
+    const executableLegacyScript = legacyScript.replace(/\.sh$/, process.platform === "win32" ? ".cmd" : ".sh");
+    if (process.platform !== "win32") await chmod(executableLegacyScript, 0o755);
 
     await execFileAsync(process.execPath, [codexSwPath, "status"], {
       cwd: repoRoot,
       env: {
         ...process.env,
         CODEX_SWITCHER_BIN_PLATFORM: "darwin",
-        CODEX_SWITCHER_BIN_LEGACY_SCRIPT: legacyScript,
+        CODEX_SWITCHER_BIN_LEGACY_SCRIPT: executableLegacyScript,
       },
     });
 

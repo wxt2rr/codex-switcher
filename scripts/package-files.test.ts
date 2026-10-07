@@ -57,6 +57,7 @@ test("published package contains the Windows/Node CLI runtime closure", async ()
   const result = await execFileAsync(npm, ["pack", "--dry-run", "--json"], {
     cwd: repoRoot,
     maxBuffer: 4 * 1024 * 1024,
+    shell: process.platform === "win32",
   });
   const packed = JSON.parse(result.stdout.trim()) as Array<{ files?: Array<{ path: string }> }>;
   const paths = new Set((packed[0]?.files ?? []).map((entry) => entry.path));

@@ -48,6 +48,7 @@ function spawnAndMirror(command, args, options) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       stdio: "inherit",
+      shell: process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command),
       ...options,
     });
     child.on("error", reject);

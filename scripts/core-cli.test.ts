@@ -15,8 +15,8 @@ async function runCoreCli(
   env: Record<string, string>,
 ): Promise<{ stdout: string; stderr: string }> {
   return execFileAsync(
-    "npx",
-    ["--yes", "tsx", "scripts/core-cli.ts", ...args],
+    process.execPath,
+    ["node_modules/tsx/dist/cli.mjs", "scripts/core-cli.ts", ...args],
     {
       cwd: process.cwd(),
       env: {

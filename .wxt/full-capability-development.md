@@ -294,3 +294,9 @@
 - Windows CI 的 Gateway 测试进一步暴露了 Agent 文件系统路径校验和远程快照路径拼接的宿主差异：native Windows 的父目录判断使用了错误的分隔符，远程 POSIX 文件系统却收到了 native `join` 生成的反斜杠路径。
 - `packages/gateway/src/agent/adapter.ts` 现在按显式 path style 选择分隔符和绝对路径判断；Agent 快照及快照目录枚举统一使用可移植的正斜杠内部路径，再交由目标文件系统归一化，兼容本地 Windows、POSIX/WSL 和 SSH 远程 Agent。
 - 定向回归：Agent adapter、remote filesystem 共 10/10 通过；此前 Windows CI 失败的 `adapter.test.ts` 和 `remote.test.ts` 场景已在本地复现并通过。下一次远端 CI 继续确认 Windows 原生测试和 AppContainer smoke。
+
+## 2026-10-07 Windows CLI 测试启动兼容修复
+
+- Windows runner 的第二轮失败来自测试启动方式，而非功能实现：测试直接调用 `npx`、批处理包管理器和 Unix 可执行 shell 脚本，导致 Windows 下分别出现 `ENOENT`、`EINVAL` 和 `spawn UNKNOWN`。
+- Core CLI 测试现在直接使用当前 Node 与仓库内的 `tsx` CLI；发布清单测试对 Windows 包管理器启用 shell 兼容；CLI launcher 对显式 `.cmd/.bat` 入口启用 Windows shell；legacy launcher fixture 在 Windows 使用等价 batch 脚本，在 Unix 保持 Bash fixture。
+- 定向回归 12/12 通过；完整本地 `npm test`、Desktop 回归、lint 和 diff check 通过。远端 CI 将验证 Windows cross-platform 测试及原生隔离 job 的最终结果。
