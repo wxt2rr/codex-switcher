@@ -376,3 +376,4 @@
 
 - `scripts/bin/launcher.cjs` 现在在 macOS/Linux 下将 `gateway`、`provider`、`agent`、`group`、`model`、`usage`、`profile` 命令转入 Node CLI；旧的环境/账号手动命令继续使用 Bash 入口。
 - README 中英文说明和一致性断言已同步；入口回归 5/5，`npm run test:cross-platform` 通过 Core 157/157、Gateway 79/79、脚本/工作流 34/34。
+- 隔离状态目录下通过实际 `node scripts/bin/codex-sw.cjs` 执行 `gateway status`、`provider ls`、`model ls`，确认主入口在 macOS 上进入 Node CLI，并保持默认环境的手动模式状态。
