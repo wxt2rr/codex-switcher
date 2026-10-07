@@ -389,3 +389,5 @@
 - 新增 `scripts/package-install-smoke.mjs`：macOS 从目标 ZIP 解包并验证应用可执行文件，Linux 使用 `dpkg-deb --extract` 验证安装树，Windows 使用 NSIS `/S` 安装到临时目录并验证 `codex-switcher.exe`。
 - 三个平台 package job 会把安装结果写入 `package-install-*.json` 并随对应安装包 artifact 上传；证据只包含平台、架构、产物文件名、安装方式和可执行文件名，不记录用户路径或凭证。
 - 本机 macOS arm64 ZIP smoke 通过；`npx tsx --test scripts/desktop-package-workflow.test.ts` 1/1，`npm run test:cross-platform` 通过 Core 157/157、Gateway 79/79、脚本/工作流 34/34，Node 语法和 diff check 通过。
+- 当前 `main` 提交 `4126d05` 的三平台打包运行 `37567933101` 已成功：macOS、Windows、Linux package job 全部通过，且 Windows NSIS、Linux deb、macOS ZIP 的安装 smoke 步骤均为成功；release job 按非标签规则跳过。
+- 对应 artifact `codex-switcher-macos`、`codex-switcher-windows-x64`、`codex-switcher-linux-x64` 均成功上传并包含各自的 `package-install-*.json` 证据文件；正式签名/公证仍未在非标签运行中执行。
