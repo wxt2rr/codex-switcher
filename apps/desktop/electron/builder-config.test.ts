@@ -11,6 +11,7 @@ const desktopPackage = JSON.parse(
   readFileSync(join(desktopRoot, "package.json"), "utf8")
 ) as {
   main: string;
+  homepage?: string;
   scripts: Record<string, string>;
   build: {
     afterPack?: string;
@@ -26,6 +27,12 @@ const desktopPackage = JSON.parse(
     };
     win?: {
       target?: string[];
+      icon?: string;
+    };
+    linux?: {
+      target?: string[];
+      category?: string;
+      maintainer?: string;
       icon?: string;
     };
     nsis?: {
@@ -55,6 +62,14 @@ test("desktop package defines electron packaging entrypoints", () => {
       to: "packages/core/package.json",
     },
     {
+      from: "../../packages/gateway/dist",
+      to: "packages/gateway/dist",
+    },
+    {
+      from: "../../packages/gateway/package.json",
+      to: "packages/gateway/package.json",
+    },
+    {
       from: "../../plugins/codex-switcher/scripts",
       to: "plugins/codex-switcher/scripts",
     },
@@ -75,6 +90,11 @@ test("desktop package defines electron packaging entrypoints", () => {
   assert.equal(desktopPackage.build.mac?.icon, "build/icon.icns");
   assert.deepEqual(desktopPackage.build.win?.target, ["nsis"]);
   assert.equal(desktopPackage.build.win?.icon, "build/icon.ico");
+  assert.deepEqual(desktopPackage.build.linux?.target, ["AppImage", "deb"]);
+  assert.equal(desktopPackage.build.linux?.category, "Utility");
+  assert.equal(desktopPackage.homepage, "https://github.com/wxt2rr/codex-switcher");
+  assert.equal(desktopPackage.build.linux?.maintainer, "wangxt");
+  assert.equal(desktopPackage.build.linux?.icon, "build/icon.png");
   assert.equal(desktopPackage.build.nsis?.installerIcon, "build/icon.ico");
   assert.equal(desktopPackage.build.nsis?.uninstallerIcon, "build/icon.ico");
   assert.equal(desktopPackage.build.nsis?.include, "build/installer.nsh");
@@ -83,6 +103,24 @@ test("desktop package defines electron packaging entrypoints", () => {
   assert.match(nativeBuildSource, /app-environment-badge-native\.node/);
   assert.match(nativeBuildSource, /\["arm64", "x86_64"\]/);
   assert.doesNotMatch(nativeBuildSource, /swiftc/);
+  assert.match(nativeBuildSource, /PluginSandboxLauncher\.cpp/);
+  assert.match(nativeBuildSource, /codex-switcher-plugin-sandbox\.exe/);
+  assert.match(nativeBuildSource, /vswhere\.exe/);
+  const windowsSandboxSource = readFileSync(join(desktopRoot, "resources", "native", "windows", "PluginSandboxLauncher.cpp"), "utf8");
+  assert.match(windowsSandboxSource, /CreateAppContainerProfile/);
+  assert.match(windowsSandboxSource, /DeriveAppContainerSidFromAppContainerName/);
+  assert.match(windowsSandboxSource, /kernelbase\.dll/);
+  assert.match(windowsSandboxSource, /userenv\.dll/);
+  assert.match(windowsSandboxSource, /GetProcAddress/);
+  assert.match(windowsSandboxSource, /FreeSid\(appContainerSid\)/);
+  assert.doesNotMatch(windowsSandboxSource, /AppContainerDeriveSidFromMoniker/);
+  assert.match(windowsSandboxSource, /PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES/);
+  assert.match(windowsSandboxSource, /internetClient/);
+  assert.match(windowsSandboxSource, /nodeDirectory/);
+  assert.match(windowsSandboxSource, /Node runtime directory/);
+  assert.match(windowsSandboxSource, /REVOKE_ACCESS/);
+  assert.match(windowsSandboxSource, /currentDacl/);
+  assert.doesNotMatch(windowsSandboxSource, /originalDacl/);
   const nativeModuleSource = readFileSync(join(desktopRoot, "resources", "native", "macos", "AppEnvironmentBadgeNative.mm"), "utf8");
   assert.match(nativeModuleSource, /hidesOnDeactivate = NO/);
   assert.match(nativeModuleSource, /canHide = NO/);

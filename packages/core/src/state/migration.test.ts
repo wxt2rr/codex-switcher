@@ -117,7 +117,18 @@ test("migration restores previous core state when persistence fails", async () =
       "utf8",
     );
 
-    await mkdir(join(coreRootDir, "core-state.json.tmp"), { recursive: true });
+    let failNextSave = true;
+    const baseStore = createStateStore({ rootDir: coreRootDir });
+    const failingStore = {
+      ...baseStore,
+      async save(state: typeof previousState) {
+        if (failNextSave) {
+          failNextSave = false;
+          throw new Error("simulated canonical state write failure");
+        }
+        await baseStore.save(state);
+      },
+    };
 
     await assert.rejects(() =>
       migrateLegacyState({
@@ -125,6 +136,7 @@ test("migration restores previous core state when persistence fails", async () =
         envsDir,
         defaultHome,
         coreRootDir,
+        stateStore: failingStore,
         now: "2026-06-16T06:00:00.000Z",
       }),
     );

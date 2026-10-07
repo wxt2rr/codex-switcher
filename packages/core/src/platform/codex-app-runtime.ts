@@ -1,5 +1,7 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
+
+import { writeFileAtomically } from "../system/atomic-file.js";
 
 export interface ManagedAppStatePaths {
   stateDir: string;
@@ -58,7 +60,7 @@ export async function writeManagedAppPid(
     await rm(paths.appPidFile, { force: true });
     return;
   }
-  await writeFile(paths.appPidFile, `${pid}\n`, "utf8");
+  await writeFileAtomically(paths.appPidFile, `${pid}\n`, { encoding: "utf8" });
 }
 
 export async function readLastManagedAppInstanceId(
@@ -106,13 +108,13 @@ export async function setManagedAppInstance(
   input: ManagedAppInstanceRecord,
 ): Promise<void> {
   await mkdir(paths.appInstancesDir, { recursive: true });
-  await writeFile(join(paths.appInstancesDir, `${input.instanceId}.pid`), `${input.pid}\n`, "utf8");
+  await writeFileAtomically(join(paths.appInstancesDir, `${input.instanceId}.pid`), `${input.pid}\n`, { encoding: "utf8" });
   if (input.targetKey) {
-    await writeFile(join(paths.appInstancesDir, `${input.instanceId}.target`), `${input.targetKey}\n`, "utf8");
+    await writeFileAtomically(join(paths.appInstancesDir, `${input.instanceId}.target`), `${input.targetKey}\n`, { encoding: "utf8" });
   } else {
     await rm(join(paths.appInstancesDir, `${input.instanceId}.target`), { force: true });
   }
-  await writeFile(paths.appLastInstanceFile, `${input.instanceId}\n`, "utf8");
+  await writeFileAtomically(paths.appLastInstanceFile, `${input.instanceId}\n`, { encoding: "utf8" });
   await writeManagedAppPid(paths, input.pid);
 }
 
@@ -129,7 +131,7 @@ export async function clearManagedAppInstance(
     const nextInstances = await listManagedAppInstances(paths);
     const fallback = nextInstances[nextInstances.length - 1];
     if (fallback) {
-      await writeFile(paths.appLastInstanceFile, `${fallback.instanceId}\n`, "utf8");
+      await writeFileAtomically(paths.appLastInstanceFile, `${fallback.instanceId}\n`, { encoding: "utf8" });
       await writeManagedAppPid(paths, fallback.pid);
       return;
     }

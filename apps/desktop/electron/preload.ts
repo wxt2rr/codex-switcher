@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   getAppEnvironmentBadgeStatus: () => ipcRenderer.invoke("desktop:getAppEnvironmentBadgeStatus"),
   getRouterLifecycleSettings: () => ipcRenderer.invoke("desktop:getRouterLifecycleSettings"),
   getRouterPortSettings: () => ipcRenderer.invoke("desktop:getRouterPortSettings"),
+  getLaunchAtLoginSettings: () => ipcRenderer.invoke("desktop:getLaunchAtLoginSettings"),
   detectCodexToolPaths: () => ipcRenderer.invoke("desktop:detectCodexToolPaths"),
   setCodexToolPath: (kind: "cli" | "app", path: string) => ipcRenderer.invoke("desktop:setCodexToolPath", kind, path),
   clearCodexToolPath: (kind: "cli" | "app") => ipcRenderer.invoke("desktop:clearCodexToolPath", kind),
@@ -26,6 +27,8 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     ipcRenderer.invoke("desktop:setRouterLifecycleSettings", value),
   setRouterPortSettings: (value: { preferredPort: number }) =>
     ipcRenderer.invoke("desktop:setRouterPortSettings", value),
+  setLaunchAtLoginSettings: (value: { enabled: boolean }) =>
+    ipcRenderer.invoke("desktop:setLaunchAtLoginSettings", value),
   getCliTerminalSettings: () => ipcRenderer.invoke("desktop:getCliTerminalSettings"),
   scanCliTerminalSettings: () => ipcRenderer.invoke("desktop:scanCliTerminalSettings"),
   setCliTerminalSelection: (id: string) => ipcRenderer.invoke("desktop:setCliTerminalSelection", id),
@@ -132,6 +135,8 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   getEnvironmentRouteStatuses: () => ipcRenderer.invoke("desktop:getEnvironmentRouteStatuses"),
   toggleEnvironmentRoute: (envName: string, enabled: boolean) =>
     ipcRenderer.invoke("desktop:toggleEnvironmentRoute", envName, enabled),
+  toggleEnvironmentGateway: (envName: string, enabled: boolean) =>
+    ipcRenderer.invoke("desktop:toggleEnvironmentGateway", envName, enabled),
   listAccountPools: () => ipcRenderer.invoke("desktop:listAccountPools"),
   saveAccountPool: (input: unknown) => ipcRenderer.invoke("desktop:saveAccountPool", input),
   toggleAccountCompatibility: (input: {
@@ -147,6 +152,22 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     ipcRenderer.invoke("desktop:checkAccountCompatibility", envName, accountName),
   loadUsageSnapshot: (filter: unknown) => ipcRenderer.invoke("desktop:loadUsageSnapshot", filter),
   loadUsageRequests: (query: unknown) => ipcRenderer.invoke("desktop:loadUsageRequests", query),
+  loadUsageTrace: (query?: unknown) => ipcRenderer.invoke("desktop:loadUsageTrace", query),
+  loadGatewayAdminSnapshot: () => ipcRenderer.invoke("desktop:loadGatewayAdminSnapshot"),
+  loadGatewayAdminConfiguration: (envName: string) => ipcRenderer.invoke("desktop:loadGatewayAdminConfiguration", envName),
+  saveGatewayAdminConfiguration: (request: { envName: string; gateway: Record<string, unknown>; agentBindings?: Record<string, Record<string, unknown>> }) => ipcRenderer.invoke("desktop:saveGatewayAdminConfiguration", request),
+  discoverGatewayAdminModels: (request: { envName: string; providerId: string }) => ipcRenderer.invoke("desktop:discoverGatewayAdminModels", request),
+  loadProviderPluginSnapshot: () => ipcRenderer.invoke("desktop:loadProviderPluginSnapshot"),
+  loadProviderPluginMarket: () => ipcRenderer.invoke("desktop:loadProviderPluginMarket"),
+  refreshProviderPluginMarket: (url: string) => ipcRenderer.invoke("desktop:refreshProviderPluginMarket", url),
+  installProviderPlugin: (request: unknown) => ipcRenderer.invoke("desktop:installProviderPlugin", request),
+  installProviderPluginFromMarket: (input: unknown) => ipcRenderer.invoke("desktop:installProviderPluginFromMarket", input),
+  deactivateProviderPlugin: (id: string) => ipcRenderer.invoke("desktop:deactivateProviderPlugin", id),
+  rollbackProviderPlugin: (id: string) => ipcRenderer.invoke("desktop:rollbackProviderPlugin", id),
+  removeProviderPlugin: (id: string) => ipcRenderer.invoke("desktop:removeProviderPlugin", id),
+  getAutoUpdateStatus: () => ipcRenderer.invoke("desktop:getAutoUpdateStatus"),
+  checkForAutoUpdate: () => ipcRenderer.invoke("desktop:checkForAutoUpdate"),
+  installDownloadedUpdate: () => ipcRenderer.invoke("desktop:installDownloadedUpdate"),
   listUsagePricing: () => ipcRenderer.invoke("desktop:listUsagePricing"),
   saveUsagePricing: (profile: unknown) => ipcRenderer.invoke("desktop:saveUsagePricing", profile),
   getSkillSnapshot: (request?: unknown) => ipcRenderer.invoke("desktop:getSkillSnapshot", request),

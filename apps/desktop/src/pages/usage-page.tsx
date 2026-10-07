@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, RefreshCw, Settings2 } from "lucide-react";
+import { Activity, Check, RefreshCw, Settings2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/form-primitives";
-import type { DesktopBridge } from "../bridge";
+import type { DesktopBridge, UsageTraceEvent } from "../bridge";
 import type { OverviewPayload, UsageFilter, UsagePricingProfile, UsageSnapshot } from "../desktop-model";
 import type { UiLanguage } from "../i18n";
 import { StatCard } from "../components/dashboard-kit";
@@ -29,6 +29,7 @@ const emptySnapshot: UsageSnapshot = {
 
 export function UsagePage({ overview, language, bridge }: { overview: OverviewPayload; language: UiLanguage; bridge: DesktopBridge }) {
   const [snapshot, setSnapshot] = useState(emptySnapshot);
+  const [trace, setTrace] = useState<UsageTraceEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [range, setRange] = useState<UsageRange>("24h");
@@ -43,6 +44,7 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
   const [priceModel, setPriceModel] = useState("*");
   const [priceInput, setPriceInput] = useState("");
   const [priceOutput, setPriceOutput] = useState("");
+  const [priceReasoning, setPriceReasoning] = useState("");
   const [priceCacheCreation, setPriceCacheCreation] = useState("");
   const [priceCacheRead, setPriceCacheRead] = useState("");
   const [refreshIntervalSeconds, setRefreshIntervalSeconds] = useState(5);
@@ -56,7 +58,15 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
     requestInFlightRef.current = true;
     setLoading(true);
     const filter = buildUsageFilter({ range, envName, accountName, baseUrl, model }, Date.now());
-    try { setSnapshot(await bridge.loadUsageSnapshot(filter)); setError(""); }
+    try {
+      const [nextSnapshot, nextTrace] = await Promise.all([
+        bridge.loadUsageSnapshot(filter),
+        bridge.loadUsageTrace({ from: filter.from, to: filter.to, envName: filter.envName, limit: 80 }),
+      ]);
+      setSnapshot(nextSnapshot);
+      setTrace(nextTrace);
+      setError("");
+    }
     catch (nextError) { setError(nextError instanceof Error ? nextError.message : String(nextError)); }
     finally { requestInFlightRef.current = false; setLoading(false); }
   }
@@ -91,6 +101,7 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
     if (!priceBaseUrl.trim() || !priceInput.trim() || !priceOutput.trim()) return;
     await bridge.saveUsagePricing({ kind: priceKind, baseUrl: priceBaseUrl.trim(), modelPattern: priceModel.trim() || "*",
       inputPerMillion: Number(priceInput), outputPerMillion: Number(priceOutput),
+      reasoningPerMillion: priceReasoning.trim() ? Number(priceReasoning) : null,
       cacheCreationPerMillion: priceCacheCreation.trim() ? Number(priceCacheCreation) : null,
       cacheReadPerMillion: priceCacheRead.trim() ? Number(priceCacheRead) : null, updatedAt: Date.now() });
     setPricing(await bridge.listUsagePricing());
@@ -145,7 +156,7 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
           <StatCard
             label="Token"
             value={formatCompact(snapshot.summary.totalTokens)}
-            helper={<><span className="text-blue-600">Input {formatCompact(snapshot.summary.inputTokens)}</span><span className="px-1 text-slate-300">/</span><span className="text-emerald-600">Output {formatCompact(snapshot.summary.outputTokens)}</span></>}
+            helper={<><span className="text-blue-600">Input {formatCompact(snapshot.summary.inputTokens)}</span><span className="px-1 text-slate-300">/</span><span className="text-emerald-600">Output {formatCompact(snapshot.summary.outputTokens)}</span><span className="px-1 text-slate-300">/</span><span className="text-fuchsia-600">Reasoning {formatCompact(snapshot.summary.reasoningTokens ?? 0)}</span></>}
           />
           <StatCard
             label={zh ? "缓存命中率" : "Cache hit rate"}
@@ -155,6 +166,17 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
           />
           <StatCard label={zh ? "费用" : "Cost"} value={snapshot.summary.actualCost === null ? "-" : `$${snapshot.summary.actualCost.toFixed(4)}`} helper={`${zh ? "标准" : "Standard"}: ${snapshot.summary.standardCost === null ? "-" : `$${snapshot.summary.standardCost.toFixed(4)}`}`} />
         </div>
+
+        <section className="rounded-[18px] bg-white p-5 ring-1 ring-black/[0.04]">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="flex items-center gap-2 text-[16px] font-semibold"><Activity className="size-4 text-blue-600" />{zh ? "路由 Trace" : "Routing trace"}</h3>
+              <p className="mt-1 text-[12px] text-slate-500">{zh ? "持久化记录实际的模型、路由组、账号和策略决策。" : "Persisted model, route-group, account, and strategy decisions."}</p>
+            </div>
+            <span className="text-[11px] text-slate-400">{trace.length ? `${trace.length} ${zh ? "条" : "events"}` : "-"}</span>
+          </div>
+          {trace.length ? <div className="mt-3 max-h-[220px] overflow-auto rounded-xl bg-[#f7f8fa] px-3">{trace.slice(0, 12).map((item, index) => <div key={`${item.at}/${item.routeId ?? item.event}/${index}`} className="grid grid-cols-[130px_1fr_auto] gap-3 border-b border-slate-200/70 py-2 text-[11px] last:border-b-0"><span className="text-slate-400">{new Date(item.at).toLocaleTimeString()}</span><span className="min-w-0 truncate"><b className="text-neutral-800">{item.event}</b>{item.requestedModel ? <span className="ml-2 text-slate-500">model={item.requestedModel}</span> : null}{item.reason ? <span className="ml-2 text-slate-500">{item.reason}</span> : null}</span><span className="max-w-[220px] truncate text-right text-slate-500" title={`${item.envName ?? ""}/${item.accountName ?? ""}`}>{item.routeId ?? item.accountName ?? "-"}</span></div>)}</div> : <div className="mt-3 rounded-xl bg-[#f7f8fa] px-3 py-6 text-center text-[12px] text-slate-400">{zh ? "尚无路由事件；开启网关并发起请求后会显示。" : "No routing events yet. Enable the gateway and send a request."}</div>}
+        </section>
 
         <div className="grid gap-3 xl:grid-cols-[0.95fr_1.35fr]">
           <section className="rounded-[18px] bg-white p-5 ring-1 ring-black/[0.04]"><h3 className="text-[16px] font-semibold">{zh ? "模型分布" : "Model distribution"}</h3>
@@ -172,9 +194,9 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
             <Field label={zh ? "价格类型" : "Price type"}><Select value={priceKind} onValueChange={(value) => setPriceKind(value as "actual" | "standard")} items={[{ value: "actual", label: zh ? "实际采购价" : "Actual" }, { value: "standard", label: zh ? "标准价" : "Standard" }]} /></Field>
             <Field label="Base URL"><Input value={priceBaseUrl} onChange={(event) => setPriceBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" /></Field>
             <Field label={zh ? "模型匹配" : "Model pattern"}><Input value={priceModel} onChange={(event) => setPriceModel(event.target.value)} placeholder="gpt-*" /></Field>
-            <div className="grid grid-cols-2 gap-3"><Field label="Input / 1M"><Input type="number" value={priceInput} onChange={(event) => setPriceInput(event.target.value)} /></Field><Field label="Output / 1M"><Input type="number" value={priceOutput} onChange={(event) => setPriceOutput(event.target.value)} /></Field><Field label="Cache Creation / 1M"><Input type="number" value={priceCacheCreation} onChange={(event) => setPriceCacheCreation(event.target.value)} placeholder={priceInput || "-"} /></Field><Field label="Cache Read / 1M"><Input type="number" value={priceCacheRead} onChange={(event) => setPriceCacheRead(event.target.value)} placeholder={priceInput || "-"} /></Field></div>
+            <div className="grid grid-cols-2 gap-3"><Field label="Input / 1M"><Input type="number" value={priceInput} onChange={(event) => setPriceInput(event.target.value)} /></Field><Field label="Output / 1M"><Input type="number" value={priceOutput} onChange={(event) => setPriceOutput(event.target.value)} /></Field><Field label="Reasoning / 1M"><Input type="number" value={priceReasoning} onChange={(event) => setPriceReasoning(event.target.value)} placeholder={priceOutput || "-"} /></Field><Field label="Cache Creation / 1M"><Input type="number" value={priceCacheCreation} onChange={(event) => setPriceCacheCreation(event.target.value)} placeholder={priceInput || "-"} /></Field><Field label="Cache Read / 1M"><Input type="number" value={priceCacheRead} onChange={(event) => setPriceCacheRead(event.target.value)} placeholder={priceInput || "-"} /></Field></div>
             <Button className="w-full" onClick={() => void savePricing()}>{zh ? "保存并重算" : "Save and reprice"}</Button>
-            <div className="divide-y divide-slate-200 border-y border-slate-200">{pricing.map((item) => <div key={`${item.kind}/${item.baseUrl}/${item.modelPattern}`} className="py-3 text-[12px]"><div className="flex justify-between"><b>{item.kind === "actual" ? (zh ? "实际" : "Actual") : (zh ? "标准" : "Standard")}</b><span>{item.modelPattern}</span></div><div className="mt-1 truncate text-slate-500">{item.baseUrl}</div><div className="mt-1 text-slate-500">Input ${item.inputPerMillion} · Output ${item.outputPerMillion}</div></div>)}</div>
+            <div className="divide-y divide-slate-200 border-y border-slate-200">{pricing.map((item) => <div key={`${item.kind}/${item.baseUrl}/${item.modelPattern}`} className="py-3 text-[12px]"><div className="flex justify-between"><b>{item.kind === "actual" ? (zh ? "实际" : "Actual") : (zh ? "标准" : "Standard")}</b><span>{item.modelPattern}</span></div><div className="mt-1 truncate text-slate-500">{item.baseUrl}</div><div className="mt-1 text-slate-500">Input ${item.inputPerMillion} · Output ${item.outputPerMillion} · Reasoning ${item.reasoningPerMillion ?? item.outputPerMillion}</div></div>)}</div>
           </div>
         </SidePanel>
         </div>

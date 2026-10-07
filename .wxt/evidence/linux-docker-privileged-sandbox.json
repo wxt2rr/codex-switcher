@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "platform": "linux",
+  "sandbox": "linux-bubblewrap",
+  "nodeVersion": "v20.20.2",
+  "passed": true,
+  "checks": {
+    "writeDenied": true,
+    "homeReadDenied": true,
+    "networkDenied": true,
+    "markerAbsent": true
+  }
+}

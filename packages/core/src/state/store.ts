@@ -1,5 +1,11 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+
+import {
+  isGatewayEnvironmentState,
+  type GatewayEnvironmentState,
+} from "../gateway/model.js";
+import { writeFileAtomically } from "../system/atomic-file.js";
 
 export const DEFAULT_SCHEMA_VERSION = 1;
 const STATE_FILE_NAME = "core-state.json";
@@ -60,6 +66,7 @@ export interface EnvState {
   name: string;
   path: string;
   accounts: Record<string, AccountState>;
+  gateway?: GatewayEnvironmentState;
 }
 
 export interface TaskSummary {
@@ -127,18 +134,14 @@ export function createStateStore(options: CreateStateStoreOptions): StateStore {
     },
     async save(state) {
       const validated = validateState(state);
-      await mkdir(dirname(stateFile), { recursive: true });
-      const tempFile = `${stateFile}.tmp`;
-      await writeFile(
-        tempFile,
+      await writeFileAtomically(
+        stateFile,
         `${JSON.stringify(validated, null, 2)}\n`,
-        "utf8",
+        { encoding: "utf8" },
       );
-      await rename(tempFile, stateFile);
     },
     async writeRaw(content) {
-      await mkdir(dirname(stateFile), { recursive: true });
-      await writeFile(stateFile, content, "utf8");
+      await writeFileAtomically(stateFile, content, { encoding: "utf8" });
     },
   };
 }
@@ -220,7 +223,7 @@ function validateEnvState(name: string, value: unknown): EnvState {
     throw createStoreError("INVALID_STATE", `Env '${name}' accounts must be an object`);
   }
 
-  return {
+  const envState: EnvState = {
     name: value.name,
     path: value.path,
     accounts: Object.fromEntries(
@@ -230,6 +233,18 @@ function validateEnvState(name: string, value: unknown): EnvState {
       ]),
     ),
   };
+
+  if (value.gateway !== undefined) {
+    if (!isGatewayEnvironmentState(value.gateway)) {
+      throw createStoreError(
+        "INVALID_STATE",
+        `Env '${name}' gateway must be a valid gateway configuration`,
+      );
+    }
+    envState.gateway = value.gateway;
+  }
+
+  return envState;
 }
 
 function validateAccountState(name: string, value: unknown): AccountState {

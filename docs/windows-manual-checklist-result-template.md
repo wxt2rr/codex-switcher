@@ -30,13 +30,15 @@ Use the raw PowerShell helper commands when you are validating from packaged con
 - [ ] CLI isolation
 - [ ] App switching
 - [ ] TUI checks
+- [ ] Gateway and plugin isolation
+- [ ] Packaging and update recovery
 - [ ] Recovery and integrity
 - [ ] Token refresh and logs
 - [ ] Security checks
 
 ## Command Evidence
 
-If you used `scripts/windows-manual-capture.ps1`, note whether you ran it from a repository checkout or from a package contents directory, attach `windows-manual-evidence.txt`, then paste or summarize the most important outputs here:
+If you used `scripts/windows-manual-capture.ps1`, note whether you ran it from a repository checkout or from a package contents directory, attach `windows-manual-evidence.txt` and the generated `windows-sandbox.json` when the AppContainer helper was available, then paste or summarize the most important outputs here. If the helper was unavailable, preserve the explicit `SKIPPED` line instead of treating the smoke as passed:
 
 ```text
 codex-sw check:
@@ -76,6 +78,25 @@ codex-sw ops token-refresh status:
 
 - Outcome:
 - Evidence:
+
+### Gateway and plugin isolation
+
+- Outcome:
+- Evidence file: `windows-sandbox.json`
+- `writeDenied`:
+- `homeReadDenied`:
+- `networkDenied`:
+- `markerAbsent`:
+- `filesystemWriteGranted`:
+
+### Packaging and update recovery
+
+- Outcome:
+- Installer path:
+- Package verification:
+- Authenticode status:
+- Upgrade dry-run:
+- Failed-boot rollback result:
 
 ### Recovery and integrity
 

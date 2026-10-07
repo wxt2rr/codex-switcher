@@ -1,6 +1,9 @@
-import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { DEFAULT_SCHEMA_VERSION, } from "./store.js";
+import { isGatewayEnvironmentState, } from "../gateway/model.js";
+import { isGatewayEnvironmentStateV2, migrateGatewayEnvironmentStateToV2, toLegacyGatewayEnvironmentState, } from "../gateway/v2.js";
 const DEFAULT_ENV_NAME = "default";
 const DEFAULT_ACCOUNT_NAME = "default";
 export async function readLegacyState(options) {
@@ -36,7 +39,7 @@ export async function writeLegacyPointers(options) {
 export async function writeLegacyRuntime(options) {
     const runtimeDir = join(options.stateDir, "env-accounts", options.envName, options.accountName);
     await mkdir(runtimeDir, { recursive: true });
-    await writeFile(join(runtimeDir, "runtime.json"), `${JSON.stringify({
+    await atomicWrite(join(runtimeDir, "runtime.json"), `${JSON.stringify({
         preferred_auth_method: options.runtime.preferredAuthMethod,
         openai_base_url_mode: options.runtime.openaiBaseUrlMode,
         openai_base_url: options.runtime.openaiBaseUrl ?? "",
@@ -55,7 +58,94 @@ export async function writeLegacyRuntime(options) {
         compatibility_long_conversation_strategy: options.runtime.compatibilityLongConversationStrategy ?? "safe",
         compatibility_instruction_role: options.runtime.compatibilityInstructionRole ?? "auto",
         compatibility_request_overrides: options.runtime.compatibilityRequestOverrides ?? {},
-    }, null, 2)}\n`, "utf8");
+    }, null, 2)}\n`);
+}
+/** Persist credential material only in the account auth store, never in Gateway metadata. */
+export async function writeLegacyAuthData(options) {
+    const accountDir = join(options.stateDir, "env-accounts", options.envName, options.accountName);
+    await atomicWrite(join(accountDir, "auth.json"), `${JSON.stringify(options.authData, null, 2)}\n`);
+}
+export async function writeLegacyGateway(options) {
+    if (!isGatewayEnvironmentState(options.gateway)) {
+        throw new Error(`Invalid gateway configuration for environment '${options.envName}'`);
+    }
+    const path = getGatewayPath(options.stateDir, options.envName);
+    const v2Path = getGatewayV2Path(options.stateDir, options.envName);
+    const previousLegacy = await readOptionalText(path);
+    const previousV2 = await readOptionalText(v2Path);
+    // Keep the historical schema as the compatibility source of truth while
+    // also materializing the v2 gateway document for the new runtime.
+    let nextV2 = migrateGatewayEnvironmentStateToV2(options.gateway, options.envName);
+    let previousV2State;
+    if (previousV2 !== undefined) {
+        try {
+            const parsed = JSON.parse(previousV2);
+            if (isGatewayEnvironmentStateV2(parsed))
+                previousV2State = parsed;
+        }
+        catch {
+            // An invalid old v2 file is preserved byte-for-byte if the transaction
+            // needs to roll back; it must not make a valid v1 write impossible.
+        }
+    }
+    if (previousV2State && previousV2State.gatewayId === nextV2.gatewayId) {
+        nextV2 = {
+            ...nextV2,
+            environmentId: previousV2State.environmentId,
+            revision: previousV2State.revision + 1,
+            sourceSchemaVersion: 2,
+            listener: previousV2State.listener,
+            agentBindings: previousV2State.agentBindings,
+        };
+    }
+    try {
+        await atomicWrite(path, `${JSON.stringify(options.gateway, null, 2)}\n`);
+        await writeLegacyGatewayV2({ stateDir: options.stateDir, envName: options.envName, gateway: nextV2 });
+    }
+    catch (error) {
+        await restoreOptionalText(path, previousLegacy).catch(() => undefined);
+        await restoreOptionalText(v2Path, previousV2).catch(() => undefined);
+        throw error;
+    }
+}
+export async function clearLegacyGateway(options) {
+    const path = getGatewayPath(options.stateDir, options.envName);
+    const v2Path = getGatewayV2Path(options.stateDir, options.envName);
+    const previousLegacy = await readOptionalText(path);
+    const previousV2 = await readOptionalText(v2Path);
+    try {
+        await rm(path, { force: true });
+        await rm(v2Path, { force: true });
+    }
+    catch (error) {
+        await restoreOptionalText(path, previousLegacy).catch(() => undefined);
+        await restoreOptionalText(v2Path, previousV2).catch(() => undefined);
+        throw error;
+    }
+}
+export async function writeLegacyGatewayV2(options) {
+    if (!isGatewayEnvironmentStateV2(options.gateway)) {
+        throw new Error(`Invalid v2 gateway configuration for environment '${options.envName}'`);
+    }
+    const path = getGatewayV2Path(options.stateDir, options.envName);
+    await atomicWrite(path, `${JSON.stringify(options.gateway, null, 2)}\n`);
+}
+export async function readLegacyGatewayV2(options) {
+    try {
+        const parsed = JSON.parse(await readFile(getGatewayV2Path(options.stateDir, options.envName), "utf8"));
+        if (!isGatewayEnvironmentStateV2(parsed)) {
+            throw new Error(`Gateway v2 configuration for environment '${options.envName}' is invalid`);
+        }
+        return parsed;
+    }
+    catch (error) {
+        if (isMissingFileError(error))
+            return undefined;
+        throw error;
+    }
+}
+export async function clearLegacyGatewayV2(options) {
+    await rm(getGatewayV2Path(options.stateDir, options.envName), { force: true });
 }
 export async function createLegacyEnv(options) {
     if (options.envName === DEFAULT_ENV_NAME) {
@@ -71,6 +161,8 @@ export async function updateLegacyEnv(options) {
         await renameIfExists(join(options.envsDir, options.envName), join(options.envsDir, options.nextEnvName));
         await renameIfExists(join(options.stateDir, "env-accounts", options.envName), join(options.stateDir, "env-accounts", options.nextEnvName));
         await renameIfExists(getEnvMetaPath(options.stateDir, options.envName), getEnvMetaPath(options.stateDir, options.nextEnvName));
+        await renameIfExists(getGatewayPath(options.stateDir, options.envName), getGatewayPath(options.stateDir, options.nextEnvName));
+        await renameIfExists(getGatewayV2Path(options.stateDir, options.envName), getGatewayV2Path(options.stateDir, options.nextEnvName));
     }
     await writeLegacyEnvMeta(options.stateDir, options.nextEnvName, {
         homePath: options.homePath,
@@ -86,6 +178,7 @@ async function readLegacyEnvState(envName, options) {
         accountName,
         await readLegacyAccountState(accountRoot, accountName),
     ])));
+    const gateway = await readLegacyGateway(options.stateDir, envName);
     return {
         name: envName,
         path: (await readLegacyEnvMeta(options.stateDir, envName)).homePath ||
@@ -93,7 +186,23 @@ async function readLegacyEnvState(envName, options) {
                 ? options.defaultHome
                 : join(options.envsDir, envName, "home")),
         accounts,
+        ...(gateway ? { gateway } : {}),
     };
+}
+async function readLegacyGateway(stateDir, envName) {
+    try {
+        const parsed = JSON.parse(await readFile(getGatewayPath(stateDir, envName), "utf8"));
+        if (!isGatewayEnvironmentState(parsed)) {
+            throw new Error(`Gateway configuration for environment '${envName}' is invalid`);
+        }
+        return parsed;
+    }
+    catch (error) {
+        if (!isMissingFileError(error))
+            throw error;
+        const v2 = await readLegacyGatewayV2({ stateDir, envName });
+        return v2 ? toLegacyGatewayEnvironmentState(v2) : undefined;
+    }
 }
 async function readLegacyAccountState(accountRoot, accountName) {
     const runtimePath = join(accountRoot, accountName, "runtime.json");
@@ -212,7 +321,7 @@ async function readPointerSnapshot(stateDir, target, kind, fallback) {
     }
 }
 async function writePointer(stateDir, target, kind, value) {
-    await writeFile(join(stateDir, `current_${target}_${kind}`), `${value}\n`, "utf8");
+    await atomicWrite(join(stateDir, `current_${target}_${kind}`), `${value}\n`);
 }
 async function listEnvNames(envsDir) {
     return listDirectoryNames(envsDir);
@@ -240,11 +349,46 @@ async function readLegacyEnvMeta(stateDir, envName) {
 }
 async function writeLegacyEnvMeta(stateDir, envName, value) {
     const metaPath = getEnvMetaPath(stateDir, envName);
-    await mkdir(join(stateDir, "env-meta"), { recursive: true });
-    await writeFile(`${metaPath}`, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    await atomicWrite(metaPath, `${JSON.stringify(value, null, 2)}\n`);
+}
+/** Write state through the same-directory rename boundary used by the core store. */
+async function atomicWrite(path, content) {
+    await mkdir(dirname(path), { recursive: true });
+    const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+        await writeFile(temporary, content, "utf8");
+        await rename(temporary, path);
+    }
+    catch (error) {
+        await rm(temporary, { force: true }).catch(() => undefined);
+        throw error;
+    }
+}
+async function readOptionalText(path) {
+    try {
+        return await readFile(path, "utf8");
+    }
+    catch (error) {
+        if (isMissingFileError(error))
+            return undefined;
+        throw error;
+    }
+}
+async function restoreOptionalText(path, content) {
+    if (content === undefined) {
+        await rm(path, { force: true });
+        return;
+    }
+    await atomicWrite(path, content);
 }
 function getEnvMetaPath(stateDir, envName) {
     return join(stateDir, "env-meta", `${envName}.json`);
+}
+function getGatewayPath(stateDir, envName) {
+    return join(stateDir, "env-gateways", `${envName}.json`);
+}
+function getGatewayV2Path(stateDir, envName) {
+    return join(stateDir, "env-gateways-v2", `${envName}.json`);
 }
 async function renameIfExists(source, target) {
     try {
@@ -255,6 +399,9 @@ async function renameIfExists(source, target) {
     }
     await mkdir(dirname(target), { recursive: true });
     await rename(source, target);
+}
+function isMissingFileError(error) {
+    return error?.code === "ENOENT";
 }
 function normalizePreferredAuthMethod(value) {
     return value === "apikey" ? "apikey" : "chatgpt";

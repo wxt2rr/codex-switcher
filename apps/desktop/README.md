@@ -10,12 +10,13 @@ Current scope:
 - Confirmation flows for env/account deletion
 - Proxy, token refresh, doctor, recover, app status, CLI launch, logs, and advanced bridged commands
 - Structured result summaries with raw output fallback
+- Provider plugins use OS-level isolation where available: macOS `sandbox-exec`, Linux `bubblewrap`, and Windows AppContainer; required isolation fails closed when the launcher is unavailable
 
 Current limitation:
 - Default Electron icon is still used
-- macOS release signing / notarization is not configured yet; unsigned builds receive a complete ad-hoc resource seal so local packages are internally valid
+- Tagged release builds support macOS Developer ID signing/notarization through GitHub Actions secrets; local builds without those secrets receive a complete ad-hoc resource seal so local packages are internally valid
 - Some desktop actions still use the legacy CLI compatibility path and have not been migrated to direct core services yet
-- Live log streaming and richer task history UX are not implemented yet
+- Runtime logs can be viewed in Settings and refresh automatically while the page is open
 
 Commands:
 - `npm run desktop:build` from repo root: build desktop frontend
@@ -24,13 +25,14 @@ Commands:
 - `npm run desktop:test` from repo root: run desktop bridge and packaging tests
 - `npm run desktop:package:mac` from repo root: build macOS `dmg` + `zip` installers for Apple Silicon and Intel
 - `npm run desktop:package:mac:dir` from repo root: build directory-style macOS `.app` packages for Apple Silicon and Intel
+- `npm run desktop:package:linux` from repo root: build Linux `AppImage` + `deb` installers for x64
 - `npm run desktop:package:win` from repo root: build a Windows `nsis` installer target
 - `npm run package:dir --workspace ./apps/desktop`: build a generic directory-style Electron package
 
 Packaging notes:
 - Build macOS installers on macOS for best results.
 - Build Windows installers on Windows for best results.
-- macOS Developer ID signing / notarization is still not configured. Local packages use ad-hoc signing and remain unidentified to Gatekeeper when downloaded.
+- macOS Developer ID signing / notarization requires the configured GitHub Actions release secrets. Local packages use ad-hoc signing and remain unidentified to Gatekeeper when downloaded.
 - Ad-hoc signatures do not provide a stable TCC identity across rebuilt versions, so local macOS updates may require Accessibility authorization again. Developer ID signing is required to preserve that authorization across releases.
 - After installing the unsigned macOS package, remove the quarantine attribute and launch it with:
 
@@ -51,9 +53,9 @@ git tag desktop-v0.1.30
 git push origin desktop-v0.1.30
 ```
 
-- Tag builds create a GitHub Pre-release containing the DMG, macOS ZIP, Windows EXE, and blockmap files.
-- The workflow also keeps `codex-switcher-macos` and `codex-switcher-windows-x64` Actions artifacts for 14 days for build diagnostics.
-- GitHub Pre-release packages are ad-hoc signed but not notarized. Developer ID signing and notarization require a separate release-hardening configuration.
+- Tag builds create a GitHub Pre-release containing the DMG, macOS ZIP, Windows EXE, Linux AppImage, Linux deb, and blockmap files.
+- The workflow also keeps `codex-switcher-macos`, `codex-switcher-windows-x64`, and `codex-switcher-linux-x64` Actions artifacts for 14 days for build diagnostics.
+- Tagged GitHub Pre-release packages are signed/notarized by the release workflow when its macOS and Windows certificate secrets are configured; manual runs without those secrets intentionally remain ad-hoc/unsigned.
 
 Verification status:
 - `npm run desktop:test`: passing

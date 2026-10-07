@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -10,6 +10,7 @@ import {
   readCliAutoResumeSettings,
   readEnvHistoryRetentionSettings,
   readGeneratedImageRecoverySettings,
+  readLaunchAtLoginSettings,
   readRouterLifecycleSettings,
   readRouterPortSettings,
   removeAppWindowCount,
@@ -19,6 +20,7 @@ import {
   saveCliAutoResumeSettings,
   saveEnvHistoryRetentionSettings,
   saveGeneratedImageRecoverySettings,
+  saveLaunchAtLoginSettings,
   saveRouterLifecycleSettings,
   saveRouterPortSettings,
 } from "./desktop-settings.js";
@@ -56,6 +58,20 @@ test("CLI auto resume settings persist without removing tool paths", async () =>
   assert.equal(JSON.parse(await readFile(path, "utf8")).cliPath, "/bin/codex");
 });
 
+test("settings writes replace atomically and leave no temporary files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "desktop-settings-atomic-"));
+  const path = join(root, "settings.json");
+
+  await saveCliAutoResumeSettings(path, { enabled: true, sessionNumber: 4 });
+  await saveRouterPortSettings(path, { preferredPort: 19090 });
+
+  assert.deepEqual(await readdir(root), ["settings.json"]);
+  assert.deepEqual(JSON.parse(await readFile(path, "utf8")), {
+    cliAutoResume: { enabled: true, sessionNumber: 4 },
+    routerPort: { preferredPort: 19090 },
+  });
+});
+
 test("router lifecycle defaults to keeping the proxy alive and persists independently", async () => {
   const root = await mkdtemp(join(tmpdir(), "desktop-router-lifecycle-"));
   const path = join(root, "settings.json");
@@ -74,6 +90,16 @@ test("router port defaults to 17832, persists, and rejects invalid values", asyn
   assert.deepEqual(await saveRouterPortSettings(path, { preferredPort: 19090 }), { preferredPort: 19090 });
   assert.deepEqual(await readRouterPortSettings(path), { preferredPort: 19090 });
   assert.deepEqual(await saveRouterPortSettings(path, { preferredPort: 70000 }), { preferredPort: 17832 });
+});
+
+test("launch-at-login defaults off and persists independently", async () => {
+  const root = await mkdtemp(join(tmpdir(), "desktop-launch-at-login-"));
+  const path = join(root, "settings.json");
+  assert.deepEqual(await readLaunchAtLoginSettings(path), { enabled: false });
+  await saveCliAutoResumeSettings(path, { enabled: true, sessionNumber: 2 });
+  assert.deepEqual(await saveLaunchAtLoginSettings(path, { enabled: true }), { enabled: true });
+  assert.deepEqual(await readLaunchAtLoginSettings(path), { enabled: true });
+  assert.deepEqual(await readCliAutoResumeSettings(path), { enabled: true, sessionNumber: 2 });
 });
 
 test("environment history retention defaults safely and clamps to 1-365 days", async () => {

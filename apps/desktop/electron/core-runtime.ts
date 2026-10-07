@@ -5,6 +5,7 @@ import {
   getConfiguredResourcesPath,
   resolveRuntimeResource,
   resolveRuntimeRoot,
+  resolveWorkspaceRoot,
 } from "./runtime-paths.js";
 
 export interface CoreRuntime {
@@ -14,12 +15,35 @@ export interface CoreRuntime {
   updateLegacyEnv: typeof import("../../../packages/core/dist/state/legacy.js").updateLegacyEnv;
   writeLegacyPointers: typeof import("../../../packages/core/dist/state/legacy.js").writeLegacyPointers;
   writeLegacyRuntime: typeof import("../../../packages/core/dist/state/legacy.js").writeLegacyRuntime;
+  writeLegacyGateway: typeof import("../../../packages/core/dist/state/legacy.js").writeLegacyGateway;
+  writeLegacyGatewayV2: typeof import("../../../packages/core/dist/state/legacy.js").writeLegacyGatewayV2;
+  readLegacyGatewayV2: typeof import("../../../packages/core/dist/state/legacy.js").readLegacyGatewayV2;
+  clearLegacyGateway: typeof import("../../../packages/core/dist/state/legacy.js").clearLegacyGateway;
+  buildLegacyGatewayEnvironmentState: typeof import("../../../packages/core/dist/gateway/legacy-adapter.js").buildLegacyGatewayEnvironmentState;
   applyTargetHomeState: typeof import("../../../packages/core/dist/system/target-home.js").applyTargetHomeState;
   repairLegacyTargetHomeConfigs: typeof import("../../../packages/core/dist/system/target-home.js").repairLegacyTargetHomeConfigs;
 }
 
+export interface GatewayProviderRuntime {
+  createBuiltInProviderAdapters: typeof import("../../../packages/gateway/dist/provider/adapters.js").createBuiltInProviderAdapters;
+}
+
+export interface GatewayPluginRuntime {
+  ProviderPluginManager: typeof import("../../../packages/gateway/dist/plugin/manager.js").ProviderPluginManager;
+}
+
+export interface GatewayAgentRuntime {
+  createAgentAdapter: typeof import("../../../packages/gateway/dist/agent/adapter.js").createAgentAdapter;
+  createNodeAgentFileSystem: typeof import("../../../packages/gateway/dist/agent/adapter.js").createNodeAgentFileSystem;
+  BUILT_IN_AGENT_PROFILES: typeof import("../../../packages/gateway/dist/agent/profiles.js").BUILT_IN_AGENT_PROFILES;
+}
+
 type CoreApiModule = typeof import("../../../packages/core/dist/api/core-api.js");
 type LegacyModule = typeof import("../../../packages/core/dist/state/legacy.js");
+type GatewayLegacyAdapterModule = typeof import("../../../packages/core/dist/gateway/legacy-adapter.js");
+type GatewayPluginRuntimeModule = typeof import("../../../packages/gateway/dist/plugin/manager.js");
+type GatewayAgentAdapterModule = typeof import("../../../packages/gateway/dist/agent/adapter.js");
+type GatewayAgentProfilesModule = typeof import("../../../packages/gateway/dist/agent/profiles.js");
 type TargetHomeModule = typeof import("../../../packages/core/dist/system/target-home.js");
 type OsModule = typeof import("../../../packages/core/dist/platform/os.js");
 type CommandDiscoveryModule = typeof import("../../../packages/core/dist/platform/command-discovery.js");
@@ -65,9 +89,13 @@ let coreSupportModulesPromise: Promise<CoreSupportModules> | undefined;
 export async function loadCoreRuntime(): Promise<CoreRuntime> {
   const baseDir = getCoreDist();
 
-  const [apiModule, legacyModule, targetHomeModule] = await Promise.all([
+  const [apiModule, legacyModule, gatewayLegacyAdapterModule, targetHomeModule] = await Promise.all([
     importModule<CoreApiModule>(join(baseDir, "api", "core-api.js")),
     importModule<LegacyModule>(join(baseDir, "state", "legacy.js")),
+    importFirstExisting<GatewayLegacyAdapterModule>([
+      join(baseDir, "gateway", "legacy-adapter.js"),
+      join(getSourceRepoRoot(), "packages", "core", "src", "gateway", "legacy-adapter.ts"),
+    ]),
     importModule<TargetHomeModule>(join(baseDir, "system", "target-home.js")),
   ]);
 
@@ -78,8 +106,54 @@ export async function loadCoreRuntime(): Promise<CoreRuntime> {
     updateLegacyEnv: legacyModule.updateLegacyEnv,
     writeLegacyPointers: legacyModule.writeLegacyPointers,
     writeLegacyRuntime: legacyModule.writeLegacyRuntime,
+    writeLegacyGateway: legacyModule.writeLegacyGateway,
+    writeLegacyGatewayV2: legacyModule.writeLegacyGatewayV2,
+    readLegacyGatewayV2: legacyModule.readLegacyGatewayV2,
+    clearLegacyGateway: legacyModule.clearLegacyGateway,
+    buildLegacyGatewayEnvironmentState: gatewayLegacyAdapterModule.buildLegacyGatewayEnvironmentState,
     applyTargetHomeState: targetHomeModule.applyTargetHomeState,
     repairLegacyTargetHomeConfigs: targetHomeModule.repairLegacyTargetHomeConfigs,
+  };
+}
+
+export async function loadGatewayProviderRuntime(): Promise<GatewayProviderRuntime> {
+  const runtimePath = resolveRuntimeResource(join("packages", "gateway", "dist", "provider", "adapters.js"), {
+    currentFile: resolveCurrentFile(),
+    resourcesPath: getConfiguredResourcesPath(),
+  });
+  const sourcePath = join(getSourceRepoRoot(), "packages", "gateway", "src", "provider", "adapters.ts");
+  const module = await importFirstExisting<typeof import("../../../packages/gateway/dist/provider/adapters.js")>([runtimePath, sourcePath]);
+  return { createBuiltInProviderAdapters: module.createBuiltInProviderAdapters };
+}
+
+export async function loadGatewayPluginRuntime(): Promise<GatewayPluginRuntime> {
+  const runtimePath = resolveRuntimeResource(join("packages", "gateway", "dist", "plugin", "manager.js"), {
+    currentFile: resolveCurrentFile(),
+    resourcesPath: getConfiguredResourcesPath(),
+  });
+  const sourcePath = join(getSourceRepoRoot(), "packages", "gateway", "src", "plugin", "manager.ts");
+  const module = await importFirstExisting<GatewayPluginRuntimeModule>([runtimePath, sourcePath]);
+  return { ProviderPluginManager: module.ProviderPluginManager };
+}
+
+export async function loadGatewayAgentRuntime(): Promise<GatewayAgentRuntime> {
+  const adapterRuntimePath = resolveRuntimeResource(join("packages", "gateway", "dist", "agent", "adapter.js"), {
+    currentFile: resolveCurrentFile(),
+    resourcesPath: getConfiguredResourcesPath(),
+  });
+  const profilesRuntimePath = resolveRuntimeResource(join("packages", "gateway", "dist", "agent", "profiles.js"), {
+    currentFile: resolveCurrentFile(),
+    resourcesPath: getConfiguredResourcesPath(),
+  });
+  const sourceRoot = join(getSourceRepoRoot(), "packages", "gateway", "src", "agent");
+  const [adapter, profiles] = await Promise.all([
+    importFirstExisting<GatewayAgentAdapterModule>([adapterRuntimePath, join(sourceRoot, "adapter.ts")]),
+    importFirstExisting<GatewayAgentProfilesModule>([profilesRuntimePath, join(sourceRoot, "profiles.ts")]),
+  ]);
+  return {
+    createAgentAdapter: adapter.createAgentAdapter,
+    createNodeAgentFileSystem: adapter.createNodeAgentFileSystem,
+    BUILT_IN_AGENT_PROFILES: profiles.BUILT_IN_AGENT_PROFILES,
   };
 }
 
@@ -95,7 +169,7 @@ export async function loadDesktopOperationsModule(): Promise<
   const candidates = [join(baseDir, "services", "desktop-operations.js")];
   if (!existsSync(candidates[0])) {
     candidates.push(
-      join(getRepoRoot(), "packages", "core", "src", "services", "desktop-operations.ts"),
+      join(getSourceRepoRoot(), "packages", "core", "src", "services", "desktop-operations.ts"),
     );
   }
 
@@ -125,7 +199,7 @@ async function loadCoreSupportModulesImpl(): Promise<CoreSupportModules> {
   const distBaseDir = getCoreDist();
   const srcBaseDir = existsSync(join(distBaseDir, "platform", "os.js"))
     ? undefined
-    : join(getRepoRoot(), "packages", "core", "src");
+    : join(getSourceRepoRoot(), "packages", "core", "src");
 
   const moduleCandidates = (distPath: string, srcPath: string): string[] => {
     const candidates = [join(distBaseDir, distPath)];
@@ -230,6 +304,10 @@ function getRepoRoot(): string {
     currentFile: resolveCurrentFile(),
     resourcesPath: getConfiguredResourcesPath(),
   });
+}
+
+function getSourceRepoRoot(): string {
+  return resolveWorkspaceRoot(resolveCurrentFile());
 }
 
 function getCoreDist(): string {

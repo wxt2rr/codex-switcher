@@ -53,7 +53,10 @@ test("desktop build emits electron main entry and preload bundle", async () => {
   assert.match(mainSource, /setMenu\(null\)/);
   assert.match(mainSource, /setApplicationMenu\(null\)/);
   assert.match(mainSource, /logo-win\.png/);
-  assert.match(mainSource, /await createWindow\(\);\s*startEnvHistoryCleanupSchedule\(\)/);
+  assert.match(mainSource, /await createWindow\(\);[\s\S]*startEnvHistoryCleanupSchedule\(\)/);
+  assert.match(mainSource, /ensureTray/);
+  assert.match(mainSource, /registerAutoUpdateController/);
+  assert.match(mainSource, /desktop:loadGatewayAdminConfiguration/);
   assert.match(mainSource, /void \(0, \w+\.runEnvHistoryRetentionCleanup\)\(\)\.catch/);
   assert.doesNotMatch(mainSource, /await \(0, \w+\.runEnvHistoryRetentionCleanup\)/);
 

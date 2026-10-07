@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const repoRoot = "/Users/wangxt/myspace/codex-switcher";
+const repoRoot = process.cwd();
 
 test("windows manual capture script records the expected verification commands", async () => {
   const content = await readFile(`${repoRoot}/scripts/windows-manual-capture.ps1`, "utf8");
@@ -26,6 +26,15 @@ test("windows manual capture script records the expected verification commands",
     "Invoke-And-Capture \"codex-sw status\" \"codex-sw status\"",
     "Invoke-And-Capture \"codex-sw app status\" \"codex-sw app status\"",
     "Invoke-And-Capture \"codex-sw ops token-refresh status\" \"codex-sw ops token-refresh status\"",
+    ".\\apps\\desktop\\resources\\native\\windows\\codex-switcher-plugin-sandbox.exe",
+    ".\\resources\\native\\windows\\codex-switcher-plugin-sandbox.exe",
+    ".\\scripts\\windows-plugin-sandbox-smoke.cjs",
+    ".\\scripts\\verify-sandbox-evidence.mjs",
+    "Test-Path -LiteralPath",
+    "$env:CODEX_SWITCHER_EVIDENCE_OUT",
+    "Windows AppContainer smoke",
+    "Windows AppContainer evidence verification",
+    "SKIPPED: Windows AppContainer helper or smoke scripts were not found.",
     "Write-Host \"Evidence written to $OutputPath\"",
   ];
 

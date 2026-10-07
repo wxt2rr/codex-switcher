@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const repoRoot = "/Users/wangxt/myspace/codex-switcher";
+const repoRoot = process.cwd();
 
 test("Windows manual checklist documents the supported validation flows", async () => {
   const content = await readFile(`${repoRoot}/docs/windows-manual-checklist.md`, "utf8");
@@ -15,6 +15,12 @@ test("Windows manual checklist documents the supported validation flows", async 
     "## CLI isolation",
     "## App switching",
     "## TUI checks",
+    "## Gateway and plugin isolation",
+    "windows-plugin-sandbox-smoke.cjs",
+    "filesystemWriteGranted",
+    "## Packaging and update recovery",
+    "Get-AuthenticodeSignature <installer-path>",
+    "failed upgraded boot",
     "## Recovery and integrity",
     "## Token refresh and logs",
     "## Security checks",

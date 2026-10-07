@@ -1,14 +1,18 @@
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { readLegacyState, type ReadLegacyStateOptions } from "./legacy.js";
 import {
   createStateStore,
+  type StateStore,
   type SwitcherState,
 } from "./store.js";
+import { writeFileAtomically } from "../system/atomic-file.js";
 
 export interface MigrateLegacyStateOptions extends ReadLegacyStateOptions {
   coreRootDir: string;
+  /** Optional store injection used to exercise failure recovery without filesystem-name assumptions. */
+  stateStore?: StateStore;
 }
 
 export interface MigrationResult {
@@ -20,7 +24,7 @@ export async function migrateLegacyState(
   options: MigrateLegacyStateOptions,
 ): Promise<MigrationResult> {
   const migrated = await readLegacyState(options);
-  const store = createStateStore({ rootDir: options.coreRootDir });
+  const store = options.stateStore ?? createStateStore({ rootDir: options.coreRootDir });
   const previousState = await tryLoadExistingState(store);
   const backupFile = await writeBackup(options.coreRootDir, migrated, options.now);
 
@@ -50,7 +54,7 @@ async function writeBackup(
   const backupDir = join(coreRootDir, "backups");
   const backupFile = join(backupDir, `legacy-state-${stamp}.json`);
   await mkdir(backupDir, { recursive: true });
-  await writeFile(backupFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  await writeFileAtomically(backupFile, `${JSON.stringify(state, null, 2)}\n`, { encoding: "utf8" });
   return backupFile;
 }
 

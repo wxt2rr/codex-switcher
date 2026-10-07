@@ -1,5 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { access, chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, chmod, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -35,11 +36,37 @@ import {
 import { getPlatformRuntime } from "../packages/core/src/platform/runtime.js";
 import {
   createLegacyEnv,
+  clearLegacyGateway,
   readLegacyState,
+  readLegacyGatewayV2,
+  writeLegacyAuthData,
+  writeLegacyGateway,
+  writeLegacyGatewayV2,
   writeLegacyPointers,
   writeLegacyRuntime,
 } from "../packages/core/src/state/legacy.js";
-import type { AuthDataRecord } from "../packages/core/src/state/store.js";
+import { importGatewayConfiguration } from "../packages/core/src/gateway/import.js";
+import {
+  createAgentAdapter,
+  createNodeAgentFileSystem,
+} from "../packages/gateway/src/agent/adapter.js";
+import { importAgentConfiguration, resolveAgentProfile } from "../packages/gateway/src/agent/import.js";
+import { BUILT_IN_AGENT_PROFILES } from "../packages/gateway/src/agent/profiles.js";
+import { BUILT_IN_PROVIDER_IDS, createBuiltInProviderAdapters, providerDefinitions, type ProviderAccountRef, type ProviderHttpClient } from "../packages/gateway/src/provider/adapters.js";
+import type { JsonObject } from "../packages/gateway/src/protocol.js";
+import {
+  isGatewayEnvironmentState,
+  isGatewayProxyUrl,
+  type GatewayCredentialDefinition,
+  type GatewayEnvironmentState,
+  type GatewayProtocol,
+  type GatewayProviderDefinition,
+  type GatewayRouteGroupDefinition,
+} from "../packages/core/src/gateway/model.js";
+import { migrateGatewayEnvironmentStateToV2 } from "../packages/core/src/gateway/v2.js";
+import type { AuthDataRecord, SwitcherState } from "../packages/core/src/state/store.js";
+import type { GatewayRouteBinding, RoutableAccount } from "../apps/desktop/electron/usage-router-manager.js";
+import { createUsageStore } from "../apps/desktop/electron/usage-store.js";
 import { applyTargetHomeState } from "../packages/core/src/system/target-home.js";
 import { renderAccountsScreen } from "../packages/core/src/tui/accounts.js";
 import { APP_PAGE_ACTIONS, renderAppScreen } from "../packages/core/src/tui/app.js";
@@ -52,6 +79,7 @@ import {
   SETUP_OPTIONS_WINDOWS,
 } from "../packages/core/src/tui/setup.js";
 import { renderStatusScreen } from "../packages/core/src/tui/status.js";
+import { GATEWAY_TUI_ACTIONS, renderGatewayScreen, type GatewayTuiSnapshot, type GatewayTuiUsage } from "../packages/core/src/tui/gateway.js";
 import {
   listAccountOptions,
   listEnvOptions,
@@ -87,6 +115,16 @@ const USAGE = `Usage:
   codex-sw-node app status
   codex-sw-node app logout [account]
   codex-sw-node proxy [show|test|off|<host:port>|<scheme://host:port>]
+  codex-sw-node gateway [start|stop|status|serve|mode manual|mode gateway|routes|import <file> [--dry-run]] [--env <env>]
+  codex-sw-node provider [add|ls|login|logout|refresh|models [--discover]|quota] [args...] [--env <env>]
+    add ... [--base-url <url>] [--proxy-url <url>]
+    login ... [--begin|--code-env <VAR> --state <state> --expected-state <state>|--secret-env <VAR>] [--account <account>] [--proxy-url <url>]
+    refresh|quota|logout ... [--live]
+  codex-sw-node agent [ls|connect|disconnect|use|default|doctor|import] [args...] [--env <env>]
+  codex-sw-node group [ls|add|set|rm|rule add|rule rm] [args...] [--env <env>]
+  codex-sw-node model [ls|inspect] [args...] [--env <env>]
+  codex-sw-node usage [today|7d|30d|all] [--env <env>]
+  codex-sw-node profile [save|ls|use|rm] [args...] [--env <env>]
   codex-sw-node whoami [-t cli|app|both]
   codex-sw-node status
   codex-sw-node overview
@@ -127,6 +165,16 @@ const USAGE_ALL = `Usage:
   codex-sw-node ops recover [--dry-run]
   codex-sw-node ops doctor [--fix]
   codex-sw-node ops token-refresh <start|stop|status|run-once>
+
+  codex-sw-node gateway [start|stop|status|serve|mode manual|mode gateway|routes] [--env <env>]
+  codex-sw-node provider [add|ls|login|logout|refresh|models [--discover]|quota] [args...] [--env <env>]
+    login ... [--begin|--code-env <VAR> --state <state> --expected-state <state>|--secret-env <VAR>] [--account <account>]
+    refresh|quota|logout ... [--live]
+  codex-sw-node agent [ls|connect|disconnect|use|default|doctor|import] [args...] [--env <env>]
+  codex-sw-node group [ls|add|set|rm|rule add|rule rm] [args...] [--env <env>]
+  codex-sw-node model [ls|inspect] [args...] [--env <env>]
+  codex-sw-node usage [today|7d|30d|all] [--env <env>]
+  codex-sw-node profile [save|ls|use|rm] [args...] [--env <env>]
 
   codex-sw-node whoami [-t cli|app|both]
   codex-sw-node status
@@ -253,6 +301,16 @@ async function main() {
     process.exit(code);
   }
 
+  if (command === "gateway") {
+    const code = await runNodeGatewayCommand(rest);
+    process.exit(code);
+  }
+
+  if (command === "provider" || command === "agent" || command === "group" || command === "model" || command === "usage" || command === "profile") {
+    const code = await runNodeGatewayDomainCommand(command, rest);
+    process.exit(code);
+  }
+
   if (command === "ops-list") {
     const code = await runNodeOpsListCommand();
     process.exit(code);
@@ -283,7 +341,7 @@ async function main() {
     process.exit(code);
   }
 
-  process.stderr.write("node-cli: command not implemented yet\n");
+  process.stderr.write(`node-cli: unknown command '${command}'\n`);
   process.exit(1);
 }
 
@@ -667,6 +725,1094 @@ async function runNodeTui(): Promise<number> {
   return runNodeTuiWithDeps();
 }
 
+async function runNodeGatewayCommand(argv: string[], deps?: { stdout?: Pick<NodeJS.WriteStream, "write"> }): Promise<number> {
+  const runtime = getNodeCliRuntime();
+  const stdout = deps?.stdout ?? process.stdout;
+  const state = await readLegacyState({ stateDir: runtime.paths.stateDir, envsDir: runtime.paths.envsDir, defaultHome: runtime.paths.defaultHome });
+  const envFlagIndex = argv.findIndex((value) => value === "--env" || value === "-e");
+  const envName = envFlagIndex >= 0 ? argv[envFlagIndex + 1] : undefined;
+  if (envFlagIndex >= 0 && !envName) throw new Error("usage: codex-sw-node gateway [start|stop|serve|status|mode manual|mode gateway|routes|disable] [--env <env>]");
+  const command = argv[0] ?? "status";
+  const selectedEnv = envName ?? state.targets.cli.env;
+  if (!state.envs[selectedEnv]) throw new Error(`environment '${selectedEnv}' not found`);
+  const environment = state.envs[selectedEnv]!;
+  if (command === "import") {
+    const sourcePath = argv[1];
+    if (!sourcePath) throw new Error("usage: gateway import <external-gateway-json> [--dry-run] [--env <env>]");
+    const source = JSON.parse(await readFile(sourcePath, "utf8")) as unknown;
+    const result = importGatewayConfiguration(source, selectedEnv);
+    const summary = { sourceFormat: result.sourceFormat, envName: selectedEnv, providers: Object.keys(result.gateway.providers).length, credentials: Object.keys(result.gateway.credentials).length, models: Object.keys(result.gateway.models).length, routeGroups: Object.keys(result.gateway.routeGroups).length, agents: Object.keys(result.agentBindings).length, warnings: result.warnings, excludedFields: result.excludedFields };
+    if (argv.includes("--dry-run")) {
+      stdout.write(JSON.stringify(summary) + "\n");
+      return 0;
+    }
+    const gatewayPath = join(runtime.paths.stateDir, "env-gateways", `${selectedEnv}.json`);
+    const gatewayV2Path = join(runtime.paths.stateDir, "env-gateways-v2", `${selectedEnv}.json`);
+    const previousGateway = await readFile(gatewayPath, "utf8").catch(() => undefined);
+    const previousGatewayV2 = await readFile(gatewayV2Path, "utf8").catch(() => undefined);
+    try {
+      await writeLegacyGateway({ stateDir: runtime.paths.stateDir, envName: selectedEnv, gateway: result.gateway });
+      const nextV2 = { ...migrateGatewayEnvironmentStateToV2(result.gateway, selectedEnv), agentBindings: result.agentBindings };
+      await writeLegacyGatewayV2({ stateDir: runtime.paths.stateDir, envName: selectedEnv, gateway: nextV2 });
+    } catch (error) {
+      await restoreTextFileAtomically(gatewayPath, previousGateway);
+      await restoreTextFileAtomically(gatewayV2Path, previousGatewayV2);
+      throw new Error(`gateway import rolled back: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    stdout.write(JSON.stringify({ ...summary, imported: true }) + "\n");
+    return 0;
+  }
+  if (command === "start" || command === "serve") {
+    if (!environment.gateway) throw new Error("gateway is not configured; add a provider or route group first");
+    const { UsageRouterManager } = await import("../apps/desktop/electron/usage-router-manager.js");
+    const serviceEntryPath = await resolveNodeGatewayServiceEntry();
+    const manager = new UsageRouterManager({
+      stateDir: runtime.paths.stateDir,
+      serviceEntryPath,
+      ...(serviceEntryPath.endsWith(".ts") ? { launchService: createNodeGatewaySourceLauncher(serviceEntryPath, runtime.paths.stateDir) } : {}),
+    });
+    const accounts = buildNodeRoutableAccounts(state, selectedEnv);
+    const gateway = environment.gateway;
+    const result = await manager.enableEnvironmentGateway(
+      selectedEnv,
+      accounts,
+      (accountName, baseUrl) => updateNodeGatewayAccountBaseUrl(runtime.paths.stateDir, selectedEnv, accountName, baseUrl),
+      buildNodeGatewayRouteGroups(gateway, selectedEnv, accounts),
+      buildNodeGatewayRouteBindings(gateway, selectedEnv, accounts),
+      gateway.routeRules ?? [],
+    );
+    const markerPath = join(runtime.paths.stateDir, "gateway", selectedEnv + ".json");
+    const routerState = await readNodeGatewayRouterState(runtime.paths.stateDir);
+    await writeTextFileAtomically(markerPath, JSON.stringify({
+      envName: selectedEnv,
+      gatewayId: result.gatewayId ?? gateway.gatewayId,
+      startedAt: Date.now(),
+      pid: routerState?.pid ?? null,
+      port: result.port ?? routerState?.port ?? null,
+    }) + "\n");
+    await writeLegacyGateway({ stateDir: runtime.paths.stateDir, envName: selectedEnv, gateway: { ...gateway, mode: "gateway" } });
+    stdout.write("gateway started: " + selectedEnv + " (" + (result.gatewayId ?? gateway.gatewayId) + ")\n");
+    return 0;
+  }
+  if (command === "stop") {
+    const { UsageRouterManager } = await import("../apps/desktop/electron/usage-router-manager.js");
+    const serviceEntryPath = await resolveNodeGatewayServiceEntry();
+    const manager = new UsageRouterManager({
+      stateDir: runtime.paths.stateDir,
+      serviceEntryPath,
+      ...(serviceEntryPath.endsWith(".ts") ? { launchService: createNodeGatewaySourceLauncher(serviceEntryPath, runtime.paths.stateDir) } : {}),
+    });
+    await manager.disableEnvironmentGateway(
+      selectedEnv,
+      (accountName, baseUrl) => updateNodeGatewayAccountBaseUrl(runtime.paths.stateDir, selectedEnv, accountName, baseUrl),
+    );
+    const [remainingRoutes, remainingPools, remainingGateways] = await Promise.all([
+      manager.listPersistedRoutes(),
+      manager.listPersistedAccountPools(),
+      manager.listPersistedEnvironmentGateways(),
+    ]);
+    if (!remainingRoutes.length && !remainingPools.length && !remainingGateways.length) {
+      await manager.stopService();
+    }
+    await rm(join(runtime.paths.stateDir, "gateway", selectedEnv + ".json"), { force: true });
+    if (environment.gateway) await writeLegacyGateway({ stateDir: runtime.paths.stateDir, envName: selectedEnv, gateway: { ...environment.gateway, mode: "direct" } });
+    stdout.write("gateway stopped: " + selectedEnv + "\n");
+    return 0;
+  }
+  if (command === "status") {
+    const gateway = environment.gateway;
+    stdout.write("gateway_process: " + (await readGatewayMarker(runtime.paths.stateDir, selectedEnv) ? "running" : "stopped") + "\n");
+    stdout.write(`gateway_env: ${selectedEnv}\n`);
+    stdout.write(`gateway_mode: ${gateway?.mode === "gateway" ? "routing" : "manual"}\n`);
+    stdout.write(`manual_account: ${state.targets.cli.env === selectedEnv ? state.targets.cli.account : "-"}\n`);
+    stdout.write(`gateway_id: ${gateway?.gatewayId ?? "-"}\n`);
+    stdout.write(`route_groups: ${gateway ? Object.keys(gateway.routeGroups).length : 0}\n`);
+    return 0;
+  }
+  if (command === "routes") {
+    if (!environment.gateway) { stdout.write("No gateway routes configured\n"); return 1; }
+    for (const group of Object.values(environment.gateway.routeGroups)) stdout.write(`${group.exposedModelId} -> ${group.strategy} (${group.members.length} routes)\n`);
+    return 0;
+  }
+  if (command === "mode") {
+    const requestedMode = argv[1];
+    if (requestedMode !== "manual" && requestedMode !== "gateway" || argv.filter((value) => value !== "--env" && value !== "-e" && value !== envName).length !== 2) throw new Error("usage: codex-sw-node gateway mode <manual|gateway> [--env <env>]");
+    if (!environment.gateway) throw new Error(`environment '${selectedEnv}' has no gateway configuration`);
+    const mode = requestedMode === "gateway" ? "gateway" : "direct";
+    await writeLegacyGateway({ stateDir: runtime.paths.stateDir, envName: selectedEnv, gateway: { ...environment.gateway, mode } });
+    stdout.write(`gateway mode: ${mode === "gateway" ? "routing" : "manual"} (${selectedEnv})\n`);
+    return 0;
+  }
+  if (command === "disable") {
+    await clearLegacyGateway({ stateDir: runtime.paths.stateDir, envName: selectedEnv });
+    stdout.write(`gateway disabled: ${selectedEnv}\n`);
+    return 0;
+  }
+  throw new Error("usage: codex-sw-node gateway [start|stop|status|serve|mode manual|mode gateway|routes|disable] [--env <env>]");
+}
+
+function buildNodeRoutableAccounts(state: SwitcherState, envName: string): RoutableAccount[] {
+  const environment = state.envs[envName];
+  if (!environment) throw new Error(`environment '${envName}' not found`);
+  return Object.entries(environment.accounts).map(([accountName, account]) => ({
+    envName,
+    accountName,
+    authMode: account.authMode,
+    providerId: account.runtime.providerId,
+    apiKey: account.authMode === "auth"
+      ? extractAccessToken(account.authData ?? {})
+      : readAuthStringField(account.authData, "OPENAI_API_KEY"),
+    authAccountId: extractNodeAuthAccountId(account.authData),
+    protocol: account.authMode === "auth"
+      ? "responses"
+      : account.runtime.apiProtocol === "chat_completions" ? "chat_completions" : "responses",
+    upstreamModel: account.runtime.compatibilityUpstreamModel,
+    reasoningProfile: account.runtime.compatibilityReasoningProfile,
+    longConversationStrategy: account.runtime.compatibilityLongConversationStrategy,
+    instructionRole: account.runtime.compatibilityInstructionRole,
+    requestOverrides: account.runtime.compatibilityRequestOverrides,
+    baseUrl: account.runtime.openaiBaseUrlMode === "custom" && account.runtime.openaiBaseUrl
+      ? account.runtime.openaiBaseUrl
+      : "default",
+  }));
+}
+
+function buildNodeGatewayRouteGroups(
+  gateway: GatewayEnvironmentState,
+  envName: string,
+  accounts: RoutableAccount[],
+): Record<string, {
+  id: string;
+  exposedModelId: string;
+  strategy: GatewayRouteGroupDefinition["strategy"];
+  sessionPolicy: GatewayRouteGroupDefinition["sessionPolicy"];
+  fallbackEnabled: boolean;
+  nestedGroupIds?: string[];
+  capabilities?: GatewayRouteGroupDefinition["capabilities"];
+  accountNames?: string[];
+}> {
+  const credentialAccountNames = new Map<string, string>();
+  for (const [credentialId, credential] of Object.entries(gateway.credentials)) {
+    const generatedCredentialPrefix = `credential:${encodeURIComponent(envName)}:`;
+    const generatedAccount = credentialId.startsWith(generatedCredentialPrefix)
+      ? decodeURIComponent(credentialId.slice(generatedCredentialPrefix.length))
+      : undefined;
+    const secretRefAccount = credential.secretRef.startsWith(`account:${envName}:`)
+      ? credential.secretRef.slice(`account:${envName}:`.length)
+      : undefined;
+    const accountName = generatedAccount ?? secretRefAccount;
+    if (accountName && accounts.some((account) => account.accountName === accountName)) {
+      credentialAccountNames.set(credentialId, accountName);
+    }
+  }
+
+  return Object.fromEntries(Object.values(gateway.routeGroups).map((group) => {
+    const accountNames = new Set<string>();
+    for (const member of group.members) {
+      for (const credentialId of member.credentialSelector.credentialIds ?? []) {
+        const accountName = credentialAccountNames.get(credentialId);
+        if (accountName) accountNames.add(accountName);
+      }
+      if (member.credentialSelector.providerId) {
+        for (const account of accounts) {
+          if (account.providerId === member.credentialSelector.providerId) accountNames.add(account.accountName);
+        }
+      }
+      for (const account of accounts) {
+        if (account.providerId === member.providerId && account.upstreamModel === member.modelId) {
+          accountNames.add(account.accountName);
+        }
+      }
+    }
+    return [group.id, {
+      id: group.id,
+      exposedModelId: group.exposedModelId,
+      strategy: group.strategy,
+      sessionPolicy: group.sessionPolicy,
+      fallbackEnabled: group.fallbackEnabled,
+      ...(group.nestedGroupIds?.length ? { nestedGroupIds: group.nestedGroupIds } : {}),
+      capabilities: group.capabilities,
+      accountNames: [...accountNames],
+    }];
+  }));
+}
+
+function buildNodeGatewayRouteBindings(
+  gateway: GatewayEnvironmentState,
+  envName: string,
+  accounts: RoutableAccount[],
+): GatewayRouteBinding[] {
+  const accountNamesByCredential = new Map<string, string>();
+  for (const [credentialId, credential] of Object.entries(gateway.credentials)) {
+    const generatedPrefix = `credential:${encodeURIComponent(envName)}:`;
+    const generatedAccount = credentialId.startsWith(generatedPrefix)
+      ? decodeURIComponent(credentialId.slice(generatedPrefix.length))
+      : undefined;
+    const accountRef = credential.secretRef.startsWith(`account:${envName}:`)
+      ? credential.secretRef.slice(`account:${envName}:`.length)
+      : undefined;
+    const accountName = generatedAccount ?? accountRef;
+    if (accountName && accounts.some((account) => account.accountName === accountName)) {
+      accountNamesByCredential.set(credentialId, accountName);
+    }
+  }
+
+  const result: GatewayRouteBinding[] = [];
+  const groupedModelIds = new Set<string>();
+  const addBinding = (
+    group: GatewayEnvironmentState["routeGroups"][string] | undefined,
+    member: GatewayEnvironmentState["routeGroups"][string]["members"][number],
+  ) => {
+    const model = gateway.models[member.modelId];
+    if (!model || !model.enabled) return;
+    if (group) groupedModelIds.add(model.id);
+    const credentialIds = member.credentialSelector.credentialIds?.length
+      ? member.credentialSelector.credentialIds
+      : Object.values(gateway.credentials)
+        .filter((credential) => credential.providerId === member.providerId && credential.status !== "disabled")
+        .map((credential) => credential.id);
+    const accountNames = credentialIds
+      .map((credentialId) => accountNamesByCredential.get(credentialId))
+      .filter((accountName): accountName is string => Boolean(accountName));
+    if (!accountNames.length) return;
+    result.push({
+      providerId: member.providerId,
+      modelId: model.id,
+      upstreamModel: model.upstreamModelId,
+      exposedModelId: group?.exposedModelId ?? model.id,
+      ...(group ? { routeGroupId: group.id } : {}),
+      accountNames: [...new Set(accountNames)],
+      protocols: model.protocols,
+      capabilities: model.capabilities,
+    });
+  };
+
+  for (const group of Object.values(gateway.routeGroups)) {
+    for (const member of group.members) addBinding(group, member);
+  }
+  for (const model of Object.values(gateway.models)) {
+    if (!model.enabled || groupedModelIds.has(model.id)) continue;
+    const accountNames = Object.values(gateway.credentials)
+      .filter((credential) => credential.providerId === model.providerId && credential.status !== "disabled")
+      .map((credential) => accountNamesByCredential.get(credential.id))
+      .filter((accountName): accountName is string => Boolean(accountName));
+    if (!accountNames.length) continue;
+    result.push({
+      providerId: model.providerId,
+      modelId: model.id,
+      upstreamModel: model.upstreamModelId,
+      exposedModelId: model.id,
+      accountNames: [...new Set(accountNames)],
+      protocols: model.protocols,
+      capabilities: model.capabilities,
+    });
+  }
+  return result;
+}
+
+async function resolveNodeGatewayServiceEntry(): Promise<string> {
+  const candidates = [
+    process.env.CODEX_SWITCHER_GATEWAY_SERVICE_ENTRY,
+    join(process.cwd(), "apps", "desktop", "electron-dist", "electron", "usage-router-service-main.cjs"),
+    join(process.cwd(), "apps", "desktop", "electron", "usage-router-service-main.ts"),
+  ].filter((value): value is string => Boolean(value?.trim()));
+  for (const candidate of candidates) {
+    try {
+      await access(candidate);
+      return candidate;
+    } catch {
+      // Try the next packaged/workspace location.
+    }
+  }
+  throw new Error("Local gateway service is not built; run 'npm run desktop:build' or set CODEX_SWITCHER_GATEWAY_SERVICE_ENTRY");
+}
+
+function createNodeGatewaySourceLauncher(serviceEntryPath: string, stateDir: string): (preferredPort?: number) => Promise<void> {
+  return async (preferredPort) => {
+    const tsxCli = join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
+    try {
+      await access(tsxCli);
+    } catch {
+      throw new Error("The TypeScript gateway service fallback requires the workspace tsx runtime; run 'npm run desktop:build'");
+    }
+    const args = [tsxCli, serviceEntryPath, "--state-dir", join(stateDir, "usage-router")];
+    if (preferredPort !== undefined) args.push("--preferred-port", String(preferredPort));
+    const child = spawn(process.execPath, args, {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env },
+    });
+    child.unref();
+  };
+}
+
+async function readNodeGatewayRouterState(stateDir: string): Promise<{ pid: number; port: number } | undefined> {
+  try {
+    const value = JSON.parse(await readFile(join(stateDir, "usage-router", "router-state.json"), "utf8")) as { pid?: unknown; port?: unknown };
+    if (typeof value.pid === "number" && typeof value.port === "number") return { pid: value.pid, port: value.port };
+  } catch {
+    // The manager already verified service health; the state file may just be between writes.
+  }
+  return undefined;
+}
+
+async function updateNodeGatewayAccountBaseUrl(
+  stateDir: string,
+  envName: string,
+  accountName: string,
+  baseUrl: string,
+): Promise<void> {
+  const runtime = getNodeCliRuntime();
+  const state = await readLegacyState({ stateDir, envsDir: runtime.paths.envsDir, defaultHome: runtime.paths.defaultHome });
+  const account = state.envs[envName]?.accounts[accountName];
+  if (!account) throw new Error(`account '${envName}/${accountName}' not found`);
+  const isDefault = baseUrl === "default";
+  await writeLegacyRuntime({
+    stateDir,
+    envName,
+    accountName,
+    runtime: {
+      ...account.runtime,
+      openaiBaseUrlMode: isDefault ? "default" : "custom",
+      openaiBaseUrl: isDefault ? undefined : baseUrl,
+    },
+  });
+}
+
+function extractNodeAuthAccountId(authData: AuthDataRecord | undefined): string | undefined {
+  const direct = readAuthStringField(authData, "account_id") ?? readAuthStringField(authData, "chatgpt_account_id");
+  if (direct) return direct;
+  const rawTokens = authData?.tokens;
+  if (!rawTokens) return undefined;
+  try {
+    const parsed = typeof rawTokens === "string" ? JSON.parse(rawTokens) as Record<string, unknown> : rawTokens as Record<string, unknown>;
+    const value = parsed.account_id ?? parsed.chatgpt_account_id;
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readAuthStringField(authData: AuthDataRecord | undefined, field: string): string | undefined {
+  const value = authData?.[field];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+type GatewayDomainCommand = "provider" | "agent" | "group" | "model" | "usage" | "profile";
+
+interface GatewayDomainArgs {
+  positional: string[];
+  options: Record<string, string | true>;
+  envName?: string;
+}
+
+async function runNodeGatewayDomainCommand(command: GatewayDomainCommand, argv: string[], deps?: { stdout?: Pick<NodeJS.WriteStream, "write">; fetch?: typeof fetch }): Promise<number> {
+  const runtime = getNodeCliRuntime();
+  const stdout = deps?.stdout ?? process.stdout;
+  const parsed = parseGatewayDomainArgs(argv);
+  const state = await readLegacyState({ stateDir: runtime.paths.stateDir, envsDir: runtime.paths.envsDir, defaultHome: runtime.paths.defaultHome });
+  const envName = parsed.envName ?? state.targets.cli.env;
+  const environment = state.envs[envName];
+  if (!environment) throw new Error("environment '" + envName + "' not found");
+  if (command === "provider") return runNodeProviderDomain(parsed, environment, envName, runtime.paths.stateDir, stdout, deps?.fetch);
+  if (command === "agent") return runNodeAgentDomain(parsed, environment, envName, runtime.paths, stdout);
+  if (command === "group") return runNodeGroupDomain(parsed, environment, envName, runtime.paths.stateDir, stdout);
+  if (command === "model") return runNodeModelDomain(parsed, environment, stdout);
+  if (command === "usage") return runNodeUsageDomain(parsed, runtime.paths.stateDir, envName, stdout);
+  return runNodeProfileDomain(parsed, environment, envName, runtime.paths.stateDir, stdout);
+}
+
+function parseGatewayDomainArgs(argv: string[]): GatewayDomainArgs {
+  const positional: string[] = [];
+  const options: Record<string, string | true> = {};
+  let envName: string | undefined;
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = argv[index] ?? "";
+    if (value === "--env" || value === "-e") {
+      envName = argv[++index];
+      if (!envName) throw new Error("missing value for --env");
+      continue;
+    }
+    if (value.startsWith("--")) {
+      const equals = value.indexOf("=");
+      if (equals >= 0) options[value.slice(2, equals)] = value.slice(equals + 1);
+      else if (argv[index + 1] && !argv[index + 1]!.startsWith("-")) options[value.slice(2)] = argv[++index]!;
+      else options[value.slice(2)] = true;
+      continue;
+    }
+    positional.push(value);
+  }
+  return { positional, options, envName };
+}
+
+async function runNodeProviderDomain(input: GatewayDomainArgs, environment: SwitcherState["envs"][string], envName: string, stateDir: string, stdout: Pick<NodeJS.WriteStream, "write">, fetchImpl: typeof fetch = fetch): Promise<number> {
+  const command = input.positional[0] ?? "ls";
+  const gateway = ensureGateway(environment.gateway, envName);
+  if (command === "ls") {
+    const ids = [...new Set([...BUILT_IN_PROVIDER_IDS, ...Object.keys(gateway.providers)])].sort();
+    for (const id of ids) {
+      const provider = gateway.providers[id];
+      stdout.write(id + "\t" + (provider?.displayName ?? id) + "\t" + (provider?.enabled === false ? "disabled" : "enabled") + "\n");
+    }
+    return 0;
+  }
+  const providerId = input.positional[1] ?? "";
+  if (command === "add") {
+    if (!providerId) throw new Error("usage: provider add <provider> [--base-url <url>] [--proxy-url <url>]");
+    const preset = providerDefinitions().find((item) => item.id === providerId);
+    const baseUrl = typeof input.options["base-url"] === "string" ? input.options["base-url"] : undefined;
+    const proxyUrl = readOptionalProxyUrl(input.options["proxy-url"]);
+    const provider = gateway.providers[providerId] ?? providerDefinitionToCore(preset, providerId, baseUrl);
+    gateway.providers[providerId] = {
+      ...(baseUrl ? { ...provider, endpoints: { responses: baseUrl, chatCompletions: baseUrl } } : provider),
+      ...(proxyUrl ? { proxyUrl } : {}),
+    };
+    await persistGateway(stateDir, envName, gateway);
+    stdout.write("provider added: " + providerId + "\n");
+    return 0;
+  }
+  if (!providerId || !gateway.providers[providerId]) throw new Error("provider '" + providerId + "' is not configured");
+  const adapter = createBuiltInProviderAdapters().get(providerId as (typeof BUILT_IN_PROVIDER_IDS)[number]);
+  if (command === "login") {
+    if (input.options.begin === true) {
+      if (!adapter) throw new Error(`Provider '${providerId}' does not expose a built-in login adapter`);
+      const redirectUri = typeof input.options["redirect-uri"] === "string" ? input.options["redirect-uri"] : `codex-switcher://${providerId}/authorize`;
+      const start = adapter.beginLogin(redirectUri);
+      stdout.write(JSON.stringify({ providerId, state: start.state, authorizationUrl: start.authorizationUrl, expiresAt: start.expiresAt }) + "\n");
+      return 0;
+    }
+    const credentialId = input.positional[2] ?? providerId + "-credential";
+    const provider = gateway.providers[providerId]!;
+    const supportedProtocols = Object.entries(provider.endpoints).flatMap(([key]) => key === "responses" ? ["responses"] : key === "chatCompletions" ? ["chat_completions"] : key === "anthropicMessages" ? ["anthropic"] : key === "gemini" ? ["gemini"] : []) as Array<"responses" | "chat_completions" | "anthropic" | "gemini">;
+    const kind = input.options["kind"] === "oauth" ? "oauth" : input.options["kind"] === "subscription" ? "auth" : provider.kind === "local" ? "local" : "api_key";
+    const accountName = typeof input.options.account === "string"
+      ? input.options.account
+      : environment.accounts[credentialId] ? credentialId : undefined;
+    const codeEnv = typeof input.options["code-env"] === "string" ? input.options["code-env"] : undefined;
+    const secretEnv = typeof input.options["secret-env"] === "string" ? input.options["secret-env"] : undefined;
+    let secretRef = typeof input.options["secret-ref"] === "string" ? input.options["secret-ref"] : "secure/" + envName + "/" + credentialId;
+    if (codeEnv) {
+      if (!adapter) throw new Error(`Provider '${providerId}' does not expose a built-in login adapter`);
+      if (!accountName || !environment.accounts[accountName]) throw new Error("provider login --code-env requires an existing --account");
+      const code = readRequiredEnvironmentValue(codeEnv, "provider login code");
+      const expectedState = typeof input.options["expected-state"] === "string" ? input.options["expected-state"] : "";
+      const state = typeof input.options.state === "string" ? input.options.state : "";
+      if (!expectedState || !state) throw new Error("provider login --code-env requires --state and --expected-state");
+      const result = adapter.completeLogin({ state, expectedState, code, accountId: accountName });
+      const account = environment.accounts[accountName]!;
+      await writeLegacyAuthData({ stateDir, envName, accountName, authData: providerAuthData(account.authData, kind, result.accessToken ?? code, result.refreshToken, result.account.accountId) });
+      secretRef = `account:${encodeURIComponent(envName)}:${encodeURIComponent(accountName)}`;
+    } else if (secretEnv) {
+      if (!accountName || !environment.accounts[accountName]) throw new Error("provider login --secret-env requires an existing --account");
+      const secret = readRequiredEnvironmentValue(secretEnv, "provider secret");
+      const account = environment.accounts[accountName]!;
+      await writeLegacyAuthData({ stateDir, envName, accountName, authData: providerAuthData(account.authData, kind, secret, undefined, accountName) });
+      secretRef = `account:${encodeURIComponent(envName)}:${encodeURIComponent(accountName)}`;
+    }
+    const credentialProxyUrl = readOptionalProxyUrl(input.options["proxy-url"]);
+    const credential: GatewayCredentialDefinition = { id: credentialId, providerId, displayName: credentialId, kind, secretRef, supportedProtocols: supportedProtocols.length ? supportedProtocols : ["responses"], status: "active", ...(credentialProxyUrl ? { proxyUrl: credentialProxyUrl } : {}) };
+    gateway.credentials[credentialId] = credential;
+    await persistGateway(stateDir, envName, gateway);
+    stdout.write("credential added: " + credentialId + " (secret stored by protected account reference only)\n");
+    return 0;
+  }
+  if (command === "logout") {
+    const credentialId = input.positional[2] ?? "";
+    if (!credentialId) throw new Error("usage: provider logout <provider> <credential>");
+    if (input.options.live === true && adapter) {
+      const credential = gateway.credentials[credentialId];
+      const target = credential ? resolveGatewayCredentialAccount(environment, envName, credential) : undefined;
+      if (credential && target) {
+        await adapter.revoke(createProviderHttpClient(fetchImpl), toProviderAccount(credential, target, gateway.providers[providerId]), resolveGatewayCredentialSecret(target));
+      }
+    }
+    delete gateway.credentials[credentialId];
+    await persistGateway(stateDir, envName, gateway);
+    stdout.write("credential removed: " + credentialId + "\n");
+    return 0;
+  }
+  if (command === "refresh") {
+    const credentials = Object.values(gateway.credentials).filter((item) => item.providerId === providerId);
+    if (input.options.live === true && adapter) {
+      const client = createProviderHttpClient(fetchImpl);
+      for (const credential of credentials) {
+        const target = resolveGatewayCredentialAccount(environment, envName, credential);
+        if (!target) continue;
+        const tokens = readProviderTokenRecord(target.authData);
+        if (!tokens.refresh_token) continue;
+        const result = await adapter.refresh(client, toProviderAccount(credential, target, gateway.providers[providerId]), tokens.refresh_token);
+        const accountName = target.accountName;
+        const accessToken = result.accessToken ?? tokens.access_token;
+        if (!accessToken) throw new Error(`Provider '${providerId}' refresh did not return an access token`);
+        await writeLegacyAuthData({ stateDir, envName, accountName, authData: providerAuthData(environment.accounts[accountName]?.authData, credential.kind, accessToken, result.refreshToken ?? tokens.refresh_token, result.account.accountId) });
+        gateway.credentials[credential.id] = { ...credential, status: "active", secretRef: `account:${encodeURIComponent(envName)}:${encodeURIComponent(accountName)}` };
+      }
+    } else {
+      for (const credential of credentials) gateway.credentials[credential.id] = { ...credential, status: "active" };
+    }
+    await persistGateway(stateDir, envName, gateway);
+    stdout.write("credentials refreshed: " + credentials.length + "\n");
+    return 0;
+  }
+  if (command === "models") {
+    if (input.options.discover === true || input.options.refresh === true) {
+      const result = await discoverGatewayProviderModels({ environment, envName, gateway, providerId, fetchImpl });
+      for (const model of result.models) stdout.write(model.id + "\t" + model.upstreamModelId + "\tdiscovered\n");
+      await persistGateway(stateDir, envName, {
+        ...gateway,
+        models: { ...gateway.models, ...Object.fromEntries(result.models.map((model) => [model.id, model])) },
+        catalogVersion: gateway.catalogVersion + (result.models.length ? 1 : 0),
+      });
+      return 0;
+    }
+    for (const model of Object.values(gateway.models).filter((item) => item.providerId === providerId)) stdout.write(model.id + "\t" + model.upstreamModelId + "\n");
+    const preset = providerDefinitions().find((item) => item.id === providerId);
+    for (const model of preset?.presets ?? []) stdout.write(providerId + ":" + model + "\t" + model + "\n");
+    return 0;
+  }
+  if (command === "quota") {
+    if (input.options.live === true) {
+      if (!adapter) throw new Error(`Provider '${providerId}' does not expose a built-in quota adapter`);
+      const client = createProviderHttpClient(fetchImpl);
+      const snapshots = [];
+      for (const credential of Object.values(gateway.credentials).filter((item) => item.providerId === providerId)) {
+        const target = resolveGatewayCredentialAccount(environment, envName, credential);
+        if (!target) continue;
+        const quota = await adapter.readQuota(client, toProviderAccount(credential, target, gateway.providers[providerId]), resolveGatewayCredentialSecret(target));
+        if (quota) snapshots.push(quota);
+      }
+      stdout.write(JSON.stringify(snapshots) + "\n");
+      return 0;
+    }
+    stdout.write(JSON.stringify(gateway.quota ?? { windowMinutes: 60 }) + "\n");
+    return 0;
+  }
+  throw new Error("usage: provider [add|ls|login|logout|refresh|models|quota]");
+}
+
+function createProviderHttpClient(fetchImpl: typeof fetch = fetch): ProviderHttpClient {
+  const proxyAgents = new Map<string, ProxyAgent>();
+  return {
+    async request(url, init, context) {
+      let dispatcher: ProxyAgent | undefined;
+      if (context?.proxyUrl) {
+        dispatcher = proxyAgents.get(context.proxyUrl);
+        if (!dispatcher) {
+          dispatcher = new ProxyAgent(context.proxyUrl);
+          proxyAgents.set(context.proxyUrl, dispatcher);
+        }
+      }
+      const response = await fetchImpl(url, { method: init.method, headers: init.headers, body: init.body, ...(dispatcher ? { dispatcher } : {}) } as RequestInit);
+      let payload: unknown = {};
+      try { payload = await response.json(); } catch { /* providers may return an empty error body */ }
+      return {
+        status: response.status,
+        headers: response.headers,
+        json: async () => (isRecord(payload) ? payload as JsonObject : {}),
+      };
+    },
+  };
+}
+
+function readRequiredEnvironmentValue(name: string, label: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`${label} environment variable '${name}' is empty or unavailable`);
+  return value;
+}
+
+function readOptionalProxyUrl(value: string | true | undefined): string | undefined {
+  if (value === undefined || value === true) return undefined;
+  if (!isGatewayProxyUrl(value)) throw new Error("proxy-url must be an HTTP(S) URL without embedded credentials");
+  return value.trim();
+}
+
+function readProviderTokenRecord(authData: AuthDataRecord | undefined): Record<string, string> {
+  const raw = authData?.tokens;
+  if (!raw) return {};
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) as unknown : raw;
+    if (!isRecord(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+  } catch {
+    return {};
+  }
+}
+
+function providerAuthData(
+  existing: AuthDataRecord | undefined,
+  kind: GatewayCredentialDefinition["kind"],
+  accessToken: string,
+  refreshToken?: string,
+  accountId?: string,
+): AuthDataRecord {
+  const next = { ...(existing ?? {}) };
+  if (kind === "api_key") {
+    next.OPENAI_API_KEY = accessToken;
+    return next;
+  }
+  const tokens = { ...readProviderTokenRecord(existing), access_token: accessToken, ...(refreshToken ? { refresh_token: refreshToken } : {}) };
+  next.tokens = tokens;
+  if (accountId) next.account_id = accountId;
+  return next;
+}
+
+function toProviderAccount(
+  credential: GatewayCredentialDefinition,
+  target: { accountName: string; accountId: string; authMethod: "api_key" | "oauth" | "subscription" | "none"; authData?: AuthDataRecord },
+  provider?: Pick<GatewayProviderDefinition, "proxyUrl" | "requestHeaders">,
+): ProviderAccountRef {
+  return {
+    accountId: target.accountId,
+    displayName: target.accountName || credential.displayName,
+    authMethod: target.authMethod,
+    secretRef: credential.secretRef,
+    status: credential.status,
+    ...(credential.modelIds ? { allowedModelIds: credential.modelIds } : {}),
+    ...((provider?.requestHeaders || credential.requestHeaders) ? { requestHeaders: { ...(provider?.requestHeaders ?? {}), ...(credential.requestHeaders ?? {}) } } : {}),
+    ...((credential.proxyUrl ?? provider?.proxyUrl) ? { proxyUrl: credential.proxyUrl ?? provider?.proxyUrl } : {}),
+  };
+}
+
+export async function discoverGatewayProviderModels(input: {
+  environment: SwitcherState["envs"][string];
+  envName: string;
+  gateway: GatewayEnvironmentState;
+  providerId: string;
+  fetchImpl?: typeof fetch;
+}): Promise<{ models: GatewayEnvironmentState["models"][string][]; credentialsUsed: number }> {
+  const adapter = createBuiltInProviderAdapters().get(input.providerId as (typeof BUILT_IN_PROVIDER_IDS)[number]);
+  if (!adapter) throw new Error(`Provider '${input.providerId}' does not expose a built-in discovery adapter`);
+  const credentials = Object.values(input.gateway.credentials).filter((credential) => credential.providerId === input.providerId && credential.status !== "disabled");
+  if (!credentials.length) throw new Error(`Provider '${input.providerId}' has no enabled credentials`);
+  const client = createProviderHttpClient(input.fetchImpl);
+  const models = new Map<string, GatewayEnvironmentState["models"][string]>();
+  let credentialsUsed = 0;
+  for (const credential of credentials) {
+    const account = resolveGatewayCredentialAccount(input.environment, input.envName, credential);
+    if (!account) continue;
+    const secret = resolveGatewayCredentialSecret(account);
+    if (account.authMethod !== "none" && !secret) continue;
+    const providerAccount: ProviderAccountRef = {
+      accountId: account.accountId,
+      displayName: credential.displayName,
+      authMethod: account.authMethod,
+      secretRef: credential.secretRef,
+      status: credential.status,
+      ...(credential.modelIds ? { allowedModelIds: credential.modelIds } : {}),
+      ...((input.gateway.providers[input.providerId]?.requestHeaders || credential.requestHeaders) ? {
+        requestHeaders: { ...(input.gateway.providers[input.providerId]?.requestHeaders ?? {}), ...(credential.requestHeaders ?? {}) },
+      } : {}),
+      ...((credential.proxyUrl ?? input.gateway.providers[input.providerId]?.proxyUrl) ? {
+        proxyUrl: credential.proxyUrl ?? input.gateway.providers[input.providerId]?.proxyUrl,
+      } : {}),
+    };
+    const discovered = await adapter.discoverModels(client, providerAccount, secret);
+    credentialsUsed += 1;
+    for (const model of discovered) {
+      const id = `${input.providerId}/${model.id}`;
+      models.set(id, {
+        id,
+        providerId: input.providerId,
+        upstreamModelId: model.id,
+        displayName: model.displayName,
+        protocols: model.protocols,
+        capabilities: model.capabilities,
+        enabled: true,
+      });
+    }
+  }
+  if (!credentialsUsed) throw new Error(`Provider '${input.providerId}' has no resolvable credential secret`);
+  return { models: [...models.values()].sort((left, right) => left.id.localeCompare(right.id)), credentialsUsed };
+}
+
+function resolveGatewayCredentialAccount(
+  environment: SwitcherState["envs"][string],
+  envName: string,
+  credential: GatewayCredentialDefinition,
+): { accountName: string; accountId: string; authMethod: "api_key" | "oauth" | "subscription" | "none"; authData?: AuthDataRecord } | undefined {
+  const parts = credential.secretRef.split(":");
+  const referencedAccount = parts.length >= 3 && parts[0] === "account" && decodeURIComponent(parts[1] ?? "") === envName
+    ? decodeURIComponent(parts.slice(2).join(":"))
+    : undefined;
+  const entry = referencedAccount && environment.accounts[referencedAccount]
+    ? [referencedAccount, environment.accounts[referencedAccount]] as const
+    : Object.entries(environment.accounts).find(([name, account]) => name === credential.displayName || account.name === credential.displayName);
+  if (!entry) return undefined;
+  const [accountName, account] = entry;
+  return {
+    accountName,
+    accountId: extractNodeAuthAccountId(account.authData) ?? accountName,
+    authMethod: account.authMode === "auth" ? "subscription" : account.authMode === "apikey" ? "api_key" : "none",
+    authData: account.authData,
+  };
+}
+
+function resolveGatewayCredentialSecret(account: { authMethod: "api_key" | "oauth" | "subscription" | "none"; authData?: AuthDataRecord }): string {
+  if (account.authMethod === "none") return "";
+  if (account.authMethod === "api_key") return readAuthStringField(account.authData, "OPENAI_API_KEY") ?? "";
+  const rawTokens = account.authData?.tokens;
+  if (!rawTokens) return "";
+  try {
+    const parsed = typeof rawTokens === "string" ? JSON.parse(rawTokens) as Record<string, unknown> : rawTokens as Record<string, unknown>;
+    return typeof parsed.access_token === "string" ? parsed.access_token.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function runNodeAgentDomain(input: GatewayDomainArgs, environment: { path: string; gateway?: GatewayEnvironmentState; accounts?: SwitcherState["envs"][string]["accounts"] }, envName: string, paths: { stateDir: string }, stdout: Pick<NodeJS.WriteStream, "write">): Promise<number> {
+  const command = input.positional[0] ?? "ls";
+  if (command === "ls") {
+    const v2 = environment.gateway ? await readLegacyGatewayV2({ stateDir: paths.stateDir, envName }).catch(() => undefined) : undefined;
+    for (const profile of BUILT_IN_AGENT_PROFILES) stdout.write(profile.id + "\t" + profile.displayName + "\t" + (v2?.agentBindings[profile.id] ? "connected" : "disconnected") + "\n");
+    return 0;
+  }
+  const agentId = input.positional[1] ?? "";
+  if (command === "import") return runNodeAgentImport(input, environment, envName, paths.stateDir, stdout);
+  const profile = BUILT_IN_AGENT_PROFILES.find((item) => item.id === agentId);
+  if (!profile) throw new Error("unknown agent '" + agentId + "'");
+  if (!environment.gateway) throw new Error("gateway is not configured for '" + envName + "'");
+  const gateway = environment.gateway;
+  let v2 = await readLegacyGatewayV2({ stateDir: paths.stateDir, envName }).catch(() => undefined);
+  v2 ??= migrateGatewayEnvironmentStateToV2(gateway, envName);
+  const bindingId = envName + ":" + agentId;
+  const bindingStateDir = join(paths.stateDir, "gateway-agents", envName);
+  const adapter = createAgentAdapter(profile, {
+    fs: createNodeAgentFileSystem(environment.path, { additionalRoots: [paths.stateDir] }),
+    stateDir: bindingStateDir,
+  });
+  if (command === "connect") {
+    const group = input.options.group ? gateway.routeGroups[String(input.options.group)] : Object.values(gateway.routeGroups)[0];
+    const model = typeof input.options.model === "string" ? input.options.model : group?.exposedModelId ?? Object.values(gateway.models)[0]?.id ?? "default";
+    await adapter.apply({ bindingId, agentId: profile.id, gatewayBaseUrl: "http://127.0.0.1:17832/gateways/" + gateway.gatewayId, gatewayTokenRef: "gateway/" + envName, protocol: profile.defaultProtocol, exposedModelId: model, routeGroupId: group?.id, enabled: true, updatedAt: Date.now() });
+    v2.agentBindings[agentId] = { agentId, displayName: profile.displayName, gatewayId: gateway.gatewayId, defaultModelId: model, defaultRouteGroupId: group?.id, originalConfigRef: "snapshot/" + bindingId, enabled: true };
+    await writeLegacyGatewayV2({ stateDir: paths.stateDir, envName, gateway: v2 });
+    stdout.write("agent connected: " + agentId + " -> " + model + "\n");
+    return 0;
+  }
+  if (command === "disconnect") {
+    await adapter.restore(bindingId);
+    delete v2.agentBindings[agentId];
+    await writeLegacyGatewayV2({ stateDir: paths.stateDir, envName, gateway: v2 });
+    stdout.write("agent disconnected: " + agentId + "\n");
+    return 0;
+  }
+  if (command === "use" || command === "default") {
+    const model = input.positional[2] ?? (typeof input.options.model === "string" ? input.options.model : "");
+    if (!model || !v2.agentBindings[agentId]) throw new Error("agent is not connected; use agent connect first");
+    v2.agentBindings[agentId] = { ...v2.agentBindings[agentId]!, defaultModelId: model };
+    await writeLegacyGatewayV2({ stateDir: paths.stateDir, envName, gateway: v2 });
+    stdout.write("agent default model: " + agentId + " -> " + model + "\n");
+    return 0;
+  }
+  if (command === "doctor") {
+    const discovered = await adapter.discover();
+    const binding = v2.agentBindings[agentId];
+    const drift = binding ? await adapter.check(bindingId) : undefined;
+    stdout.write("agent: " + agentId + "\ninstalled: " + (discovered.installed ? "yes" : "no") + "\nstate: " + (drift?.state ?? "unwired") + "\n");
+    return drift?.state === "drifted" || drift?.state === "missing" ? 1 : 0;
+  }
+  throw new Error("usage: agent [ls|connect|disconnect|use|default|doctor|import]");
+}
+
+async function runNodeAgentImport(
+  input: GatewayDomainArgs,
+  environment: { path: string; gateway?: GatewayEnvironmentState; accounts?: SwitcherState["envs"][string]["accounts"] },
+  envName: string,
+  stateDir: string,
+  stdout: Pick<NodeJS.WriteStream, "write">,
+): Promise<number> {
+  const agentRef = input.positional[1] ?? "";
+  if (!agentRef) throw new Error("usage: agent import <agent> [--path <config>] [--dry-run]");
+  const profile = resolveAgentProfile(agentRef);
+  const configPath = typeof input.options.path === "string" ? input.options.path : join(environment.path, profile.configPath);
+  const content = await readFile(configPath, "utf8").catch(() => {
+    throw new Error(`Agent configuration not found: ${configPath}`);
+  });
+  const imported = importAgentConfiguration(profile, content);
+  if (input.options["dry-run"] === true) {
+    stdout.write(JSON.stringify({ agentId: imported.agentId, configPath, protocol: imported.protocol, model: imported.model, baseUrl: imported.baseUrl, reasoningProfile: imported.reasoningProfile, fallbackModelId: imported.fallbackModelId, subAgentModelId: imported.subAgentModelId, credentialPresent: imported.credentialPresent, warnings: imported.warnings }) + "\n");
+    return 0;
+  }
+  if (!imported.model || !imported.baseUrl) throw new Error(`Agent '${profile.id}' must declare both a model and Base URL before import`);
+
+  const gateway = ensureGateway(environment.gateway, envName);
+  const providerId = `imported-${profile.id}`;
+  const modelId = `${providerId}/${imported.model}`;
+  const credentialId = `credential:${encodeURIComponent(envName)}:${profile.id}:imported`;
+  const routeGroupId = `agent-import:${profile.id}`;
+  const mappedAccountName = typeof input.options.account === "string" ? input.options.account : undefined;
+  const mappedAccount = mappedAccountName ? environment.accounts?.[mappedAccountName] : undefined;
+  if (mappedAccountName && !mappedAccount) throw new Error(`account '${mappedAccountName}' not found in environment '${envName}'`);
+  gateway.providers[providerId] = {
+    id: providerId,
+    displayName: `${profile.displayName} imported provider`,
+    kind: profile.protocol === "anthropic" ? "anthropic" : profile.protocol === "gemini" ? "gemini" : "custom",
+    endpoints: endpointForProtocol(imported.baseUrl, profile.defaultProtocol),
+    modelDiscovery: "manual",
+    enabled: true,
+  };
+  gateway.credentials[credentialId] = {
+    id: credentialId,
+    providerId,
+    displayName: `${profile.displayName} imported credential`,
+    kind: mappedAccount?.authMode === "auth" ? "auth" : "api_key",
+    secretRef: mappedAccountName
+      ? `account:${encodeURIComponent(envName)}:${encodeURIComponent(mappedAccountName)}`
+      : `imported:${encodeURIComponent(envName)}:${profile.id}`,
+    supportedProtocols: [profile.defaultProtocol],
+    status: mappedAccount ? "active" : "disabled",
+  };
+  gateway.models[modelId] = {
+    id: modelId,
+    providerId,
+    upstreamModelId: imported.model,
+    displayName: imported.model,
+    protocols: [profile.defaultProtocol],
+    capabilities: { tools: true, reasoning: true, vision: true, streaming: true },
+    enabled: true,
+  };
+  gateway.routeGroups[routeGroupId] = {
+    id: routeGroupId,
+    displayName: `${profile.displayName} imported route`,
+    exposedModelId: imported.model,
+    members: [{ providerId, modelId, credentialSelector: { credentialIds: [credentialId] }, priority: 0, weight: 1 }],
+    strategy: "smart",
+    sessionPolicy: "auto",
+    fallbackEnabled: true,
+  };
+  gateway.defaultRouteGroupId ??= routeGroupId;
+  const gatewayPath = join(stateDir, "env-gateways", `${envName}.json`);
+  const gatewayV2Path = join(stateDir, "env-gateways-v2", `${envName}.json`);
+  const previousGateway = await readFile(gatewayPath, "utf8").catch(() => undefined);
+  const previousGatewayV2 = await readFile(gatewayV2Path, "utf8").catch(() => undefined);
+  try {
+    await persistGateway(stateDir, envName, gateway);
+    const v2 = await readLegacyGatewayV2({ stateDir, envName }).catch(() => migrateGatewayEnvironmentStateToV2(gateway, envName));
+    v2.agentBindings[profile.id] = {
+      agentId: profile.id,
+      displayName: profile.displayName,
+      gatewayId: gateway.gatewayId,
+      defaultModelId: imported.model,
+      defaultRouteGroupId: routeGroupId,
+      ...(imported.reasoningProfile ? { reasoningProfile: imported.reasoningProfile } : {}),
+      ...(imported.fallbackModelId ? { fallbackModelId: imported.fallbackModelId } : {}),
+      ...(imported.subAgentModelId ? { subAgentModelId: imported.subAgentModelId } : {}),
+      originalConfigRef: `import/${encodeURIComponent(envName)}/${profile.id}`,
+      enabled: true,
+    };
+    await writeLegacyGatewayV2({ stateDir, envName, gateway: v2 });
+  } catch (error) {
+    await Promise.all([
+      restoreTextFileAtomically(gatewayPath, previousGateway),
+      restoreTextFileAtomically(gatewayV2Path, previousGatewayV2),
+    ]);
+    throw new Error(`agent import rolled back: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  stdout.write(`agent imported: ${profile.id} -> ${imported.model}\n`);
+  if (imported.warnings.length) stdout.write(JSON.stringify({ warnings: imported.warnings }) + "\n");
+  return 0;
+}
+
+function endpointForProtocol(baseUrl: string, protocol: GatewayProtocol): GatewayProviderDefinition["endpoints"] {
+  if (protocol === "chat_completions") return { chatCompletions: baseUrl };
+  if (protocol === "anthropic") return { anthropicMessages: baseUrl };
+  if (protocol === "gemini") return { gemini: baseUrl };
+  return { responses: baseUrl };
+}
+
+async function runNodeGroupDomain(input: GatewayDomainArgs, environment: { gateway?: GatewayEnvironmentState }, envName: string, stateDir: string, stdout: Pick<NodeJS.WriteStream, "write">): Promise<number> {
+  const command = input.positional[0] ?? "ls";
+  const gateway = ensureGateway(environment.gateway, envName);
+  if (command === "ls") {
+    for (const group of Object.values(gateway.routeGroups)) stdout.write(group.id + "\t" + group.exposedModelId + "\t" + group.strategy + "\t" + group.members.length + " members\n");
+    return 0;
+  }
+  if (command === "add") {
+    const id = input.positional[1] ?? "";
+    if (!id) throw new Error("usage: group add <id> <exposed-model> [--provider <id>] [--model <id>] [--credential <id>]");
+    const providerId = String(input.options.provider ?? Object.keys(gateway.providers)[0] ?? "");
+    if (!providerId) throw new Error("group requires a configured provider");
+    const exposedModelId = input.positional[2] ?? String(input.options.model ?? id);
+    const modelId = String(input.options.model ?? exposedModelId);
+    const credentialId = typeof input.options.credential === "string" ? input.options.credential : Object.values(gateway.credentials).find((item) => item.providerId === providerId)?.id;
+    gateway.routeGroups[id] = { id, displayName: id, exposedModelId, members: [{ providerId, modelId, credentialSelector: credentialId ? { credentialIds: [credentialId] } : { providerId }, priority: 0, weight: 1 }], strategy: "smart", sessionPolicy: "auto", fallbackEnabled: true };
+    gateway.defaultRouteGroupId ??= id;
+    await persistGateway(stateDir, envName, gateway);
+    stdout.write("group added: " + id + "\n");
+    return 0;
+  }
+  const groupId = command === "rule" ? input.positional[2] ?? "" : input.positional[1] ?? "";
+  const group = gateway.routeGroups[groupId];
+  if (!group) throw new Error("route group '" + groupId + "' not found");
+  if (command === "rm") {
+    delete gateway.routeGroups[groupId];
+    if (gateway.defaultRouteGroupId === groupId) delete gateway.defaultRouteGroupId;
+    await persistGateway(stateDir, envName, gateway);
+    stdout.write("group removed: " + groupId + "\n");
+    return 0;
+  }
+  if (command === "set") {
+    const strategy = input.options.strategy;
+    if (typeof strategy === "string" && ["smart", "order", "rotate", "usage", "pace", "weight", "weighted_round_robin"].includes(strategy)) group.strategy = strategy as GatewayRouteGroupDefinition["strategy"];
+    if (typeof input.options.session === "string" && ["auto", "session", "turn", "off"].includes(input.options.session)) group.sessionPolicy = input.options.session as GatewayRouteGroupDefinition["sessionPolicy"];
+    if (input.options.fallback === "off" || input.options.fallback === "false") group.fallbackEnabled = false;
+    if (input.options.fallback === "on" || input.options.fallback === "true") group.fallbackEnabled = true;
+    await persistGateway(stateDir, envName, gateway);
+    stdout.write("group updated: " + groupId + "\n");
+    return 0;
+  }
+  if (command === "rule") {
+    const action = input.positional[1];
+    const capability = input.positional[3] ?? String(input.options.capability ?? "");
+    if (!["tools", "vision", "reasoning", "streaming"].includes(capability)) throw new Error("only explicit capability rules are supported (tools|vision|reasoning|streaming)");
+    group.capabilities ??= {};
+    if (action === "add") group.capabilities[capability as keyof NonNullable<GatewayRouteGroupDefinition["capabilities"]>] = true;
+    else if (action === "rm") delete group.capabilities[capability as keyof NonNullable<GatewayRouteGroupDefinition["capabilities"]>];
+    else throw new Error("usage: group rule [add|rm] <group> <capability>");
+    await persistGateway(stateDir, envName, gateway);
+    stdout.write("group capability rule updated: " + groupId + " " + capability + "\n");
+    return 0;
+  }
+  throw new Error("usage: group [ls|add|set|rm|rule add|rule rm]");
+}
+
+async function runNodeModelDomain(input: GatewayDomainArgs, environment: { gateway?: GatewayEnvironmentState }, stdout: Pick<NodeJS.WriteStream, "write">): Promise<number> {
+  const gateway = environment.gateway;
+  if (!gateway) { stdout.write("No gateway models configured\n"); return 1; }
+  if ((input.positional[0] ?? "ls") === "inspect") {
+    const id = input.positional[1] ?? "";
+    const model = gateway.models[id] ?? Object.values(gateway.models).find((item) => item.upstreamModelId === id);
+    if (!model) throw new Error("model '" + id + "' not found");
+    stdout.write(JSON.stringify(model, null, 2) + "\n");
+    return 0;
+  }
+  for (const model of Object.values(gateway.models)) stdout.write(model.id + "\t" + model.providerId + "\t" + model.upstreamModelId + "\n");
+  for (const group of Object.values(gateway.routeGroups)) stdout.write(group.exposedModelId + "\tgroup\t" + group.id + "\n");
+  return 0;
+}
+
+async function runNodeUsageDomain(input: GatewayDomainArgs, stateDir: string, envName: string, stdout: Pick<NodeJS.WriteStream, "write">): Promise<number> {
+  const window = input.positional[0] ?? "all";
+  const duration = window === "today" ? 24 * 60 * 60_000 : window === "7d" ? 7 * 24 * 60 * 60_000 : window === "30d" ? 30 * 24 * 60 * 60_000 : Number.MAX_SAFE_INTEGER;
+  const to = Date.now();
+  const from = duration === Number.MAX_SAFE_INTEGER ? 0 : to - duration;
+  const databasePath = join(stateDir, "usage-router", "usage.db");
+  if (await access(databasePath).then(() => true).catch(() => false)) {
+    const store = await createUsageStore(databasePath);
+    try {
+      const snapshot = await store.queryUsage({ from, to, envName });
+      stdout.write(JSON.stringify({ envName, window, requests: snapshot.summary.requests, inputTokens: snapshot.summary.inputTokens, outputTokens: snapshot.summary.outputTokens, cost: snapshot.summary.actualCost }) + "\n");
+      return 0;
+    } finally {
+      await store.close();
+    }
+  }
+  const raw = await readFile(join(stateDir, "gateway-usage.json"), "utf8").catch(() => "[]");
+  let records: Array<Record<string, unknown>> = [];
+  try { records = JSON.parse(raw) as Array<Record<string, unknown>>; } catch { records = []; }
+  const filtered = records.filter((record) => record.envName === envName && (typeof record.completedAt !== "number" || record.completedAt >= from));
+  const summary = { envName, window, requests: filtered.length, inputTokens: sumUsageField(filtered, "inputTokens"), outputTokens: sumUsageField(filtered, "outputTokens"), cost: sumUsageField(filtered, "actualCost") };
+  stdout.write(JSON.stringify(summary) + "\n");
+  return 0;
+}
+
+async function runNodeProfileDomain(input: GatewayDomainArgs, environment: { gateway?: GatewayEnvironmentState }, envName: string, stateDir: string, stdout: Pick<NodeJS.WriteStream, "write">): Promise<number> {
+  const command = input.positional[0] ?? "ls";
+  const profilesDir = join(stateDir, "profiles");
+  await mkdir(profilesDir, { recursive: true });
+  if (command === "ls") {
+    for (const name of (await readdir(profilesDir).catch(() => [])).filter((item) => item.endsWith(".json"))) stdout.write(name.slice(0, -5) + "\n");
+    return 0;
+  }
+  const name = input.positional[1] ?? "";
+  if (!name || !/^[a-zA-Z0-9._-]+$/.test(name)) throw new Error("profile name is required");
+  const path = join(profilesDir, name + ".json");
+  if (command === "save") {
+    if (!environment.gateway) throw new Error("gateway is not configured");
+    await restoreTextFileAtomically(path, JSON.stringify(environment.gateway, null, 2) + "\n");
+    stdout.write("profile saved: " + name + "\n");
+    return 0;
+  }
+  if (command === "rm") {
+    await rm(path, { force: true });
+    stdout.write("profile removed: " + name + "\n");
+    return 0;
+  }
+  if (command === "use") {
+    const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
+    if (!isGatewayEnvironmentState(parsed)) throw new Error("profile contains an invalid Gateway configuration");
+    const gateway = parsed as GatewayEnvironmentState;
+    await persistGateway(stateDir, envName, gateway);
+    stdout.write("profile applied: " + name + "\n");
+    return 0;
+  }
+  throw new Error("usage: profile [save|ls|use|rm] <name>");
+}
+
+function ensureGateway(value: GatewayEnvironmentState | undefined, envName: string): GatewayEnvironmentState {
+  return value ?? { schemaVersion: 1, mode: "direct", gatewayId: "gateway-" + envName, providers: {}, credentials: {}, models: {}, routeGroups: {}, catalogVersion: 0 };
+}
+
+async function persistGateway(stateDir: string, envName: string, gateway: GatewayEnvironmentState): Promise<void> {
+  await writeLegacyGateway({ stateDir, envName, gateway });
+}
+
+async function restoreTextFileAtomically(path: string, content: string | undefined): Promise<void> {
+  if (content === undefined) {
+    await rm(path, { force: true });
+    return;
+  }
+  await writeTextFileAtomically(path, content);
+}
+
+async function writeTextFileAtomically(path: string, content: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, content, "utf8");
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true }).catch(() => undefined);
+  }
+}
+
+function providerDefinitionToCore(definition: ReturnType<typeof providerDefinitions>[number] | undefined, providerId: string, baseUrl?: string): GatewayProviderDefinition {
+  const endpoints = definition?.endpoints ?? [];
+  const result: GatewayProviderDefinition["endpoints"] = {};
+  for (const endpoint of endpoints) {
+    if (endpoint.protocol === "responses") result.responses = baseUrl ?? endpoint.baseUrl;
+    if (endpoint.protocol === "chat_completions") result.chatCompletions = baseUrl ?? endpoint.baseUrl;
+    if (endpoint.protocol === "anthropic") result.anthropicMessages = baseUrl ?? endpoint.baseUrl;
+    if (endpoint.protocol === "gemini") result.gemini = baseUrl ?? endpoint.baseUrl;
+  }
+  const kind = ["openai", "chatgpt", "anthropic", "gemini", "custom", "local"].includes(providerId) ? providerId as GatewayProviderDefinition["kind"] : "custom";
+  return { id: providerId, displayName: definition?.displayName ?? providerId, kind, endpoints: result, modelDiscovery: definition?.presets.length ? "preset" : "manual", enabled: true };
+}
+
+async function readGatewayMarker(stateDir: string, envName: string): Promise<boolean> {
+  try {
+    const marker = JSON.parse(await readFile(join(stateDir, "gateway", envName + ".json"), "utf8")) as { port?: unknown };
+    if (typeof marker.port === "number") {
+      const response = await fetch(`http://127.0.0.1:${marker.port}/health`, { signal: AbortSignal.timeout(800) });
+      if (!response.ok) return false;
+      const health = await response.json() as { ok?: unknown; apiVersion?: unknown };
+      return health.ok === true && health.apiVersion === 9;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sumUsageField(records: Array<Record<string, unknown>>, key: string): number {
+  return records.reduce((sum, record) => sum + (typeof record[key] === "number" ? record[key] as number : 0), 0);
+}
+
 async function runNodeAppCommand(
   argv: string[],
   deps?: {
@@ -889,7 +2035,7 @@ async function runNodeImportDefaultCommand(
     try {
       const authRaw = await readFile(defaultAuthPath, "utf8");
       await mkdir(targetAccountDir, { recursive: true });
-      await writeFile(join(targetAccountDir, "auth.json"), authRaw, "utf8");
+      await writeTextFileAtomically(join(targetAccountDir, "auth.json"), authRaw);
       await writeLegacyRuntime({
         stateDir: runtime.paths.stateDir,
         envName,
@@ -1026,10 +2172,9 @@ async function runNodeInitCommand(
     stdout.write(`[dry-run] ensure PATH block in ${profile}\n`);
     if (!dryRunFlag) {
       await mkdir(binDir, { recursive: true });
-      await writeFile(
+      await writeTextFileAtomically(
         launcherPath,
         `@echo off\r\nnode "${join(process.cwd(), "scripts", "bin", "codex-sw-node.cjs")}" %*\r\n`,
-        "utf8",
       );
       if (normalizedWindowsShell === "powershell" || normalizedWindowsShell === "windows-terminal") {
         await ensureShellInitBlock(profile, [
@@ -1071,7 +2216,7 @@ async function runNodeInitCommand(
   stdout.write(`[dry-run] ensure PATH block in ${rcFile}\n`);
   if (!dryRunFlag) {
     await mkdir(join(runtime.paths.homeDir, ".local", "bin"), { recursive: true });
-    await writeFile(linkPath, `${scriptPath}\n`, "utf8");
+    await writeTextFileAtomically(linkPath, `${scriptPath}\n`);
     await ensureShellInitBlock(rcFile, [
       "# >>> codex-sw init >>>",
       'export PATH="$HOME/.local/bin:$PATH"',
@@ -1488,7 +2633,7 @@ async function refreshAccountTokenOnceNative(input: {
     }
 
     if (afterRaw !== input.authRaw) {
-      await writeFile(input.authFile, afterRaw, "utf8");
+      await writeTextFileAtomically(input.authFile, afterRaw);
       await syncUpdatedAuthToActiveTargets({
         ...input.runtimePaths,
         envName: input.envName,
@@ -1784,7 +2929,7 @@ async function ensureShellInitBlock(filePath: string, lines: string[]): Promise<
 
   const prefix = existing && !existing.endsWith("\n") ? `${existing}\n` : existing;
   await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${prefix}${lines.join("\n")}\n`, "utf8");
+  await writeTextFileAtomically(filePath, `${prefix}${lines.join("\n")}\n`);
 }
 
 async function hasShellInitBlock(
@@ -1941,7 +3086,7 @@ async function removeShellInitBlock(
   }
 
   const cleaned = kept.join("\n").replace(/\n+$/g, "\n");
-  await writeFile(filePath, cleaned, "utf8");
+  await writeTextFileAtomically(filePath, cleaned);
 }
 
 async function runNodeAccountLoginCommand(
@@ -1992,10 +3137,9 @@ async function runNodeAccountLoginCommand(
     const authRaw = await import("node:fs/promises").then(({ readFile }) =>
       readFile(join(envState.path, "auth.json"), "utf8"),
     );
-    await writeFile(
+    await writeTextFileAtomically(
       join(runtime.paths.stateDir, "env-accounts", envName, accountName, "auth.json"),
       authRaw,
-      "utf8",
     );
     await writeLegacyRuntime({
       stateDir: runtime.paths.stateDir,
@@ -2023,10 +3167,9 @@ async function runNodeAccountLoginCommand(
     if (!apiKey) {
       throw new Error("API key is required");
     }
-    await writeFile(
+    await writeTextFileAtomically(
       join(runtime.paths.stateDir, "env-accounts", envName, accountName, "auth.json"),
       `${JSON.stringify({ auth_mode: "apikey", OPENAI_API_KEY: apiKey }, null, 2)}\n`,
-      "utf8",
     );
     await writeLegacyRuntime({
       stateDir: runtime.paths.stateDir,
@@ -2052,10 +3195,9 @@ async function runNodeAccountLoginCommand(
   }
 
   const authJson = buildSub2ApiAuthJson(process.env.CODEX_SWITCHER_SUB2API_JSON);
-  await writeFile(
+  await writeTextFileAtomically(
     join(runtime.paths.stateDir, "env-accounts", envName, accountName, "auth.json"),
     `${JSON.stringify(authJson, null, 2)}\n`,
-    "utf8",
   );
   await writeLegacyRuntime({
     stateDir: runtime.paths.stateDir,
@@ -2601,6 +3743,13 @@ async function runNodeTuiWithDeps(deps?: {
         });
         continue;
       }
+      if (choice === 9) {
+        await runGatewayPage(terminal, {
+          env,
+          stdout,
+        });
+        continue;
+      }
       if (choice === HOME_MENU_ITEMS.length - 1) {
         break;
       }
@@ -2636,6 +3785,167 @@ async function runTokenRefreshOnceForTui(): Promise<string> {
   }
   const lines = output.split(/\r?\n/).filter(Boolean);
   return lines[lines.length - 1] ?? "Token refresh scan completed";
+}
+
+async function runGatewayPage(
+  terminal: ReturnType<typeof createTerminal>,
+  deps: {
+    env: NodeJS.ProcessEnv;
+    stdout?: Pick<NodeJS.WriteStream, "write">;
+  },
+): Promise<void> {
+  let selected = 0;
+  let message = "";
+  const stdout = deps.stdout ?? process.stdout;
+
+  while (true) {
+    const snapshot = await readGatewayTuiSnapshot(deps.env);
+    terminal.clear();
+    stdout.write(renderGatewayScreen({ snapshot, selected, message }));
+
+    const key = await terminal.readKey();
+    if (key === "quit" || key === "escape") return;
+    if (key === "up") {
+      selected = (selected - 1 + GATEWAY_TUI_ACTIONS.length) % GATEWAY_TUI_ACTIONS.length;
+      continue;
+    }
+    if (key === "down") {
+      selected = (selected + 1) % GATEWAY_TUI_ACTIONS.length;
+      continue;
+    }
+    if (key !== "enter") continue;
+
+    const action = GATEWAY_TUI_ACTIONS[selected]?.id ?? "back";
+    if (action === "back") return;
+    if (action === "refresh") {
+      message = "Gateway snapshot refreshed";
+      continue;
+    }
+
+    const output: string[] = [];
+    const capture = {
+      write(chunk: string) {
+        output.push(chunk);
+        return true;
+      },
+    } as Pick<NodeJS.WriteStream, "write">;
+
+    try {
+      if (action === "toggle-mode") {
+        const mode = snapshot.mode === "gateway" ? "manual" : "gateway";
+        await runNodeGatewayCommand(["mode", mode, "--env", snapshot.envName], { stdout: capture });
+      } else if (action === "start-stop") {
+        await runNodeGatewayCommand([snapshot.process === "running" ? "stop" : "start", "--env", snapshot.envName], { stdout: capture });
+      } else {
+        const domainCommand = action === "providers"
+          ? "provider"
+          : action === "models"
+            ? "model"
+            : action === "groups"
+              ? "group"
+              : action === "agents"
+                ? "agent"
+                : action === "usage"
+                  ? "usage"
+                  : "profile";
+        const domainArgs = action === "usage"
+          ? ["today", "--env", snapshot.envName]
+          : ["ls", "--env", snapshot.envName];
+        await runNodeGatewayDomainCommand(domainCommand, domainArgs, { stdout: capture });
+      }
+      message = output.join("").trim() || `${GATEWAY_TUI_ACTIONS[selected]?.title ?? "Gateway"} completed`;
+    } catch (error) {
+      message = `Error: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+}
+
+async function readGatewayTuiSnapshot(env: NodeJS.ProcessEnv): Promise<GatewayTuiSnapshot> {
+  const runtime = getPlatformRuntime(
+    env,
+    env.CODEX_SWITCHER_TEST_PLATFORM || process.platform,
+  );
+  const state = await readLegacyState({
+    stateDir: runtime.paths.stateDir,
+    envsDir: runtime.paths.envsDir,
+    defaultHome: runtime.paths.defaultHome,
+  });
+  const envName = state.targets.cli.env;
+  const environment = state.envs[envName];
+  const gateway = environment?.gateway;
+  const v2 = await readLegacyGatewayV2({ stateDir: runtime.paths.stateDir, envName }).catch(() => undefined);
+  const profilesDir = join(runtime.paths.stateDir, "profiles");
+  const profiles = (await readdir(profilesDir).catch(() => []))
+    .filter((name) => name.endsWith(".json"))
+    .map((name) => name.slice(0, -5))
+    .sort();
+  const usage = await readGatewayTuiUsage(runtime.paths.stateDir, envName);
+
+  return {
+    envName,
+    mode: gateway?.mode === "gateway" ? "gateway" : "manual",
+    process: await readGatewayMarker(runtime.paths.stateDir, envName) ? "running" : "stopped",
+    gatewayId: gateway?.gatewayId ?? "-",
+    providers: Object.values(gateway?.providers ?? {})
+      .map((provider) => ({ id: provider.id, status: provider.enabled === false ? "disabled" : "enabled" }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
+    credentials: Object.values(gateway?.credentials ?? {})
+      .map((credential) => ({ id: credential.id, providerId: credential.providerId, status: credential.status }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
+    models: Object.values(gateway?.models ?? {})
+      .map((model) => ({ id: model.id, providerId: model.providerId, upstreamModelId: model.upstreamModelId, enabled: model.enabled }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
+    routeGroups: Object.values(gateway?.routeGroups ?? {})
+      .map((group) => ({ id: group.id, exposedModelId: group.exposedModelId, strategy: group.strategy, sessionPolicy: group.sessionPolicy, members: group.members.length }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
+    agents: BUILT_IN_AGENT_PROFILES.map((profile) => ({
+      id: profile.id,
+      status: v2?.agentBindings[profile.id]?.enabled ? "connected" : "disconnected",
+    })),
+    profiles,
+    usage,
+  };
+}
+
+async function readGatewayTuiUsage(stateDir: string, envName: string): Promise<GatewayTuiUsage> {
+  const to = Date.now();
+  const from = to - 24 * 60 * 60_000;
+  const databasePath = join(stateDir, "usage-router", "usage.db");
+  if (await access(databasePath).then(() => true).catch(() => false)) {
+    const store = await createUsageStore(databasePath);
+    try {
+      const snapshot = await store.queryUsage({ from, to, envName });
+      return {
+        window: "today",
+        requests: snapshot.summary.requests,
+        inputTokens: snapshot.summary.inputTokens,
+        outputTokens: snapshot.summary.outputTokens,
+        cost: snapshot.summary.actualCost,
+      };
+    } finally {
+      await store.close();
+    }
+  }
+
+  const raw = await readFile(join(stateDir, "gateway-usage.json"), "utf8").catch(() => "[]");
+  let records: Array<Record<string, unknown>> = [];
+  try {
+    records = JSON.parse(raw) as Array<Record<string, unknown>>;
+  } catch {
+    records = [];
+  }
+  const filtered = records.filter((record) => record.envName === envName
+    && (typeof record.completedAt !== "number" || record.completedAt >= from));
+  const costValues = filtered
+    .map((record) => record.actualCost)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  return {
+    window: "today",
+    requests: filtered.length,
+    inputTokens: sumUsageField(filtered, "inputTokens"),
+    outputTokens: sumUsageField(filtered, "outputTokens"),
+    cost: costValues.length ? costValues.reduce((sum, value) => sum + value, 0) : null,
+  };
 }
 
 async function runSetupPage(
@@ -3386,6 +4696,9 @@ async function executeSwitchSelection(
 
 export const __internal = {
   runNodeTuiWithDeps,
+  runNodeGatewayCommand,
+  runNodeGatewayDomainCommand,
+  discoverGatewayProviderModels,
   executeSwitchSelection,
   runNodeAccountLoginCommand,
   runNodeCliCommand,

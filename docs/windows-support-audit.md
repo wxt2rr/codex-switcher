@@ -1,6 +1,6 @@
 # Windows Support Audit
 
-Last updated: 2026-07-02
+Last updated: 2026-10-07
 
 ## Goal
 
@@ -33,7 +33,13 @@ Prove how far `codex-switcher` has progressed toward Windows-native support for 
 - macOS desktop regression coverage is also enforced in GitHub Actions via `.github/workflows/ci.yml`.
 - Current evidence from the latest local run:
   - `npm run desktop:test`
-  - Result: passed
+  - Result: 387 passed, 1 externally-gated Codex E2E skipped (388 tests total)
+
+### Provider plugin isolation build contract
+
+- The Windows AppContainer launcher is compiled by the native Windows build path and is now also cross-compiled on Ubuntu CI with `g++-mingw-w64-x86-64`; the workflow checks that the result is a PE executable with an `MZ` header.
+- The Windows smoke runner exercises both default-deny and explicit `--filesystem` capability runs; accepted evidence requires the plugin directory write to be granted only in the explicit-capability run while Home reads and network remain denied.
+- This proves the helper's build contract, not its Windows runtime behavior. The authoritative runtime check remains the Windows AppContainer smoke test in `.github/workflows/ci.yml` and `desktop-package.yml`.
 
 ### Windows validation handoff assets
 

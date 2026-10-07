@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { mergeAccountUsageMetrics, mergeOverviewWithAuthMetrics } from "@/auth-metrics";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/components/theme-provider";
-import type { AccountPoolInput, AccountPoolStatus, AppEnvironmentBadgeStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry, DesktopLaunchStrategy, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, RouterLifecycleSettings, RouterPortSettings } from "./bridge";
+import type { AccountPoolInput, AccountPoolStatus, AppEnvironmentBadgeStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, DesktopAutoUpdateStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry, DesktopLaunchStrategy, EnvHistoryRetentionSettings, GatewayAdminEnvironment, GeneratedImageRecoveryStatus, LaunchAtLoginStatus, ProviderPluginMarketEntry, ProviderPluginSnapshot, RouterLifecycleSettings, RouterPortSettings } from "./bridge";
 import { DesktopShell } from "./components/desktop-shell";
 import type { AccountSummary, AuthMetricsPayload, EnvironmentRouteStatus, NavView, OverviewPayload } from "./desktop-model";
 import { resolveDesktopBridge } from "./bridge";
@@ -74,6 +74,7 @@ export function App() {
   const [accountSub2ApiDraft, setAccountSub2ApiDraft] = useState("");
   const [proxyDraft, setProxyDraft] = useState("");
   const [selectedLogKind, setSelectedLogKind] = useState("switcher");
+  const [logContent, setLogContent] = useState("");
   const [toolStatuses, setToolStatuses] = useState<CodexToolStatus[]>([]);
   const [toolDrafts, setToolDrafts] = useState<Record<"cli" | "app", string>>({ cli: "", app: "" });
   const [cliAutoResume, setCliAutoResume] = useState<CliAutoResumeSettings>({ enabled: false, sessionNumber: 1 });
@@ -83,6 +84,8 @@ export function App() {
   const [routerLifecycleSaving, setRouterLifecycleSaving] = useState(false);
   const [routerPort, setRouterPort] = useState<RouterPortSettings>({ preferredPort: 17832 });
   const [routerPortSaving, setRouterPortSaving] = useState(false);
+  const [launchAtLogin, setLaunchAtLogin] = useState<LaunchAtLoginStatus>({ enabled: false, supported: false });
+  const [launchAtLoginSaving, setLaunchAtLoginSaving] = useState(false);
   const [envHistoryRetention, setEnvHistoryRetention] = useState<EnvHistoryRetentionSettings>({ enabled: false, retentionDays: 30 });
   const [envHistoryRetentionSaving, setEnvHistoryRetentionSaving] = useState(false);
   const [generatedImageRecovery, setGeneratedImageRecovery] = useState<GeneratedImageRecoveryStatus>({
@@ -96,6 +99,10 @@ export function App() {
   const [cliTerminalSaving, setCliTerminalSaving] = useState(false);
   const [routeStatuses, setRouteStatuses] = useState<EnvironmentRouteStatus[]>([]);
   const [accountPools, setAccountPools] = useState<AccountPoolStatus[]>([]);
+  const [gatewayAdminSnapshot, setGatewayAdminSnapshot] = useState<GatewayAdminEnvironment[]>([]);
+  const [providerPlugins, setProviderPlugins] = useState<ProviderPluginSnapshot[]>([]);
+  const [providerPluginMarket, setProviderPluginMarket] = useState<ProviderPluginMarketEntry[]>([]);
+  const [autoUpdateStatus, setAutoUpdateStatus] = useState<DesktopAutoUpdateStatus>({ enabled: false, state: "disabled" });
   const authMetricsRequestRef = useRef(0);
   const authMetricsInFlightRef = useRef(false);
   const proxyDraftDirtyRef = useRef(false);
@@ -175,10 +182,36 @@ export function App() {
     void bridge.getCliTerminalSettings().then(setCliTerminalSettings).catch(setErrorMessage);
     void bridge.getRouterLifecycleSettings().then(setRouterLifecycle).catch(setErrorMessage);
     void bridge.getRouterPortSettings().then(setRouterPort).catch(setErrorMessage);
+    void bridge.getLaunchAtLoginSettings().then(setLaunchAtLogin).catch(setErrorMessage);
     void bridge.getEnvHistoryRetentionSettings().then(setEnvHistoryRetention).catch(setErrorMessage);
     void bridge.getGeneratedImageRecoverySettings().then(setGeneratedImageRecovery).catch(setErrorMessage);
     void bridge.getAppEnvironmentBadgeStatus().then(setAppEnvironmentBadges).catch(setErrorMessage);
+    void bridge.loadGatewayAdminSnapshot().then(setGatewayAdminSnapshot).catch(setErrorMessage);
+    void bridge.loadProviderPluginSnapshot().then(setProviderPlugins).catch(setErrorMessage);
+    void bridge.loadProviderPluginMarket().then(setProviderPluginMarket).catch(setErrorMessage);
+    void bridge.getAutoUpdateStatus().then(setAutoUpdateStatus).catch(setErrorMessage);
   }, [view]);
+
+  useEffect(() => {
+    if (view !== "operations") return;
+    let stopped = false;
+    const loadLog = async () => {
+      try {
+        const result = selectedLogKind === "token-refresh"
+          ? await bridge.readTokenRefreshLog()
+          : await bridge.readSwitcherLog();
+        if (!stopped) setLogContent(result.content);
+      } catch (error) {
+        if (!stopped) setErrorMessage(error);
+      }
+    };
+    void loadLog();
+    const interval = window.setInterval(() => { void loadLog(); }, 1_500);
+    return () => {
+      stopped = true;
+      window.clearInterval(interval);
+    };
+  }, [selectedLogKind, view]);
 
   useEffect(() => {
     if (!appEnvironmentBadgePermissionPending) return;
@@ -313,6 +346,20 @@ export function App() {
     }
   }
 
+  async function handleLaunchAtLoginChange(enabled: boolean) {
+    const previous = launchAtLogin;
+    setLaunchAtLogin((current) => ({ ...current, enabled }));
+    setLaunchAtLoginSaving(true);
+    try {
+      setLaunchAtLogin(await bridge.setLaunchAtLoginSettings({ enabled }));
+    } catch (error) {
+      setLaunchAtLogin(previous);
+      setErrorMessage(error);
+    } finally {
+      setLaunchAtLoginSaving(false);
+    }
+  }
+
   async function handleGeneratedImageRecoveryChange(enabled: boolean) {
     const previous = generatedImageRecovery;
     setGeneratedImageRecovery((current) => ({ ...current, enabled }));
@@ -412,12 +459,12 @@ export function App() {
     }
   }
 
-  async function handleToggleEnvironmentRoute(envName: string, enabled: boolean) {
+  async function handleToggleEnvironmentGateway(envName: string, enabled: boolean) {
     setBusy(true);
     try {
-      const next = await bridge.toggleEnvironmentRoute(envName, enabled);
+      const next = await bridge.toggleEnvironmentGateway(envName, enabled);
       setRouteStatuses((current) => [...current.filter((item) => item.envName !== envName), next]);
-      setSuccessMessage(language === "zh" ? `环境 ${envName} 路由已${enabled ? "开启" : "关闭"}` : `Routing ${enabled ? "enabled" : "disabled"} for ${envName}`);
+      setSuccessMessage(language === "zh" ? `环境 ${envName} 网关已${enabled ? "开启" : "关闭"}` : `Gateway ${enabled ? "enabled" : "disabled"} for ${envName}`);
       await refreshOverview({ loadMetrics: false });
     } catch (error) { setErrorMessage(error); }
     finally { setBusy(false); }
@@ -430,7 +477,7 @@ export function App() {
       setAccountPools((current) => [...current.filter((item) => item.envName !== input.envName), ...(next ? [next] : [])]);
       const routes = await bridge.getEnvironmentRouteStatuses();
       setRouteStatuses(routes);
-      setSuccessMessage(language === "zh" ? `环境 ${input.envName} 账号池已${input.enabled ? "保存" : "关闭"}` : `Account pool ${input.enabled ? "saved" : "disabled"}`);
+      setSuccessMessage(language === "zh" ? `环境 ${input.envName} 凭证池已${input.enabled ? "保存" : "关闭"}` : `Credential pool ${input.enabled ? "saved" : "disabled"}`);
       await refreshOverview({ loadMetrics: false });
       return true;
     } catch (error) { setErrorMessage(error); return false; }
@@ -989,11 +1036,13 @@ export function App() {
   async function handleReadLog() {
     setBusy(true);
     try {
+      const result = selectedLogKind === "token-refresh"
+        ? await bridge.readTokenRefreshLog()
+        : await bridge.readSwitcherLog();
+      setLogContent(result.content);
       if (selectedLogKind === "token-refresh") {
-        await bridge.readTokenRefreshLog();
         setTranslatedSuccessMessage(copy.message.tokenRefreshLogLoaded);
       } else {
-        await bridge.readSwitcherLog();
         setTranslatedSuccessMessage(copy.message.switcherLogLoaded);
       }
     } catch (error) {
@@ -1150,7 +1199,7 @@ export function App() {
           onImportDefaultEnv={(envName) => void handleImportDefaultEnv(envName)}
           onDeleteEnv={() => void handleDeleteEnv()}
           routeStatuses={routeStatuses}
-          onToggleRoute={handleToggleEnvironmentRoute}
+          onToggleGateway={handleToggleEnvironmentGateway}
           accountPools={accountPools}
           onSaveAccountPool={handleSaveAccountPool}
         />
@@ -1246,6 +1295,7 @@ export function App() {
           busy={busy}
           proxyDraft={proxyDraft}
           logKind={selectedLogKind}
+          logContent={logContent}
           onProxyDraftChange={(value) => {
             proxyDraftDirtyRef.current = true;
             setProxyDraft(value);
@@ -1272,6 +1322,9 @@ export function App() {
           routerPort={routerPort}
           routerPortSaving={routerPortSaving}
           onRouterPortChange={(next) => void handleRouterPortChange(next)}
+          launchAtLogin={launchAtLogin}
+          launchAtLoginSaving={launchAtLoginSaving}
+          onLaunchAtLoginChange={(enabled) => void handleLaunchAtLoginChange(enabled)}
           envHistoryRetention={envHistoryRetention}
           envHistoryRetentionSaving={envHistoryRetentionSaving}
           onEnvHistoryRetentionChange={(next) => void handleEnvHistoryRetentionChange(next)}
@@ -1282,6 +1335,32 @@ export function App() {
           appEnvironmentBadgesSaving={appEnvironmentBadgesSaving}
           onAppEnvironmentBadgesChange={(enabled) => void handleAppEnvironmentBadgesChange(enabled)}
           onRequestAppEnvironmentBadgePermission={() => void handleRequestAppEnvironmentBadgePermission()}
+          gatewayAdminSnapshot={gatewayAdminSnapshot}
+          providerPlugins={providerPlugins}
+          providerPluginMarket={providerPluginMarket}
+          onInstallProviderPlugin={async (request) => {
+            await bridge.installProviderPlugin(request);
+            setProviderPlugins(await bridge.loadProviderPluginSnapshot());
+          }}
+          onRefreshProviderPluginMarket={async (url) => setProviderPluginMarket(await bridge.refreshProviderPluginMarket(url))}
+          onInstallProviderPluginFromMarket={async (input) => {
+            await bridge.installProviderPluginFromMarket(input);
+            setProviderPlugins(await bridge.loadProviderPluginSnapshot());
+          }}
+          onDeactivateProviderPlugin={(id) => void bridge.deactivateProviderPlugin(id).then(setProviderPlugins).catch(setErrorMessage)}
+          onRollbackProviderPlugin={(id) => void bridge.rollbackProviderPlugin(id).then(setProviderPlugins).catch(setErrorMessage)}
+          onRemoveProviderPlugin={(id) => void bridge.removeProviderPlugin(id).then(setProviderPlugins).catch(setErrorMessage)}
+          autoUpdateStatus={autoUpdateStatus}
+          onCheckForAutoUpdate={() => void bridge.checkForAutoUpdate().then(setAutoUpdateStatus).catch(setErrorMessage)}
+          onInstallDownloadedUpdate={() => void bridge.installDownloadedUpdate().then(setAutoUpdateStatus).catch(setErrorMessage)}
+          loadGatewayAdminConfiguration={(envName) => bridge.loadGatewayAdminConfiguration(envName)}
+          saveGatewayAdminConfiguration={(request) => bridge.saveGatewayAdminConfiguration(request)}
+          onGatewayConfigurationSaved={() => void bridge.loadGatewayAdminSnapshot().then(setGatewayAdminSnapshot).catch(setErrorMessage)}
+          onDiscoverGatewayModels={async (request) => {
+            await bridge.discoverGatewayAdminModels(request);
+            const snapshot = await bridge.loadGatewayAdminSnapshot();
+            setGatewayAdminSnapshot(snapshot);
+          }}
         />
       ) : null}
 

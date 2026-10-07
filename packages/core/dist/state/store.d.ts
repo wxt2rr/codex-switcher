@@ -1,3 +1,4 @@
+import { type GatewayEnvironmentState } from "../gateway/model.js";
 export declare const DEFAULT_SCHEMA_VERSION = 1;
 export type TargetName = "cli" | "app";
 export type AuthMode = "auth" | "apikey" | "provider-profile";
@@ -45,6 +46,7 @@ export interface EnvState {
     name: string;
     path: string;
     accounts: Record<string, AccountState>;
+    gateway?: GatewayEnvironmentState;
 }
 export interface TaskSummary {
     id: string;

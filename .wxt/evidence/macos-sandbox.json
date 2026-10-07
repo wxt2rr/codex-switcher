@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "platform": "darwin",
+  "sandbox": "macos-sandbox-exec",
+  "nodeVersion": "v25.2.1",
+  "passed": true,
+  "checks": {
+    "writeDenied": true,
+    "homeReadDenied": true,
+    "networkDenied": true,
+    "markerAbsent": true
+  }
+}

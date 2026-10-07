@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 export interface CliAutoResumeSettings {
@@ -12,6 +13,10 @@ export interface RouterLifecycleSettings {
 
 export interface RouterPortSettings {
   preferredPort: number;
+}
+
+export interface LaunchAtLoginSettings {
+  enabled: boolean;
 }
 
 export interface EnvHistoryRetentionSettings {
@@ -37,6 +42,7 @@ interface DesktopSettingsFile {
   cliAutoResume?: Partial<CliAutoResumeSettings>;
   routerLifecycle?: Partial<RouterLifecycleSettings>;
   routerPort?: Partial<RouterPortSettings>;
+  launchAtLogin?: Partial<LaunchAtLoginSettings>;
   envHistoryRetention?: Partial<EnvHistoryRetentionSettings>;
   generatedImageRecovery?: Partial<GeneratedImageRecoverySettings>;
   appEnvironmentBadges?: Partial<AppEnvironmentBadgeSettings>;
@@ -46,6 +52,7 @@ interface DesktopSettingsFile {
 export const DEFAULT_CLI_AUTO_RESUME_SETTINGS: CliAutoResumeSettings = { enabled: false, sessionNumber: 1 };
 export const DEFAULT_ROUTER_LIFECYCLE_SETTINGS: RouterLifecycleSettings = { stopOnAppQuit: false };
 export const DEFAULT_ROUTER_PORT_SETTINGS: RouterPortSettings = { preferredPort: 17832 };
+export const DEFAULT_LAUNCH_AT_LOGIN_SETTINGS: LaunchAtLoginSettings = { enabled: false };
 export const DEFAULT_ENV_HISTORY_RETENTION_SETTINGS: EnvHistoryRetentionSettings = {
   enabled: false,
   retentionDays: 30,
@@ -64,8 +71,7 @@ export async function saveCliAutoResumeSettings(path: string, value: CliAutoResu
   const normalized = normalizeCliAutoResumeSettings(value);
   const settings = await readSettings(path);
   settings.cliAutoResume = normalized;
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+  await writeSettings(path, settings);
   return normalized;
 }
 
@@ -81,14 +87,29 @@ export async function saveRouterLifecycleSettings(
   const normalized = { stopOnAppQuit: value.stopOnAppQuit === true };
   const settings = await readSettings(path);
   settings.routerLifecycle = normalized;
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+  await writeSettings(path, settings);
   return normalized;
 }
 
 export async function readRouterPortSettings(path: string): Promise<RouterPortSettings> {
   const settings = await readSettings(path);
   return normalizeRouterPortSettings(settings.routerPort);
+}
+
+export async function readLaunchAtLoginSettings(path: string): Promise<LaunchAtLoginSettings> {
+  const settings = await readSettings(path);
+  return { enabled: settings.launchAtLogin?.enabled === true };
+}
+
+export async function saveLaunchAtLoginSettings(
+  path: string,
+  value: LaunchAtLoginSettings,
+): Promise<LaunchAtLoginSettings> {
+  const normalized = { enabled: value.enabled === true };
+  const settings = await readSettings(path);
+  settings.launchAtLogin = normalized;
+  await writeSettings(path, settings);
+  return normalized;
 }
 
 export async function saveRouterPortSettings(
@@ -98,8 +119,7 @@ export async function saveRouterPortSettings(
   const normalized = normalizeRouterPortSettings(value);
   const settings = await readSettings(path);
   settings.routerPort = normalized;
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+  await writeSettings(path, settings);
   return normalized;
 }
 
@@ -115,8 +135,7 @@ export async function saveEnvHistoryRetentionSettings(
   const normalized = normalizeEnvHistoryRetentionSettings(value);
   const settings = await readSettings(path);
   settings.envHistoryRetention = normalized;
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+  await writeSettings(path, settings);
   return normalized;
 }
 
@@ -243,7 +262,13 @@ function normalizeEnvName(value: string): string {
 
 async function writeSettings(path: string, settings: DesktopSettingsFile): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true }).catch(() => undefined);
+  }
 }
 
 async function readSettings(path: string): Promise<DesktopSettingsFile> {

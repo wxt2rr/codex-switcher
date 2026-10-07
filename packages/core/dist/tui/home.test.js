@@ -12,7 +12,8 @@ test("renderHomeScreen prints logo, menu, and nav hint", () => {
     assert.match(screen, /7\.\s+Setup/);
     assert.match(screen, /8\.\s+Refresh/);
     assert.match(screen, /9\.\s+Logs/);
-    assert.match(screen, /10\.\s+Quit/);
+    assert.match(screen, /10\.\s+Gateway/);
+    assert.match(screen, /11\.\s+Quit/);
     assert.match(screen, /Use arrow keys, Enter, number keys, or q to quit\./);
 });
 test("runHomeLoop renders plain output in non-interactive mode", async () => {
@@ -43,6 +44,7 @@ test("runHomeLoop renders plain output in non-interactive mode", async () => {
     assert.match(rendered, /Initialize codex-sw for your shell or terminal/);
     assert.match(rendered, /Run one token refresh scan now/);
     assert.match(rendered, /View token refresh logs/);
-    assert.equal(HOME_MENU_ITEMS.length, 10);
+    assert.match(rendered, /Manage explicit model routing and Gateway operations/);
+    assert.equal(HOME_MENU_ITEMS.length, 11);
 });
 //# sourceMappingURL=home.test.js.map

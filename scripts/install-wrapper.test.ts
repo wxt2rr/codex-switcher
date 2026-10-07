@@ -7,7 +7,7 @@ import test from "node:test";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const repoRoot = "/Users/wangxt/myspace/codex-switcher";
+const repoRoot = process.cwd();
 
 test("install.sh delegates to the node install path for windows terminal", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-install-wrapper-win-"));

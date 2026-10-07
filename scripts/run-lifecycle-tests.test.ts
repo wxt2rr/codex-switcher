@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const repoRoot = "/Users/wangxt/myspace/codex-switcher";
+const repoRoot = process.cwd();
 
 test("run-lifecycle-tests wrapper enables lifecycle tests and forwards to cross-platform suite", async () => {
   const content = await readFile(`${repoRoot}/scripts/run-lifecycle-tests.mjs`, "utf8");

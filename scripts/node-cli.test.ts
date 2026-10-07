@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -9,9 +9,12 @@ import { promisify } from "node:util";
 
 import { __internal } from "./node-cli.js";
 import { getPlatformRuntime } from "../packages/core/src/platform/runtime.js";
+import { readLegacyGatewayV2, readLegacyState, writeLegacyAuthData, writeLegacyGateway, writeLegacyGatewayV2, writeLegacyRuntime } from "../packages/core/src/state/legacy.js";
+import { migrateGatewayEnvironmentStateToV2 } from "../packages/core/src/gateway/v2.js";
+import { createUsageStore } from "../apps/desktop/electron/usage-store.js";
 
 const execFileAsync = promisify(execFile);
-const repoRoot = "/Users/wangxt/myspace/codex-switcher";
+const repoRoot = process.cwd();
 
 function getRunProxyConnectivityTest() {
   const candidate = (__internal as Record<string, unknown>).runProxyConnectivityTest;
@@ -113,6 +116,487 @@ test("node-cli delegates whoami to the TypeScript core path", async () => {
     assert.match(result.stdout, /cli: default\/personal/);
     assert.match(result.stdout, /app: default\/personal/);
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("node-cli exposes provider, route-group, agent, profile, and gateway lifecycle commands without leaking secrets", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-gateway-cli-"));
+  const stateDir = join(root, ".codex-switcher");
+  const envsDir = join(root, ".codex-envs");
+  const defaultHome = join(root, ".codex");
+  const previous = {
+    state: process.env.CODEX_SWITCHER_STATE_DIR,
+    envs: process.env.CODEX_SWITCHER_ENVS_DIR,
+    home: process.env.CODEX_SWITCHER_DEFAULT_HOME,
+  };
+  process.env.CODEX_SWITCHER_STATE_DIR = stateDir;
+  process.env.CODEX_SWITCHER_ENVS_DIR = envsDir;
+  process.env.CODEX_SWITCHER_DEFAULT_HOME = defaultHome;
+  try {
+    await mkdir(defaultHome, { recursive: true });
+    const writes: string[] = [];
+    const stdout = { write(value: string) { writes.push(value); return true; } };
+    await __internal.runNodeGatewayDomainCommand("provider", ["add", "openai", "--proxy-url", "http://127.0.0.1:7890", "--env", "default"], { stdout });
+    await __internal.runNodeGatewayDomainCommand("provider", ["login", "openai", "primary", "--secret-ref", "secure/ref", "--proxy-url", "http://127.0.0.1:7891", "--env", "default"], { stdout });
+    await __internal.runNodeGatewayDomainCommand("group", ["add", "coding", "coding-model", "--provider", "openai", "--model", "gpt-5", "--credential", "primary", "--env", "default"], { stdout });
+    await __internal.runNodeGatewayDomainCommand("group", ["rule", "add", "coding", "tools", "--env", "default"], { stdout });
+    await __internal.runNodeGatewayDomainCommand("profile", ["save", "work", "--env", "default"], { stdout });
+    const savedProfile = JSON.parse(await readFile(join(stateDir, "profiles", "work.json"), "utf8")) as { schemaVersion?: number; routeGroups?: unknown };
+    assert.equal(savedProfile.schemaVersion, 1);
+    assert.ok(savedProfile.routeGroups);
+    await writeFile(join(stateDir, "profiles", "invalid.json"), "{}\n", "utf8");
+    await assert.rejects(
+      __internal.runNodeGatewayDomainCommand("profile", ["use", "invalid", "--env", "default"], { stdout }),
+      /invalid Gateway configuration/,
+    );
+    await __internal.runNodeGatewayDomainCommand("agent", ["connect", "claude", "--model", "coding-model", "--env", "default"], { stdout });
+    const listing: string[] = [];
+    await __internal.runNodeGatewayDomainCommand("model", ["ls", "--env", "default"], { stdout: { write(value: string) { listing.push(value); return true; } } });
+    assert.match(listing.join(""), /coding-model/);
+    assert.match(writes.join(""), /provider added: openai/);
+    assert.match(writes.join(""), /credential added: primary/);
+    assert.match(writes.join(""), /agent connected: claude/);
+    assert.doesNotMatch(writes.join(""), /secure\/ref/);
+    const state = await readLegacyState({ stateDir, envsDir, defaultHome });
+    assert.equal(state.envs.default?.gateway?.providers.openai?.proxyUrl, "http://127.0.0.1:7890");
+    assert.equal(state.envs.default?.gateway?.credentials.primary?.proxyUrl, "http://127.0.0.1:7891");
+    await __internal.runNodeGatewayCommand(["mode", "manual", "--env", "default"], { stdout });
+    await __internal.runNodeGatewayCommand(["status", "--env", "default"], { stdout });
+    assert.match(writes.join(""), /gateway_mode: manual/);
+    assert.match(writes.join(""), /gateway_process: stopped/);
+    await __internal.runNodeGatewayDomainCommand("agent", ["disconnect", "claude", "--env", "default"], { stdout });
+  } finally {
+    if (previous.state === undefined) delete process.env.CODEX_SWITCHER_STATE_DIR; else process.env.CODEX_SWITCHER_STATE_DIR = previous.state;
+    if (previous.envs === undefined) delete process.env.CODEX_SWITCHER_ENVS_DIR; else process.env.CODEX_SWITCHER_ENVS_DIR = previous.envs;
+    if (previous.home === undefined) delete process.env.CODEX_SWITCHER_DEFAULT_HOME; else process.env.CODEX_SWITCHER_DEFAULT_HOME = previous.home;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("node-cli covers the complete explicit Gateway domain command contract", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-gateway-domain-contract-"));
+  const stateDir = join(root, ".codex-switcher");
+  const envsDir = join(root, ".codex-envs");
+  const defaultHome = join(root, ".codex");
+  const previous = {
+    state: process.env.CODEX_SWITCHER_STATE_DIR,
+    envs: process.env.CODEX_SWITCHER_ENVS_DIR,
+    home: process.env.CODEX_SWITCHER_DEFAULT_HOME,
+  };
+  process.env.CODEX_SWITCHER_STATE_DIR = stateDir;
+  process.env.CODEX_SWITCHER_ENVS_DIR = envsDir;
+  process.env.CODEX_SWITCHER_DEFAULT_HOME = defaultHome;
+
+  try {
+    await mkdir(defaultHome, { recursive: true });
+    await mkdir(join(defaultHome, ".codex"), { recursive: true });
+    await writeFile(join(defaultHome, ".codex", "config.toml"), 'model = "gpt-5"\nmodel_reasoning_effort = "high"\nopenai_base_url = "https://import.example/v1/"\nOPENAI_API_KEY = "sk-never-import"\n', "utf8");
+    const runDomain = async (command: "provider" | "agent" | "group" | "model" | "usage" | "profile", args: string[]) => {
+      const writes: string[] = [];
+      const code = await __internal.runNodeGatewayDomainCommand(command, [...args, "--env", "default"], {
+        stdout: { write(value: string) { writes.push(value); return true; } },
+      });
+      assert.equal(code, 0, `${command} ${args.join(" ")} should succeed`);
+      return writes.join("");
+    };
+
+    const importedPreview = await runDomain("agent", ["import", "codex", "--dry-run"]);
+    assert.match(importedPreview, /"model":"gpt-5"/);
+    assert.match(importedPreview, /"reasoningProfile":"high"/);
+    assert.match(importedPreview, /https:\/\/import\.example\/v1/);
+    assert.doesNotMatch(importedPreview, /sk-never-import/);
+    assert.match(await runDomain("agent", ["import", "codex"]), /agent imported: codex -> gpt-5/);
+
+    assert.match(await runDomain("provider", ["add", "openai"]), /provider added: openai/);
+    assert.match(await runDomain("provider", ["login", "openai", "--begin"]), /authorizationUrl/);
+    assert.match(await runDomain("provider", ["login", "openai", "primary", "--secret-ref", "secure\/ref"]), /credential added: primary/);
+    assert.match(await runDomain("provider", ["ls"]), /openai/);
+    assert.match(await runDomain("provider", ["models", "openai"]), /openai:gpt-5/);
+    assert.match(await runDomain("provider", ["quota", "openai"]), /windowMinutes/);
+    assert.match(await runDomain("provider", ["refresh", "openai"]), /credentials refreshed: 1/);
+
+    await runDomain("group", ["add", "coding", "coding-model", "--provider", "openai", "--model", "gpt-5", "--credential", "primary"]);
+    await runDomain("group", ["set", "coding", "--strategy", "weight", "--session", "session", "--fallback", "off"]);
+    await runDomain("group", ["rule", "add", "coding", "vision"]);
+    await runDomain("group", ["rule", "rm", "coding", "vision"]);
+    assert.match(await runDomain("group", ["ls"]), /coding\tcoding-model\tweight/);
+
+    const state = await readLegacyState({ stateDir, envsDir, defaultHome });
+    const gateway = state.envs.default?.gateway;
+    const importedBinding = await readLegacyGatewayV2({ stateDir, envName: "default" });
+    assert.equal(importedBinding?.agentBindings.codex?.reasoningProfile, "high");
+    assert.ok(gateway);
+    gateway.models["openai/gpt-5"] = {
+      id: "openai/gpt-5",
+      providerId: "openai",
+      upstreamModelId: "gpt-5",
+      displayName: "GPT-5",
+      protocols: ["responses", "chat_completions"],
+      capabilities: { streaming: true, tools: true },
+      enabled: true,
+    };
+    await writeLegacyGateway({ stateDir, envName: "default", gateway });
+    assert.match(await runDomain("model", ["ls"]), /openai\/gpt-5/);
+    assert.match(await runDomain("model", ["inspect", "gpt-5"]), /"upstreamModelId": "gpt-5"/);
+
+    assert.match(await runDomain("agent", ["ls"]), /claude/);
+    assert.match(await runDomain("agent", ["connect", "claude", "--model", "coding-model"]), /agent connected: claude/);
+    assert.match(await runDomain("agent", ["doctor", "claude"]), /state: clean/);
+    assert.match(await runDomain("agent", ["use", "claude", "coding-model"]), /agent default model: claude/);
+    assert.match(await runDomain("agent", ["default", "claude", "--model", "coding-model"]), /agent default model: claude/);
+
+    for (const window of ["today", "7d", "30d", "all"]) {
+      const summary = JSON.parse(await runDomain("usage", [window])) as { window?: string };
+      assert.equal(summary.window, window);
+    }
+
+    assert.match(await runDomain("profile", ["save", "contract"]), /profile saved: contract/);
+    assert.match(await runDomain("profile", ["ls"]), /contract/);
+    assert.match(await runDomain("profile", ["use", "contract"]), /profile applied: contract/);
+    assert.match(await runDomain("profile", ["rm", "contract"]), /profile removed: contract/);
+
+    const gatewayWrites: string[] = [];
+    await __internal.runNodeGatewayCommand(["routes", "--env", "default"], { stdout: { write(value: string) { gatewayWrites.push(value); return true; } } });
+    assert.match(gatewayWrites.join(""), /coding-model/);
+    await __internal.runNodeGatewayCommand(["mode", "gateway", "--env", "default"], { stdout: { write(value: string) { gatewayWrites.push(value); return true; } } });
+    assert.match(gatewayWrites.join(""), /gateway mode: routing/);
+    await __internal.runNodeGatewayCommand(["mode", "manual", "--env", "default"], { stdout: { write(value: string) { gatewayWrites.push(value); return true; } } });
+    assert.match(gatewayWrites.join(""), /gateway mode: manual/);
+
+    assert.match(await runDomain("agent", ["disconnect", "claude"]), /agent disconnected: claude/);
+    assert.match(await runDomain("group", ["rm", "coding"]), /group removed: coding/);
+    assert.match(await runDomain("provider", ["logout", "openai", "primary"]), /credential removed: primary/);
+  } finally {
+    if (previous.state === undefined) delete process.env.CODEX_SWITCHER_STATE_DIR; else process.env.CODEX_SWITCHER_STATE_DIR = previous.state;
+    if (previous.envs === undefined) delete process.env.CODEX_SWITCHER_ENVS_DIR; else process.env.CODEX_SWITCHER_ENVS_DIR = previous.envs;
+    if (previous.home === undefined) delete process.env.CODEX_SWITCHER_DEFAULT_HOME; else process.env.CODEX_SWITCHER_DEFAULT_HOME = previous.home;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("node-cli usage reads the persistent router ledger before the legacy JSON fallback", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-gateway-usage-cli-"));
+  const stateDir = join(root, ".codex-switcher");
+  const envsDir = join(root, ".codex-envs");
+  const defaultHome = join(root, ".codex");
+  const previous = {
+    state: process.env.CODEX_SWITCHER_STATE_DIR,
+    envs: process.env.CODEX_SWITCHER_ENVS_DIR,
+    home: process.env.CODEX_SWITCHER_DEFAULT_HOME,
+  };
+  process.env.CODEX_SWITCHER_STATE_DIR = stateDir;
+  process.env.CODEX_SWITCHER_ENVS_DIR = envsDir;
+  process.env.CODEX_SWITCHER_DEFAULT_HOME = defaultHome;
+  try {
+    await mkdir(defaultHome, { recursive: true });
+    const store = await createUsageStore(join(stateDir, "usage-router", "usage.db"));
+    await store.recordUsage({
+      requestId: "cli-usage-request", routeId: "route-a", startedAt: 1_000, completedAt: 2_000,
+      envName: "default", accountName: "primary", upstreamBaseUrl: "https://api.example.com/v1",
+      endpoint: "/responses", model: "gpt-5", inputTokens: 10, outputTokens: 5,
+      cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 15, httpStatus: 200,
+      latencyMs: 1_000, actualCost: 0.25, standardCost: 0.3,
+    });
+    await store.close();
+    const writes: string[] = [];
+    await __internal.runNodeGatewayDomainCommand("usage", ["all", "--env", "default"], { stdout: { write(value: string) { writes.push(value); return true; } } });
+    const summary = JSON.parse(writes.join("")) as { requests: number; inputTokens: number; outputTokens: number; cost: number };
+    assert.equal(summary.requests, 1);
+    assert.equal(summary.inputTokens, 10);
+    assert.equal(summary.outputTokens, 5);
+    assert.equal(summary.cost, 0.25);
+  } finally {
+    if (previous.state === undefined) delete process.env.CODEX_SWITCHER_STATE_DIR; else process.env.CODEX_SWITCHER_STATE_DIR = previous.state;
+    if (previous.envs === undefined) delete process.env.CODEX_SWITCHER_ENVS_DIR; else process.env.CODEX_SWITCHER_ENVS_DIR = previous.envs;
+    if (previous.home === undefined) delete process.env.CODEX_SWITCHER_DEFAULT_HOME; else process.env.CODEX_SWITCHER_DEFAULT_HOME = previous.home;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("provider models --discover uses the existing credential reference and returns only model metadata", async () => {
+  const environment = {
+    name: "default",
+    path: "/tmp/codex-default",
+    accounts: {
+      primary: {
+        name: "primary",
+        authMode: "apikey" as const,
+        authData: { OPENAI_API_KEY: "secret-not-output" },
+        runtime: { preferredAuthMethod: "apikey" as const, openaiBaseUrlMode: "default" as const },
+      },
+    },
+    gateway: {
+      schemaVersion: 1 as const,
+      mode: "gateway" as const,
+      gatewayId: "gateway-default",
+      providers: { openai: { id: "openai", displayName: "OpenAI", kind: "openai" as const, endpoints: { responses: "https://api.openai.com/v1" }, modelDiscovery: "models_endpoint" as const, enabled: true } },
+      credentials: { primary: { id: "primary", providerId: "openai", displayName: "primary", kind: "api_key" as const, secretRef: "account:default:primary", supportedProtocols: ["responses" as const], status: "active" as const } },
+      models: {}, routeGroups: {}, catalogVersion: 0,
+    },
+  };
+  const result = await __internal.discoverGatewayProviderModels({
+    environment: environment as never,
+    envName: "default",
+    gateway: environment.gateway,
+    providerId: "openai",
+    fetchImpl: async (_url, init) => {
+      assert.equal(new Headers(init?.headers).get("authorization"), "Bearer secret-not-output");
+      return new Response(JSON.stringify({ data: [{ id: "gpt-discovered" }] }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+  assert.equal(result.credentialsUsed, 1);
+  assert.ok(result.models.some((model) => model.id === "openai/gpt-discovered"));
+  assert.doesNotMatch(JSON.stringify(result), /secret-not-output/);
+});
+
+test("provider lifecycle stores protected credentials and exercises live refresh, quota, and revoke", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-provider-lifecycle-"));
+  const stateDir = join(root, ".codex-switcher");
+  const envsDir = join(root, ".codex-envs");
+  const defaultHome = join(root, ".codex");
+  const previous = {
+    state: process.env.CODEX_SWITCHER_STATE_DIR,
+    envs: process.env.CODEX_SWITCHER_ENVS_DIR,
+    home: process.env.CODEX_SWITCHER_DEFAULT_HOME,
+    secret: process.env.CODEX_TEST_PROVIDER_SECRET,
+  };
+  process.env.CODEX_SWITCHER_STATE_DIR = stateDir;
+  process.env.CODEX_SWITCHER_ENVS_DIR = envsDir;
+  process.env.CODEX_SWITCHER_DEFAULT_HOME = defaultHome;
+  process.env.CODEX_TEST_PROVIDER_SECRET = "access-from-protected-env";
+  try {
+    await mkdir(defaultHome, { recursive: true });
+    await writeLegacyRuntime({
+      stateDir,
+      envName: "default",
+      accountName: "primary",
+      runtime: { preferredAuthMethod: "chatgpt", openaiBaseUrlMode: "default" },
+    });
+    await writeLegacyAuthData({
+      stateDir,
+      envName: "default",
+      accountName: "primary",
+      authData: { tokens: { access_token: "old-access", refresh_token: "old-refresh" } },
+    });
+
+    const writes: string[] = [];
+    const stdout = { write(value: string) { writes.push(value); return true; } };
+    await __internal.runNodeGatewayDomainCommand("provider", ["add", "gemini", "--env", "default"], { stdout });
+    await __internal.runNodeGatewayDomainCommand(
+      "provider",
+      ["login", "gemini", "primary", "--account", "primary", "--kind", "oauth", "--secret-env", "CODEX_TEST_PROVIDER_SECRET", "--env", "default"],
+      { stdout },
+    );
+
+    const gatewayPath = join(stateDir, "env-gateways", "default.json");
+    const authPath = join(stateDir, "env-accounts", "default", "primary", "auth.json");
+    const gatewayAfterLogin = JSON.parse(await readFile(gatewayPath, "utf8")) as { credentials: Record<string, { secretRef: string; kind: string }> };
+    assert.equal(gatewayAfterLogin.credentials.primary?.kind, "oauth");
+    assert.equal(gatewayAfterLogin.credentials.primary?.secretRef, "account:default:primary");
+    assert.equal(JSON.parse(await readFile(authPath, "utf8")).tokens.access_token, "access-from-protected-env");
+    assert.doesNotMatch(writes.join(""), /access-from-protected-env/);
+
+    const quotaCalls: Array<{ url: string; method: string; key: string | null }> = [];
+    await __internal.runNodeGatewayDomainCommand("provider", ["quota", "gemini", "--live", "--env", "default"], {
+      stdout,
+      fetch: async (url, init) => {
+        quotaCalls.push({ url, method: init?.method ?? "GET", key: new Headers(init?.headers).get("x-goog-api-key") });
+        return new Response(JSON.stringify({ requests_remaining: 7, reset_at: 123, plan: "test" }), { status: 200 });
+      },
+    });
+    assert.equal(quotaCalls.length, 1);
+    assert.equal(quotaCalls[0]?.method, "GET");
+    assert.equal(quotaCalls[0]?.key, "access-from-protected-env");
+    assert.match(writes.at(-1) ?? "", /requestsRemaining/);
+
+    const refreshCalls: Array<{ url: string; body: string }> = [];
+    await __internal.runNodeGatewayDomainCommand("provider", ["refresh", "gemini", "--live", "--env", "default"], {
+      stdout,
+      fetch: async (url, init) => {
+        refreshCalls.push({ url, body: String(init?.body ?? "") });
+        return new Response(JSON.stringify({ access_token: "refreshed-access", refresh_token: "refreshed-refresh", expires_in: 3600 }), { status: 200 });
+      },
+    });
+    assert.equal(refreshCalls.length, 1);
+    assert.match(refreshCalls[0]?.url ?? "", /oauth\/token$/);
+    assert.match(refreshCalls[0]?.body ?? "", /refresh_token=old-refresh/);
+    const refreshedAuth = JSON.parse(await readFile(authPath, "utf8")) as { tokens: { access_token: string; refresh_token: string } };
+    assert.equal(refreshedAuth.tokens.access_token, "refreshed-access");
+    assert.equal(refreshedAuth.tokens.refresh_token, "refreshed-refresh");
+
+    const revokeCalls: Array<{ url: string; body: string; key: string | null }> = [];
+    await __internal.runNodeGatewayDomainCommand("provider", ["logout", "gemini", "primary", "--live", "--env", "default"], {
+      stdout,
+      fetch: async (url, init) => {
+        revokeCalls.push({ url, body: String(init?.body ?? ""), key: new Headers(init?.headers).get("x-goog-api-key") });
+        return new Response("{}", { status: 200 });
+      },
+    });
+    assert.equal(revokeCalls.length, 1);
+    assert.match(revokeCalls[0]?.url ?? "", /oauth\/revoke$/);
+    assert.match(revokeCalls[0]?.body ?? "", /token=refreshed-access/);
+    assert.equal(revokeCalls[0]?.key, "refreshed-access");
+    const gatewayAfterLogout = JSON.parse(await readFile(gatewayPath, "utf8")) as { credentials: Record<string, unknown> };
+    assert.equal(gatewayAfterLogout.credentials.primary, undefined);
+  } finally {
+    if (previous.state === undefined) delete process.env.CODEX_SWITCHER_STATE_DIR; else process.env.CODEX_SWITCHER_STATE_DIR = previous.state;
+    if (previous.envs === undefined) delete process.env.CODEX_SWITCHER_ENVS_DIR; else process.env.CODEX_SWITCHER_ENVS_DIR = previous.envs;
+    if (previous.home === undefined) delete process.env.CODEX_SWITCHER_DEFAULT_HOME; else process.env.CODEX_SWITCHER_DEFAULT_HOME = previous.home;
+    if (previous.secret === undefined) delete process.env.CODEX_TEST_PROVIDER_SECRET; else process.env.CODEX_TEST_PROVIDER_SECRET = previous.secret;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("node-cli imports external gateway metadata with a dry-run preview and a recoverable write", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-external-gateway-import-"));
+  const stateDir = join(root, ".codex-switcher");
+  const envsDir = join(root, ".codex-envs");
+  const defaultHome = join(root, ".codex");
+  const sourcePath = join(root, "providers.json");
+  const previous = { state: process.env.CODEX_SWITCHER_STATE_DIR, envs: process.env.CODEX_SWITCHER_ENVS_DIR, home: process.env.CODEX_SWITCHER_DEFAULT_HOME };
+  process.env.CODEX_SWITCHER_STATE_DIR = stateDir;
+  process.env.CODEX_SWITCHER_ENVS_DIR = envsDir;
+  process.env.CODEX_SWITCHER_DEFAULT_HOME = defaultHome;
+  try {
+    await mkdir(defaultHome, { recursive: true });
+    await writeFile(sourcePath, JSON.stringify({ providers: [{ id: "relay", name: "Relay", responses: "https://relay.example/v1", key: "sk-never-persist", models: ["gpt-5"] }], groups: [{ id: "coding", members: ["relay/gpt-5"], routing: "rotate" }], agents: [{ id: "codex", model: "group/coding" }] }), "utf8");
+    const writes: string[] = [];
+    const stdout = { write(value: string) { writes.push(value); return true; } };
+    await __internal.runNodeGatewayCommand(["import", sourcePath, "--dry-run", "--env", "default"], { stdout });
+    assert.match(writes.join(""), /\"sourceFormat\":\"provider_gateway\"/);
+    assert.match(writes.join(""), /\"agents\":1/);
+    await __internal.runNodeGatewayCommand(["import", sourcePath, "--env", "default"], { stdout });
+    const gateway = JSON.parse(await readFile(join(stateDir, "env-gateways", "default.json"), "utf8")) as { mode: string; routeGroups: Record<string, unknown> };
+    assert.equal(gateway.mode, "direct");
+    assert.ok(gateway.routeGroups.coding);
+    assert.doesNotMatch(await readFile(join(stateDir, "env-gateways", "default.json"), "utf8"), /sk-never-persist/);
+  } finally {
+    if (previous.state === undefined) delete process.env.CODEX_SWITCHER_STATE_DIR; else process.env.CODEX_SWITCHER_STATE_DIR = previous.state;
+    if (previous.envs === undefined) delete process.env.CODEX_SWITCHER_ENVS_DIR; else process.env.CODEX_SWITCHER_ENVS_DIR = previous.envs;
+    if (previous.home === undefined) delete process.env.CODEX_SWITCHER_DEFAULT_HOME; else process.env.CODEX_SWITCHER_DEFAULT_HOME = previous.home;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("gateway import clears stale v2 agent bindings when the new source has none", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-gateway-import-v2-cleanup-"));
+  const stateDir = join(root, ".codex-switcher");
+  const envsDir = join(root, ".codex-envs");
+  const defaultHome = join(root, ".codex");
+  const sourcePath = join(root, "gateway.json");
+  const previous = { state: process.env.CODEX_SWITCHER_STATE_DIR, envs: process.env.CODEX_SWITCHER_ENVS_DIR, home: process.env.CODEX_SWITCHER_DEFAULT_HOME };
+  process.env.CODEX_SWITCHER_STATE_DIR = stateDir;
+  process.env.CODEX_SWITCHER_ENVS_DIR = envsDir;
+  process.env.CODEX_SWITCHER_DEFAULT_HOME = defaultHome;
+  try {
+    await mkdir(defaultHome, { recursive: true });
+    const gateway = {
+      schemaVersion: 1 as const, mode: "direct" as const, gatewayId: "gateway-default",
+      providers: {}, credentials: {}, models: {}, routeGroups: {}, catalogVersion: 1,
+    };
+    const persisted = migrateGatewayEnvironmentStateToV2(gateway, "default");
+    await writeLegacyGatewayV2({
+      stateDir,
+      envName: "default",
+      gateway: { ...persisted, agentBindings: { claude: { agentId: "claude", displayName: "Claude Code", gatewayId: gateway.gatewayId, defaultModelId: "gpt-5", originalConfigRef: "snapshot/claude", enabled: true } } },
+    });
+    await writeFile(sourcePath, JSON.stringify({ providers: [], models: [], groups: [] }), "utf8");
+    await __internal.runNodeGatewayCommand(["import", sourcePath, "--env", "default"], { stdout: { write() { return true; } } });
+    const restored = await readLegacyGatewayV2({ stateDir, envName: "default" });
+    assert.deepEqual(restored?.agentBindings ?? {}, {});
+  } finally {
+    if (previous.state === undefined) delete process.env.CODEX_SWITCHER_STATE_DIR; else process.env.CODEX_SWITCHER_STATE_DIR = previous.state;
+    if (previous.envs === undefined) delete process.env.CODEX_SWITCHER_ENVS_DIR; else process.env.CODEX_SWITCHER_ENVS_DIR = previous.envs;
+    if (previous.home === undefined) delete process.env.CODEX_SWITCHER_DEFAULT_HOME; else process.env.CODEX_SWITCHER_DEFAULT_HOME = previous.home;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("node-cli gateway start configures the real local router and stop restores manual URLs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-gateway-cli-runtime-"));
+  const stateDir = join(root, ".codex-switcher");
+  const envsDir = join(root, ".codex-envs");
+  const defaultHome = join(root, ".codex");
+  const accountDir = join(stateDir, "env-accounts", "default", "primary");
+  const previous = {
+    state: process.env.CODEX_SWITCHER_STATE_DIR,
+    envs: process.env.CODEX_SWITCHER_ENVS_DIR,
+    home: process.env.CODEX_SWITCHER_DEFAULT_HOME,
+  };
+  process.env.CODEX_SWITCHER_STATE_DIR = stateDir;
+  process.env.CODEX_SWITCHER_ENVS_DIR = envsDir;
+  process.env.CODEX_SWITCHER_DEFAULT_HOME = defaultHome;
+  try {
+    await mkdir(accountDir, { recursive: true });
+    await mkdir(defaultHome, { recursive: true });
+    await writeFile(join(stateDir, "current_cli_env"), "default\n", "utf8");
+    await writeFile(join(stateDir, "current_cli_account"), "primary\n", "utf8");
+    await writeFile(join(stateDir, "current_app_env"), "default\n", "utf8");
+    await writeFile(join(stateDir, "current_app_account"), "primary\n", "utf8");
+    await writeFile(join(accountDir, "runtime.json"), JSON.stringify({
+      preferred_auth_method: "apikey",
+      openai_base_url_mode: "default",
+      provider_id: "openai",
+      compatibility_upstream_model: "gpt-5",
+    }), "utf8");
+    await writeFile(join(accountDir, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-runtime-test" }), "utf8");
+    await writeLegacyGateway({
+      stateDir,
+      envName: "default",
+      gateway: {
+        schemaVersion: 1,
+        mode: "direct",
+        gatewayId: "gateway-default",
+        providers: { openai: { id: "openai", displayName: "OpenAI", kind: "openai", endpoints: { responses: "https://api.openai.com/v1" }, modelDiscovery: "manual", enabled: true } },
+        credentials: { "credential:default:primary": { id: "credential:default:primary", providerId: "openai", displayName: "primary", kind: "api_key", secretRef: "account:default:primary", supportedProtocols: ["responses"], status: "active" } },
+        models: {
+          "openai/gpt-5": { id: "openai/gpt-5", providerId: "openai", upstreamModelId: "gpt-5", displayName: "gpt-5", protocols: ["responses"], capabilities: {}, enabled: true },
+          "openai/gpt-vision": { id: "openai/gpt-vision", providerId: "openai", upstreamModelId: "gpt-vision", displayName: "gpt-vision", protocols: ["responses"], capabilities: { vision: true }, enabled: true },
+        },
+        routeGroups: {
+          coding: { id: "coding", displayName: "Coding", exposedModelId: "coding", members: [{ providerId: "openai", modelId: "openai/gpt-5", credentialSelector: { credentialIds: ["credential:default:primary"] }, priority: 0, weight: 1 }], strategy: "order", sessionPolicy: "off", fallbackEnabled: true },
+          vision: { id: "vision", displayName: "Vision", exposedModelId: "vision", members: [{ providerId: "openai", modelId: "openai/gpt-vision", credentialSelector: { credentialIds: ["credential:default:primary"] }, priority: 0, weight: 1 }], strategy: "order", sessionPolicy: "off", fallbackEnabled: true, capabilities: { vision: true } },
+        },
+        routeRules: [{ id: "images-to-vision", targetModelId: "vision", priority: 0, enabled: true, match: { hasImages: true } }],
+        catalogVersion: 1,
+      },
+    });
+    const writes: string[] = [];
+    const stdout = { write(value: string) { writes.push(value); return true; } };
+
+    await __internal.runNodeGatewayCommand(["start", "--env", "default"], { stdout });
+    assert.match(writes.join(""), /gateway started: default/);
+    const marker = JSON.parse(await readFile(join(stateDir, "gateway", "default.json"), "utf8")) as { pid?: number; port?: number };
+    assert.deepEqual(await readdir(join(stateDir, "gateway")), ["default.json"]);
+    assert.equal(typeof marker.pid, "number");
+    assert.equal(typeof marker.port, "number");
+    assert.ok((marker.port ?? 0) > 0);
+    const manager = new (await import("../apps/desktop/electron/usage-router-manager.js")).UsageRouterManager({
+      stateDir,
+      serviceEntryPath: join(process.cwd(), "apps", "desktop", "electron-dist", "electron", "usage-router-service-main.cjs"),
+    });
+    const persistedGateway = (await manager.listPersistedEnvironmentGateways()).find((item) => item.envName === "default");
+    assert.equal(persistedGateway?.routeRules?.[0]?.targetModelId, "vision");
+    const persistedRoutes = await manager.listPersistedRoutes();
+    assert.ok(persistedRoutes.some((route) => route.exposedModelId === "vision"));
+    const routedRuntime = JSON.parse(await readFile(join(accountDir, "runtime.json"), "utf8")) as { openai_base_url?: string };
+    assert.match(routedRuntime.openai_base_url ?? "", /^http:\/\/127\.0\.0\.1:\d+\/gateways\//);
+
+    await __internal.runNodeGatewayCommand(["stop", "--env", "default"], { stdout });
+    assert.match(writes.join(""), /gateway stopped: default/);
+    const restored = JSON.parse(await readFile(join(accountDir, "runtime.json"), "utf8")) as { openai_base_url_mode?: string; openai_base_url?: string };
+    assert.equal(restored.openai_base_url_mode, "default");
+    assert.equal(restored.openai_base_url, "");
+  } finally {
+    const { UsageRouterManager } = await import("../apps/desktop/electron/usage-router-manager.js");
+    await new UsageRouterManager({
+      stateDir,
+      serviceEntryPath: join(process.cwd(), "apps", "desktop", "electron-dist", "electron", "usage-router-service-main.cjs"),
+    }).stopService().catch(() => undefined);
+    if (previous.state === undefined) delete process.env.CODEX_SWITCHER_STATE_DIR; else process.env.CODEX_SWITCHER_STATE_DIR = previous.state;
+    if (previous.envs === undefined) delete process.env.CODEX_SWITCHER_ENVS_DIR; else process.env.CODEX_SWITCHER_ENVS_DIR = previous.envs;
+    if (previous.home === undefined) delete process.env.CODEX_SWITCHER_DEFAULT_HOME; else process.env.CODEX_SWITCHER_DEFAULT_HOME = previous.home;
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -2603,7 +3087,54 @@ test("node-cli tui renders the home screen in non-interactive mode", async () =>
   assert.match(result.stdout, /7\.\s+Setup/);
   assert.match(result.stdout, /8\.\s+Refresh/);
   assert.match(result.stdout, /9\.\s+Logs/);
-  assert.match(result.stdout, /10\.\s+Quit/);
+  assert.match(result.stdout, /10\.\s+Gateway/);
+  assert.match(result.stdout, /11\.\s+Quit/);
+});
+
+test("runNodeTuiWithDeps opens the Gateway operations page", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-node-cli-gateway-tui-"));
+  const writes: string[] = [];
+  const keys = ["digit:10", "quit", "quit"] as const;
+  let keyIndex = 0;
+  try {
+    await (__internal as Record<string, unknown>).runNodeTuiWithDeps({
+      terminal: {
+        isInteractive: true,
+        colorEnabled: false,
+        columns: 100,
+        rows: 30,
+        enter() {},
+        leave() {},
+        clear() {},
+        async readKey() {
+          return keys[keyIndex++] ?? "quit";
+        },
+      },
+      env: {
+        ...process.env,
+        CODEX_SWITCHER_STATE_DIR: join(root, "state"),
+        CODEX_SWITCHER_ENVS_DIR: join(root, "envs"),
+        CODEX_SWITCHER_DEFAULT_HOME: join(root, "default-home"),
+      },
+      stdout: {
+        write(chunk: string) {
+          writes.push(chunk);
+          return true;
+        },
+      } as NodeJS.WriteStream,
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+
+  const output = writes.join("");
+  assert.match(output, /codex-sw-node - Gateway/);
+  assert.match(output, /Mode: Manual account switching/);
+  assert.match(output, /Toggle Mode/);
+  assert.match(output, /Providers/);
+  assert.match(output, /Route Groups/);
+  assert.match(output, /Usage/);
+  assert.match(output, /Usage \(today\): 0 requests/);
 });
 
 test("runNodeTuiWithDeps opens setup and initializes codex-sw for windows terminal", async () => {

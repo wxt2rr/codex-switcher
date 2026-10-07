@@ -77,6 +77,29 @@ Use the PowerShell commands above when you are validating from packaged contents
 - [ ] `Refresh` runs one token-refresh scan
 - [ ] `Logs` opens the token-refresh log view and `q` / `Esc` returns to home
 
+## Gateway and plugin isolation
+
+- [ ] `npm run desktop:build` produces `apps/desktop/resources/native/windows/codex-switcher-plugin-sandbox.exe`
+- [ ] Run the Windows AppContainer smoke runner for both default-deny and explicit filesystem capability cases:
+
+```powershell
+$launcher = (Resolve-Path .\apps\desktop\resources\native\windows\codex-switcher-plugin-sandbox.exe).Path
+$env:CODEX_SWITCHER_EVIDENCE_OUT = (Join-Path (Get-Location) "windows-sandbox.json")
+node .\scripts\windows-plugin-sandbox-smoke.cjs --launcher $launcher --node ((Get-Command node.exe).Source)
+node .\scripts\verify-sandbox-evidence.mjs .\windows-sandbox.json
+```
+
+- [ ] Evidence reports `writeDenied`, `homeReadDenied`, `networkDenied`, `markerAbsent`, and `filesystemWriteGranted` as `true`
+- [ ] Confirm a plugin without `network` cannot reach an external endpoint and a plugin with only `filesystem` can write only inside its plugin directory
+
+## Packaging and update recovery
+
+- [ ] `npm run desktop:package:win` creates the Windows installer and packaged AppContainer helper
+- [ ] Run `npm run package:verify --workspace apps/desktop -- <installer-path>` and record the result
+- [ ] On a tagged release, `Get-AuthenticodeSignature <installer-path>` reports `Valid`
+- [ ] `codex-sw upgrade --dry-run` accepts only a newer, platform-matching, signature-verified manifest
+- [ ] Simulate a failed upgraded boot and confirm the previous installation is restored and the rollback journal is cleared after a healthy restart
+
 ## Recovery and integrity
 
 - [ ] Corrupt a pointer file manually and run `codex-sw ops recover`

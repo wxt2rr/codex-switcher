@@ -1,0 +1,49 @@
+export const GATEWAY_TUI_ACTIONS = [
+    { id: "toggle-mode", title: "Toggle Mode", description: "Switch between manual account mode and Gateway routing" },
+    { id: "start-stop", title: "Start/Stop", description: "Start or stop the local environment Gateway" },
+    { id: "providers", title: "Providers", description: "List configured Provider sources and credentials" },
+    { id: "models", title: "Models", description: "List logical and upstream model bindings" },
+    { id: "groups", title: "Route Groups", description: "List explicit model RouteGroups and strategies" },
+    { id: "agents", title: "Agents", description: "List Agent Gateway bindings and connection state" },
+    { id: "usage", title: "Usage", description: "Show today's Gateway requests, tokens, and cost" },
+    { id: "profiles", title: "Profiles", description: "List saved Gateway configuration profiles" },
+    { id: "refresh", title: "Refresh", description: "Reload the current environment snapshot" },
+    { id: "back", title: "Back", description: "Return to the main TUI" },
+];
+export function renderGatewayScreen(input) {
+    const selected = input.selected ?? 0;
+    const { snapshot } = input;
+    const lines = [
+        "codex-sw-node - Gateway",
+        "",
+        `Environment: ${snapshot.envName}`,
+        `Mode: ${snapshot.mode === "gateway" ? "Gateway routing" : "Manual account switching"}`,
+        `Process: ${snapshot.process}`,
+        `Gateway: ${snapshot.gatewayId}`,
+        `Providers: ${snapshot.providers.length}  Credentials: ${snapshot.credentials.length}`,
+        `Models: ${snapshot.models.length}  RouteGroups: ${snapshot.routeGroups.length}  Agents: ${snapshot.agents.filter((agent) => agent.status === "connected").length}/${snapshot.agents.length}`,
+        `Profiles: ${snapshot.profiles.length}`,
+        `Usage (today): ${snapshot.usage.requests} requests  ${snapshot.usage.inputTokens + snapshot.usage.outputTokens} tokens  cost=${snapshot.usage.cost === null ? "n/a" : snapshot.usage.cost}`,
+        "",
+    ];
+    if (snapshot.providers.length > 0) {
+        lines.push(`Provider sources: ${snapshot.providers.map((provider) => `${provider.id}(${provider.status})`).join(", ")}`);
+        lines.push("");
+    }
+    if (snapshot.routeGroups.length > 0) {
+        lines.push("RouteGroups:");
+        for (const group of snapshot.routeGroups) {
+            lines.push(`- ${group.id}: ${group.exposedModelId} / ${group.strategy} / ${group.sessionPolicy} / ${group.members} members`);
+        }
+        lines.push("");
+    }
+    if (input.message)
+        lines.push(input.message, "");
+    for (const [index, action] of GATEWAY_TUI_ACTIONS.entries()) {
+        const marker = index === selected ? ">" : " ";
+        lines.push(`${marker} ${action.title.padEnd(14, " ")} ${action.description}`);
+    }
+    lines.push("", "Up/Down move  Enter select  Esc/q back", "");
+    return lines.join("\n");
+}
+//# sourceMappingURL=gateway.js.map

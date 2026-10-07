@@ -14,12 +14,13 @@ import {
   ListPageHeader,
   ListStack,
 } from "../components/account-list-primitives";
-import { Field, Input, Select } from "../components/form-primitives";
-import { ConfirmDialog } from "../components/admin-primitives";
+import { Field, Input, Select, Textarea } from "../components/form-primitives";
+import { ConfirmDialog, SidePanel } from "../components/admin-primitives";
 import { getDesktopCopy } from "../desktop-copy";
 import { localizeLogKind } from "../desktop-utils";
 import type { UiLanguage } from "../i18n";
-import type { AppEnvironmentBadgeStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, RouterLifecycleSettings, RouterPortSettings } from "../bridge";
+import { GatewayAdminStructuredEditor } from "./gateway-admin-editor";
+import type { AppEnvironmentBadgeStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, DesktopAutoUpdateStatus, EnvHistoryRetentionSettings, GatewayAdminConfiguration, GatewayAdminEnvironment, GeneratedImageRecoveryStatus, LaunchAtLoginStatus, ProviderPluginInstallRequest, ProviderPluginMarketEntry, ProviderPluginSnapshot, RouterLifecycleSettings, RouterPortSettings, SaveGatewayAdminConfigurationRequest } from "../bridge";
 
 function pageTitle(language: UiLanguage) {
   if (language === "zh") return "设置";
@@ -62,6 +63,7 @@ export function OperationsPage({
   busy,
   proxyDraft,
   logKind,
+  logContent,
   onProxyDraftChange,
   onLogKindChange,
   onProxyAutoDetect,
@@ -85,6 +87,9 @@ export function OperationsPage({
   routerPort,
   routerPortSaving,
   onRouterPortChange,
+  launchAtLogin,
+  launchAtLoginSaving,
+  onLaunchAtLoginChange,
   envHistoryRetention,
   envHistoryRetentionSaving,
   onEnvHistoryRetentionChange,
@@ -95,6 +100,22 @@ export function OperationsPage({
   appEnvironmentBadgesSaving,
   onAppEnvironmentBadgesChange,
   onRequestAppEnvironmentBadgePermission,
+  gatewayAdminSnapshot,
+  providerPlugins,
+  providerPluginMarket,
+  onInstallProviderPlugin,
+  onRefreshProviderPluginMarket,
+  onInstallProviderPluginFromMarket,
+  onDeactivateProviderPlugin,
+  onRollbackProviderPlugin,
+  onRemoveProviderPlugin,
+  autoUpdateStatus,
+  onCheckForAutoUpdate,
+  onInstallDownloadedUpdate,
+  loadGatewayAdminConfiguration,
+  saveGatewayAdminConfiguration,
+  onGatewayConfigurationSaved,
+  onDiscoverGatewayModels,
 }: {
   language: UiLanguage;
   languageOptions: Array<{ value: UiLanguage; label: string }>;
@@ -102,6 +123,7 @@ export function OperationsPage({
   busy: boolean;
   proxyDraft: string;
   logKind: string;
+  logContent: string;
   onProxyDraftChange: (value: string) => void;
   onLogKindChange: (value: string) => void;
   onProxyAutoDetect: () => void;
@@ -125,6 +147,9 @@ export function OperationsPage({
   routerPort: RouterPortSettings;
   routerPortSaving: boolean;
   onRouterPortChange: (value: RouterPortSettings) => void;
+  launchAtLogin: LaunchAtLoginStatus;
+  launchAtLoginSaving: boolean;
+  onLaunchAtLoginChange: (enabled: boolean) => void;
   envHistoryRetention: EnvHistoryRetentionSettings;
   envHistoryRetentionSaving: boolean;
   onEnvHistoryRetentionChange: (value: EnvHistoryRetentionSettings) => void;
@@ -135,12 +160,40 @@ export function OperationsPage({
   appEnvironmentBadgesSaving: boolean;
   onAppEnvironmentBadgesChange: (enabled: boolean) => void;
   onRequestAppEnvironmentBadgePermission: () => void;
+  gatewayAdminSnapshot: GatewayAdminEnvironment[];
+  providerPlugins: ProviderPluginSnapshot[];
+  providerPluginMarket: ProviderPluginMarketEntry[];
+  onInstallProviderPlugin: (request: ProviderPluginInstallRequest) => Promise<void>;
+  onRefreshProviderPluginMarket: (url: string) => Promise<void>;
+  onInstallProviderPluginFromMarket: (input: { id: string; version?: string }) => Promise<void>;
+  onDeactivateProviderPlugin: (id: string) => void;
+  onRollbackProviderPlugin: (id: string) => void;
+  onRemoveProviderPlugin: (id: string) => void;
+  autoUpdateStatus: DesktopAutoUpdateStatus;
+  onCheckForAutoUpdate: () => void;
+  onInstallDownloadedUpdate: () => void;
+  loadGatewayAdminConfiguration: (envName: string) => Promise<GatewayAdminConfiguration | null>;
+  saveGatewayAdminConfiguration: (request: SaveGatewayAdminConfigurationRequest) => Promise<GatewayAdminConfiguration>;
+  onGatewayConfigurationSaved: () => void;
+  onDiscoverGatewayModels: (request: { envName: string; providerId: string }) => Promise<void>;
 }) {
   const pageCopy = getDesktopCopy(language);
   const [sessionNumberDraft, setSessionNumberDraft] = useState(String(cliAutoResume.sessionNumber));
   const [retentionDaysDraft, setRetentionDaysDraft] = useState(String(envHistoryRetention.retentionDays));
   const [routerPortDraft, setRouterPortDraft] = useState(String(routerPort.preferredPort));
   const [showBadgePermissionDialog, setShowBadgePermissionDialog] = useState(false);
+  const [gatewayConfigOpen, setGatewayConfigOpen] = useState(false);
+  const [gatewayConfigEnv, setGatewayConfigEnv] = useState<string>();
+  const [gatewayConfigJson, setGatewayConfigJson] = useState("");
+  const [gatewayConfigBusy, setGatewayConfigBusy] = useState(false);
+  const [gatewayDiscoveryKey, setGatewayDiscoveryKey] = useState<string>();
+  const [gatewayEditorMode, setGatewayEditorMode] = useState<"structured" | "json">("structured");
+  const [pluginInstallOpen, setPluginInstallOpen] = useState(false);
+  const [pluginInstallJson, setPluginInstallJson] = useState("");
+  const [pluginInstallBusy, setPluginInstallBusy] = useState(false);
+  const [pluginMarketUrl, setPluginMarketUrl] = useState("");
+  const [pluginMarketBusy, setPluginMarketBusy] = useState(false);
+  const [pluginMarketInstalling, setPluginMarketInstalling] = useState<string>();
 
   useEffect(() => {
     setSessionNumberDraft(String(cliAutoResume.sessionNumber));
@@ -176,11 +229,198 @@ export function OperationsPage({
     if (nextPort !== routerPort.preferredPort) onRouterPortChange({ preferredPort: nextPort });
   }
 
+  async function openGatewayConfiguration(envName: string) {
+    setGatewayConfigBusy(true);
+    try {
+      const configuration = await loadGatewayAdminConfiguration(envName);
+      if (!configuration) throw new Error(`Gateway configuration for '${envName}' was not found`);
+      setGatewayConfigEnv(envName);
+      setGatewayConfigJson(JSON.stringify({ gateway: configuration.gateway, agentBindings: configuration.agentBindings }, null, 2));
+      setGatewayEditorMode("structured");
+      setGatewayConfigOpen(true);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setGatewayConfigBusy(false);
+    }
+  }
+
+  async function saveGatewayConfiguration() {
+    if (!gatewayConfigEnv) return;
+    let gateway: Record<string, unknown>;
+    let agentBindings: Record<string, Record<string, unknown>> | undefined;
+    try {
+      const parsed = JSON.parse(gatewayConfigJson) as Record<string, unknown>;
+      gateway = parsed.gateway && typeof parsed.gateway === "object" && !Array.isArray(parsed.gateway) ? parsed.gateway as Record<string, unknown> : parsed;
+      agentBindings = parsed.agentBindings && typeof parsed.agentBindings === "object" && !Array.isArray(parsed.agentBindings) ? parsed.agentBindings as Record<string, Record<string, unknown>> : undefined;
+    } catch (error) {
+      console.error(error);
+      return;
+    }
+    setGatewayConfigBusy(true);
+    try {
+      await saveGatewayAdminConfiguration({ envName: gatewayConfigEnv, gateway, agentBindings });
+      setGatewayConfigOpen(false);
+      onGatewayConfigurationSaved();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setGatewayConfigBusy(false);
+    }
+  }
+
+  async function discoverGatewayModels(envName: string, providerId: string) {
+    const key = `${envName}:${providerId}`;
+    setGatewayDiscoveryKey(key);
+    try {
+      await onDiscoverGatewayModels({ envName, providerId });
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setGatewayDiscoveryKey(undefined);
+    }
+  }
+
+  async function installProviderPluginFromJson() {
+    try {
+      const request = JSON.parse(pluginInstallJson) as ProviderPluginInstallRequest;
+      setPluginInstallBusy(true);
+      await onInstallProviderPlugin(request);
+      setPluginInstallOpen(false);
+      setPluginInstallJson("");
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setPluginInstallBusy(false);
+    }
+  }
+
+  async function refreshProviderPluginMarketFromUrl() {
+    const url = pluginMarketUrl.trim();
+    if (!url) return;
+    setPluginMarketBusy(true);
+    try {
+      await onRefreshProviderPluginMarket(url);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setPluginMarketBusy(false);
+    }
+  }
+
+  async function installProviderPluginFromMarketEntry(entry: ProviderPluginMarketEntry) {
+    if (!entry.source) return;
+    const key = `${entry.id}@${entry.version}`;
+    setPluginMarketInstalling(key);
+    try {
+      await onInstallProviderPluginFromMarket({ id: entry.id, version: entry.version });
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setPluginMarketInstalling(undefined);
+    }
+  }
+
   return (
     <ListPageFrame>
       <ListPageHeader title={pageTitle(language)} subtitle={pageSubtitle(language)} />
 
       <ListStack>
+        <OperationCard
+          title={language === "zh" ? "自动更新" : "Automatic updates"}
+          subtitle={language === "zh" ? "仅在配置更新源后检查；下载完成后可回滚到安装前版本。" : "Checks only when an update feed is configured; install is enabled after download."}
+        >
+          <div className="flex flex-wrap items-center gap-3 rounded-lg bg-[#f7f8fa] px-4 py-3">
+            <span className="text-[12px] text-slate-600">{autoUpdateStatus.enabled ? autoUpdateStatus.state : (language === "zh" ? "未配置更新源" : "Feed not configured")}{autoUpdateStatus.version ? ` · ${autoUpdateStatus.version}` : ""}</span>
+            {autoUpdateStatus.message ? <span className="text-[11px] text-slate-400">{autoUpdateStatus.message}</span> : null}
+            <div className="ml-auto flex gap-2">
+              <button type="button" className="rounded-md bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 ring-1 ring-black/[0.06] disabled:opacity-50" disabled={!autoUpdateStatus.enabled || autoUpdateStatus.state === "checking"} onClick={onCheckForAutoUpdate}>{language === "zh" ? "检查更新" : "Check"}</button>
+              <button type="button" className="rounded-md bg-[#34C759] px-3 py-1.5 text-[11px] font-medium text-white disabled:opacity-50" disabled={autoUpdateStatus.state !== "downloaded"} onClick={onInstallDownloadedUpdate}>{language === "zh" ? "安装" : "Install"}</button>
+            </div>
+          </div>
+        </OperationCard>
+
+        <OperationCard
+          title={language === "zh" ? "Gateway 运营视图" : "Gateway operations"}
+          subtitle={language === "zh" ? "集中查看 Provider、Credential、模型目录、路由组、Agent 绑定和配额状态。" : "Inspect providers, credentials, model catalog, route groups, agent bindings, and quota state."}
+        >
+          <div className="space-y-3 rounded-lg bg-[#f7f8fa] px-4 py-3">
+            {gatewayAdminSnapshot.length ? gatewayAdminSnapshot.map((item) => (
+              <div key={item.envName} className="rounded-xl bg-white px-3 py-3 ring-1 ring-black/[0.04]">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="min-w-0"><div className="truncate text-[13px] font-semibold text-neutral-900">{item.envName}</div><div className="mt-0.5 text-[11px] text-slate-500">{item.gatewayId} · {item.mode === "gateway" ? (language === "zh" ? "网关模式" : "Gateway") : (language === "zh" ? "手动模式" : "Manual")}</div></div>
+                  <div className="flex items-center gap-2"><IconActionButton icon={<Wrench className="size-4" />} label={language === "zh" ? "编辑 Gateway 配置" : "Edit Gateway configuration"} onClick={() => void openGatewayConfiguration(item.envName)} disabled={gatewayConfigBusy} /><span className={`rounded-full px-2 py-1 text-[10px] font-medium ${item.gatewayEnabled ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{item.gatewayEnabled ? (language === "zh" ? "运行中" : "Running") : (language === "zh" ? "未运行" : "Stopped")}</span></div>
+                </div>
+                <div className="mt-3 grid gap-2 text-[11px] text-slate-600 sm:grid-cols-4"><span>Provider {item.providers.length}</span><span>Credential {item.credentials.length}</span><span>Model {item.models.length}</span><span>RouteGroup {item.routeGroups.length}</span><span>Agent {item.agents.length}</span><span>{language === "zh" ? "已路由账号" : "Routed accounts"} {item.routedAccounts}</span><span className="truncate" title={item.localGatewayBaseUrl}>{item.localGatewayBaseUrl ?? "-"}</span><span>{item.quota ? `${language === "zh" ? "Quota" : "Quota"} ${item.quota.maxRequests ?? "∞"}/${item.quota.windowMinutes}m` : "Quota -"}</span></div>
+                {item.providers.length ? <div className="mt-3 flex flex-wrap gap-2">{item.providers.map((provider) => <button key={provider.id} type="button" className="rounded-md border border-black/[0.07] bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-600 disabled:cursor-wait disabled:opacity-50" disabled={gatewayDiscoveryKey !== undefined} onClick={() => void discoverGatewayModels(item.envName, provider.id)}>{gatewayDiscoveryKey === `${item.envName}:${provider.id}` ? (language === "zh" ? `发现 ${provider.displayName}…` : `Discovering ${provider.displayName}…`) : (language === "zh" ? `发现 ${provider.displayName} 模型` : `Discover ${provider.displayName} models`)}</button>)}</div> : null}
+                {item.routeGroups.length ? <div className="mt-3 divide-y divide-slate-100 rounded-lg border border-slate-100 bg-[#fafbfc]">{item.routeGroups.map((group) => <div key={group.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-[11px]"><span className="font-medium text-neutral-800">{group.exposedModelId}</span><span className="text-slate-500">{group.strategy} · {group.memberCount} {language === "zh" ? "成员" : "members"}{group.fallbackEnabled ? " · fallback" : ""}</span></div>)}</div> : null}
+                {item.agents.length ? <div className="mt-3 divide-y divide-slate-100 rounded-lg border border-slate-100 bg-[#fafbfc]">{item.agents.map((agent) => {
+                  const stateLabel = agent.state === "clean" ? (language === "zh" ? "正常" : "Clean") : agent.state === "drifted" ? (language === "zh" ? "已漂移" : "Drifted") : agent.state === "missing" ? (language === "zh" ? "配置缺失" : "Missing") : agent.state === "disabled" ? (language === "zh" ? "未连接" : "Disabled") : (language === "zh" ? "未接入" : "Unwired");
+                  const stateClass = agent.state === "clean" ? "text-emerald-600" : agent.state === "drifted" || agent.state === "missing" ? "text-amber-600" : "text-slate-500";
+                  return <div key={agent.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-[11px]"><div className="min-w-0"><span className="font-medium text-neutral-800">{agent.displayName}</span><span className="ml-2 text-slate-400">{agent.defaultModelId ?? agent.defaultRouteGroupId ?? "-"}</span>{agent.configPath ? <div className="truncate text-[10px] text-slate-400">{agent.configPath}</div> : null}</div><span className={stateClass}>{stateLabel}</span></div>;
+                })}</div> : null}
+              </div>
+            )) : <div className="py-3 text-center text-[12px] text-slate-400">{language === "zh" ? "暂无 Gateway 配置" : "No Gateway configuration"}</div>}
+          </div>
+        </OperationCard>
+
+        <OperationCard
+          title={language === "zh" ? "Provider 插件运行时" : "Provider plugin runtime"}
+          subtitle={language === "zh" ? "插件按受限 Host 启动，并可安全停用、回滚或删除；插件只提供显式 Provider/模型能力。" : "Plugins run behind the restricted host and can be deactivated, rolled back, or removed; providers expose explicit model capabilities only."}
+        >
+          <div className="space-y-2 rounded-lg bg-[#f7f8fa] px-4 py-3">
+            <div className="flex justify-end"><button type="button" className="rounded-md bg-white px-2.5 py-1.5 text-[10px] font-medium text-slate-600 ring-1 ring-black/[0.06]" onClick={() => { setPluginInstallJson(JSON.stringify({ manifest: { id: "provider-plugin", name: "Provider plugin", version: "1.0.0", apiVersion: 1, entry: "index.js", permissions: ["provider"] }, source: { kind: "local", path: "/path/to/plugin" } }, null, 2)); setPluginInstallOpen(true); }}>{language === "zh" ? "安装插件" : "Install plugin"}</button></div>
+            <div className="rounded-lg bg-white px-3 py-3 ring-1 ring-black/[0.04]">
+              <div className="mb-2 text-[11px] font-medium text-slate-700">{language === "zh" ? "Provider 插件市场" : "Provider plugin market"}</div>
+              <div className="flex gap-2">
+                <Input aria-label={language === "zh" ? "Provider 插件市场地址" : "Provider plugin market URL"} className="h-8 min-w-0 flex-1 bg-[#fafbfc] text-[11px]" value={pluginMarketUrl} onChange={(event) => setPluginMarketUrl(event.target.value)} placeholder="https://example.com/provider-plugins.json" />
+                <button type="button" className="rounded-md bg-white px-2.5 py-1.5 text-[10px] font-medium text-slate-600 ring-1 ring-black/[0.06] disabled:opacity-50" disabled={pluginMarketBusy || !pluginMarketUrl.trim()} onClick={() => void refreshProviderPluginMarketFromUrl()}>{pluginMarketBusy ? (language === "zh" ? "刷新中…" : "Refreshing…") : (language === "zh" ? "刷新" : "Refresh")}</button>
+              </div>
+              <div className="mt-2 text-[10px] text-slate-400">{language === "zh" ? "市场条目必须声明明确的 local/npm/git 安装源；签名条目在未配置受信校验器时会被拒绝。" : "Entries must declare an explicit local/npm/git source; signed entries fail closed without a trusted verifier."}</div>
+              {providerPluginMarket.length ? <div className="mt-3 space-y-2">{providerPluginMarket.map((entry) => {
+                const key = `${entry.id}@${entry.version}`;
+                const installed = providerPlugins.some((plugin) => plugin.id === entry.id && plugin.version === entry.version);
+                return <div key={key} className="flex flex-wrap items-center gap-2 rounded-md bg-[#fafbfc] px-2.5 py-2 ring-1 ring-slate-100">
+                  <div className="min-w-0 flex-1"><div className="truncate text-[11px] font-medium text-neutral-800">{entry.name} <span className="font-mono text-[10px] text-slate-400">{key}</span></div><div className="mt-0.5 truncate text-[10px] text-slate-500">{entry.description ?? entry.downloadUrl ?? (language === "zh" ? "无描述" : "No description")}</div></div>
+                  <button type="button" className="rounded-md border border-black/[0.07] bg-white px-2 py-1 text-[10px] text-slate-600 disabled:opacity-50" disabled={!entry.source || installed || pluginMarketInstalling !== undefined} onClick={() => void installProviderPluginFromMarketEntry(entry)}>{installed ? (language === "zh" ? "已安装" : "Installed") : !entry.source ? (language === "zh" ? "无安装源" : "No source") : pluginMarketInstalling === key ? (language === "zh" ? "安装中…" : "Installing…") : (language === "zh" ? "安装" : "Install")}</button>
+                </div>;
+              })}</div> : <div className="mt-3 text-center text-[10px] text-slate-400">{language === "zh" ? "暂无缓存市场条目" : "No cached market entries"}</div>}
+            </div>
+            {providerPlugins.length ? providerPlugins.map((plugin) => <div key={plugin.id} className="flex flex-wrap items-center gap-2 rounded-lg bg-white px-3 py-2 ring-1 ring-black/[0.04]">
+              <div className="min-w-0 flex-1"><div className="truncate text-[12px] font-medium text-neutral-800">{plugin.name} <span className="font-mono text-[10px] text-slate-400">{plugin.id}@{plugin.version}</span></div><div className="mt-0.5 text-[10px] text-slate-500">{plugin.provider?.displayName ?? (language === "zh" ? "未激活" : "Inactive")} · {plugin.permissions.join(", ") || "provider"}{plugin.error ? ` · ${plugin.error}` : ""}</div></div>
+              <span className={`rounded-full px-2 py-1 text-[10px] font-medium ${plugin.active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{plugin.active ? (language === "zh" ? "运行中" : "Active") : (language === "zh" ? "已停用" : "Inactive")}</span>
+              {plugin.active ? <button type="button" className="rounded-md border border-black/[0.07] bg-white px-2 py-1 text-[10px] text-slate-600" onClick={() => onDeactivateProviderPlugin(plugin.id)}>{language === "zh" ? "停用" : "Deactivate"}</button> : null}
+              <button type="button" className="rounded-md border border-black/[0.07] bg-white px-2 py-1 text-[10px] text-slate-600" onClick={() => onRollbackProviderPlugin(plugin.id)}>{language === "zh" ? "回滚" : "Rollback"}</button>
+              <button type="button" className="rounded-md border border-rose-200 bg-white px-2 py-1 text-[10px] text-rose-600" onClick={() => onRemoveProviderPlugin(plugin.id)}>{language === "zh" ? "删除" : "Remove"}</button>
+            </div>) : <div className="py-2 text-center text-[11px] text-slate-400">{language === "zh" ? "暂无已安装 Provider 插件" : "No installed Provider plugins"}</div>}
+          </div>
+        </OperationCard>
+
+        <SidePanel
+          open={pluginInstallOpen}
+          title={language === "zh" ? "安装 Provider 插件" : "Install Provider plugin"}
+          description={language === "zh" ? "输入 manifest 和 local/npm/git source。签名插件必须通过校验后才能启动；插件不会获得未声明的 Secret、网络或文件权限。" : "Provide a manifest and a local/npm/git source. Signed plugins are verified before activation and receive no undeclared secret, network, or filesystem permissions."}
+          onClose={() => setPluginInstallOpen(false)}
+          closeLabel={language === "zh" ? "关闭" : "Close"}
+        >
+          <Textarea className="min-h-[360px] font-mono text-[11px] leading-5" value={pluginInstallJson} onChange={(event) => setPluginInstallJson(event.target.value)} spellCheck={false} />
+          <div className="mt-4 flex justify-end gap-2"><button type="button" className="rounded-md border border-black/[0.08] bg-white px-3 py-2 text-[12px] font-medium text-slate-600" onClick={() => setPluginInstallOpen(false)}>{language === "zh" ? "取消" : "Cancel"}</button><button type="button" className="rounded-md bg-[#34C759] px-3 py-2 text-[12px] font-medium text-white disabled:opacity-50" disabled={pluginInstallBusy || !pluginInstallJson.trim()} onClick={() => void installProviderPluginFromJson()}>{pluginInstallBusy ? (language === "zh" ? "安装中…" : "Installing…") : (language === "zh" ? "安装并启动" : "Install and activate")}</button></div>
+        </SidePanel>
+
+        <SidePanel
+          open={gatewayConfigOpen}
+          title={language === "zh" ? `编辑 ${gatewayConfigEnv ?? ""} Gateway` : `Edit ${gatewayConfigEnv ?? ""} Gateway`}
+          description={language === "zh" ? "编辑 Provider、Credential 引用、模型目录和显式 RouteGroup。不会保存明文密钥，也不支持意图路由字段。" : "Edit providers, credential references, models, and explicit route groups. Plaintext secrets and intent-routing fields are not accepted."}
+          onClose={() => setGatewayConfigOpen(false)}
+          closeLabel={language === "zh" ? "关闭" : "Close"}
+        >
+          <div className="mb-4 flex gap-1 rounded-lg bg-[#f7f8fa] p-1"><button type="button" className={`rounded-md px-3 py-1.5 text-[11px] font-medium ${gatewayEditorMode === "structured" ? "bg-white text-neutral-900 shadow-sm" : "text-slate-500"}`} onClick={() => setGatewayEditorMode("structured")}>{language === "zh" ? "结构化表单" : "Structured"}</button><button type="button" className={`rounded-md px-3 py-1.5 text-[11px] font-medium ${gatewayEditorMode === "json" ? "bg-white text-neutral-900 shadow-sm" : "text-slate-500"}`} onClick={() => setGatewayEditorMode("json")}>{language === "zh" ? "高级 JSON" : "Advanced JSON"}</button></div>
+          {gatewayEditorMode === "structured" ? <GatewayAdminStructuredEditor value={gatewayConfigJson} onChange={setGatewayConfigJson} language={language} /> : <Field label={language === "zh" ? "Gateway + Agent JSON" : "Gateway + Agent JSON"} hint={language === "zh" ? "保存时由 Core 校验 schema；路由只按显式模型、RouteGroup、能力、健康度、配额和策略选择。agentBindings 只保存配置绑定，不包含密钥。" : "Core validates the schema on save; routing uses explicit models, RouteGroups, capabilities, health, quota, and strategy. agentBindings contain configuration bindings only, never secrets."}>
+            <Textarea className="min-h-[520px] font-mono text-[11px] leading-5" value={gatewayConfigJson} onChange={(event) => setGatewayConfigJson(event.target.value)} spellCheck={false} />
+          </Field>}
+          <div className="mt-5 flex justify-end gap-2"><button type="button" className="rounded-md border border-black/[0.08] bg-white px-3 py-2 text-[12px] font-medium text-slate-600" onClick={() => setGatewayConfigOpen(false)}>{language === "zh" ? "取消" : "Cancel"}</button><button type="button" className="rounded-md bg-[#34C759] px-3 py-2 text-[12px] font-medium text-white disabled:opacity-50" disabled={gatewayConfigBusy} onClick={() => void saveGatewayConfiguration()}>{language === "zh" ? "保存配置" : "Save configuration"}</button></div>
+        </SidePanel>
+
         <OperationCard
           title={language === "zh" ? "界面语言" : language === "ja" ? "表示言語" : "Interface language"}
           subtitle={language === "zh" ? "选择应用界面的显示语言" : language === "ja" ? "アプリで使用する言語を選択" : "Choose the language used throughout the app"}
@@ -366,6 +606,29 @@ export function OperationsPage({
           </div>
         </OperationCard>
 
+        <OperationCard
+          title={language === "zh" ? "登录启动" : language === "ja" ? "ログイン時に起動" : "Launch at login"}
+          subtitle={language === "zh" ? "登录系统后自动启动 Codex Switcher，保留本地 Gateway 和托盘服务" : language === "ja" ? "ログイン後に Codex Switcher とローカル Gateway を自動起動" : "Start Codex Switcher with the local Gateway and tray service after sign-in"}
+        >
+          <div className="flex items-center gap-3 rounded-lg bg-[#f7f8fa] px-4 py-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-[12px] font-medium text-neutral-800">{language === "zh" ? "登录系统时自动启动" : language === "ja" ? "ログイン時に自動起動" : "Start automatically at login"}</div>
+              <div className="mt-0.5 text-[11px] text-slate-400">{launchAtLogin.supported ? (language === "zh" ? "仅在 macOS 和 Windows 上由系统管理" : language === "ja" ? "macOS と Windows のシステム設定で管理" : "Managed by the operating system on macOS and Windows") : (language === "zh" ? "当前系统暂不支持登录启动" : language === "ja" ? "現在のシステムでは利用できません" : "Unavailable on this system")}</div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-label={language === "zh" ? "登录系统时自动启动" : "Start automatically at login"}
+              aria-checked={launchAtLogin.enabled}
+              disabled={launchAtLoginSaving || !launchAtLogin.supported}
+              onClick={() => onLaunchAtLoginChange(!launchAtLogin.enabled)}
+              className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:cursor-not-allowed disabled:opacity-50 ${launchAtLogin.enabled ? "bg-[#34C759]" : "bg-[#d1d1d6] dark:bg-slate-700"}`}
+            >
+              <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${launchAtLogin.enabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
+            </button>
+          </div>
+        </OperationCard>
+
         <ListCard className="responsive-record-row px-5 py-0">
           <div className="grid min-h-[150px] items-center gap-5 lg:grid-cols-[minmax(180px,0.62fr)_minmax(0,1.55fr)]">
             <div><h3 className="text-[15px] font-semibold tracking-[-0.02em] text-neutral-950">{language === "zh" ? "Codex 安装" : "Codex Installation"}</h3><p className="mt-1 text-[12px] text-slate-500">{language === "zh" ? "配置CLI 与 APP 的安装路径后，支持一键启动与切换" : language === "ja" ? "CLI と App のインストール先を設定し、ワンクリックで起動・切替" : "Configure CLI and App paths for one-click launch and switching"}</p></div>
@@ -412,6 +675,9 @@ export function OperationsPage({
             <div className="responsive-actions">
               <IconActionButton icon={<FileSearch className="size-4" />} label={pageCopy.operations.readLog} onClick={onReadLog} disabled={busy} />
             </div>
+            <pre className="col-span-full max-h-[260px] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-[#111827] px-4 py-3 font-mono text-[11px] leading-5 text-slate-200">
+              {logContent || (language === "zh" ? "暂无日志" : language === "ja" ? "ログはありません" : "No log entries")}
+            </pre>
           </div>
         </OperationCard>
       </ListStack>

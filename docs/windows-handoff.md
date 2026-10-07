@@ -18,6 +18,7 @@ Finish the last unproven part of the current migration:
 - Automated repository evidence is currently green:
   - `npm run test:cross-platform`
   - `npm run desktop:test`
+- The desktop test command recursively executes all `apps/desktop/electron` and `apps/desktop/src` test files; the latest local result is 387 passed and 1 externally-gated Codex E2E skipped (388 tests total).
 - One lifecycle-sensitive CLI test is intentionally skipped by default inside Codex App.
 - That lifecycle-sensitive coverage can be re-enabled from an external terminal with:
 
@@ -49,6 +50,7 @@ The key repository commands are:
 - `npm run test:cross-platform`
 - `npm run test:lifecycle`
 - `npm run windows:manual:start`
+- `npm run desktop:build` followed by the AppContainer smoke command in [windows-manual-checklist.md](windows-manual-checklist.md)
 
 If validation is happening from packaged contents instead of a source checkout, use:
 
@@ -62,6 +64,7 @@ The Windows session should produce or update:
 
 - `windows-manual-evidence.txt`
 - `windows-manual-result.md`
+- `windows-sandbox.json`
 
 Use those outputs to complete the checklist verdict.
 
@@ -80,6 +83,8 @@ The Windows continuation should only claim completion after:
 - `npm run test:cross-platform` passes on Windows
 - `npm run test:lifecycle` is executed from an external terminal
 - the manual checklist is completed on a real Windows machine
+- the AppContainer smoke evidence proves both default-deny and explicit filesystem capability behavior
+- the packaged helper and installer verification results are recorded, including Authenticode status for tagged releases
 - `windows-manual-evidence.txt` is attached or preserved
 - `windows-manual-result.md` contains a final verdict
 

@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
 import { detectPlatform } from "./os.js";
+import { writeFileAtomically } from "../system/atomic-file.js";
 
 export interface UsageProxyState {
   source: "manual" | "auto-env" | "auto-system" | "off";
@@ -96,7 +97,7 @@ export async function setManualUsageProxy(
   const normalized = normalizeUsageProxyValue(value);
   const file = usageProxyFilePath(stateDir);
   await mkdir(dirname(file), { recursive: true });
-  await writeFile(file, `${normalized}\n`, "utf8");
+  await writeFileAtomically(file, `${normalized}\n`, { encoding: "utf8" });
   return normalized;
 }
 

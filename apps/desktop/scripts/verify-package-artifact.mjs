@@ -4,7 +4,20 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
-const appRoot = process.argv[2] || "release/mac-arm64/codex-switcher.app";
+const artifactPath = process.argv[2] || "release/mac-arm64/codex-switcher.app";
+
+if (!artifactPath.endsWith(".app")) {
+  assert.ok(existsSync(artifactPath), `Packaged artifact not found: ${artifactPath}`);
+  const artifact = readFileSync(artifactPath);
+  assert.ok(artifact.length > 0, `Packaged artifact is empty: ${artifactPath}`);
+  if (artifactPath.endsWith(".exe")) assert.equal(artifact.subarray(0, 2).toString(), "MZ", "Windows installer is not a PE executable");
+  if (artifactPath.endsWith(".AppImage")) assert.equal(artifact.subarray(0, 4).toString(), "\x7fELF", "Linux AppImage is not an ELF executable");
+  if (artifactPath.endsWith(".deb")) assert.equal(artifact.subarray(0, 8).toString(), "!<arch>\n", "Linux package is not an ar archive");
+  console.log(`Verified packaged artifact: ${artifactPath}`);
+  process.exit(0);
+}
+
+const appRoot = artifactPath;
 const infoPlistPath = join(appRoot, "Contents", "Info.plist");
 const packagedIconPath = join(appRoot, "Contents", "Resources", "icon.icns");
 const sourceIconPath = "build/icon.icns";

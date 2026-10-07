@@ -7,6 +7,8 @@ import {
   derivePoolSessionKey,
   nextMemberHealth,
   normalizePoolMaxSameAccountFailures,
+  createCredentialPoolId,
+  createAccountPoolId,
   selectPoolMember,
   type AccountPool,
   type PoolDispatchState,
@@ -82,4 +84,8 @@ test("applies cooldown and recovers a successful member", () => {
   const recovered = nextMemberHealth(failed, { ok: true }, now + 1);
   assert.equal(recovered.state, "healthy");
   assert.equal(recovered.consecutiveFailures, 0);
+});
+
+test("credential pool keeps the legacy account-pool identity for migration safety", () => {
+  assert.equal(createCredentialPoolId("work"), createAccountPoolId("work"));
 });

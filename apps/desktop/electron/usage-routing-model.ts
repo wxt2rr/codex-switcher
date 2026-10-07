@@ -1,9 +1,15 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 
-export type RouteProtocol = "responses" | "chat_completions";
+export type RouteProtocol = "responses" | "chat_completions" | "anthropic" | "gemini";
 export type ReasoningProfile = "auto" | "standard" | "reasoning_content" | "think_tags";
 export type LongConversationStrategy = "safe" | "continuity";
 export type CompatibilityInstructionRole = "auto" | "system" | "developer";
+export interface RouteCapabilities {
+  reasoning?: boolean;
+  tools?: boolean;
+  vision?: boolean;
+  streaming?: boolean;
+}
 
 export interface RouteTarget {
   routeId: string;
@@ -12,20 +18,124 @@ export interface RouteTarget {
   upstreamBaseUrl: string;
   originalBaseUrl: string;
   protocol: RouteProtocol;
+  providerId?: string;
+  exposedModelId?: string;
+  routeGroupId?: string;
   upstreamModel?: string;
+  capabilities?: RouteCapabilities;
   reasoningProfile: ReasoningProfile;
   longConversationStrategy?: LongConversationStrategy;
   instructionRole?: CompatibilityInstructionRole;
   requestOverrides?: Record<string, unknown>;
+  /** Non-secret configured headers; auth and hop-by-hop headers are always controlled by the router. */
+  requestHeaders?: Record<string, string>;
+  /** Explicit HTTP(S) proxy endpoint for this route; credentials are never embedded. */
+  proxyUrl?: string;
   enabled: boolean;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface GatewayRequestContext {
+  gatewayId: string;
+  envName: string;
+  protocol: RouteProtocol;
+  /** Allow the Gateway ingress protocol to be converted to the selected upstream protocol. */
+  allowProtocolConversion?: boolean;
+  /** Privacy-safe, in-memory runtime signals used by usage/pace/smart selection. */
+  routeMetrics?: Readonly<Record<string, GatewayRouteRuntimeMetrics>>;
+  routeRules?: GatewayRouteRule[];
+  ruleContext?: GatewayRouteRuleContext;
+  requestedModel?: string;
+  requestedAccountName?: string;
+  sessionKey?: string;
+  requiredCapabilities?: RouteCapabilities;
+}
+
+export interface GatewayRouteRuleContext {
+  tokenCount?: number;
+  hasImages?: boolean;
+  reasoning?: boolean;
+  reasoningProfile?: string;
+  agentId?: string;
+  contextCompacted?: boolean;
+  now?: number;
+  requestedModel?: string;
+  providerId?: string;
+}
+
+export interface GatewayRouteRuntimeMetrics {
+  requestsInWindow?: number;
+  tokensInWindow?: number;
+  latencyMs?: number;
+  quotaRemaining?: number;
+  resetAt?: number;
+}
+
+/** Explicit request metadata only; never contains prompt or intent fields. */
+export interface GatewayRouteRule {
+  id: string;
+  targetModelId: string;
+  priority: number;
+  enabled: boolean;
+  match: {
+    tokenCount?: { min?: number; max?: number };
+    hasImages?: boolean;
+    reasoning?: boolean;
+    reasoningProfiles?: string[];
+    agentIds?: string[];
+    contextCompacted?: boolean;
+    time?: { startHour: number; endHour: number; daysOfWeek?: number[]; timezone?: "local" | "utc" };
+    modelIds?: string[];
+    providerIds?: string[];
+  };
+}
+
+export interface EnvironmentGateway {
+  gatewayId: string;
+  envName: string;
+  routeIds: string[];
+  routeGroups?: Record<string, EnvironmentGatewayRouteGroup>;
+  routeRules?: GatewayRouteRule[];
+  defaultRouteId?: string;
+  poolId?: string;
+  quota?: GatewayQuotaPolicy;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface GatewayQuotaPolicy {
+  windowMinutes: number;
+  maxRequests?: number;
+  maxTokens?: number;
+}
+
+export interface GatewayRouteHealth {
+  routeId: string;
+  state: "healthy" | "cooldown";
+  consecutiveFailures: number;
+  cooldownUntil: number | null;
+}
+
+export interface EnvironmentGatewayRouteGroup {
+  id: string;
+  exposedModelId: string;
+  routeIds: string[];
+  nestedGroupIds?: string[];
+  strategy: "smart" | "order" | "rotate" | "usage" | "pace" | "weight" | "weighted_round_robin";
+  sessionPolicy: "auto" | "session" | "turn" | "off";
+  fallbackEnabled: boolean;
+  weights?: Record<string, number>;
+  capabilities?: RouteCapabilities;
 }
 
 export interface RouteRuntimeSecret {
   routeId: string;
   upstreamApiKey: string;
   localRouteToken: string;
+  authMode?: "auth" | "apikey";
+  accountId?: string;
   hydratedAt: number;
 }
 
@@ -36,10 +146,23 @@ export function authorizeRouteToken(header: string | undefined, expected: string
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
+export function isSafeRouteProxyUrl(value: unknown): value is string {
+  if (typeof value !== "string" || !value.trim()) return false;
+  try {
+    const parsed = new URL(value.trim());
+    return (parsed.protocol === "http:" || parsed.protocol === "https:")
+      && !parsed.username && !parsed.password && Boolean(parsed.hostname)
+      && (!parsed.port || Number(parsed.port) > 0 && Number(parsed.port) <= 65535);
+  } catch {
+    return false;
+  }
+}
+
 export interface ExtractedTokenUsage {
   model: string | null;
   inputTokens: number | null;
   outputTokens: number | null;
+  reasoningTokens?: number | null;
   cacheCreationTokens: number | null;
   cacheReadTokens: number | null;
   totalTokens: number | null;
@@ -52,6 +175,7 @@ export interface UsageRequestAttempt {
   httpStatus: number | null;
   reason: string | null;
   errorMessage: string | null;
+  retryAfterMs?: number | null;
   outcome: "success" | "retry" | "returned" | "failed";
 }
 
@@ -68,6 +192,23 @@ export interface UsageRequest extends ExtractedTokenUsage {
   latencyMs: number;
   actualCost: number | null;
   standardCost: number | null;
+  /** The model requested at ingress, before any explicit route/model rewrite. */
+  logicalModel?: string | null;
+  /** The model reported by or sent to the selected upstream. */
+  servedModel?: string | null;
+  providerId?: string | null;
+  credentialId?: string | null;
+  agentId?: string | null;
+  ingressProtocol?: RouteProtocol | null;
+  upstreamProtocol?: RouteProtocol | null;
+  routeGroupId?: string | null;
+  /** ID of an explicit metadata rule; never derived from prompt contents. */
+  routeRuleId?: string | null;
+  timeToFirstTokenMs?: number | null;
+  retryAfterMs?: number | null;
+  finalCandidate?: string | null;
+  failureType?: string | null;
+  priceTier?: string | null;
   poolId?: string | null;
   entryAccountName?: string | null;
   attemptedAccounts?: string[];
@@ -116,6 +257,31 @@ export interface UsageRequestPage {
   facets: UsageRequestFacets;
 }
 
+export interface UsageTraceEvent {
+  event: string;
+  at: number;
+  envName?: string;
+  gatewayId?: string;
+  requestedModel?: string | null;
+  protocol?: RouteProtocol;
+  routeId?: string;
+  routeGroupId?: string | null;
+  accountName?: string;
+  providerId?: string | null;
+  reason?: string;
+  [key: string]: unknown;
+}
+
+export interface UsageTraceQuery {
+  from?: number;
+  to?: number;
+  envName?: string;
+  gatewayId?: string;
+  routeId?: string;
+  event?: string;
+  limit?: number;
+}
+
 export interface AccountRequestHealthSegment {
   completedAt: number;
   success: boolean;
@@ -135,6 +301,7 @@ export interface UsageSummary {
   requests: number;
   inputTokens: number;
   outputTokens: number;
+  reasoningTokens?: number;
   cacheCreationTokens: number;
   cacheReadTokens: number;
   totalTokens: number;
@@ -151,6 +318,7 @@ export interface UsageDimensionAggregate {
   requests: number;
   inputTokens: number;
   outputTokens: number;
+  reasoningTokens?: number;
   cacheCreationTokens: number;
   cacheReadTokens: number;
   totalTokens: number;
@@ -176,6 +344,7 @@ export interface PricingProfile {
   modelPattern: string;
   inputPerMillion: number;
   outputPerMillion: number;
+  reasoningPerMillion?: number | null;
   cacheCreationPerMillion: number | null;
   cacheReadPerMillion: number | null;
   updatedAt: number;
@@ -203,12 +372,20 @@ export function createRouteId(envName: string, accountName: string, upstreamBase
     .slice(0, 20);
 }
 
+export function createEnvironmentGatewayId(envName: string): string {
+  return createHash("sha256").update(`gateway\0${envName}`).digest("hex").slice(0, 20);
+}
+
 export function buildLocalRouteBaseUrl(port: number, routeId: string): string {
   return `http://127.0.0.1:${port}/routes/${encodeURIComponent(routeId)}`;
 }
 
+export function buildLocalGatewayBaseUrl(port: number, gatewayId: string): string {
+  return `http://127.0.0.1:${port}/gateways/${encodeURIComponent(gatewayId)}`;
+}
+
 export function isLocalRouterBaseUrl(value: string | undefined): boolean {
-  return /^https?:\/\/(?:127\.0\.0\.1|localhost):\d+\/(?:routes|pools)\//i.test(value?.trim() ?? "");
+  return /^https?:\/\/(?:127\.0\.0\.1|localhost):\d+\/(?:routes|pools|gateways)\//i.test(value?.trim() ?? "");
 }
 
 export function selectCompatibilityUpstreamBaseUrl(
@@ -244,23 +421,33 @@ export function extractTokenUsage(payload: unknown): ExtractedTokenUsage | null 
   if (!root) return null;
   const response = asRecord(root.response);
   const container = response ?? root;
-  const usage = asRecord(container.usage) ?? asRecord(root.usage);
+  const usage = asRecord(container.usage) ?? asRecord(root.usage) ?? asRecord(container.usageMetadata) ?? asRecord(root.usageMetadata);
   if (!usage) return null;
 
   const inputDetails =
     asRecord(usage.input_tokens_details) ?? asRecord(usage.prompt_tokens_details) ?? {};
-  const inputTokens = finiteNumber(usage.input_tokens) ?? finiteNumber(usage.prompt_tokens);
-  const outputTokens = finiteNumber(usage.output_tokens) ?? finiteNumber(usage.completion_tokens);
+  const outputDetails =
+    asRecord(usage.output_tokens_details) ?? asRecord(usage.completion_tokens_details) ?? {};
+  const inputTokens = finiteNumber(usage.input_tokens) ?? finiteNumber(usage.prompt_tokens) ?? finiteNumber(usage.promptTokenCount);
+  const outputTokens = finiteNumber(usage.output_tokens) ?? finiteNumber(usage.completion_tokens) ?? finiteNumber(usage.candidatesTokenCount);
+  const reasoningTokens = finiteNumber(usage.reasoning_tokens)
+    ?? finiteNumber(usage.thinking_tokens)
+    ?? finiteNumber(usage.thoughtsTokenCount)
+    ?? finiteNumber(outputDetails.reasoning_tokens)
+    ?? finiteNumber(outputDetails.thinking_tokens);
   const totalTokens =
     finiteNumber(usage.total_tokens) ??
-    (inputTokens !== null && outputTokens !== null ? inputTokens + outputTokens : null);
+    finiteNumber(usage.totalTokenCount) ??
+    (inputTokens !== null && outputTokens !== null ? inputTokens + outputTokens + (reasoningTokens ?? 0) : null);
 
   return {
     model:
       (typeof container.model === "string" ? container.model : null) ??
+      (typeof container.modelVersion === "string" ? container.modelVersion : null) ??
       (typeof root.model === "string" ? root.model : null),
     inputTokens,
     outputTokens,
+    ...(reasoningTokens !== null ? { reasoningTokens } : {}),
     cacheCreationTokens:
       finiteNumber(inputDetails.cache_creation_tokens) ??
       finiteNumber(usage.cache_creation_input_tokens) ??

@@ -56,3 +56,79 @@ jobs:
         run: npm run desktop:build
       - name: Run desktop tests
         run: npm run desktop:test
+
+  desktop-non-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build desktop application
+        run: npm run desktop:build
+      - name: Install and verify bubblewrap
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes bubblewrap g++-mingw-w64-x86-64
+          command -v bwrap
+          bwrap --version
+      - name: Cross-compile Windows plugin sandbox helper
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          x86_64-w64-mingw32-g++ \
+            -std=c++17 -O2 -municode -static -static-libgcc -static-libstdc++ \
+            apps/desktop/resources/native/windows/PluginSandboxLauncher.cpp \
+            -o "$RUNNER_TEMP/codex-switcher-plugin-sandbox.exe" \
+            -ladvapi32 -luserenv -lshell32
+          file "$RUNNER_TEMP/codex-switcher-plugin-sandbox.exe"
+          test "$(od -An -tx1 -N2 "$RUNNER_TEMP/codex-switcher-plugin-sandbox.exe" | tr -d ' \n')" = 4d5a
+      - name: Run Linux plugin sandbox smoke test
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          mkdir -p .wxt/evidence
+          CODEX_SWITCHER_EVIDENCE_OUT=.wxt/evidence/linux-sandbox.json node scripts/posix-plugin-sandbox-smoke.mjs
+      - name: Verify Linux plugin sandbox evidence
+        if: matrix.os == 'ubuntu-latest'
+        run: node scripts/verify-sandbox-evidence.mjs .wxt/evidence/linux-sandbox.json
+      - name: Verify Windows plugin sandbox helper
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path apps/desktop/resources/native/windows/codex-switcher-plugin-sandbox.exe)) {
+            throw "Windows AppContainer plugin sandbox helper was not built"
+          }
+      - name: Run Windows plugin sandbox smoke test
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .wxt/evidence | Out-Null
+          $node = (Get-Command node.exe).Source
+          $env:CODEX_SWITCHER_EVIDENCE_OUT = (Resolve-Path .wxt/evidence).Path + "\\windows-sandbox.json"
+          node scripts/windows-plugin-sandbox-smoke.cjs `
+            --launcher (Resolve-Path apps/desktop/resources/native/windows/codex-switcher-plugin-sandbox.exe) `
+            --node $node
+      - name: Verify Windows plugin sandbox evidence
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: node scripts/verify-sandbox-evidence.mjs .wxt/evidence/windows-sandbox.json
+      - name: Upload plugin sandbox evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-sandbox-evidence-${{ matrix.os }}
+          path: .wxt/evidence/*.json
+          if-no-files-found: warn
+      - name: Run desktop tests
+        run: npm run desktop:test

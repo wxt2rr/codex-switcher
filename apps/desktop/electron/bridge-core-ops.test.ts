@@ -113,6 +113,7 @@ test("desktop bridge creates envs directly from core state and clones default ho
 
   try {
     process.env.HOME = root;
+    delete process.env.CODEX_SWITCHER_DESKTOP_RESOURCES_PATH;
     process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
     process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
     process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
@@ -134,6 +135,46 @@ test("desktop bridge creates envs directly from core state and clones default ho
     await assert.rejects(
       access(join(root, "envs", "project", "home", "auth.json")),
     );
+  } finally {
+    restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("desktop Gateway Agent bindings apply and restore real Agent configuration files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-agent-binding-"));
+  const previousEnv = { ...process.env };
+  try {
+    process.env.HOME = root;
+    delete process.env.CODEX_SWITCHER_DESKTOP_RESOURCES_PATH;
+    process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
+    process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
+    process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
+    await bridge.createEnv({ envName: "project", source: { kind: "empty" } });
+    const home = join(root, "envs", "project", "home");
+    await writeFileRecursive(join(home, ".codex", "config.toml"), "model = \"original\"\n");
+
+    const gateway = {
+      schemaVersion: 1 as const,
+      mode: "gateway" as const,
+      gatewayId: "gateway-project",
+      providers: { local: { id: "local", displayName: "Local", kind: "local" as const, endpoints: {}, modelDiscovery: "manual" as const, enabled: true } },
+      credentials: { local: { id: "local", providerId: "local", displayName: "Local", kind: "local" as const, secretRef: "account:project:local", supportedProtocols: ["responses" as const], status: "active" as const } },
+      models: { model: { id: "model", providerId: "local", upstreamModelId: "model", displayName: "Model", protocols: ["responses" as const], capabilities: {}, enabled: true } },
+      routeGroups: { default: { id: "default", displayName: "Default", exposedModelId: "model", members: [{ providerId: "local", modelId: "model", credentialSelector: { credentialIds: ["local"] }, priority: 0, weight: 1 }], strategy: "order" as const, sessionPolicy: "auto" as const, fallbackEnabled: true } },
+      defaultRouteGroupId: "default",
+      catalogVersion: 1,
+    };
+    const binding = { codex: { agentId: "codex", displayName: "Codex", gatewayId: "gateway-project", defaultModelId: "model", defaultRouteGroupId: "default", originalConfigRef: "snapshot/project:codex", enabled: true } };
+
+    await bridge.saveGatewayAdminConfiguration({ envName: "project", gateway, agentBindings: binding });
+    const connected = await readFile(join(home, ".codex", "config.toml"), "utf8");
+    assert.match(connected, /openai_base_url = "http:\/\/127\.0\.0\.1:\d+\/gateways\/gateway-project"/);
+    assert.match(connected, /model = "model"/);
+    assert.match(connected, /OPENAI_API_KEY = "gateway\/project"/);
+
+    await bridge.saveGatewayAdminConfiguration({ envName: "project", gateway, agentBindings: {} });
+    assert.equal(await readFile(join(home, ".codex", "config.toml"), "utf8"), "model = \"original\"\n");
   } finally {
     restoreEnv(previousEnv);
     await rm(root, { recursive: true, force: true });

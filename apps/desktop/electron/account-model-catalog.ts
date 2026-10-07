@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -9,6 +10,8 @@ import {
   type ModelCatalogStore,
 } from "./model-catalog-store.js";
 import { resolveProviderModelPreset } from "./provider-model-presets.js";
+import { buildGatewayModelCatalog } from "./gateway-model-catalog.js";
+import type { GatewayEnvironmentState } from "../../../packages/core/dist/gateway/model.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -100,6 +103,31 @@ export async function synchronizeAccountModelCatalog(options: {
   return { enabled: true, catalogPath };
 }
 
+export async function synchronizeEnvironmentGatewayModelCatalog(options: {
+  homePath: string;
+  gateway: GatewayEnvironmentState;
+  loadBundledCatalog?: () => Promise<BundledModelCatalog>;
+}): Promise<{ enabled: boolean; catalogPath?: string }> {
+  const configPath = join(options.homePath, "config.toml");
+  const catalogPath = join(options.homePath, "model-catalogs", "codex-switcher-gateway-models.json");
+  const gatewayEntries = buildGatewayModelCatalog(options.gateway);
+  if (gatewayEntries.length === 0) {
+    await removeModelCatalogConfig(configPath);
+    await rm(catalogPath, { force: true });
+    return { enabled: false };
+  }
+
+  const bundled = options.loadBundledCatalog ? await options.loadBundledCatalog() : { models: [] };
+  const bundledSlugs = new Set(bundled.models.map((model) => model.slug));
+  const collisions = gatewayEntries.filter((entry) => bundledSlugs.has(entry.slug));
+  if (collisions.length) {
+    throw new Error(`Gateway model catalog conflicts with bundled models: ${collisions.map((entry) => entry.slug).join(", ")}`);
+  }
+  await atomicWriteJson(catalogPath, { models: [...bundled.models, ...gatewayEntries] });
+  await setModelCatalogConfig(configPath, catalogPath);
+  return { enabled: true, catalogPath };
+}
+
 async function mergeModelCatalogFile(path: string, entries: ModelCatalogEntry[]): Promise<void> {
   const existing = await readFile(path, "utf8").catch((error: unknown) => {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
@@ -173,9 +201,14 @@ async function atomicWriteJson(path: string, value: unknown): Promise<void> {
 
 async function atomicWriteText(path: string, value: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.tmp`;
-  await writeFile(temporary, value, "utf8");
-  await rename(temporary, path);
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, value, "utf8");
+    await rename(temporary, path);
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }
 
 function validateCatalogEntry(value: unknown): ModelCatalogEntry {

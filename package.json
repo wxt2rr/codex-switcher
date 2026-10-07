@@ -27,6 +27,7 @@
     "apps/*"
   ],
   "files": [
+    "packages/gateway/**",
     "plugins/codex-switcher/**",
     "!plugins/codex-switcher/**/__pycache__/**",
     "!plugins/codex-switcher/**/*.pyc",
@@ -36,7 +37,17 @@
     "scripts/windows-manual-capture.ps1",
     "scripts/windows-manual-start.ps1",
     "scripts/windows-manual-result-template.ps1",
+    "scripts/windows-plugin-sandbox-smoke.cjs",
+    "scripts/verify-sandbox-evidence.mjs",
     "scripts/uninstall.sh",
+    "scripts/node-cli.ts",
+    "scripts/core-cli.ts",
+    "packages/core/src/**",
+    "packages/gateway/src/**",
+    "apps/desktop/electron/**",
+    "!packages/core/src/**/*.test.ts",
+    "!packages/gateway/src/**/*.test.ts",
+    "!apps/desktop/electron/**/*.test.ts",
     "CHANGELOG.md",
     "LICENSE",
     "README.md"
@@ -44,13 +55,15 @@
   "scripts": {
     "lint:bash": "bash -n plugins/codex-switcher/scripts/codex-switcher && bash -n plugins/codex-switcher/scripts/codex-sw",
     "lint": "npm run lint:bash",
-    "test:cross-platform": "tsx --test packages/core/src/**/*.test.ts packages/core/src/*.test.ts scripts/bin-entry.test.ts scripts/ci-workflow.test.ts scripts/core-cli.test.ts scripts/node-cli.test.ts scripts/install-wrapper.test.ts scripts/readme-consistency.test.ts scripts/run-lifecycle-tests.test.ts scripts/windows-handoff.test.ts scripts/windows-manual-checklist.test.ts scripts/windows-manual-capture.test.ts scripts/windows-manual-start.test.ts scripts/windows-manual-result-template.test.ts scripts/windows-manual-result-template-script.test.ts scripts/windows-support-audit.test.ts scripts/package-files.test.ts scripts/package-scripts.test.ts",
+    "test:cross-platform": "npm run core:test && npm run gateway:test && tsx --test --test-concurrency=1 scripts/bin-entry.test.ts scripts/ci-workflow.test.ts scripts/core-cli.test.ts scripts/update-release-manifest.test.ts scripts/install-wrapper.test.ts scripts/readme-consistency.test.ts scripts/run-lifecycle-tests.test.ts scripts/sandbox-evidence.test.ts scripts/submission-content.test.ts scripts/windows-handoff.test.ts scripts/windows-manual-checklist.test.ts scripts/windows-manual-capture.test.ts scripts/windows-manual-start.test.ts scripts/windows-manual-result-template.test.ts scripts/windows-manual-result-template-script.test.ts scripts/windows-support-audit.test.ts scripts/package-files.test.ts scripts/package-scripts.test.ts",
     "test:legacy-bash": "tsx --test scripts/legacy-cli-compat.test.ts",
     "test": "npm run test:cross-platform && npm run test:legacy-bash",
     "node-cli:test": "npm run test:cross-platform",
     "cli:test": "npm run test:cross-platform && npm run test:legacy-bash",
-    "core:test": "tsx --test packages/core/src/**/*.test.ts packages/core/src/*.test.ts",
+    "core:test": "node ./packages/core/scripts/run-tests.mjs",
+    "gateway:test": "npm run test --workspace ./packages/gateway",
     "core:build": "tsc -p packages/core/tsconfig.json",
+    "gateway:build": "tsc -p packages/gateway/tsconfig.json",
     "core:cli": "tsx scripts/core-cli.ts",
     "desktop:build": "npm run build --workspace ./apps/desktop",
     "desktop:dev": "npm run electron:dev --workspace ./apps/desktop",
@@ -59,6 +72,7 @@
     "test:desktop-package-workflow": "tsx --test scripts/desktop-package-workflow.test.ts",
     "desktop:package:mac": "npm run package:mac --workspace ./apps/desktop",
     "desktop:package:mac:dir": "npm run package:mac:dir --workspace ./apps/desktop",
+    "desktop:package:linux": "npm run package:linux --workspace ./apps/desktop",
     "desktop:package:win": "npm run package:win --workspace ./apps/desktop",
     "website:dev": "npm run dev --workspace ./apps/website",
     "website:build": "npm run build --workspace ./apps/website",
@@ -68,16 +82,24 @@
     "windows:manual:start": "powershell -ExecutionPolicy Bypass -File ./scripts/windows-manual-start.ps1",
     "windows:manual:capture": "powershell -ExecutionPolicy Bypass -File ./scripts/windows-manual-capture.ps1",
     "windows:manual:result-template": "powershell -ExecutionPolicy Bypass -File ./scripts/windows-manual-result-template.ps1",
-    "check:cross-platform": "npm run test:cross-platform && npm run core:build",
+    "check:cross-platform": "npm run test:cross-platform && npm run core:build && npm run gateway:build",
     "check": "npm run lint && npm run test",
     "prepublishOnly": "npm run check",
     "release:npm": "./scripts/publish-npm.sh",
     "release:npm:token": "./scripts/publish-npm-with-token.sh",
-    "release:npm:auto": "./scripts/release-publish.sh"
+    "release:npm:auto": "./scripts/release-publish.sh",
+    "release:update-manifest": "node ./scripts/create-update-manifest.mjs",
+    "release:verify-manifest": "node ./scripts/verify-update-manifest.mjs"
+  },
+  "dependencies": {
+    "jsonc-parser": "^3.3.1",
+    "sql.js": "^1.14.1",
+    "tsx": "^4.20.3",
+    "undici": "^6.29.0",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.8",
-    "tsx": "^4.20.3",
     "typescript": "^5.8.3"
   },
   "engines": {

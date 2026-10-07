@@ -46,6 +46,14 @@ Or pass token by arg:
 3. validates auth with `npm whoami`
 4. publishes via `npm publish --access public --registry ...`
 
+The published package includes the Windows/Node CLI runtime closure and declares its runtime loader dependencies (`tsx`, `sql.js`, `undici`, `jsonc-parser`, and `yaml`) as production dependencies. The package contract test runs `npm pack --dry-run` and checks the installed launcher sources; a manual isolated-prefix install can be smoke-tested with:
+
+```bash
+npm pack --pack-destination /tmp/codex-switcher-pack
+npm install --prefix /tmp/codex-switcher-install /tmp/codex-switcher-pack/*.tgz
+node /tmp/codex-switcher-install/node_modules/@wangxt0223/codex-switcher/scripts/bin/codex-sw-node.cjs version
+```
+
 ## Auto release script (set version + changelog + publish)
 
 `scripts/release-publish.sh` can do all of these in one command:

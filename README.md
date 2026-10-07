@@ -47,18 +47,22 @@ codex-sw check
 - Electron 运行：`npm run desktop:electron`
 - 桌面测试：`npm run desktop:test`
 - 目录打包：`npm run package:dir --workspace ./apps/desktop`
+- macOS 安装包：`npm run desktop:package:mac`
+- Windows 安装包：`npm run desktop:package:win`
+- Linux 安装包：`npm run desktop:package:linux`（AppImage + deb）
 
 说明：
 
 - 当前桌面版已经覆盖：overview、env/account 切换、env 创建、runtime base URL 更新、原生 login/relogin、账号与环境删除确认、proxy、token refresh、doctor、recover、App 状态、CLI 启动、日志查看和高级命令桥接。
+- 当前桌面版同时支持两种互不冲突的工作模式：关闭网关时继续手动切换账号；开启网关后，同一环境可以把订阅凭证、API Key、OAuth、本地模型和自定义 OpenAI 兼容接口加入路由组，按显式逻辑模型、Provider、能力、健康度和策略统一转发。
 - 操作结果已支持结构化摘要视图，同时保留原始输出，适合排障。
 - 当前桌面壳使用 Electron，复用 Node/TypeScript core bridge；仓库内已验证前端构建、主进程构建、桌面测试，以及目录打包后的 App 启动。
-- 当前未完成的主要是发行级能力，例如应用图标、签名、公证和分发流程。
+- 网关核心位于 `packages/gateway`，包含四协议 IR/双向转换、Provider/凭证契约、44 个 Agent Adapter、嵌套路由组、插件 Host、用量/配额/费用/Trace，以及手动模式兼容；不会分析 Prompt 或自动判断意图。
 - 详细架构和迁移说明见 [docs/desktop-core-architecture.md](docs/desktop-core-architecture.md)。
 
 ### 桌面安装包安全提示
 
-当前 macOS 和 Windows 安装包均未进行代码签名。请只从本仓库的 GitHub Release 下载，并在确认文件来源可信后继续以下操作。
+当前 macOS、Windows 和 Linux 安装包仍未配置生产签名/公证。请只从本仓库的 GitHub Release 下载，并在确认文件来源可信后继续以下操作。
 
 macOS 安装完成后，如果系统提示应用“已损坏”或无法打开，请在终端执行：
 
@@ -129,6 +133,22 @@ codex-sw env new project-a --empty
 codex-sw ac login corp --env project-a
 codex-sw ac use corp --env project-a -t both
 ```
+
+### 方式三：网关模式
+
+网关模式不替换手动模式，而是作为同一环境的另一种运行方式：
+
+```bash
+# 查看当前模式和路由
+codex-sw gateway status --env default
+codex-sw gateway routes --env default
+
+# 开启/关闭统一网关；关闭后恢复手动账号切换
+codex-sw gateway mode gateway --env default
+codex-sw gateway mode manual --env default
+```
+
+网关模式下，逻辑模型是稳定入口，底层可由多个 Provider、模型和凭证组成路由组；同一环境可以同时使用订阅模型和自定义模型。`codex-sw ac use ...` 仍然保留，用于网关关闭时的显式账号切换。
 
 ## env / account 是什么（先看这个）
 

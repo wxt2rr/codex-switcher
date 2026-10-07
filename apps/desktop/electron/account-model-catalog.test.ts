@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { buildBundledCatalogCommand, synchronizeAccountModelCatalog } from "./account-model-catalog.js";
+import { buildBundledCatalogCommand, synchronizeAccountModelCatalog, synchronizeEnvironmentGatewayModelCatalog } from "./account-model-catalog.js";
 import { createModelCatalogStore } from "./model-catalog-store.js";
 
 test("account catalog merges bundled models with the account's bound custom models", async () => {
@@ -54,6 +54,45 @@ test("account catalog removes model_catalog_json when the account has no binding
   const config = await readFile(join(homePath, "config.toml"), "utf8");
   assert.doesNotMatch(config, /model_catalog_json/);
   assert.match(config, /model = "gpt-5.4"/);
+});
+
+test("environment gateway catalog writes aggregated models for Codex App", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-gateway-catalog-"));
+  const homePath = join(root, "home");
+  const configPath = join(homePath, "config.toml");
+  try {
+    await mkdir(homePath, { recursive: true });
+    await writeFile(configPath, 'model = "gpt-5"\n', "utf8");
+    const result = await synchronizeEnvironmentGatewayModelCatalog({
+      homePath,
+      gateway: {
+        schemaVersion: 1,
+        mode: "gateway",
+        gatewayId: "gateway-work",
+        providers: {},
+        credentials: {},
+        models: {
+          deepseek: {
+            id: "deepseek/deepseek-chat",
+            providerId: "deepseek",
+            upstreamModelId: "deepseek-chat",
+            displayName: "DeepSeek Chat",
+            protocols: ["responses"],
+            capabilities: {},
+            enabled: true,
+          },
+        },
+        routeGroups: {},
+        catalogVersion: 1,
+      },
+    });
+    assert.equal(result.enabled, true);
+    const catalog = JSON.parse(await readFile(result.catalogPath!, "utf8")) as { models: Array<{ slug: string }> };
+    assert.deepEqual(catalog.models.map((model) => model.slug), ["deepseek:deepseek-chat"]);
+    assert.match(await readFile(configPath, "utf8"), /model_catalog_json = .*codex-switcher-gateway-models\.json/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("account catalog keeps custom models when Codex CLI is unavailable", async () => {

@@ -9,6 +9,7 @@ import {
   loadCoreRuntime,
   loadCoreSupportModules,
   loadDesktopOperationsModule,
+  loadGatewayAgentRuntime,
   type CoreRuntime,
 } from "./core-runtime.js";
 import {
@@ -19,8 +20,12 @@ import {
   type EnvFileHistoryEntry,
   type EnvFileHistorySource,
 } from "./env-file-history.js";
-import { UsageRouterManager } from "./usage-router-manager.js";
-import { isLocalRouterBaseUrl, resolveRouteDisplayBaseUrl, selectCompatibilityUpstreamBaseUrl, type PricingProfile, type UsageFilter, type UsageRequestQuery } from "./usage-routing-model.js";
+import { UsageRouterManager, type GatewayRouteBinding } from "./usage-router-manager.js";
+import type {
+  GatewayEnvironmentState,
+  GatewayRouteGroupDefinition,
+} from "../../../packages/core/dist/gateway/model.js";
+import { isLocalRouterBaseUrl, resolveRouteDisplayBaseUrl, selectCompatibilityUpstreamBaseUrl, type PricingProfile, type UsageFilter, type UsageRequestQuery, type UsageTraceQuery } from "./usage-routing-model.js";
 import {
   buildEffectiveCodexEnv,
   getCodexToolStatus,
@@ -45,6 +50,7 @@ import {
   readAppWindowSettings,
   readEnvHistoryRetentionSettings,
   readGeneratedImageRecoverySettings,
+  readLaunchAtLoginSettings,
   readAppEnvironmentBadgeSettings,
   readRouterLifecycleSettings,
   readRouterPortSettings,
@@ -54,12 +60,14 @@ import {
   removeAppWindowCount,
   saveEnvHistoryRetentionSettings,
   saveGeneratedImageRecoverySettings,
+  saveLaunchAtLoginSettings,
   saveAppEnvironmentBadgeSettings,
   saveRouterLifecycleSettings,
   saveRouterPortSettings,
   type CliAutoResumeSettings,
   type EnvHistoryRetentionSettings,
   type GeneratedImageRecoverySettings,
+  type LaunchAtLoginSettings,
   type AppEnvironmentBadgeSettings,
   type RouterLifecycleSettings,
   type RouterPortSettings,
@@ -77,6 +85,7 @@ import {
 import {
   loadBundledModelCatalog,
   synchronizeAccountModelCatalog,
+  synchronizeEnvironmentGatewayModelCatalog,
 } from "./account-model-catalog.js";
 import {
   DEEPSEEK_DEFAULT_MODEL_SLUG,
@@ -113,7 +122,24 @@ import {
   type CodexSkillEnvironment,
 } from "./generated-image-recovery-skill.js";
 import { AppEnvironmentBadgeManager, createUnsupportedBadgeAdapter, type AppEnvironmentBadgeStatus } from "./app-environment-badges.js";
+import type { DesktopAutoUpdateStatus } from "./auto-update.js";
+import type { GatewayAdminConfiguration, LaunchAtLoginStatus, SaveGatewayAdminConfigurationRequest } from "../src/bridge.js";
+import { stripExcludedGatewayFields } from "./gateway-admin-configuration.js";
 import { MacDockBadgeAdapter, WindowsTaskbarBadgeAdapter } from "./app-environment-badge-adapters.js";
+import { discoverGatewayProviderModels } from "./gateway-model-discovery.js";
+import {
+  deactivateProviderPlugin as deactivateProviderPluginRuntime,
+  installProviderPlugin as installProviderPluginRuntime,
+  listProviderPlugins as listProviderPluginsRuntime,
+  listProviderPluginMarket as listProviderPluginMarketRuntime,
+  removeProviderPlugin as removeProviderPluginRuntime,
+  refreshProviderPluginMarket as refreshProviderPluginMarketRuntime,
+  rollbackProviderPlugin as rollbackProviderPluginRuntime,
+  installProviderPluginFromMarket as installProviderPluginFromMarketRuntime,
+  getProviderPluginDescriptor,
+  type ProviderPluginInstallRequest,
+  type ProviderPluginMarketInstallRequest,
+} from "./provider-plugin-runtime.js";
 import {
   buildCodexChatGptAuthJson,
   buildImportedAccountNames,
@@ -284,25 +310,158 @@ export async function getEnvironmentRouteStatuses() {
   return getUsageRouterManager().getEnvironmentStatuses(Object.keys(state.envs).sort());
 }
 
-function getEnvironmentRouteAccounts(state: Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>, envName: string) {
+function getEnvironmentRouteAccounts(
+  state: Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>,
+  envName: string,
+  gateway?: GatewayEnvironmentState,
+) {
   const env = state.envs[envName];
   if (!env) throw new Error(`Environment '${envName}' not found`);
-  return Object.entries(env.accounts).map(([accountName, account]) => ({
-    envName,
-    accountName,
-    authMode: account.authMode,
-    apiKey: account.authMode === "auth"
-      ? extractAccessTokenFromAuthData(account.authData)
-      : readAuthStringField(account.authData, "OPENAI_API_KEY"),
-    authAccountId: extractAccountIdFromAuthData(account.authData),
-    protocol: account.authMode === "auth"
-      ? "responses" as const
-      : account.runtime.apiProtocol === "chat_completions" ? "chat_completions" as const : "responses" as const,
-    upstreamModel: account.runtime.compatibilityUpstreamModel,
-    baseUrl: account.runtime.openaiBaseUrlMode === "custom" && account.runtime.openaiBaseUrl
-      ? account.runtime.openaiBaseUrl
-      : "default",
-  }));
+  return Object.entries(env.accounts).map(([accountName, account]) => {
+    const providerId = account.runtime.providerId ?? (account.authMode === "auth" ? "chatgpt" : "openai");
+    const credential = gateway && Object.values(gateway.credentials).find((candidate) => candidate.providerId === providerId
+      && (candidate.displayName === accountName || candidate.secretRef === `account:${encodeURIComponent(envName)}:${encodeURIComponent(accountName)}`));
+    const proxyUrl = credential?.proxyUrl ?? gateway?.providers[providerId]?.proxyUrl;
+    return {
+      envName,
+      accountName,
+      authMode: account.authMode,
+      providerId,
+      apiKey: account.authMode === "auth"
+        ? extractAccessTokenFromAuthData(account.authData)
+        : readAuthStringField(account.authData, "OPENAI_API_KEY"),
+      authAccountId: extractAccountIdFromAuthData(account.authData),
+      protocol: account.authMode === "auth"
+        ? "responses" as const
+        : account.runtime.apiProtocol === "chat_completions" ? "chat_completions" as const : "responses" as const,
+      upstreamModel: account.runtime.compatibilityUpstreamModel,
+      baseUrl: account.runtime.openaiBaseUrlMode === "custom" && account.runtime.openaiBaseUrl
+        ? account.runtime.openaiBaseUrl
+        : "default",
+      ...(proxyUrl ? { proxyUrl } : {}),
+    };
+  });
+}
+
+/**
+ * Projects the persisted Gateway catalog into explicit runtime bindings.
+ * Credentials still resolve to the existing environment accounts; the
+ * Gateway catalog contributes the provider/model/group selection only.
+ * There is deliberately no prompt, classifier, or intent selector here.
+ */
+function buildGatewayRouteBindings(
+  environment: { name: string; accounts: Record<string, { name: string; authMode: string }> },
+  gateway: GatewayEnvironmentState,
+): GatewayRouteBinding[] {
+  const accountNamesByCredential = new Map<string, string>();
+  for (const [credentialId, credential] of Object.entries(gateway.credentials)) {
+    const secretParts = credential.secretRef.split(":");
+    const referencedName = secretParts.length >= 3 && secretParts[0] === "account"
+      && decodeURIComponent(secretParts[1] ?? "") === environment.name
+      ? decodeURIComponent(secretParts.slice(2).join(":"))
+      : undefined;
+    const fallback = Object.entries(environment.accounts).find(([accountName, account]) =>
+      accountName === credential.displayName || account.name === credential.displayName,
+    )?.[0];
+    const accountName = referencedName && environment.accounts[referencedName] ? referencedName : fallback;
+    if (accountName) accountNamesByCredential.set(credentialId, accountName);
+  }
+
+  const headersByCredentialAccount = (credentialIds: string[], providerId: string): Record<string, Record<string, string>> => {
+    const result: Record<string, Record<string, string>> = {};
+    const providerHeaders = gateway.providers[providerId]?.requestHeaders ?? {};
+    for (const credentialId of credentialIds) {
+      const accountName = accountNamesByCredential.get(credentialId);
+      if (!accountName) continue;
+      const credentialHeaders = gateway.credentials[credentialId]?.requestHeaders ?? {};
+      const headers = { ...providerHeaders, ...credentialHeaders };
+      if (Object.keys(headers).length) result[accountName] = { ...(result[accountName] ?? {}), ...headers };
+    }
+    return result;
+  };
+
+  const proxyByCredentialAccount = (credentialIds: string[], providerId: string): Record<string, string> => {
+    const result: Record<string, string> = {};
+    const providerProxy = gateway.providers[providerId]?.proxyUrl;
+    for (const credentialId of credentialIds) {
+      const accountName = accountNamesByCredential.get(credentialId);
+      if (!accountName) continue;
+      const proxyUrl = gateway.credentials[credentialId]?.proxyUrl ?? providerProxy;
+      if (proxyUrl) result[accountName] = proxyUrl;
+    }
+    return result;
+  };
+
+  const result: GatewayRouteBinding[] = [];
+  const addBinding = (
+    group: GatewayRouteGroupDefinition | undefined,
+    member: GatewayRouteGroupDefinition["members"][number],
+  ) => {
+    const model = gateway.models[member.modelId];
+    if (!model || !model.enabled) return;
+    const credentials = member.credentialSelector.credentialIds?.length
+      ? member.credentialSelector.credentialIds
+      : Object.values(gateway.credentials)
+        .filter((credential) => credential.providerId === member.providerId && credential.status !== "disabled")
+        .map((credential) => credential.id);
+    const accounts = credentials
+      .map((credentialId) => accountNamesByCredential.get(credentialId))
+      .filter((accountName): accountName is string => Boolean(accountName));
+    if (!accounts.length) return;
+    const requestHeadersByAccount = headersByCredentialAccount(credentials, member.providerId);
+    const proxyUrlByAccount = proxyByCredentialAccount(credentials, member.providerId);
+    result.push({
+      providerId: member.providerId,
+      modelId: model.id,
+      upstreamModel: model.upstreamModelId,
+      exposedModelId: group?.exposedModelId ?? model.id,
+      ...(group ? { routeGroupId: group.id } : {}),
+      accountNames: [...new Set(accounts)],
+      protocols: model.protocols,
+      capabilities: model.capabilities,
+      ...(Object.keys(requestHeadersByAccount).length ? { requestHeadersByAccount } : {}),
+      ...(Object.keys(proxyUrlByAccount).length ? { proxyUrlByAccount } : {}),
+    });
+  };
+
+  for (const group of Object.values(gateway.routeGroups)) {
+    for (const member of group.members) addBinding(group, member);
+  }
+  // A catalog model can be used directly even if it has not been placed in a
+  // RouteGroup.  This is still explicit model routing, not intent routing.
+  const groupedModelIds = new Set(Object.values(gateway.routeGroups).flatMap((group) => group.members.map((member) => member.modelId)));
+  for (const model of Object.values(gateway.models)) {
+    if (!model.enabled || groupedModelIds.has(model.id)) continue;
+    const credentials = Object.values(gateway.credentials)
+      .filter((credential) => credential.providerId === model.providerId && credential.status !== "disabled")
+      .map((credential) => accountNamesByCredential.get(credential.id))
+      .filter((accountName): accountName is string => Boolean(accountName));
+    if (!credentials.length) continue;
+    const requestHeadersByAccount = headersByCredentialAccount(
+      Object.values(gateway.credentials)
+        .filter((credential) => credential.providerId === model.providerId && credential.status !== "disabled")
+        .map((credential) => credential.id),
+      model.providerId,
+    );
+    const proxyUrlByAccount = proxyByCredentialAccount(
+      Object.values(gateway.credentials)
+        .filter((credential) => credential.providerId === model.providerId && credential.status !== "disabled")
+        .map((credential) => credential.id),
+      model.providerId,
+    );
+    result.push({
+      providerId: model.providerId,
+      modelId: model.id,
+      upstreamModel: model.upstreamModelId,
+      exposedModelId: model.id,
+      accountNames: [...new Set(credentials)],
+      protocols: model.protocols,
+      capabilities: model.capabilities,
+      ...(Object.keys(requestHeadersByAccount).length ? { requestHeadersByAccount } : {}),
+      ...(Object.keys(proxyUrlByAccount).length ? { proxyUrlByAccount } : {}),
+    });
+  }
+  return result;
 }
 
 function extractAccountIdFromAuthData(authData: Record<string, unknown> | undefined): string | undefined {
@@ -546,6 +705,7 @@ async function restoreEnabledRoutes(): Promise<void> {
       longConversationStrategy: account.runtime.compatibilityLongConversationStrategy ?? route.longConversationStrategy,
       instructionRole: account.runtime.compatibilityInstructionRole ?? route.instructionRole,
       requestOverrides: account.runtime.compatibilityRequestOverrides ?? route.requestOverrides,
+      proxyUrl: route.proxyUrl,
     }, async ({ baseUrl, localRouteToken }) => {
       await writeCompatibilityRuntime(runtime, route.envName, route.accountName, {
         ...account.runtime,
@@ -567,6 +727,62 @@ export async function toggleEnvironmentRoute(envName: string, enabled: boolean) 
   return enabled
     ? getUsageRouterManager().enableEnvironment(envName, accounts, updateBaseUrl)
     : getUsageRouterManager().disableEnvironment(envName, updateBaseUrl);
+}
+
+export async function toggleEnvironmentGateway(envName: string, enabled: boolean) {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const env = state.envs[envName];
+  if (!env) throw new Error(`Environment '${envName}' not found`);
+  const generated = runtime.buildLegacyGatewayEnvironmentState(env);
+  const accounts = getEnvironmentRouteAccounts(state, envName, generated);
+  const updateBaseUrl = createEnvironmentRouteBaseUrlUpdater(runtime, envName);
+  const manager = getUsageRouterManager();
+
+  if (!enabled) {
+    const result = await manager.disableEnvironmentGateway(envName, updateBaseUrl);
+    await runtime.clearLegacyGateway({ stateDir: getStateDir(), envName });
+    const nextState = await runtime.readLegacyState(getLegacyOptions());
+    await reapplyEnvironmentTargetHomes(runtime, nextState, envName, "disable-environment-gateway");
+    return result;
+  }
+
+  const result = await manager.enableEnvironmentGateway(
+    envName,
+    accounts,
+    updateBaseUrl,
+    generated.routeGroups,
+    buildGatewayRouteBindings(env, generated),
+    generated.routeRules ?? [],
+  );
+  const gateway = {
+    ...generated,
+    mode: "gateway" as const,
+    gatewayId: result.gatewayId ?? generated.gatewayId,
+    catalogVersion: generated.catalogVersion + 1,
+  };
+  try {
+    await runtime.writeLegacyGateway({ stateDir: getStateDir(), envName, gateway });
+    const nextState = await runtime.readLegacyState(getLegacyOptions());
+    await reapplyEnvironmentTargetHomes(runtime, nextState, envName, "enable-environment-gateway");
+    return result;
+  } catch (error) {
+    await manager.disableEnvironmentGateway(envName, updateBaseUrl).catch(() => undefined);
+    await runtime.clearLegacyGateway({ stateDir: getStateDir(), envName }).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function reapplyEnvironmentTargetHomes(
+  runtime: CoreRuntime,
+  state: Awaited<ReturnType<CoreRuntime["readLegacyState"]>>,
+  envName: string,
+  source: EnvFileHistorySource,
+): Promise<void> {
+  for (const target of ["cli", "app"] as const) {
+    if (state.targets[target].env !== envName) continue;
+    await applyTargetHomeStateWithHistory(runtime, state, target, source);
+  }
 }
 
 export async function listAccountPools() {
@@ -614,6 +830,356 @@ export async function loadUsageSnapshot(filter: UsageFilter) {
 
 export async function loadUsageRequests(query: UsageRequestQuery) {
   return getUsageRouterManager().queryUsageRequests(query);
+}
+
+export async function loadUsageTrace(query: UsageTraceQuery = {}) {
+  return getUsageRouterManager().listTraceEvents(query);
+}
+
+export async function loadGatewayAdminSnapshot() {
+  const runtime = await loadCoreRuntime();
+  const agentRuntime = await loadGatewayAgentRuntime().catch(() => undefined);
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const manager = getUsageRouterManager();
+  const [routes, gateways, statuses] = await Promise.all([
+    manager.listPersistedRoutes(),
+    manager.listPersistedEnvironmentGateways(),
+    manager.getEnvironmentStatuses(Object.keys(state.envs)),
+  ]);
+  return Promise.all(Object.values(state.envs).sort((left, right) => left.name.localeCompare(right.name)).map(async (environment) => {
+    const gateway = environment.gateway ?? {
+      schemaVersion: 1 as const,
+      mode: "direct" as const,
+      gatewayId: `gateway-${environment.name}`,
+      providers: {}, credentials: {}, models: {}, routeGroups: {}, catalogVersion: 0,
+    };
+    const v2 = await runtime.readLegacyGatewayV2({ stateDir: getStateDir(), envName: environment.name }).catch(() => undefined);
+    const liveGateway = gateways.find((item) => item.envName === environment.name && item.enabled);
+    const routeStatus = statuses.find((item) => item.envName === environment.name);
+    const environmentRoutes = routes.filter((route) => route.envName === environment.name && route.enabled);
+    const agents = await Promise.all(Object.values(v2?.agentBindings ?? {}).map(async (item) => {
+      const base = { id: item.agentId, displayName: item.displayName, enabled: item.enabled, defaultModelId: item.defaultModelId, defaultRouteGroupId: item.defaultRouteGroupId, reasoningProfile: item.reasoningProfile, fallbackModelId: item.fallbackModelId, subAgentModelId: item.subAgentModelId };
+      if (!agentRuntime) return base;
+      const profile = agentRuntime.BUILT_IN_AGENT_PROFILES.find((candidate) => candidate.id === item.agentId);
+      if (!profile) return { ...base, state: "unwired" as const };
+      const fs = agentRuntime.createNodeAgentFileSystem(environment.path, { additionalRoots: [getStateDir()] });
+      const adapter = agentRuntime.createAgentAdapter(profile, { fs, stateDir: join(getStateDir(), "gateway-agents", encodeURIComponent(environment.name)) });
+      const discovered = await adapter.discover();
+      const drift = item.enabled ? await adapter.check(`${environment.name}:${item.agentId}`) : undefined;
+      return { ...base, installed: discovered.installed, configPath: discovered.configPath, state: item.enabled ? drift?.state ?? "unwired" : "disabled" as const };
+    }));
+    return {
+      envName: environment.name,
+      mode: gateway.mode,
+      gatewayId: gateway.gatewayId,
+      gatewayEnabled: Boolean(liveGateway),
+      localGatewayBaseUrl: routeStatus?.localGatewayBaseUrl,
+      providers: Object.values(gateway.providers).map((item) => ({ id: item.id, displayName: item.displayName, kind: item.kind, enabled: item.enabled })),
+      credentials: Object.values(gateway.credentials).map((item) => ({ id: item.id, providerId: item.providerId, kind: item.kind, status: item.status })),
+      models: Object.values(gateway.models).map((item) => ({ id: item.id, providerId: item.providerId, upstreamModelId: item.upstreamModelId, displayName: item.displayName, enabled: item.enabled })),
+      routeGroups: Object.values(gateway.routeGroups).map((item) => ({ id: item.id, displayName: item.displayName, exposedModelId: item.exposedModelId, strategy: item.strategy, sessionPolicy: item.sessionPolicy, fallbackEnabled: item.fallbackEnabled, memberCount: item.members.length })),
+      agents,
+      routedAccounts: environmentRoutes.length,
+      quota: gateway.quota,
+    };
+  }));
+}
+
+export async function loadGatewayAdminConfiguration(envName: string): Promise<GatewayAdminConfiguration | null> {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const environment = state.envs[envName];
+  if (!environment) return null;
+  const gateway = environment.gateway ?? runtime.buildLegacyGatewayEnvironmentState(environment);
+  const v2 = await runtime.readLegacyGatewayV2({ stateDir: getStateDir(), envName }).catch(() => undefined);
+  return {
+    envName,
+    revision: v2?.revision ?? 0,
+    gateway: stripExcludedGatewayFields(gateway),
+    agentBindings: JSON.parse(JSON.stringify(v2?.agentBindings ?? {})) as Record<string, Record<string, unknown>>,
+  };
+}
+
+export async function discoverGatewayAdminModels(input: { envName: string; providerId: string }) {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const environment = state.envs[input.envName];
+  if (!environment) throw new Error(`Environment '${input.envName}' not found`);
+  let gateway = environment.gateway ?? runtime.buildLegacyGatewayEnvironmentState(environment);
+  const pluginDescriptor = await getProviderPluginDescriptor(getStateDir(), input.providerId);
+  if (pluginDescriptor && !gateway.providers[input.providerId]) {
+    const endpoints = Object.fromEntries(pluginDescriptor.endpoints.map((endpoint) => [
+      endpoint.protocol === "chat_completions" ? "chatCompletions" : endpoint.protocol === "anthropic" ? "anthropicMessages" : endpoint.protocol,
+      endpoint.baseUrl,
+    ]));
+    gateway = {
+      ...gateway,
+      providers: {
+        ...gateway.providers,
+        [input.providerId]: {
+          id: input.providerId,
+          displayName: pluginDescriptor.displayName,
+          kind: "custom" as const,
+          endpoints,
+          modelDiscovery: "plugin" as const,
+          enabled: true,
+        },
+      },
+    };
+  }
+  const result = await discoverGatewayProviderModels({
+    environment,
+    envName: input.envName,
+    gateway,
+    providerId: input.providerId,
+    stateDir: getStateDir(),
+  });
+  const nextGateway = {
+    ...gateway,
+    models: { ...gateway.models, ...Object.fromEntries(result.models.map((model) => [model.id, model])) },
+    catalogVersion: gateway.catalogVersion + (result.models.length ? 1 : 0),
+  };
+  await runtime.writeLegacyGateway({ stateDir: getStateDir(), envName: input.envName, gateway: nextGateway });
+  const cliStatus = await getCodexToolStatus("cli", getCodexToolPathOptions());
+  await synchronizeEnvironmentGatewayModelCatalog({
+    homePath: environment.path,
+    gateway: nextGateway,
+    loadBundledCatalog: cliStatus.available ? () => loadBundledModelCatalog(cliStatus.path) : undefined,
+  });
+  const activeGateway = (await getUsageRouterManager().listPersistedEnvironmentGateways()).find((item) => item.envName === input.envName && item.enabled);
+  if (activeGateway) {
+    const accounts = getEnvironmentRouteAccounts(await runtime.readLegacyState(getLegacyOptions()), input.envName, nextGateway);
+    const updateBaseUrl = createEnvironmentRouteBaseUrlUpdater(runtime, input.envName);
+    await getUsageRouterManager().enableEnvironmentGateway(
+      input.envName,
+      accounts,
+      updateBaseUrl,
+      Object.fromEntries(Object.values(nextGateway.routeGroups).map((group) => [group.id, group])),
+      buildGatewayRouteBindings(environment, nextGateway),
+      nextGateway.routeRules ?? [],
+    );
+  }
+  return {
+    envName: input.envName,
+    providerId: input.providerId,
+    modelIds: result.models.map((model) => model.id),
+    credentialsUsed: result.credentialsUsed,
+    catalogVersion: nextGateway.catalogVersion,
+  };
+}
+
+export function loadProviderPluginSnapshot() {
+  return listProviderPluginsRuntime(getStateDir());
+}
+
+export function loadProviderPluginMarket() {
+  return listProviderPluginMarketRuntime(getStateDir());
+}
+
+export function refreshProviderPluginMarket(url: string) {
+  return refreshProviderPluginMarketRuntime(getStateDir(), url);
+}
+
+export function installProviderPlugin(input: ProviderPluginInstallRequest) {
+  return installProviderPluginRuntime(getStateDir(), input);
+}
+
+export function installProviderPluginFromMarket(input: ProviderPluginMarketInstallRequest) {
+  return installProviderPluginFromMarketRuntime(getStateDir(), input);
+}
+
+export function deactivateProviderPluginById(id: string) {
+  return deactivateProviderPluginRuntime(getStateDir(), id);
+}
+
+export function rollbackProviderPluginById(id: string) {
+  return rollbackProviderPluginRuntime(getStateDir(), id);
+}
+
+export function removeProviderPluginById(id: string) {
+  return removeProviderPluginRuntime(getStateDir(), id);
+}
+
+type DesktopAgentBindingRecord = Record<string, unknown>;
+
+async function synchronizeDesktopGatewayAgents(input: {
+  envName: string;
+  environment: { path: string };
+  gateway: GatewayEnvironmentState;
+  previousBindings: Record<string, DesktopAgentBindingRecord>;
+  nextBindings: Record<string, DesktopAgentBindingRecord>;
+}): Promise<void> {
+  const agentRuntime = await loadGatewayAgentRuntime();
+  const profiles = new Map(agentRuntime.BUILT_IN_AGENT_PROFILES.map((profile) => [profile.id, profile]));
+  const stateDir = join(getStateDir(), "gateway-agents", encodeURIComponent(input.envName));
+  const fs = agentRuntime.createNodeAgentFileSystem(input.environment.path, { additionalRoots: [getStateDir()] });
+  const routeStatus = (await getUsageRouterManager().getEnvironmentStatuses([input.envName]))[0];
+  const routerSettings = await readRouterPortSettings(getCodexToolPathOptions().settingsPath);
+  const gatewayBaseUrl = routeStatus?.localGatewayBaseUrl
+    ?? `http://127.0.0.1:${routerSettings.preferredPort}/gateways/${encodeURIComponent(input.gateway.gatewayId)}`;
+  const gatewayTokenRef = `gateway/${encodeURIComponent(input.envName)}`;
+  const adapterFor = (agentId: string) => {
+    const profile = [...profiles.values()].find((item) => item.id === agentId);
+    if (!profile) throw new Error(`Unsupported Gateway Agent '${agentId}'`);
+    return { profile, adapter: agentRuntime.createAgentAdapter(profile, { fs, stateDir }) };
+  };
+  const bindingIdFor = (agentId: string) => `${input.envName}:${agentId}`;
+  const modelFor = (binding: DesktopAgentBindingRecord): { modelId: string; routeGroupId?: string; reasoningProfile?: string; fallbackModelId?: string; subAgentModelId?: string } | undefined => {
+    const requestedModel = typeof binding.defaultModelId === "string" && binding.defaultModelId.trim() ? binding.defaultModelId.trim() : undefined;
+    const requestedGroup = typeof binding.defaultRouteGroupId === "string" && binding.defaultRouteGroupId.trim() ? binding.defaultRouteGroupId.trim() : undefined;
+    const group = requestedGroup ? input.gateway.routeGroups[requestedGroup] : input.gateway.defaultRouteGroupId ? input.gateway.routeGroups[input.gateway.defaultRouteGroupId] : undefined;
+    const modelId = requestedModel ?? group?.exposedModelId ?? Object.values(input.gateway.models)[0]?.id;
+    if (!modelId) return undefined;
+    const optionalString = (key: string) => typeof binding[key] === "string" && binding[key].trim() ? binding[key].trim() : undefined;
+    return {
+      modelId,
+      routeGroupId: requestedGroup ?? group?.id,
+      ...(optionalString("reasoningProfile") ? { reasoningProfile: optionalString("reasoningProfile") } : {}),
+      ...(optionalString("fallbackModelId") ? { fallbackModelId: optionalString("fallbackModelId") } : {}),
+      ...(optionalString("subAgentModelId") ? { subAgentModelId: optionalString("subAgentModelId") } : {}),
+    };
+  };
+  const applyBinding = async (binding: DesktopAgentBindingRecord) => {
+    const agentId = typeof binding.agentId === "string" && binding.agentId.trim() ? binding.agentId.trim() : "";
+    if (!agentId) throw new Error("Gateway Agent binding is missing agentId");
+    const { profile, adapter } = adapterFor(agentId);
+    const model = modelFor(binding);
+    if (!model) throw new Error(`Gateway Agent '${agentId}' needs a model or RouteGroup before it can be connected`);
+    await adapter.apply({
+      bindingId: bindingIdFor(agentId),
+      agentId: profile.id,
+      gatewayBaseUrl,
+      gatewayTokenRef,
+      protocol: profile.defaultProtocol,
+      exposedModelId: model.modelId,
+      routeGroupId: model.routeGroupId,
+      reasoningProfile: model.reasoningProfile,
+      fallbackModelId: model.fallbackModelId,
+      subAgentModelId: model.subAgentModelId,
+      enabled: true,
+      updatedAt: Date.now(),
+    });
+  };
+  const restoreBinding = async (binding: DesktopAgentBindingRecord) => {
+    const agentId = typeof binding.agentId === "string" && binding.agentId.trim() ? binding.agentId.trim() : "";
+    if (!agentId) return;
+    const { adapter } = adapterFor(agentId);
+    await adapter.restore(bindingIdFor(agentId));
+  };
+
+  // Validate every enabled binding before mutating any Agent configuration.
+  for (const binding of Object.values(input.nextBindings)) {
+    if (binding.enabled !== true) continue;
+    const agentId = typeof binding.agentId === "string" ? binding.agentId.trim() : "";
+    if (!agentId) throw new Error("Gateway Agent binding is missing agentId");
+    adapterFor(agentId);
+    if (!modelFor(binding)) throw new Error(`Gateway Agent '${agentId}' needs a model or RouteGroup before it can be connected`);
+  }
+
+  const touched = new Set<string>();
+  try {
+    // Apply new bindings first so a failed new configuration leaves removed
+    // bindings untouched until every replacement is known to be writable.
+    for (const binding of Object.values(input.nextBindings)) {
+      const agentId = typeof binding.agentId === "string" ? binding.agentId.trim() : "";
+      if (!agentId) continue;
+      touched.add(agentId);
+      if (binding.enabled === true) await applyBinding(binding);
+      else await restoreBinding(binding);
+    }
+    for (const binding of Object.values(input.previousBindings)) {
+      const agentId = typeof binding.agentId === "string" ? binding.agentId.trim() : "";
+      if (!agentId || touched.has(agentId)) continue;
+      touched.add(agentId);
+      await restoreBinding(binding);
+    }
+  } catch (error) {
+    // Restore the previous explicit bindings when a multi-Agent update fails.
+    // Adapter snapshots retain the pre-wire content across repeated applies.
+    for (const agentId of touched) {
+      const previous = Object.values(input.previousBindings).find((binding) => binding.agentId === agentId);
+      try {
+        if (previous?.enabled === true && modelFor(previous)) await applyBinding(previous);
+        else if (previous) await restoreBinding(previous);
+        else await restoreBinding({ agentId });
+      } catch {
+        // Preserve the original failure; the subsequent Drift check reports
+        // any platform-level rollback failure without leaking credentials.
+      }
+    }
+    throw error;
+  }
+}
+
+export async function saveGatewayAdminConfiguration(input: SaveGatewayAdminConfigurationRequest): Promise<GatewayAdminConfiguration> {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const environment = state.envs[input.envName];
+  if (!environment) throw new Error(`Environment '${input.envName}' not found`);
+  const gateway = stripExcludedGatewayFields(input.gateway);
+  const previousV2 = await runtime.readLegacyGatewayV2({ stateDir: getStateDir(), envName: input.envName }).catch(() => undefined);
+  await runtime.writeLegacyGateway({ stateDir: getStateDir(), envName: input.envName, gateway: gateway as unknown as Parameters<CoreRuntime["writeLegacyGateway"]>[0]["gateway"] });
+  if (input.agentBindings) {
+    const currentV2 = await runtime.readLegacyGatewayV2({ stateDir: getStateDir(), envName: input.envName });
+    if (!currentV2) throw new Error(`Gateway v2 configuration for '${input.envName}' could not be created`);
+    await runtime.writeLegacyGatewayV2({
+      stateDir: getStateDir(),
+      envName: input.envName,
+      gateway: {
+        ...currentV2,
+        agentBindings: input.agentBindings,
+        revision: currentV2.revision + 1,
+        sourceSchemaVersion: 2,
+      } as unknown as Parameters<CoreRuntime["writeLegacyGatewayV2"]>[0]["gateway"],
+    });
+    await synchronizeDesktopGatewayAgents({
+      envName: input.envName,
+      environment,
+      gateway: gateway as unknown as GatewayEnvironmentState,
+      previousBindings: (previousV2?.agentBindings ?? {}) as unknown as Record<string, DesktopAgentBindingRecord>,
+      nextBindings: input.agentBindings,
+    });
+  }
+  const latest = await runtime.readLegacyState(getLegacyOptions());
+  const accounts = getEnvironmentRouteAccounts(latest, input.envName);
+  const updateBaseUrl = createEnvironmentRouteBaseUrlUpdater(runtime, input.envName);
+  const activeGateway = (await getUsageRouterManager().listPersistedEnvironmentGateways()).find((item) => item.envName === input.envName && item.enabled);
+  if (activeGateway) {
+    const gateway = latest.envs[input.envName]?.gateway;
+    if (gateway) {
+      const gatewayAccounts = getEnvironmentRouteAccounts(latest, input.envName, gateway);
+      await getUsageRouterManager().enableEnvironmentGateway(
+        input.envName,
+        gatewayAccounts,
+        updateBaseUrl,
+        Object.fromEntries(Object.values(gateway.routeGroups).map((group) => [group.id, group])),
+        buildGatewayRouteBindings(latest.envs[input.envName]!, gateway),
+        gateway.routeRules ?? [],
+      );
+    }
+  }
+  const saved = await loadGatewayAdminConfiguration(input.envName);
+  if (!saved) throw new Error(`Environment '${input.envName}' disappeared while saving gateway configuration`);
+  return saved;
+}
+
+let autoUpdateController: import("./auto-update.js").DesktopAutoUpdateController | undefined;
+
+export function registerAutoUpdateController(controller: import("./auto-update.js").DesktopAutoUpdateController): void {
+  autoUpdateController = controller;
+}
+
+export function getAutoUpdateStatus(): DesktopAutoUpdateStatus {
+  return autoUpdateController?.getStatus() ?? { enabled: false, state: "disabled", message: "Auto-update is not initialized" };
+}
+
+export async function checkForAutoUpdate(): Promise<DesktopAutoUpdateStatus> {
+  return autoUpdateController?.check() ?? getAutoUpdateStatus();
+}
+
+export function installDownloadedUpdate(): DesktopAutoUpdateStatus {
+  if (!autoUpdateController) throw new Error("Auto-update is not initialized");
+  return autoUpdateController.install();
 }
 
 export async function listUsagePricing() {
@@ -1556,6 +2122,11 @@ export async function getRouterPortSettings(): Promise<RouterPortSettings> {
   return readRouterPortSettings(getCodexToolPathOptions().settingsPath);
 }
 
+export async function getLaunchAtLoginSettings(): Promise<LaunchAtLoginStatus> {
+  const settings = await readLaunchAtLoginSettings(getCodexToolPathOptions().settingsPath);
+  return { ...settings, supported: process.platform === "darwin" || process.platform === "win32" };
+}
+
 export async function getEnvHistoryRetentionSettings(): Promise<EnvHistoryRetentionSettings> {
   return readEnvHistoryRetentionSettings(getCodexToolPathOptions().settingsPath);
 }
@@ -1619,6 +2190,11 @@ export async function setRouterLifecycleSettings(value: RouterLifecycleSettings)
 
 export async function setRouterPortSettings(value: RouterPortSettings): Promise<RouterPortSettings> {
   return saveRouterPortSettings(getCodexToolPathOptions().settingsPath, value);
+}
+
+export async function setLaunchAtLoginSettings(value: { enabled: boolean }): Promise<LaunchAtLoginStatus> {
+  const settings = await saveLaunchAtLoginSettings(getCodexToolPathOptions().settingsPath, value);
+  return { ...settings, supported: process.platform === "darwin" || process.platform === "win32" };
 }
 
 export async function setEnvHistoryRetentionSettings(
@@ -2361,22 +2937,32 @@ async function applyTargetHomeStateWithHistory(
     const catalogPreset = refreshedAccount?.runtime.independentModelEnabled
       ? resolveProviderDefaultPreset(catalogBaseUrl)
       : resolveProviderModelPreset({ baseUrl: catalogBaseUrl, model: refreshedAccount?.runtime.model });
-    await synchronizeAccountModelCatalog({
-      envName: pointer.env,
-      accountName: pointer.account,
-      homePath: env.path,
-      store: getModelCatalogStore(),
-      providerId: refreshedAccount?.runtime.providerId,
-      baseUrl: catalogBaseUrl,
-      model: catalogPreset?.entries[0]?.slug
-        ?? refreshedAccount?.runtime.model
-        ?? (refreshedAccount?.runtime.independentModelEnabled
-          ? getProviderDefaultModelSlug(refreshedAccount.runtime.independentModelProviderId) ?? DEEPSEEK_DEFAULT_MODEL_SLUG
-          : undefined),
-      loadBundledCatalog: cliStatus.available
-        ? () => loadBundledModelCatalog(cliStatus.path)
-        : undefined,
-    });
+    if (env.gateway?.mode === "gateway") {
+      await synchronizeEnvironmentGatewayModelCatalog({
+        homePath: env.path,
+        gateway: env.gateway,
+        loadBundledCatalog: cliStatus.available
+          ? () => loadBundledModelCatalog(cliStatus.path)
+          : undefined,
+      });
+    } else {
+      await synchronizeAccountModelCatalog({
+        envName: pointer.env,
+        accountName: pointer.account,
+        homePath: env.path,
+        store: getModelCatalogStore(),
+        providerId: refreshedAccount?.runtime.providerId,
+        baseUrl: catalogBaseUrl,
+        model: catalogPreset?.entries[0]?.slug
+          ?? refreshedAccount?.runtime.model
+          ?? (refreshedAccount?.runtime.independentModelEnabled
+            ? getProviderDefaultModelSlug(refreshedAccount.runtime.independentModelProviderId) ?? DEEPSEEK_DEFAULT_MODEL_SLUG
+            : undefined),
+        loadBundledCatalog: cliStatus.available
+          ? () => loadBundledModelCatalog(cliStatus.path)
+          : undefined,
+      });
+    }
   } catch (error) {
     await restoreEnvFileSnapshot(env.path, before);
     throw error;

@@ -18,7 +18,7 @@ async function runCoreCli(
     "npx",
     ["--yes", "tsx", "scripts/core-cli.ts", ...args],
     {
-      cwd: "/Users/wangxt/myspace/codex-switcher",
+      cwd: process.cwd(),
       env: {
         ...process.env,
         ...env,

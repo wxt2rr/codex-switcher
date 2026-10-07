@@ -1,9 +1,11 @@
-import { mkdir, writeFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, mkdir, writeFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readLegacyState } from "./legacy.js";
+import { clearLegacyGateway, readLegacyGatewayV2, readLegacyState, writeLegacyGateway, writeLegacyGatewayV2, } from "./legacy.js";
+import { GATEWAY_SCHEMA_VERSION } from "../gateway/model.js";
+import { migrateGatewayEnvironmentStateToV2 } from "../gateway/v2.js";
 test("legacy reader hydrates envs, accounts, runtime settings, and target pointers", async () => {
     const root = await mkdtemp(join(tmpdir(), "codex-switcher-legacy-"));
     const stateDir = join(root, ".codex-switcher");
@@ -78,6 +80,191 @@ test("legacy reader hydrates auth metadata from account auth.json", async () => 
         });
     }
     finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+test("legacy state persists environment gateway configuration independently of account files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-legacy-gateway-"));
+    const stateDir = join(root, ".codex-switcher");
+    const envsDir = join(root, ".codex-envs");
+    const defaultHome = join(root, ".codex");
+    try {
+        await mkdir(defaultHome, { recursive: true });
+        const gateway = {
+            schemaVersion: GATEWAY_SCHEMA_VERSION,
+            mode: "gateway",
+            gatewayId: "gateway-default",
+            providers: {},
+            credentials: {},
+            models: {},
+            routeGroups: {},
+            catalogVersion: 1,
+        };
+        await writeLegacyGateway({ stateDir, envName: "default", gateway });
+        const persistedV2 = await readLegacyGatewayV2({ stateDir, envName: "default" });
+        assert.equal(persistedV2?.schemaVersion, 2);
+        assert.equal(persistedV2?.environmentId, "default");
+        const loaded = await readLegacyState({ stateDir, envsDir, defaultHome });
+        assert.deepEqual(loaded.envs.default.gateway, gateway);
+        await clearLegacyGateway({ stateDir, envName: "default" });
+        assert.equal(await readLegacyGatewayV2({ stateDir, envName: "default" }), undefined);
+        const cleared = await readLegacyState({ stateDir, envsDir, defaultHome });
+        assert.equal(cleared.envs.default.gateway, undefined);
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+test("legacy reader downgrades a v2-only gateway document for old consumers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-legacy-gateway-v2-only-"));
+    const stateDir = join(root, ".codex-switcher");
+    const envsDir = join(root, ".codex-envs");
+    const defaultHome = join(root, ".codex");
+    try {
+        await mkdir(defaultHome, { recursive: true });
+        const legacy = {
+            schemaVersion: GATEWAY_SCHEMA_VERSION,
+            mode: "gateway",
+            gatewayId: "gateway-default",
+            providers: {},
+            credentials: {},
+            models: {},
+            routeGroups: {},
+            catalogVersion: 1,
+        };
+        await writeLegacyGatewayV2({
+            stateDir,
+            envName: "default",
+            gateway: migrateGatewayEnvironmentStateToV2(legacy, "default"),
+        });
+        const loaded = await readLegacyState({ stateDir, envsDir, defaultHome });
+        assert.deepEqual(loaded.envs.default.gateway, legacy);
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+test("legacy gateway writes preserve v2 environment identity and agent bindings", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-legacy-gateway-preserve-"));
+    const stateDir = join(root, ".codex-switcher");
+    const defaultHome = join(root, ".codex");
+    try {
+        await mkdir(defaultHome, { recursive: true });
+        await writeLegacyGatewayV2({
+            stateDir,
+            envName: "default",
+            gateway: {
+                schemaVersion: 2,
+                environmentId: "environment-default",
+                revision: 7,
+                sourceSchemaVersion: 2,
+                mode: "gateway",
+                gatewayId: "gateway-default",
+                providers: {},
+                credentials: {},
+                models: {},
+                routeGroups: {},
+                agentBindings: {
+                    codex: {
+                        agentId: "codex",
+                        displayName: "Codex",
+                        gatewayId: "gateway-default",
+                        defaultModelId: "gpt-shared",
+                        originalConfigRef: "codex/config.toml",
+                        enabled: true,
+                    },
+                },
+                listener: { basePath: "/gateways/gateway-default", protocols: ["responses", "chat_completions", "anthropic", "gemini"] },
+                catalogVersion: 1,
+            },
+        });
+        await writeLegacyGateway({
+            stateDir,
+            envName: "default",
+            gateway: {
+                schemaVersion: GATEWAY_SCHEMA_VERSION,
+                mode: "direct",
+                gatewayId: "gateway-default",
+                providers: {},
+                credentials: {},
+                models: {},
+                routeGroups: {},
+                catalogVersion: 1,
+            },
+        });
+        const persisted = await readLegacyGatewayV2({ stateDir, envName: "default" });
+        assert.equal(persisted?.environmentId, "environment-default");
+        assert.equal(persisted?.revision, 8);
+        assert.deepEqual(persisted?.agentBindings?.codex, {
+            agentId: "codex",
+            displayName: "Codex",
+            gatewayId: "gateway-default",
+            defaultModelId: "gpt-shared",
+            originalConfigRef: "codex/config.toml",
+            enabled: true,
+        });
+        assert.deepEqual(persisted?.listener, { basePath: "/gateways/gateway-default", protocols: ["responses", "chat_completions", "anthropic", "gemini"] });
+        assert.equal(persisted?.mode, "direct");
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+test("legacy gateway dual-write restores v1 when the v2 write fails", async () => {
+    if (process.platform === "win32")
+        return;
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-legacy-gateway-rollback-"));
+    const stateDir = join(root, ".codex-switcher");
+    const gateway = {
+        schemaVersion: GATEWAY_SCHEMA_VERSION,
+        mode: "direct",
+        gatewayId: "gateway-default",
+        providers: {},
+        credentials: {},
+        models: {},
+        routeGroups: {},
+        catalogVersion: 1,
+    };
+    try {
+        await writeLegacyGateway({ stateDir, envName: "default", gateway });
+        const legacyPath = join(stateDir, "env-gateways", "default.json");
+        const v2Directory = join(stateDir, "env-gateways-v2");
+        const before = await readFile(legacyPath, "utf8");
+        await chmod(v2Directory, 0o500);
+        await assert.rejects(writeLegacyGateway({ stateDir, envName: "default", gateway: { ...gateway, mode: "gateway", catalogVersion: 2 } }));
+        assert.equal(await readFile(legacyPath, "utf8"), before);
+    }
+    finally {
+        await chmod(join(stateDir, "env-gateways-v2"), 0o700).catch(() => undefined);
+        await rm(root, { recursive: true, force: true });
+    }
+});
+test("clearing a legacy gateway restores v1 when v2 deletion fails", async () => {
+    if (process.platform === "win32")
+        return;
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-legacy-gateway-clear-rollback-"));
+    const stateDir = join(root, ".codex-switcher");
+    const gateway = {
+        schemaVersion: GATEWAY_SCHEMA_VERSION,
+        mode: "gateway",
+        gatewayId: "gateway-default",
+        providers: {},
+        credentials: {},
+        models: {},
+        routeGroups: {},
+        catalogVersion: 1,
+    };
+    try {
+        await writeLegacyGateway({ stateDir, envName: "default", gateway });
+        const legacyPath = join(stateDir, "env-gateways", "default.json");
+        const v2Path = join(stateDir, "env-gateways-v2", "default.json");
+        await chmod(join(stateDir, "env-gateways-v2"), 0o500);
+        await assert.rejects(clearLegacyGateway({ stateDir, envName: "default" }));
+        assert.equal((await readFile(legacyPath, "utf8")).length > 0, true);
+        assert.equal((await readFile(v2Path, "utf8")).length > 0, true);
+    }
+    finally {
+        await chmod(join(stateDir, "env-gateways-v2"), 0o700).catch(() => undefined);
         await rm(root, { recursive: true, force: true });
     }
 });

@@ -1,5 +1,6 @@
-import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
 
 import {
   DEFAULT_SCHEMA_VERSION,
@@ -10,6 +11,16 @@ import {
   type PreferredAuthMethod,
   type SwitcherState,
 } from "./store.js";
+import {
+  isGatewayEnvironmentState,
+  type GatewayEnvironmentState,
+} from "../gateway/model.js";
+import {
+  isGatewayEnvironmentStateV2,
+  migrateGatewayEnvironmentStateToV2,
+  toLegacyGatewayEnvironmentState,
+  type GatewayEnvironmentStateV2,
+} from "../gateway/v2.js";
 
 const DEFAULT_ENV_NAME = "default";
 const DEFAULT_ACCOUNT_NAME = "default";
@@ -33,6 +44,35 @@ export interface WriteLegacyRuntimeOptions {
   envName: string;
   accountName: string;
   runtime: AccountState["runtime"];
+}
+
+export interface WriteLegacyAuthDataOptions {
+  stateDir: string;
+  envName: string;
+  accountName: string;
+  authData: AuthDataRecord;
+}
+
+export interface WriteLegacyGatewayOptions {
+  stateDir: string;
+  envName: string;
+  gateway: GatewayEnvironmentState;
+}
+
+export interface ClearLegacyGatewayOptions {
+  stateDir: string;
+  envName: string;
+}
+
+export interface WriteLegacyGatewayV2Options {
+  stateDir: string;
+  envName: string;
+  gateway: GatewayEnvironmentStateV2;
+}
+
+export interface ReadLegacyGatewayV2Options {
+  stateDir: string;
+  envName: string;
 }
 
 export interface CreateLegacyEnvOptions {
@@ -127,7 +167,7 @@ export async function writeLegacyRuntime(
     options.accountName,
   );
   await mkdir(runtimeDir, { recursive: true });
-  await writeFile(
+  await atomicWrite(
     join(runtimeDir, "runtime.json"),
     `${JSON.stringify(
       {
@@ -154,8 +194,111 @@ export async function writeLegacyRuntime(
       null,
       2,
     )}\n`,
-    "utf8",
   );
+}
+
+/** Persist credential material only in the account auth store, never in Gateway metadata. */
+export async function writeLegacyAuthData(
+  options: WriteLegacyAuthDataOptions,
+): Promise<void> {
+  const accountDir = join(
+    options.stateDir,
+    "env-accounts",
+    options.envName,
+    options.accountName,
+  );
+  await atomicWrite(join(accountDir, "auth.json"), `${JSON.stringify(options.authData, null, 2)}\n`);
+}
+
+export async function writeLegacyGateway(
+  options: WriteLegacyGatewayOptions,
+): Promise<void> {
+  if (!isGatewayEnvironmentState(options.gateway)) {
+    throw new Error(`Invalid gateway configuration for environment '${options.envName}'`);
+  }
+  const path = getGatewayPath(options.stateDir, options.envName);
+  const v2Path = getGatewayV2Path(options.stateDir, options.envName);
+  const previousLegacy = await readOptionalText(path);
+  const previousV2 = await readOptionalText(v2Path);
+
+  // Keep the historical schema as the compatibility source of truth while
+  // also materializing the v2 gateway document for the new runtime.
+  let nextV2 = migrateGatewayEnvironmentStateToV2(options.gateway, options.envName);
+  let previousV2State: GatewayEnvironmentStateV2 | undefined;
+  if (previousV2 !== undefined) {
+    try {
+      const parsed = JSON.parse(previousV2) as unknown;
+      if (isGatewayEnvironmentStateV2(parsed)) previousV2State = parsed;
+    } catch {
+      // An invalid old v2 file is preserved byte-for-byte if the transaction
+      // needs to roll back; it must not make a valid v1 write impossible.
+    }
+  }
+  if (previousV2State && previousV2State.gatewayId === nextV2.gatewayId) {
+    nextV2 = {
+      ...nextV2,
+      environmentId: previousV2State.environmentId,
+      revision: previousV2State.revision + 1,
+      sourceSchemaVersion: 2,
+      listener: previousV2State.listener,
+      agentBindings: previousV2State.agentBindings,
+    };
+  }
+
+  try {
+    await atomicWrite(path, `${JSON.stringify(options.gateway, null, 2)}\n`);
+    await writeLegacyGatewayV2({ stateDir: options.stateDir, envName: options.envName, gateway: nextV2 });
+  } catch (error) {
+    await restoreOptionalText(path, previousLegacy).catch(() => undefined);
+    await restoreOptionalText(v2Path, previousV2).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function clearLegacyGateway(
+  options: ClearLegacyGatewayOptions,
+): Promise<void> {
+  const path = getGatewayPath(options.stateDir, options.envName);
+  const v2Path = getGatewayV2Path(options.stateDir, options.envName);
+  const previousLegacy = await readOptionalText(path);
+  const previousV2 = await readOptionalText(v2Path);
+  try {
+    await rm(path, { force: true });
+    await rm(v2Path, { force: true });
+  } catch (error) {
+    await restoreOptionalText(path, previousLegacy).catch(() => undefined);
+    await restoreOptionalText(v2Path, previousV2).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function writeLegacyGatewayV2(
+  options: WriteLegacyGatewayV2Options,
+): Promise<void> {
+  if (!isGatewayEnvironmentStateV2(options.gateway)) {
+    throw new Error(`Invalid v2 gateway configuration for environment '${options.envName}'`);
+  }
+  const path = getGatewayV2Path(options.stateDir, options.envName);
+  await atomicWrite(path, `${JSON.stringify(options.gateway, null, 2)}\n`);
+}
+
+export async function readLegacyGatewayV2(
+  options: ReadLegacyGatewayV2Options,
+): Promise<GatewayEnvironmentStateV2 | undefined> {
+  try {
+    const parsed = JSON.parse(await readFile(getGatewayV2Path(options.stateDir, options.envName), "utf8")) as unknown;
+    if (!isGatewayEnvironmentStateV2(parsed)) {
+      throw new Error(`Gateway v2 configuration for environment '${options.envName}' is invalid`);
+    }
+    return parsed;
+  } catch (error: unknown) {
+    if (isMissingFileError(error)) return undefined;
+    throw error;
+  }
+}
+
+export async function clearLegacyGatewayV2(options: ClearLegacyGatewayOptions): Promise<void> {
+  await rm(getGatewayV2Path(options.stateDir, options.envName), { force: true });
 }
 
 export async function createLegacyEnv(options: CreateLegacyEnvOptions): Promise<void> {
@@ -184,6 +327,14 @@ export async function updateLegacyEnv(options: UpdateLegacyEnvOptions): Promise<
       getEnvMetaPath(options.stateDir, options.envName),
       getEnvMetaPath(options.stateDir, options.nextEnvName),
     );
+    await renameIfExists(
+      getGatewayPath(options.stateDir, options.envName),
+      getGatewayPath(options.stateDir, options.nextEnvName),
+    );
+    await renameIfExists(
+      getGatewayV2Path(options.stateDir, options.envName),
+      getGatewayV2Path(options.stateDir, options.nextEnvName),
+    );
   }
 
   await writeLegacyEnvMeta(options.stateDir, options.nextEnvName, {
@@ -211,6 +362,7 @@ async function readLegacyEnvState(
     ),
   );
 
+  const gateway = await readLegacyGateway(options.stateDir, envName);
   return {
     name: envName,
     path:
@@ -219,7 +371,25 @@ async function readLegacyEnvState(
         ? options.defaultHome
         : join(options.envsDir, envName, "home")),
     accounts,
+    ...(gateway ? { gateway } : {}),
   };
+}
+
+async function readLegacyGateway(
+  stateDir: string,
+  envName: string,
+): Promise<GatewayEnvironmentState | undefined> {
+  try {
+    const parsed = JSON.parse(await readFile(getGatewayPath(stateDir, envName), "utf8")) as unknown;
+    if (!isGatewayEnvironmentState(parsed)) {
+      throw new Error(`Gateway configuration for environment '${envName}' is invalid`);
+    }
+    return parsed;
+  } catch (error) {
+    if (!isMissingFileError(error)) throw error;
+    const v2 = await readLegacyGatewayV2({ stateDir, envName });
+    return v2 ? toLegacyGatewayEnvironmentState(v2) : undefined;
+  }
 }
 
 async function readLegacyAccountState(
@@ -375,7 +545,7 @@ async function writePointer(
   kind: "env" | "account",
   value: string,
 ): Promise<void> {
-  await writeFile(join(stateDir, `current_${target}_${kind}`), `${value}\n`, "utf8");
+  await atomicWrite(join(stateDir, `current_${target}_${kind}`), `${value}\n`);
 }
 
 async function listEnvNames(envsDir: string): Promise<string[]> {
@@ -412,12 +582,49 @@ async function writeLegacyEnvMeta(
   value: LegacyEnvMetaRecord,
 ): Promise<void> {
   const metaPath = getEnvMetaPath(stateDir, envName);
-  await mkdir(join(stateDir, "env-meta"), { recursive: true });
-  await writeFile(`${metaPath}`, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await atomicWrite(metaPath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+/** Write state through the same-directory rename boundary used by the core store. */
+async function atomicWrite(path: string, content: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, content, "utf8");
+    await rename(temporary, path);
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function readOptionalText(path: string): Promise<string | undefined> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if (isMissingFileError(error)) return undefined;
+    throw error;
+  }
+}
+
+async function restoreOptionalText(path: string, content: string | undefined): Promise<void> {
+  if (content === undefined) {
+    await rm(path, { force: true });
+    return;
+  }
+  await atomicWrite(path, content);
 }
 
 function getEnvMetaPath(stateDir: string, envName: string): string {
   return join(stateDir, "env-meta", `${envName}.json`);
+}
+
+function getGatewayPath(stateDir: string, envName: string): string {
+  return join(stateDir, "env-gateways", `${envName}.json`);
+}
+
+function getGatewayV2Path(stateDir: string, envName: string): string {
+  return join(stateDir, "env-gateways-v2", `${envName}.json`);
 }
 
 async function renameIfExists(source: string, target: string): Promise<void> {
@@ -429,6 +636,10 @@ async function renameIfExists(source: string, target: string): Promise<void> {
 
   await mkdir(dirname(target), { recursive: true });
   await rename(source, target);
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
 }
 
 function normalizePreferredAuthMethod(value: unknown): PreferredAuthMethod {

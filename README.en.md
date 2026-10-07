@@ -47,18 +47,22 @@ This repository now includes a runnable Electron desktop app under `apps/desktop
 - Electron runtime: `npm run desktop:electron`
 - Desktop tests: `npm run desktop:test`
 - Directory packaging: `npm run package:dir --workspace ./apps/desktop`
+- macOS installers: `npm run desktop:package:mac`
+- Windows installer: `npm run desktop:package:win`
+- Linux installers: `npm run desktop:package:linux` (AppImage + deb)
 
 Notes:
 
 - The desktop app now covers overview, env/account switching, env creation, runtime base URL updates, native login/relogin, confirmation flows for destructive actions, proxy, token refresh, doctor, recover, app status, CLI launch, log viewing, and advanced command bridging.
+- The desktop app also supports two compatible operating modes: manual account switching when the gateway is off, and gateway routing when it is on. In gateway mode, subscriptions, API keys, OAuth credentials, local models, and custom OpenAI-compatible endpoints can coexist in route groups and be selected by explicit logical model, provider, capability, health, and strategy.
 - Operation results now include structured summaries with raw output fallback for debugging.
 - The desktop app uses Electron and reuses the Node/TypeScript core bridge; frontend build, main-process build, desktop tests, and packaged app startup have been verified in-repo.
-- The main unfinished work is release hardening such as app icon, code signing, notarization, and distribution.
+- The gateway core lives in `packages/gateway` and includes four-protocol IR/bidirectional conversion, provider/credential contracts, 44 agent adapters, nested route groups, plugin hosting, usage/quota/cost/trace accounting, and manual-mode compatibility. It does not inspect prompts or perform automatic intent classification.
 - See [docs/desktop-core-architecture.md](docs/desktop-core-architecture.md) for architecture and migration notes.
 
 ### Desktop installer security notice
 
-The current macOS and Windows packages are unsigned. Download them only from this repository's GitHub Releases and continue only after verifying the source.
+Tagged release signing is wired into the GitHub Actions workflow for macOS Developer ID + notarization and Windows Authenticode when the repository release secrets are present. Local builds and manual workflow runs without those secrets remain ad-hoc/unsigned. Download release artifacts only from this repository's GitHub Releases and verify the source.
 
 If macOS reports that the installed app is damaged or cannot be opened, run:
 
@@ -128,6 +132,22 @@ codex-sw env new project-a --empty
 codex-sw ac login corp --env project-a
 codex-sw ac use corp --env project-a -t both
 ```
+
+### Option 3: Gateway mode
+
+Gateway mode is an additional mode for the same environment; it does not remove manual account switching:
+
+```bash
+# Inspect the current mode and routes
+codex-sw gateway status --env default
+codex-sw gateway routes --env default
+
+# Enable/disable the unified local gateway
+codex-sw gateway mode gateway --env default
+codex-sw gateway mode manual --env default
+```
+
+In gateway mode, a logical model remains the stable entrypoint while route groups can contain multiple providers, models, and credentials. A single environment can therefore use subscription and custom models together. `codex-sw ac use ...` remains available for explicit account switching whenever gateway mode is off.
 
 ## What `env` and `account` mean
 

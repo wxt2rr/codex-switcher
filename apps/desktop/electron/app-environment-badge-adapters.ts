@@ -19,7 +19,7 @@ export interface MacBadgeNativeModule {
   isTrustedAccessibilityClient(prompt: boolean): boolean;
   getBundleIdentifier(): string;
   getCodexDockRects(): Array<{ x: number; y: number; width: number; height: number }>;
-  setEnvironmentBadges(instances: Array<{ label: string; color: string }>): number;
+  setEnvironmentBadges(instances: Array<{ pid: number; label: string; color: string }>): number;
   clearEnvironmentBadges(): void;
 }
 
@@ -86,7 +86,11 @@ export class MacDockBadgeAdapter implements AppEnvironmentBadgeAdapter {
   async sync(instances: AppEnvironmentBadgeInstance[]): Promise<AppEnvironmentBadgeSyncResult> {
     if (!this.native) return { applied: 0, unresolved: instances.length, message: "macOS badge native module is unavailable" };
     const ordered = [...instances].sort((a, b) => a.instanceId.localeCompare(b.instanceId));
-    const applied = this.native.setEnvironmentBadges(ordered.map((instance) => ({ label: instance.label, color: instance.color })));
+    const applied = this.native.setEnvironmentBadges(ordered.map((instance) => ({
+      pid: instance.pid,
+      label: instance.label,
+      color: instance.color,
+    })));
     return {
       applied,
       unresolved: Math.max(0, instances.length - applied),

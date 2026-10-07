@@ -9,6 +9,9 @@ export interface EnvironmentRouteStatus {
   poolId?: string;
   poolMemberCount?: number;
   poolReadyMembers?: number;
+  gatewayEnabled?: boolean;
+  gatewayId?: string;
+  localGatewayBaseUrl?: string;
 }
 
 export interface UsageFilter {
@@ -42,6 +45,7 @@ export interface UsageRequestRecord {
   model: string | null;
   inputTokens: number | null;
   outputTokens: number | null;
+  reasoningTokens?: number | null;
   cacheCreationTokens: number | null;
   cacheReadTokens: number | null;
   totalTokens: number | null;
@@ -88,6 +92,7 @@ export interface UsageSummary {
   requests: number;
   inputTokens: number;
   outputTokens: number;
+  reasoningTokens?: number;
   cacheCreationTokens: number;
   cacheReadTokens: number;
   totalTokens: number;
@@ -104,6 +109,7 @@ export interface UsageAggregate {
   requests: number;
   inputTokens: number;
   outputTokens: number;
+  reasoningTokens?: number;
   cacheCreationTokens: number;
   cacheReadTokens: number;
   totalTokens: number;
@@ -126,6 +132,7 @@ export interface UsagePricingProfile {
   modelPattern: string;
   inputPerMillion: number;
   outputPerMillion: number;
+  reasoningPerMillion?: number | null;
   cacheCreationPerMillion: number | null;
   cacheReadPerMillion: number | null;
   updatedAt: number;

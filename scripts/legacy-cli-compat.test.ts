@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const execAsync = promisify(exec);
-const repoRoot = "/Users/wangxt/myspace/codex-switcher";
+const repoRoot = process.cwd();
 const scriptPath = join(repoRoot, "plugins/codex-switcher/scripts/codex-switcher");
 
 test("legacy bash entrypoints delegate env/account/runtime writes to core-cli", async () => {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const repoRoot = "/Users/wangxt/myspace/codex-switcher";
+const repoRoot = process.cwd();
 
 test("Windows manual result template preserves the expected evidence and verdict structure", async () => {
   const content = await readFile(`${repoRoot}/docs/windows-manual-checklist-result-template.md`, "utf8");
@@ -27,16 +27,24 @@ test("Windows manual result template preserves the expected evidence and verdict
     "- [ ] CLI isolation",
     "- [ ] App switching",
     "- [ ] TUI checks",
+    "- [ ] Gateway and plugin isolation",
+    "- [ ] Packaging and update recovery",
     "- [ ] Recovery and integrity",
     "- [ ] Token refresh and logs",
     "- [ ] Security checks",
     "## Command Evidence",
-    "If you used `scripts/windows-manual-capture.ps1`, note whether you ran it from a repository checkout or from a package contents directory, attach `windows-manual-evidence.txt`, then paste or summarize the most important outputs here:",
+    "attach `windows-manual-evidence.txt` and the generated `windows-sandbox.json` when the AppContainer helper was available",
+    "preserve the explicit `SKIPPED` line instead of treating the smoke as passed",
     "codex-sw check:",
     "codex-sw platform:",
     "codex-sw ops doctor:",
     "codex-sw app status:",
     "codex-sw ops token-refresh status:",
+    "### Gateway and plugin isolation",
+    "`filesystemWriteGranted`:",
+    "### Packaging and update recovery",
+    "Authenticode status:",
+    "Failed-boot rollback result:",
     "## Open Issues",
     "## Final Verdict",
     "- [ ] Passed without blockers",

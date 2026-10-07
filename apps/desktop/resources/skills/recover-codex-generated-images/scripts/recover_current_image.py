@@ -44,7 +44,18 @@ def find_transcript(codex_home: Path, session_id: str) -> Path | None:
     if not sessions.is_dir():
         return None
     matches = list(sessions.rglob(f"rollout-*{session_id}.jsonl"))
-    return max(matches, key=lambda path: path.stat().st_mtime_ns) if matches else None
+    if not matches:
+        return None
+
+    def freshness(path: Path) -> tuple[int, int, int, int, str]:
+        stat = path.stat()
+        # Filesystems differ in timestamp precision. Keep the normal mtime
+        # ordering, then use creation/change metadata and inode as stable tie
+        # breakers so a same-tick rollout does not select an older transcript.
+        birthtime = int(getattr(stat, "st_birthtime_ns", 0) or 0)
+        return (stat.st_mtime_ns, birthtime, stat.st_ctime_ns, stat.st_ino, path.name)
+
+    return max(matches, key=freshness)
 
 
 def current_turn_image_calls(transcript: Path) -> list[dict[str, Any]]:

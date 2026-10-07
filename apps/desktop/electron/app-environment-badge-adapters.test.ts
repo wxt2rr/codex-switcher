@@ -31,3 +31,23 @@ test("macOS permission request preserves an already trusted entry", async () => 
   assert.equal(await adapter.requestPermission(), "granted");
   assert.deepEqual(resets, []);
 });
+
+test("macOS badge sync forwards process ids for native Dock item matching", async () => {
+  let received: Array<{ pid: number; label: string; color: string }> = [];
+  const adapter = new MacDockBadgeAdapter("/tmp/app-environment-badge-adapters.test.cjs", {
+    native: {
+      ...nativeModule([]),
+      setEnvironmentBadges: (instances) => {
+        received = instances;
+        return instances.length;
+      },
+    },
+  });
+
+  const result = await adapter.sync([
+    { instanceId: "instance-2", pid: 2468, environment: "wangxt", label: "W", color: "#0A84FF" },
+  ]);
+
+  assert.equal(result.applied, 1);
+  assert.deepEqual(received, [{ pid: 2468, label: "W", color: "#0A84FF" }]);
+});

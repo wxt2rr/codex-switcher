@@ -35,7 +35,9 @@ export async function handleChatCompatibilityRequest(options: CompatibilityHandl
     apiKey: options.secret.upstreamApiKey,
     body: transformed.body,
     headers: options.headers,
+    configuredHeaders: options.route.requestHeaders,
     signal: options.signal,
+    proxyUrl: options.route.proxyUrl,
   });
   if (!upstream.ok) {
     return new Response(upstream.body, { status: upstream.status, statusText: upstream.statusText, headers: upstream.headers });

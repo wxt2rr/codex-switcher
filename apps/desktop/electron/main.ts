@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Tray, type IpcMainInvokeEvent } from "electron";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -60,6 +60,7 @@ import {
   getAppEnvironmentBadgeStatus,
   getRouterLifecycleSettings,
   getRouterPortSettings,
+  getLaunchAtLoginSettings,
   detectCodexToolPaths,
   setCodexToolPath,
   setCliAutoResumeSettings,
@@ -70,12 +71,31 @@ import {
   synchronizeAppEnvironmentBadges,
   setRouterLifecycleSettings,
   setRouterPortSettings,
+  setLaunchAtLoginSettings,
   clearCodexToolPath,
   toggleEnvironmentRoute,
+  toggleEnvironmentGateway,
   listAccountPools,
   saveAccountPool,
   loadUsageSnapshot,
   loadUsageRequests,
+  loadUsageTrace,
+  loadGatewayAdminSnapshot,
+  loadGatewayAdminConfiguration,
+  saveGatewayAdminConfiguration,
+  discoverGatewayAdminModels,
+  loadProviderPluginSnapshot,
+  loadProviderPluginMarket,
+  refreshProviderPluginMarket,
+  installProviderPlugin,
+  installProviderPluginFromMarket,
+  deactivateProviderPluginById,
+  rollbackProviderPluginById,
+  removeProviderPluginById,
+  getAutoUpdateStatus,
+  checkForAutoUpdate,
+  installDownloadedUpdate,
+  registerAutoUpdateController,
   listUsagePricing,
   saveUsagePricing,
   getCliTerminalSettings,
@@ -99,11 +119,33 @@ import {
   repairSkillProvider,
   repairLegacyEnvironmentConfigs,
 } from "./bridge.js";
+import { closeProviderPluginRuntime } from "./provider-plugin-runtime.js";
+import { autoUpdater } from "electron";
+import { createDesktopAutoUpdateController, restartAfterRollback } from "./auto-update.js";
+import { buildDesktopTrayActions } from "./tray-menu.js";
+import { createUpdateRollbackJournal, resolveUpdateJournalPath, validateUpdateManifest, type DesktopUpdateManifest } from "./update-security.js";
+import { copyInstallForRollback, restoreInstallFromRollback } from "./update-rollback.js";
 
 const currentDir = __dirname;
 const execFileAsync = promisify(execFile);
 const appDir = dirname(currentDir);
 process.env.CODEX_SWITCHER_DESKTOP_RESOURCES_PATH = process.resourcesPath;
+let mainWindow: BrowserWindow | undefined;
+let tray: Tray | undefined;
+
+function readConfiguredUpdateManifest(): DesktopUpdateManifest | undefined {
+  const raw = process.env.CODEX_SWITCHER_UPDATE_MANIFEST_JSON?.trim();
+  if (!raw) return undefined;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (validateUpdateManifest(value)) return value;
+    console.warn("Ignoring malformed CODEX_SWITCHER_UPDATE_MANIFEST_JSON");
+    return undefined;
+  } catch {
+    console.warn("Ignoring invalid CODEX_SWITCHER_UPDATE_MANIFEST_JSON");
+    return undefined;
+  }
+}
 
 function resolveDesktopLogoPath() {
   const fileName = process.platform === "win32" ? "logo-win.png" : "logo.png";
@@ -136,6 +178,10 @@ async function createWindow() {
       sandbox: false
     }
   });
+  mainWindow = window;
+  window.on("closed", () => {
+    if (mainWindow === window) mainWindow = undefined;
+  });
   if (process.platform !== "darwin") {
     window.setMenuBarVisibility(false);
     window.setMenu(null);
@@ -151,15 +197,77 @@ async function createWindow() {
   await window.loadFile(join(appDir, "..", "dist", "index.html"));
 }
 
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    void createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function applyLaunchAtLoginSettings(settings: { enabled: boolean; supported: boolean }): void {
+  if (settings.supported) app.setLoginItemSettings({ openAtLogin: settings.enabled });
+}
+
+async function refreshTrayMenu() {
+  if (!tray) return;
+  const states = await loadGatewayAdminSnapshot().catch(() => []);
+  const actions = buildDesktopTrayActions(states);
+  tray.setContextMenu(Menu.buildFromTemplate(actions.map((action) => action.id === "separator"
+    ? { type: "separator" as const }
+    : {
+      label: action.label,
+      enabled: action.enabled,
+      click: () => {
+        if (action.id === "open") showMainWindow();
+        if (action.id === "refresh") void refreshTrayMenu();
+        if (action.id === "quit") app.quit();
+      },
+    })));
+}
+
+async function ensureTray() {
+  if (tray) return;
+  const iconPath = resolveDesktopLogoPath();
+  const icon = iconPath ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty();
+  tray = new Tray(icon);
+  tray.setToolTip("Codex Switcher");
+  tray.on("click", showMainWindow);
+  await refreshTrayMenu();
+}
+
 app.whenReady().then(async () => {
   if (process.platform !== "darwin") {
     Menu.setApplicationMenu(null);
   }
   registerHandlers();
+  const updateFeedUrl = process.env.CODEX_SWITCHER_UPDATE_FEED_URL?.trim();
+  const updateBackupPath = process.env.CODEX_SWITCHER_UPDATE_BACKUP_PATH?.trim() || join(app.getPath("userData"), "updates", "app-backup");
+  const autoUpdateController = createDesktopAutoUpdateController(autoUpdater, {
+    feedUrl: updateFeedUrl,
+    manifest: readConfiguredUpdateManifest(),
+    trustedPublicKeyPem: process.env.CODEX_SWITCHER_UPDATE_TRUSTED_PUBLIC_KEY,
+    requireSignedManifest: process.env.CODEX_SWITCHER_UPDATE_REQUIRE_SIGNATURE === "1",
+    ...(updateFeedUrl ? {
+      rollbackJournal: createUpdateRollbackJournal(resolveUpdateJournalPath(app.getPath("userData"))),
+      currentVersion: app.getVersion(),
+      backupPath: updateBackupPath,
+      prepareRollbackBackup: (backupPath: string) => copyInstallForRollback(app.getAppPath(), backupPath),
+      restoreRollbackBackup: (backupPath: string) => restoreInstallFromRollback(app.getAppPath(), backupPath),
+    } : {}),
+  });
+  applyLaunchAtLoginSettings(await getLaunchAtLoginSettings());
+  const rollbackBoot = autoUpdateController.beginBoot();
+  if (restartAfterRollback(rollbackBoot, app)) return;
+  registerAutoUpdateController(autoUpdateController);
   await repairLegacyEnvironmentConfigs().catch((error) => {
     console.warn("Codex legacy config migration failed", error);
   });
   await createWindow();
+  await ensureTray();
+  autoUpdateController.markHealthy();
   startEnvHistoryCleanupSchedule();
   void synchronizeAppEnvironmentBadges().catch(() => undefined);
 
@@ -195,13 +303,15 @@ app.on("before-quit", (event) => {
     })
     .catch(() => undefined)
     .finally(() => {
-      quitCleanupFinished = true;
-      app.quit();
+      void closeProviderPluginRuntime().catch(() => undefined).finally(() => {
+        quitCleanupFinished = true;
+        app.quit();
+      });
     });
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
+  if (process.platform !== "darwin" && !tray) {
     app.quit();
   }
 });
@@ -240,6 +350,7 @@ function registerHandlers() {
   ipcMain.handle("desktop:getAppEnvironmentBadgeStatus", () => getAppEnvironmentBadgeStatus());
   ipcMain.handle("desktop:getRouterLifecycleSettings", () => getRouterLifecycleSettings());
   ipcMain.handle("desktop:getRouterPortSettings", () => getRouterPortSettings());
+  ipcMain.handle("desktop:getLaunchAtLoginSettings", () => getLaunchAtLoginSettings());
   ipcMain.handle("desktop:detectCodexToolPaths", () => detectCodexToolPaths());
   ipcMain.handle("desktop:setCodexToolPath", (_event, kind, path) => setCodexToolPath(kind, path));
   ipcMain.handle("desktop:clearCodexToolPath", (_event, kind) => clearCodexToolPath(kind));
@@ -250,6 +361,11 @@ function registerHandlers() {
   ipcMain.handle("desktop:setAppEnvironmentBadgeSettings", (_event, value) => setAppEnvironmentBadgeSettings(value));
   ipcMain.handle("desktop:setRouterLifecycleSettings", (_event, value) => setRouterLifecycleSettings(value));
   ipcMain.handle("desktop:setRouterPortSettings", (_event, value) => setRouterPortSettings(value));
+  ipcMain.handle("desktop:setLaunchAtLoginSettings", async (_event, value) => {
+    const settings = await setLaunchAtLoginSettings(value);
+    applyLaunchAtLoginSettings(settings);
+    return settings;
+  });
   ipcMain.handle("desktop:getCliTerminalSettings", async () => withTerminalIcons(await getCliTerminalSettings()));
   ipcMain.handle("desktop:scanCliTerminalSettings", async () => withTerminalIcons(await scanCliTerminalSettings()));
   ipcMain.handle("desktop:setCliTerminalSelection", async (_event, id) => withTerminalIcons(await setCliTerminalSelection(id)));
@@ -369,6 +485,8 @@ function registerHandlers() {
   ipcMain.handle("desktop:getEnvironmentRouteStatuses", () => getEnvironmentRouteStatuses());
   ipcMain.handle("desktop:toggleEnvironmentRoute", (_event: IpcMainInvokeEvent, envName: string, enabled: boolean) =>
     toggleEnvironmentRoute(envName, enabled));
+  ipcMain.handle("desktop:toggleEnvironmentGateway", (_event: IpcMainInvokeEvent, envName: string, enabled: boolean) =>
+    toggleEnvironmentGateway(envName, enabled));
   ipcMain.handle("desktop:listAccountPools", () => listAccountPools());
   ipcMain.handle("desktop:saveAccountPool", (_event: IpcMainInvokeEvent, input) => saveAccountPool(input));
   ipcMain.handle("desktop:toggleAccountCompatibility", (_event: IpcMainInvokeEvent, input) =>
@@ -379,6 +497,22 @@ function registerHandlers() {
     checkAccountCompatibility(envName, accountName));
   ipcMain.handle("desktop:loadUsageSnapshot", (_event: IpcMainInvokeEvent, filter) => loadUsageSnapshot(filter));
   ipcMain.handle("desktop:loadUsageRequests", (_event: IpcMainInvokeEvent, query) => loadUsageRequests(query));
+  ipcMain.handle("desktop:loadUsageTrace", (_event: IpcMainInvokeEvent, query) => loadUsageTrace(query));
+  ipcMain.handle("desktop:loadGatewayAdminSnapshot", () => loadGatewayAdminSnapshot());
+  ipcMain.handle("desktop:loadGatewayAdminConfiguration", (_event: IpcMainInvokeEvent, envName: string) => loadGatewayAdminConfiguration(envName));
+  ipcMain.handle("desktop:saveGatewayAdminConfiguration", (_event: IpcMainInvokeEvent, request) => saveGatewayAdminConfiguration(request));
+  ipcMain.handle("desktop:discoverGatewayAdminModels", (_event: IpcMainInvokeEvent, request) => discoverGatewayAdminModels(request));
+  ipcMain.handle("desktop:loadProviderPluginSnapshot", () => loadProviderPluginSnapshot());
+  ipcMain.handle("desktop:loadProviderPluginMarket", () => loadProviderPluginMarket());
+  ipcMain.handle("desktop:refreshProviderPluginMarket", (_event: IpcMainInvokeEvent, url: string) => refreshProviderPluginMarket(url));
+  ipcMain.handle("desktop:installProviderPlugin", (_event: IpcMainInvokeEvent, request) => installProviderPlugin(request));
+  ipcMain.handle("desktop:installProviderPluginFromMarket", (_event: IpcMainInvokeEvent, input) => installProviderPluginFromMarket(input));
+  ipcMain.handle("desktop:deactivateProviderPlugin", (_event: IpcMainInvokeEvent, id: string) => deactivateProviderPluginById(id));
+  ipcMain.handle("desktop:rollbackProviderPlugin", (_event: IpcMainInvokeEvent, id: string) => rollbackProviderPluginById(id));
+  ipcMain.handle("desktop:removeProviderPlugin", (_event: IpcMainInvokeEvent, id: string) => removeProviderPluginById(id));
+  ipcMain.handle("desktop:getAutoUpdateStatus", () => getAutoUpdateStatus());
+  ipcMain.handle("desktop:checkForAutoUpdate", () => checkForAutoUpdate());
+  ipcMain.handle("desktop:installDownloadedUpdate", () => installDownloadedUpdate());
   ipcMain.handle("desktop:listUsagePricing", () => listUsagePricing());
   ipcMain.handle("desktop:saveUsagePricing", (_event: IpcMainInvokeEvent, profile) => saveUsagePricing(profile));
   ipcMain.handle("desktop:getSkillSnapshot", (_event: IpcMainInvokeEvent, request) =>

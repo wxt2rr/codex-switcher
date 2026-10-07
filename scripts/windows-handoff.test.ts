@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const repoRoot = "/Users/wangxt/myspace/codex-switcher";
+const repoRoot = process.cwd();
 
 test("windows handoff doc captures the continuation flow for a real Windows machine", async () => {
   const content = await readFile(`${repoRoot}/docs/windows-handoff.md`, "utf8");

@@ -64,6 +64,7 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       calls.push("getRouterPortSettings");
       return { preferredPort: 17832 };
     },
+    getLaunchAtLoginSettings: async () => ({ enabled: false, supported: true }),
     detectCodexToolPaths: async () => [],
     setCodexToolPath: async (kind, path) => ({ kind, path, detectedPath: "", manualPath: path, source: "manual", available: true }),
     clearCodexToolPath: async (kind) => ({ kind, path: "", detectedPath: "", manualPath: "", source: "missing", available: false }),
@@ -88,6 +89,7 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       calls.push(`setRouterPortSettings:${value.preferredPort}`);
       return value;
     },
+    setLaunchAtLoginSettings: async (value) => ({ enabled: value.enabled, supported: true }),
     getCliTerminalSettings: async () => ({ selectedId: "terminal", terminals: [{ id: "terminal", label: "Terminal", supportsCurrentWindow: true }] }),
     scanCliTerminalSettings: async () => ({ selectedId: "terminal", terminals: [{ id: "terminal", label: "Terminal", supportsCurrentWindow: true }] }),
     setCliTerminalSelection: async (id) => ({ selectedId: id, terminals: [{ id, label: id, supportsCurrentWindow: false }] }),
@@ -255,6 +257,15 @@ test("desktop bridge forwards calls to injected electron api", async () => {
     },
     getEnvironmentRouteStatuses: async () => [],
     toggleEnvironmentRoute: async (envName, enabled) => ({ envName, enabled, routedAccounts: enabled ? 1 : 0, port: enabled ? 17832 : null }),
+    toggleEnvironmentGateway: async (envName, enabled) => ({
+      envName,
+      enabled,
+      routedAccounts: enabled ? 1 : 0,
+      port: enabled ? 17832 : null,
+      gatewayEnabled: enabled,
+      gatewayId: enabled ? `gateway-${envName}` : undefined,
+      localGatewayBaseUrl: enabled ? "http://127.0.0.1:17832/gateways/preview" : undefined,
+    }),
     toggleAccountCompatibility: async (input) => {
       calls.push(`toggleAccountCompatibility:${input.envName}:${input.accountName}:${input.enabled}`);
       return { envName: input.envName, accountName: input.accountName, enabled: input.enabled, state: input.enabled ? "ready" : "disabled" };
@@ -276,6 +287,22 @@ test("desktop bridge forwards calls to injected electron api", async () => {
         page: query.page, pageSize: query.pageSize, totalPages: 1,
         facets: { envNames: [], accountNames: [], models: [], endpoints: [], poolIds: [], failoverReasons: [] } };
     },
+    loadUsageTrace: async () => [],
+    loadGatewayAdminSnapshot: async () => [],
+    loadGatewayAdminConfiguration: async () => null,
+    saveGatewayAdminConfiguration: async (request) => ({ envName: request.envName, revision: 0, gateway: request.gateway, agentBindings: request.agentBindings ?? {} }),
+    discoverGatewayAdminModels: async (request) => ({ envName: request.envName, providerId: request.providerId, modelIds: [], credentialsUsed: 0, catalogVersion: 0 }),
+    loadProviderPluginSnapshot: async () => [],
+    loadProviderPluginMarket: async () => [],
+    refreshProviderPluginMarket: async () => [],
+    installProviderPlugin: async () => ({ id: "preview", name: "Preview", version: "1.0.0", active: true, permissions: [] }),
+    installProviderPluginFromMarket: async () => ({ id: "preview", name: "Preview", version: "1.0.0", active: true, permissions: [] }),
+    deactivateProviderPlugin: async () => [],
+    rollbackProviderPlugin: async () => [],
+    removeProviderPlugin: async () => [],
+    getAutoUpdateStatus: async () => ({ enabled: false, state: "disabled" }),
+    checkForAutoUpdate: async () => ({ enabled: false, state: "disabled" }),
+    installDownloadedUpdate: async () => ({ enabled: false, state: "disabled" }),
     listUsagePricing: async () => [],
     saveUsagePricing: async () => undefined,
     getSkillSnapshot: async () => ({

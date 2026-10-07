@@ -69,6 +69,22 @@ test("usage trend selects an adaptive bucket size", () => {
   assert.equal(resolveUsageTrendBucketMs(30 * day), day);
 });
 
+test("usage store persists explicit route rules separately from legacy routing fields", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-route-rules-store-"));
+  const databasePath = join(root, "usage.db");
+  const first = await createUsageStore(databasePath);
+  await first.upsertGateway({
+    gatewayId: "gateway-rules", envName: "work", routeIds: ["route-a"],
+    routeRules: [{ id: "images", targetModelId: "vision-model", priority: 0, enabled: true, match: { hasImages: true, agentIds: ["codex"] } }],
+    enabled: true, createdAt: 1, updatedAt: 1,
+  });
+  await first.close();
+  const reopened = await createUsageStore(databasePath);
+  const [gateway] = await reopened.listGateways();
+  assert.deepEqual(gateway?.routeRules, [{ id: "images", targetModelId: "vision-model", priority: 0, enabled: true, match: { hasImages: true, agentIds: ["codex"] } }]);
+  await reopened.close();
+});
+
 test("usage store persists routes and aggregates usage by model and Base URL", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-usage-store-"));
   const databasePath = join(root, "usage.db");
@@ -86,13 +102,15 @@ test("usage store persists routes and aggregates usage by model and Base URL", a
     longConversationStrategy: "continuity",
     instructionRole: "developer",
     requestOverrides: { temperature: 0.2 },
+    requestHeaders: { "x-provider-scope": "shared" },
+    proxyUrl: "http://127.0.0.1:7890",
     enabled: true,
     createdAt: 1,
     updatedAt: 1,
   });
   await first.upsertPricing({
     kind: "actual", baseUrl: "https://api.example.com/v1", modelPattern: "gpt-*",
-    inputPerMillion: 1, outputPerMillion: 2, cacheCreationPerMillion: 1, cacheReadPerMillion: 0.1,
+    inputPerMillion: 1, outputPerMillion: 2, reasoningPerMillion: 3, cacheCreationPerMillion: 1, cacheReadPerMillion: 0.1,
     updatedAt: 1,
   });
   await first.recordUsage({
@@ -107,6 +125,7 @@ test("usage store persists routes and aggregates usage by model and Base URL", a
     model: "gpt-5.4",
     inputTokens: 100,
     outputTokens: 20,
+    reasoningTokens: 4,
     cacheCreationTokens: 5,
     cacheReadTokens: 40,
     totalTokens: 120,
@@ -114,6 +133,20 @@ test("usage store persists routes and aggregates usage by model and Base URL", a
     latencyMs: 200,
     actualCost: null,
     standardCost: null,
+    logicalModel: "gpt-logical",
+    servedModel: "provider-model",
+    providerId: "provider-openai",
+    credentialId: "credential-a",
+    agentId: "codex",
+    ingressProtocol: "responses",
+    upstreamProtocol: "chat_completions",
+    routeGroupId: "shared-gpt",
+    routeRuleId: "large-context",
+    timeToFirstTokenMs: 35,
+    retryAfterMs: 1200,
+    finalCandidate: "route-a",
+    failureType: null,
+    priceTier: "standard",
   });
   await first.close();
 
@@ -125,13 +158,26 @@ test("usage store persists routes and aggregates usage by model and Base URL", a
   assert.equal(route?.longConversationStrategy, "continuity");
   assert.equal(route?.instructionRole, "developer");
   assert.deepEqual(route?.requestOverrides, { temperature: 0.2 });
+  assert.deepEqual(route?.requestHeaders, { "x-provider-scope": "shared" });
+  assert.equal(route?.proxyUrl, "http://127.0.0.1:7890");
   const snapshot = await reopened.queryUsage({ from: 0, to: 2000 });
   assert.equal(snapshot.summary.requests, 1);
   assert.equal(snapshot.summary.totalTokens, 120);
+  assert.equal(snapshot.summary.reasoningTokens, 4);
   assert.equal(snapshot.models[0]?.model, "gpt-5.4");
   assert.equal(snapshot.baseUrls[0]?.baseUrl, "https://api.example.com/v1");
   assert.equal(snapshot.baseUrls[0]?.cacheReadTokens, 40);
-  assert.equal(snapshot.summary.actualCost, 0.000104);
+  assert.equal(snapshot.summary.actualCost, 0.000116);
+  const requestPage = await reopened.queryUsageRequests({ from: 0, to: 2000, page: 1, pageSize: 10 });
+  assert.equal(requestPage.items[0]?.logicalModel, "gpt-logical");
+  assert.equal(requestPage.items[0]?.servedModel, "provider-model");
+  assert.equal(requestPage.items[0]?.providerId, "provider-openai");
+  assert.equal(requestPage.items[0]?.ingressProtocol, "responses");
+  assert.equal(requestPage.items[0]?.upstreamProtocol, "chat_completions");
+  assert.equal(requestPage.items[0]?.routeRuleId, "large-context");
+  assert.equal(requestPage.items[0]?.timeToFirstTokenMs, 35);
+  assert.equal(requestPage.items[0]?.retryAfterMs, 1200);
+  assert.equal(requestPage.items[0]?.reasoningTokens, 4);
   await reopened.close();
 });
 

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const repoRoot = "/Users/wangxt/myspace/codex-switcher";
+const repoRoot = process.cwd();
 
 test("windows support audit captures the proven scope and remaining real-machine gap", async () => {
   const content = await readFile(`${repoRoot}/docs/windows-support-audit.md`, "utf8");

@@ -40,7 +40,7 @@ test("router manager passes the configured preferred port to the service launche
   }
 });
 
-test("environment routing skips AUTH accounts and restores exact upstream URLs", async () => {
+test("environment routing includes AUTH credentials and restores exact upstream URLs", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-manager-"));
   let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
   const manager = new UsageRouterManager({
@@ -52,14 +52,124 @@ test("environment routing skips AUTH accounts and restores exact upstream URLs",
   try {
     const enabled = await manager.enableEnvironment("work", [
       { envName: "work", accountName: "key", authMode: "apikey", baseUrl: "https://api.example.com/v1/" },
-      { envName: "work", accountName: "login", authMode: "auth", baseUrl: "" },
+      { envName: "work", accountName: "login", authMode: "auth", baseUrl: "", apiKey: "auth-token", authAccountId: "chat-account" },
     ], update);
-    assert.equal(enabled.routedAccounts, 1);
+    assert.equal(enabled.routedAccounts, 2);
     assert.match(values.get("key") ?? "", /^http:\/\/127\.0\.0\.1:\d+\/routes\//);
-    assert.equal(values.has("login"), false);
+    assert.match(values.get("login") ?? "", /^http:\/\/127\.0\.0\.1:\d+\/routes\//);
+    assert.equal((await manager.listRoutes()).find((route) => route.accountName === "login")?.upstreamBaseUrl, "https://chatgpt.com/backend-api/codex");
 
     await manager.disableEnvironment("work", update);
     assert.equal(values.get("key"), "https://api.example.com/v1/");
+    assert.equal(values.get("login"), "default");
+  } finally {
+    await service?.close();
+  }
+});
+
+test("environment gateway shares one local base URL and restores all member URLs", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-manager-gateway-"));
+  let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
+  const manager = new UsageRouterManager({
+    stateDir, serviceEntryPath: "unused",
+    launchService: async () => { service = await startUsageRouterService({ stateDir: join(stateDir, "usage-router") }); },
+  });
+  const values = new Map<string, string>();
+  const update = async (account: string, baseUrl: string) => { values.set(account, baseUrl); };
+  try {
+    const enabled = await manager.enableEnvironmentGateway("work", [
+      { envName: "work", accountName: "login", authMode: "auth", baseUrl: "default", apiKey: "auth-token", authAccountId: "chat-account" },
+      { envName: "work", accountName: "key", authMode: "apikey", baseUrl: "https://api.example.com/v1", apiKey: "sk-key" },
+    ], update);
+    assert.equal(enabled.gatewayEnabled, true);
+    assert.match(values.get("login") ?? "", /^http:\/\/127\.0\.0\.1:\d+\/gateways\//);
+    assert.equal(values.get("login"), values.get("key"));
+    assert.equal((await manager.listRoutes()).length, 2);
+
+    const disabled = await manager.disableEnvironmentGateway("work", update);
+    assert.equal(disabled.enabled, false);
+    assert.equal(values.get("login"), "default");
+    assert.equal(values.get("key"), "https://api.example.com/v1");
+    assert.deepEqual(await manager.listRoutes(), []);
+  } finally {
+    await service?.close();
+  }
+});
+
+test("environment gateway materializes explicit catalog models without intent routing", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-manager-gateway-models-"));
+  let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
+  const manager = new UsageRouterManager({
+    stateDir, serviceEntryPath: "unused",
+    launchService: async () => { service = await startUsageRouterService({ stateDir: join(stateDir, "usage-router") }); },
+  });
+  const values = new Map<string, string>();
+  const update = async (account: string, baseUrl: string) => { values.set(account, baseUrl); };
+  const accounts = [
+    { envName: "work", accountName: "key", authMode: "apikey", baseUrl: "https://api.example.com/v1", apiKey: "sk-key", providerId: "custom" },
+  ];
+  try {
+    await manager.enableEnvironmentGateway("work", accounts, update, {
+      group: { id: "group", exposedModelId: "work-model", strategy: "order", sessionPolicy: "off", fallbackEnabled: true },
+    }, [{
+      providerId: "custom", modelId: "custom/model", upstreamModel: "custom-upstream", exposedModelId: "work-model",
+      routeGroupId: "group", accountNames: ["key"], protocols: ["responses"], capabilities: { tools: true },
+      requestHeadersByAccount: { key: { "x-provider-scope": "custom" } },
+      proxyUrlByAccount: { key: "http://127.0.0.1:7890" },
+    }]);
+    const firstRoutes = await manager.listRoutes();
+    assert.equal(firstRoutes.length, 2);
+    const modelRoute = firstRoutes.find((route) => route.exposedModelId === "work-model");
+    assert.equal(modelRoute?.upstreamModel, "custom-upstream");
+    assert.equal(modelRoute?.providerId, "custom");
+    assert.equal(modelRoute?.routeGroupId, "group");
+    assert.deepEqual(modelRoute?.requestHeaders, { "x-provider-scope": "custom" });
+    assert.equal(modelRoute?.proxyUrl, "http://127.0.0.1:7890");
+    assert.equal(values.get("key")?.includes("/gateways/"), true);
+
+    await manager.enableEnvironmentGateway("work", accounts, update, {
+      next: { id: "next", exposedModelId: "next-model", strategy: "order", sessionPolicy: "off", fallbackEnabled: true },
+    }, [{
+      providerId: "custom", modelId: "custom/next", upstreamModel: "custom-next", exposedModelId: "next-model",
+      routeGroupId: "next", accountNames: ["key"], protocols: ["responses"],
+    }]);
+    const secondRoutes = await manager.listRoutes();
+    assert.equal(secondRoutes.some((route) => route.exposedModelId === "work-model"), false);
+    assert.equal(secondRoutes.some((route) => route.exposedModelId === "next-model"), true);
+  } finally {
+    await service?.close();
+  }
+});
+
+test("environment gateway can sit on top of a credential pool and restore the pool URL", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-manager-gateway-pool-"));
+  let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
+  const manager = new UsageRouterManager({
+    stateDir, serviceEntryPath: "unused",
+    launchService: async () => { service = await startUsageRouterService({ stateDir: join(stateDir, "usage-router") }); },
+  });
+  const values = new Map<string, string>();
+  const update = async (account: string, baseUrl: string) => { values.set(account, baseUrl); };
+  const accounts = [
+    { envName: "work", accountName: "first", authMode: "apikey", baseUrl: "https://one.example/v1", apiKey: "sk-one" },
+    { envName: "work", accountName: "second", authMode: "apikey", baseUrl: "https://two.example/v1", apiKey: "sk-two" },
+  ];
+  try {
+    const pool = await manager.enableAccountPool({ envName: "work", protocol: "responses", accountNames: ["first", "second"] }, accounts, update);
+    assert.equal(pool.enabled, true);
+    const gateway = await manager.enableEnvironmentGateway("work", accounts, update);
+    assert.equal(gateway.gatewayEnabled, true);
+    const persistedGateway = (await manager.listEnvironmentGateways())[0];
+    assert.equal(persistedGateway?.poolId, pool.poolId);
+    assert.match(values.get("first") ?? "", /\/gateways\//);
+    assert.equal(values.get("first"), values.get("second"));
+
+    const disabled = await manager.disableEnvironmentGateway("work", update);
+    assert.equal(disabled.gatewayEnabled, false);
+    assert.equal(disabled.poolEnabled, true);
+    assert.match(values.get("first") ?? "", /\/pools\//);
+    assert.equal(values.get("first"), values.get("second"));
+    assert.equal((await manager.listAccountPools())[0]?.poolId, pool.poolId);
   } finally {
     await service?.close();
   }
@@ -149,12 +259,12 @@ test("syncing an enabled environment attaches newly created non-AUTH accounts", 
       { envName: "work", accountName: "new-auth", authMode: "auth", baseUrl: "" },
     ], update);
 
-    assert.equal(synced?.routedAccounts, 2);
+    assert.equal(synced?.routedAccounts, 3);
     const routes = await manager.listRoutes();
     assert.equal(routes.find((route) => route.accountName === "existing")?.originalBaseUrl, "https://api.changed.example/v1");
     assert.equal(routes.some((route) => route.upstreamBaseUrl === "https://api.example.com/v1"), false);
     assert.match(values.get("new-key") ?? "", /^http:\/\/127\.0\.0\.1:\d+\/routes\//);
-    assert.equal(values.has("new-auth"), false);
+    assert.equal(values.has("new-auth"), true);
   } finally {
     await service?.close();
   }

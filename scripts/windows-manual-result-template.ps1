@@ -50,6 +50,8 @@ Use this template after running [windows-manual-checklist.md](windows-manual-che
 - [ ] CLI isolation
 - [ ] App switching
 - [ ] TUI checks
+- [ ] Gateway and plugin isolation
+- [ ] Packaging and update recovery
 - [ ] Recovery and integrity
 - [ ] Token refresh and logs
 - [ ] Security checks
@@ -96,6 +98,25 @@ codex-sw ops token-refresh status:
 
 - Outcome:
 - Evidence:
+
+### Gateway and plugin isolation
+
+- Outcome:
+- Evidence file: `windows-sandbox.json`
+- `writeDenied`:
+- `homeReadDenied`:
+- `networkDenied`:
+- `markerAbsent`:
+- `filesystemWriteGranted`:
+
+### Packaging and update recovery
+
+- Outcome:
+- Installer path:
+- Package verification:
+- Authenticode status:
+- Upgrade dry-run:
+- Failed-boot rollback result:
 
 ### Recovery and integrity
 

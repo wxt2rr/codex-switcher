@@ -63,6 +63,7 @@ test("extractTokenUsage supports Responses API and chat completion usage", () =>
           input_tokens: 100,
           output_tokens: 25,
           input_tokens_details: { cached_tokens: 60, cache_creation_tokens: 10 },
+          output_tokens_details: { reasoning_tokens: 7 },
         },
       },
     }),
@@ -70,9 +71,10 @@ test("extractTokenUsage supports Responses API and chat completion usage", () =>
       model: "gpt-5.4",
       inputTokens: 100,
       outputTokens: 25,
+      reasoningTokens: 7,
       cacheCreationTokens: 10,
       cacheReadTokens: 60,
-      totalTokens: 125,
+      totalTokens: 132,
     },
   );
 
@@ -94,5 +96,10 @@ test("extractTokenUsage supports Responses API and chat completion usage", () =>
       cacheReadTokens: 12,
       totalTokens: 45,
     },
+  );
+
+  assert.deepEqual(
+    extractTokenUsage({ modelVersion: "gemini-2.5", usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 8, totalTokenCount: 20 } }),
+    { model: "gemini-2.5", inputTokens: 12, outputTokens: 8, cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 20 },
   );
 });

@@ -6,6 +6,7 @@ export interface CodexToolStatus { kind: "cli" | "app"; path: string; detectedPa
 export interface CliAutoResumeSettings { enabled: boolean; sessionNumber: number; }
 export interface RouterLifecycleSettings { stopOnAppQuit: boolean; }
 export interface RouterPortSettings { preferredPort: number; }
+export interface LaunchAtLoginStatus { enabled: boolean; supported: boolean; }
 export interface EnvHistoryRetentionSettings { enabled: boolean; retentionDays: number; }
 export interface GeneratedImageRecoveryStatus {
   enabled: boolean; installedEnvironments: number; totalEnvironments: number; conflicts: string[];
@@ -121,6 +122,127 @@ export interface CompatibilityCheckResult {
   capabilities?: { text: boolean; streaming: boolean; sequentialTools: boolean; parallelTools: boolean; reasoning: boolean };
 }
 
+export interface UsageTraceEvent {
+  event: string;
+  at: number;
+  envName?: string;
+  gatewayId?: string;
+  requestedModel?: string | null;
+  protocol?: "responses" | "chat_completions" | "anthropic" | "gemini";
+  routeId?: string;
+  routeGroupId?: string | null;
+  accountName?: string;
+  providerId?: string | null;
+  reason?: string;
+  [key: string]: unknown;
+}
+
+export interface UsageTraceQuery {
+  from?: number;
+  to?: number;
+  envName?: string;
+  gatewayId?: string;
+  routeId?: string;
+  event?: string;
+  limit?: number;
+}
+
+export interface GatewayAdminEnvironment {
+  envName: string;
+  mode: "direct" | "gateway";
+  gatewayId: string;
+  gatewayEnabled: boolean;
+  localGatewayBaseUrl?: string;
+  providers: Array<{ id: string; displayName: string; kind: string; enabled: boolean }>;
+  credentials: Array<{ id: string; providerId: string; kind: string; status: string }>;
+  models: Array<{ id: string; providerId: string; upstreamModelId: string; displayName: string; enabled: boolean }>;
+  routeGroups: Array<{ id: string; displayName: string; exposedModelId: string; strategy: string; sessionPolicy: string; fallbackEnabled: boolean; memberCount: number }>;
+  agents: Array<{ id: string; displayName: string; enabled: boolean; defaultModelId?: string; defaultRouteGroupId?: string; reasoningProfile?: string; fallbackModelId?: string; subAgentModelId?: string; installed?: boolean; configPath?: string; state?: "clean" | "missing" | "drifted" | "unwired" | "disabled" }>;
+  routedAccounts: number;
+  quota?: { windowMinutes: number; maxRequests?: number; maxTokens?: number };
+}
+
+export interface GatewayAdminConfiguration {
+  envName: string;
+  revision: number;
+  gateway: Record<string, unknown>;
+  agentBindings: Record<string, Record<string, unknown>>;
+}
+
+export interface SaveGatewayAdminConfigurationRequest {
+  envName: string;
+  gateway: Record<string, unknown>;
+  agentBindings?: Record<string, Record<string, unknown>>;
+}
+
+export interface DiscoverGatewayModelsRequest {
+  envName: string;
+  providerId: string;
+}
+
+export interface DiscoverGatewayModelsResult {
+  envName: string;
+  providerId: string;
+  modelIds: string[];
+  credentialsUsed: number;
+  catalogVersion: number;
+}
+
+export interface ProviderPluginSnapshot {
+  id: string;
+  name: string;
+  version: string;
+  active: boolean;
+  permissions: string[];
+  provider?: {
+    id: string;
+    displayName: string;
+    authMethods: string[];
+    endpoints: Array<{ protocol: string; baseUrl: string; modelsPath: string; quotaPath?: string }>;
+  };
+  error?: string;
+}
+
+export interface ProviderPluginInstallRequest {
+  manifest: {
+    id: string;
+    name: string;
+    version: string;
+    apiVersion: number;
+    entry: string;
+    permissions: string[];
+    signature?: string;
+    checksum?: string;
+  };
+  source:
+    | { kind: "local"; path: string }
+    | { kind: "npm"; spec: string }
+  | { kind: "git"; url: string; ref?: string };
+}
+
+export interface ProviderPluginMarketEntry {
+  id: string;
+  name: string;
+  version: string;
+  apiVersion: number;
+  entry: string;
+  permissions: string[];
+  description?: string;
+  downloadUrl?: string;
+  source?: ProviderPluginInstallRequest["source"];
+  signature?: string;
+  checksum?: string;
+  updatedAt: number;
+}
+
+export interface DesktopAutoUpdateStatus {
+  enabled: boolean;
+  state: "disabled" | "idle" | "checking" | "available" | "downloaded" | "error";
+  version?: string;
+  message?: string;
+  checkedAt?: number;
+}
+
 export type ModelCatalogEntry = Record<string, unknown> & {
   slug: string;
   display_name: string;
@@ -198,6 +320,7 @@ export interface DesktopElectronApi {
   getAppEnvironmentBadgeStatus(): Promise<AppEnvironmentBadgeStatus>;
   getRouterLifecycleSettings(): Promise<RouterLifecycleSettings>;
   getRouterPortSettings(): Promise<RouterPortSettings>;
+  getLaunchAtLoginSettings(): Promise<LaunchAtLoginStatus>;
   detectCodexToolPaths(): Promise<CodexToolStatus[]>;
   setCodexToolPath(kind: "cli" | "app", path: string): Promise<CodexToolStatus>;
   clearCodexToolPath(kind: "cli" | "app"): Promise<CodexToolStatus>;
@@ -208,6 +331,7 @@ export interface DesktopElectronApi {
   setAppEnvironmentBadgeSettings(value: { enabled: boolean }): Promise<AppEnvironmentBadgeStatus>;
   setRouterLifecycleSettings(value: RouterLifecycleSettings): Promise<RouterLifecycleSettings>;
   setRouterPortSettings(value: RouterPortSettings): Promise<RouterPortSettings>;
+  setLaunchAtLoginSettings(value: { enabled: boolean }): Promise<LaunchAtLoginStatus>;
   getCliTerminalSettings(): Promise<CliTerminalSettings>;
   scanCliTerminalSettings(): Promise<CliTerminalSettings>;
   setCliTerminalSelection(id: CliTerminalId): Promise<CliTerminalSettings>;
@@ -265,6 +389,7 @@ export interface DesktopElectronApi {
   readTokenRefreshLog(): Promise<DesktopLogResult>;
   getEnvironmentRouteStatuses(): Promise<EnvironmentRouteStatus[]>;
   toggleEnvironmentRoute(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
+  toggleEnvironmentGateway(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
   listAccountPools(): Promise<AccountPoolStatus[]>;
   saveAccountPool(input: AccountPoolInput): Promise<AccountPoolStatus | null>;
   toggleAccountCompatibility(input: AccountCompatibilityRequest): Promise<AccountCompatibilityStatus>;
@@ -272,6 +397,22 @@ export interface DesktopElectronApi {
   checkAccountCompatibility(envName: string, accountName: string): Promise<CompatibilityCheckResult>;
   loadUsageSnapshot(filter: UsageFilter): Promise<UsageSnapshot>;
   loadUsageRequests(query: UsageRequestQuery): Promise<UsageRequestPage>;
+  loadUsageTrace(query?: UsageTraceQuery): Promise<UsageTraceEvent[]>;
+  loadGatewayAdminSnapshot(): Promise<GatewayAdminEnvironment[]>;
+  loadGatewayAdminConfiguration(envName: string): Promise<GatewayAdminConfiguration | null>;
+  saveGatewayAdminConfiguration(request: SaveGatewayAdminConfigurationRequest): Promise<GatewayAdminConfiguration>;
+  discoverGatewayAdminModels(request: DiscoverGatewayModelsRequest): Promise<DiscoverGatewayModelsResult>;
+  loadProviderPluginSnapshot(): Promise<ProviderPluginSnapshot[]>;
+  loadProviderPluginMarket(): Promise<ProviderPluginMarketEntry[]>;
+  refreshProviderPluginMarket(url: string): Promise<ProviderPluginMarketEntry[]>;
+  installProviderPlugin(request: ProviderPluginInstallRequest): Promise<ProviderPluginSnapshot>;
+  installProviderPluginFromMarket(input: { id: string; version?: string }): Promise<ProviderPluginSnapshot>;
+  deactivateProviderPlugin(id: string): Promise<ProviderPluginSnapshot[]>;
+  rollbackProviderPlugin(id: string): Promise<ProviderPluginSnapshot[]>;
+  removeProviderPlugin(id: string): Promise<ProviderPluginSnapshot[]>;
+  getAutoUpdateStatus(): Promise<DesktopAutoUpdateStatus>;
+  checkForAutoUpdate(): Promise<DesktopAutoUpdateStatus>;
+  installDownloadedUpdate(): Promise<DesktopAutoUpdateStatus>;
   listUsagePricing(): Promise<UsagePricingProfile[]>;
   saveUsagePricing(profile: UsagePricingProfile): Promise<void>;
   getSkillSnapshot(request?: SkillSnapshotRequest): Promise<SkillManagerSnapshot>;
@@ -295,6 +436,7 @@ export interface DesktopBridge {
   getAppEnvironmentBadgeStatus(): Promise<AppEnvironmentBadgeStatus>;
   getRouterLifecycleSettings(): Promise<RouterLifecycleSettings>;
   getRouterPortSettings(): Promise<RouterPortSettings>;
+  getLaunchAtLoginSettings(): Promise<LaunchAtLoginStatus>;
   detectCodexToolPaths(): Promise<CodexToolStatus[]>;
   setCodexToolPath(kind: "cli" | "app", path: string): Promise<CodexToolStatus>;
   clearCodexToolPath(kind: "cli" | "app"): Promise<CodexToolStatus>;
@@ -305,6 +447,7 @@ export interface DesktopBridge {
   setAppEnvironmentBadgeSettings(value: { enabled: boolean }): Promise<AppEnvironmentBadgeStatus>;
   setRouterLifecycleSettings(value: RouterLifecycleSettings): Promise<RouterLifecycleSettings>;
   setRouterPortSettings(value: RouterPortSettings): Promise<RouterPortSettings>;
+  setLaunchAtLoginSettings(value: { enabled: boolean }): Promise<LaunchAtLoginStatus>;
   getCliTerminalSettings(): Promise<CliTerminalSettings>;
   scanCliTerminalSettings(): Promise<CliTerminalSettings>;
   setCliTerminalSelection(id: CliTerminalId): Promise<CliTerminalSettings>;
@@ -362,6 +505,7 @@ export interface DesktopBridge {
   readTokenRefreshLog(): Promise<DesktopLogResult>;
   getEnvironmentRouteStatuses(): Promise<EnvironmentRouteStatus[]>;
   toggleEnvironmentRoute(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
+  toggleEnvironmentGateway(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
   listAccountPools(): Promise<AccountPoolStatus[]>;
   saveAccountPool(input: AccountPoolInput): Promise<AccountPoolStatus | null>;
   toggleAccountCompatibility(input: AccountCompatibilityRequest): Promise<AccountCompatibilityStatus>;
@@ -369,6 +513,22 @@ export interface DesktopBridge {
   checkAccountCompatibility(envName: string, accountName: string): Promise<CompatibilityCheckResult>;
   loadUsageSnapshot(filter: UsageFilter): Promise<UsageSnapshot>;
   loadUsageRequests(query: UsageRequestQuery): Promise<UsageRequestPage>;
+  loadUsageTrace(query?: UsageTraceQuery): Promise<UsageTraceEvent[]>;
+  loadGatewayAdminSnapshot(): Promise<GatewayAdminEnvironment[]>;
+  loadGatewayAdminConfiguration(envName: string): Promise<GatewayAdminConfiguration | null>;
+  saveGatewayAdminConfiguration(request: SaveGatewayAdminConfigurationRequest): Promise<GatewayAdminConfiguration>;
+  discoverGatewayAdminModels(request: DiscoverGatewayModelsRequest): Promise<DiscoverGatewayModelsResult>;
+  loadProviderPluginSnapshot(): Promise<ProviderPluginSnapshot[]>;
+  loadProviderPluginMarket(): Promise<ProviderPluginMarketEntry[]>;
+  refreshProviderPluginMarket(url: string): Promise<ProviderPluginMarketEntry[]>;
+  installProviderPlugin(request: ProviderPluginInstallRequest): Promise<ProviderPluginSnapshot>;
+  installProviderPluginFromMarket(input: { id: string; version?: string }): Promise<ProviderPluginSnapshot>;
+  deactivateProviderPlugin(id: string): Promise<ProviderPluginSnapshot[]>;
+  rollbackProviderPlugin(id: string): Promise<ProviderPluginSnapshot[]>;
+  removeProviderPlugin(id: string): Promise<ProviderPluginSnapshot[]>;
+  getAutoUpdateStatus(): Promise<DesktopAutoUpdateStatus>;
+  checkForAutoUpdate(): Promise<DesktopAutoUpdateStatus>;
+  installDownloadedUpdate(): Promise<DesktopAutoUpdateStatus>;
   listUsagePricing(): Promise<UsagePricingProfile[]>;
   saveUsagePricing(profile: UsagePricingProfile): Promise<void>;
   getSkillSnapshot(request?: SkillSnapshotRequest): Promise<SkillManagerSnapshot>;
@@ -394,6 +554,7 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       getAppEnvironmentBadgeStatus: unavailable,
       getRouterLifecycleSettings: unavailable,
       getRouterPortSettings: unavailable,
+      getLaunchAtLoginSettings: unavailable,
       detectCodexToolPaths: unavailable,
       setCodexToolPath: unavailable,
       clearCodexToolPath: unavailable,
@@ -404,6 +565,7 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       setAppEnvironmentBadgeSettings: unavailable,
       setRouterLifecycleSettings: unavailable,
       setRouterPortSettings: unavailable,
+      setLaunchAtLoginSettings: unavailable,
       getCliTerminalSettings: unavailable,
       scanCliTerminalSettings: unavailable,
       setCliTerminalSelection: unavailable,
@@ -455,6 +617,7 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       readTokenRefreshLog: unavailable,
       getEnvironmentRouteStatuses: unavailable,
       toggleEnvironmentRoute: unavailable,
+      toggleEnvironmentGateway: unavailable,
       listAccountPools: unavailable,
       saveAccountPool: unavailable,
       toggleAccountCompatibility: unavailable,
@@ -462,6 +625,22 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       checkAccountCompatibility: unavailable,
       loadUsageSnapshot: unavailable,
       loadUsageRequests: unavailable,
+      loadUsageTrace: unavailable,
+      loadGatewayAdminSnapshot: unavailable,
+      loadGatewayAdminConfiguration: unavailable,
+      saveGatewayAdminConfiguration: unavailable,
+      discoverGatewayAdminModels: unavailable,
+      loadProviderPluginSnapshot: unavailable,
+      loadProviderPluginMarket: unavailable,
+      refreshProviderPluginMarket: unavailable,
+      installProviderPlugin: unavailable,
+      installProviderPluginFromMarket: unavailable,
+      deactivateProviderPlugin: unavailable,
+      rollbackProviderPlugin: unavailable,
+      removeProviderPlugin: unavailable,
+      getAutoUpdateStatus: unavailable,
+      checkForAutoUpdate: unavailable,
+      installDownloadedUpdate: unavailable,
       listUsagePricing: unavailable,
       saveUsagePricing: unavailable,
       getSkillSnapshot: unavailable,
@@ -585,6 +764,7 @@ function createBrowserPreviewBridge(): DesktopBridge {
     getRouterLifecycleSettings: async () => ({ stopOnAppQuit: false }),
     getAppEnvironmentBadgeStatus: async () => ({ enabled: false, supported: true, platform: "macos", permission: "denied", applied: 0, unresolved: 0 }),
     getRouterPortSettings: async () => ({ preferredPort: 17832 }),
+    getLaunchAtLoginSettings: async () => ({ enabled: false, supported: true }),
     detectCodexToolPaths: async () => [],
     setCodexToolPath: async (kind, path) => ({ kind, path, detectedPath: "", manualPath: path, source: "manual", available: true }),
     clearCodexToolPath: async (kind) => ({ kind, path: "", detectedPath: "", manualPath: "", source: "missing", available: false }),
@@ -592,6 +772,7 @@ function createBrowserPreviewBridge(): DesktopBridge {
     setEnvHistoryRetentionSettings: async (value) => value,
     setRouterLifecycleSettings: async (value) => value,
     setRouterPortSettings: async (value) => value,
+    setLaunchAtLoginSettings: async (value) => ({ enabled: value.enabled, supported: true }),
     requestAppEnvironmentBadgePermission: async () => ({ enabled: false, supported: true, platform: "macos", permission: "granted", applied: 0, unresolved: 0 }),
     setAppEnvironmentBadgeSettings: async (value) => ({ enabled: value.enabled, supported: true, platform: "macos", permission: "granted", applied: value.enabled ? 2 : 0, unresolved: 0 }),
     getCliTerminalSettings: async () => ({ selectedId: "terminal", terminals: [{ id: "terminal", label: "Terminal", supportsCurrentWindow: true }] }),
@@ -650,6 +831,15 @@ function createBrowserPreviewBridge(): DesktopBridge {
     toggleEnvironmentRoute: async (envName, enabled) => ({
       envName, enabled, routedAccounts: enabled ? 2 : 0, port: enabled ? 17832 : null,
     }),
+    toggleEnvironmentGateway: async (envName, enabled) => ({
+      envName,
+      enabled,
+      routedAccounts: enabled ? 2 : 0,
+      port: enabled ? 17832 : null,
+      gatewayEnabled: enabled,
+      gatewayId: enabled ? `gateway-${envName}` : undefined,
+      localGatewayBaseUrl: enabled ? "http://127.0.0.1:17832/gateways/preview" : undefined,
+    }),
     listAccountPools: async () => [],
     saveAccountPool: async () => null,
     toggleAccountCompatibility: async (input) => ({ envName: input.envName, accountName: input.accountName,
@@ -701,6 +891,22 @@ function createBrowserPreviewBridge(): DesktopBridge {
           actualCost: null, standardCost: 0.002907 },
       ],
     }),
+    loadUsageTrace: async () => [],
+    loadGatewayAdminSnapshot: async () => [],
+    loadGatewayAdminConfiguration: async () => null,
+    saveGatewayAdminConfiguration: async (request) => ({ envName: request.envName, revision: 0, gateway: request.gateway, agentBindings: {} }),
+    discoverGatewayAdminModels: async (request) => ({ envName: request.envName, providerId: request.providerId, modelIds: [], credentialsUsed: 0, catalogVersion: 0 }),
+    loadProviderPluginSnapshot: async () => [],
+    loadProviderPluginMarket: async () => [],
+    refreshProviderPluginMarket: async () => { throw new Error("Provider plugin market is unavailable in preview mode"); },
+    installProviderPlugin: async () => { throw new Error("Provider plugin management is unavailable in preview mode"); },
+    installProviderPluginFromMarket: async () => { throw new Error("Provider plugin market is unavailable in preview mode"); },
+    deactivateProviderPlugin: async () => [],
+    rollbackProviderPlugin: async () => [],
+    removeProviderPlugin: async () => [],
+    getAutoUpdateStatus: async () => ({ enabled: false, state: "disabled", message: "Preview mode" }),
+    checkForAutoUpdate: async () => ({ enabled: false, state: "disabled", message: "Preview mode" }),
+    installDownloadedUpdate: async () => ({ enabled: false, state: "disabled", message: "Preview mode" }),
     listUsagePricing: async () => [],
     saveUsagePricing: async () => undefined,
     getGeneratedImageRecoverySettings: async () => ({

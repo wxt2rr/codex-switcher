@@ -224,7 +224,7 @@ test("account environment filter persists an explicit default environment", () =
   assert.match(formPrimitives, /onPointerDown=/);
 });
 
-test("account-pool editor explains retry and failover thresholds", () => {
+test("credential-pool editor explains retry and failover thresholds", () => {
   assert.match(environments, /分配权重/);
   assert.match(environments, /轮询顺序：权重相同时按此顺序选择账号/);
   assert.match(environments, /会话保持时长（分钟）/);

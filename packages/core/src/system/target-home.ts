@@ -1,7 +1,8 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import type { SwitcherState, TargetName } from "../state/store.js";
+import { writeFileAtomically } from "./atomic-file.js";
 
 export interface ApplyTargetHomeStateOptions {
   state: SwitcherState;
@@ -60,7 +61,7 @@ export async function repairLegacyTargetHomeConfigs(options: {
         providerAuthEnabled: repair.providerAuthEnabled,
       };
       await options.beforeWrite?.(entry);
-      await writeFile(join(env.path, "config.toml"), repair.content, "utf8");
+      await writeFileAtomically(join(env.path, "config.toml"), repair.content, { encoding: "utf8" });
       result.repaired.push(entry);
     } catch (error) {
       result.failures.push({
@@ -106,10 +107,10 @@ export async function applyTargetHomeState(
     : account.authData;
 
   if (targetAuthData) {
-    await writeFile(
+    await writeFileAtomically(
       join(env.path, "auth.json"),
       `${JSON.stringify(normalizeAuthDataForTargetHome(targetAuthData), null, 2)}\n`,
-      "utf8",
+      { encoding: "utf8" },
     );
   } else {
     await rm(join(env.path, "auth.json"), { force: true });
@@ -172,7 +173,7 @@ async function writeManagedConfig(
   }
 
   const content = `${managedLines.join("\n")}${cleaned ? `\n${cleaned}` : ""}\n`;
-  await writeFile(configPath, content, "utf8");
+  await writeFileAtomically(configPath, content, { encoding: "utf8" });
 }
 
 function repairLegacyTargetHomeConfig(
@@ -314,7 +315,7 @@ async function clearManagedConfig(configPath: string) {
   }
 
   const cleaned = removeManagedConfigLines(existing);
-  await writeFile(configPath, cleaned ? `${cleaned}\n` : "", "utf8");
+  await writeFileAtomically(configPath, cleaned ? `${cleaned}\n` : "", { encoding: "utf8" });
 }
 
 function removeManagedConfigLines(content: string, options?: { removeModel?: boolean; removeModelCatalogJson?: boolean }): string {

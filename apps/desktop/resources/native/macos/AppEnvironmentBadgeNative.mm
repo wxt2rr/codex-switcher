@@ -89,6 +89,18 @@ bool CopyStringAttribute(AXUIElementRef element, CFStringRef name, NSString **re
   return true;
 }
 
+bool CopyURLAttribute(AXUIElementRef element, CFStringRef name, NSURL **result) {
+  CFTypeRef value = nullptr;
+  if (AXUIElementCopyAttributeValue(element, name, &value) != kAXErrorSuccess || value == nullptr) return false;
+  if (CFGetTypeID(value) != CFURLGetTypeID()) {
+    CFRelease(value);
+    return false;
+  }
+  *result = [(__bridge NSURL *)value copy];
+  CFRelease(value);
+  return true;
+}
+
 bool CopyPointAttribute(AXUIElementRef element, CFStringRef name, CGPoint *result) {
   CFTypeRef value = nullptr;
   if (AXUIElementCopyAttributeValue(element, name, &value) != kAXErrorSuccess || value == nullptr) return false;
@@ -184,14 +196,16 @@ bool DisplayAtPointIsFullscreen(CGPoint point) {
   return fullscreen;
 }
 
-void VisitDockElement(AXUIElementRef element, int depth, NSMutableArray<NSValue *> *rects, NSMutableSet<NSString *> *seen) {
+void VisitDockElement(AXUIElementRef element, int depth, NSMutableArray<NSDictionary *> *items, NSMutableSet<NSString *> *seen) {
   if (depth > 5) return;
   NSString *title = nil;
   NSString *role = nil;
   NSString *subrole = nil;
+  NSURL *url = nil;
   CopyStringAttribute(element, kAXTitleAttribute, &title);
   CopyStringAttribute(element, kAXRoleAttribute, &role);
   CopyStringAttribute(element, kAXSubroleAttribute, &subrole);
+  CopyURLAttribute(element, kAXURLAttribute, &url);
   if (IsTargetDockApplication(title, role, subrole)) {
     bool hidden = false;
     // Hidden/auto-hidden Dock items can remain in the AX tree with a stale
@@ -206,7 +220,11 @@ void VisitDockElement(AXUIElementRef element, int depth, NSMutableArray<NSValue 
       NSString *key = [NSString stringWithFormat:@"%.2f:%.2f:%.2f:%.2f", origin.x, origin.y, size.width, size.height];
       if (![seen containsObject:key]) {
         [seen addObject:key];
-        [rects addObject:[NSValue valueWithRect:NSMakeRect(origin.x, origin.y, size.width, size.height)]];
+        NSMutableDictionary *item = [NSMutableDictionary dictionary];
+        item[@"rect"] = [NSValue valueWithRect:NSMakeRect(origin.x, origin.y, size.width, size.height)];
+        item[@"title"] = title ?: @"";
+        if (url.path.length > 0) item[@"path"] = url.path;
+        [items addObject:item];
       }
     }
   }
@@ -217,25 +235,27 @@ void VisitDockElement(AXUIElementRef element, int depth, NSMutableArray<NSValue 
     CFArrayRef children = (CFArrayRef)childrenValue;
     for (CFIndex index = 0; index < CFArrayGetCount(children); index += 1) {
       AXUIElementRef child = (AXUIElementRef)CFArrayGetValueAtIndex(children, index);
-      VisitDockElement(child, depth + 1, rects, seen);
+      VisitDockElement(child, depth + 1, items, seen);
     }
   }
   CFRelease(childrenValue);
 }
 
-NSMutableArray<NSValue *> *DiscoverDockRects() {
+NSMutableArray<NSDictionary *> *DiscoverDockItems() {
   NSArray<NSRunningApplication *> *dockApps = [NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.apple.dock"];
   if (dockApps.count == 0) return [NSMutableArray array];
   const pid_t dockProcessIdentifier = dockApps.firstObject.processIdentifier;
   AXUIElementRef dock = AXUIElementCreateApplication(dockProcessIdentifier);
-  NSMutableArray<NSValue *> *rects = [NSMutableArray array];
-  VisitDockElement(dock, 0, rects, [NSMutableSet set]);
+  NSMutableArray<NSDictionary *> *items = [NSMutableArray array];
+  VisitDockElement(dock, 0, items, [NSMutableSet set]);
   CFRelease(dock);
   CGFloat minimumX = CGFLOAT_MAX;
   CGFloat maximumX = -CGFLOAT_MAX;
   CGFloat minimumY = CGFLOAT_MAX;
   CGFloat maximumY = -CGFLOAT_MAX;
-  for (NSValue *value in rects) {
+  for (NSDictionary *item in items) {
+    NSValue *value = item[@"rect"];
+    if (value == nil) continue;
     const NSRect rect = value.rectValue;
     minimumX = MIN(minimumX, NSMidX(rect));
     maximumX = MAX(maximumX, NSMidX(rect));
@@ -245,13 +265,75 @@ NSMutableArray<NSValue *> *DiscoverDockRects() {
   // A bottom Dock lays items out horizontally; left and right Docks lay them
   // out vertically. Select the ordering axis from the discovered geometry so
   // badge identity remains aligned with the same item on every Dock edge.
-  const bool sortAlongY = rects.count > 1 && (maximumY - minimumY) > (maximumX - minimumX);
-  [rects sortUsingComparator:^NSComparisonResult(NSValue *left, NSValue *right) {
-    const CGFloat leftPosition = sortAlongY ? NSMidY(left.rectValue) : NSMidX(left.rectValue);
-    const CGFloat rightPosition = sortAlongY ? NSMidY(right.rectValue) : NSMidX(right.rectValue);
+  const bool sortAlongY = items.count > 1 && (maximumY - minimumY) > (maximumX - minimumX);
+  [items sortUsingComparator:^NSComparisonResult(NSDictionary *left, NSDictionary *right) {
+    NSValue *leftRect = left[@"rect"];
+    NSValue *rightRect = right[@"rect"];
+    const CGFloat leftPosition = sortAlongY ? NSMidY(leftRect.rectValue) : NSMidX(leftRect.rectValue);
+    const CGFloat rightPosition = sortAlongY ? NSMidY(rightRect.rectValue) : NSMidX(rightRect.rectValue);
     return leftPosition < rightPosition ? NSOrderedAscending : leftPosition > rightPosition ? NSOrderedDescending : NSOrderedSame;
   }];
+  return items;
+}
+
+NSMutableArray<NSValue *> *DiscoverDockRects() {
+  NSMutableArray<NSDictionary *> *items = DiscoverDockItems();
+  NSMutableArray<NSValue *> *rects = [NSMutableArray arrayWithCapacity:items.count];
+  for (NSDictionary *item in items) {
+    NSValue *rect = item[@"rect"];
+    if (rect != nil) [rects addObject:rect];
+  }
   return rects;
+}
+
+NSString *NormalizedDockString(NSString *value) {
+  return [[value ?: @"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
+}
+
+NSInteger FindDockItemIndex(NSArray<NSDictionary *> *dockItems, NSMutableSet<NSNumber *> *usedIndexes, NSString *targetPath, NSString *targetTitle) {
+  NSString *normalizedPath = NormalizedDockString(targetPath);
+  if (normalizedPath.length > 0) {
+    for (NSUInteger index = 0; index < dockItems.count; index += 1) {
+      if ([usedIndexes containsObject:@(index)]) continue;
+      NSString *candidatePath = NormalizedDockString(dockItems[index][@"path"]);
+      if (candidatePath.length > 0 && [candidatePath isEqualToString:normalizedPath]) return (NSInteger)index;
+    }
+  }
+
+  NSString *normalizedTitle = NormalizedDockString(targetTitle);
+  if (normalizedTitle.length > 0) {
+    for (NSUInteger index = 0; index < dockItems.count; index += 1) {
+      if ([usedIndexes containsObject:@(index)]) continue;
+      NSString *candidateTitle = NormalizedDockString(dockItems[index][@"title"]);
+      if (candidateTitle.length > 0 && [candidateTitle isEqualToString:normalizedTitle]) return (NSInteger)index;
+    }
+  }
+
+  return -1;
+}
+
+NSMutableArray<NSDictionary *> *ResolveBadgeDockItems(NSArray<NSDictionary *> *badgeItems) {
+  NSMutableArray<NSDictionary *> *dockItems = DiscoverDockItems();
+  NSMutableArray<NSDictionary *> *resolvedItems = [NSMutableArray arrayWithCapacity:badgeItems.count];
+  NSMutableSet<NSNumber *> *usedIndexes = [NSMutableSet set];
+
+  for (NSDictionary *badgeItem in badgeItems) {
+    NSNumber *pid = badgeItem[@"pid"];
+    NSRunningApplication *app = pid == nil ? nil : [NSRunningApplication runningApplicationWithProcessIdentifier:pid.intValue];
+    NSInteger index = FindDockItemIndex(dockItems, usedIndexes, app.bundleURL.path, app.localizedName);
+    if (index < 0 && badgeItems.count == 1 && dockItems.count == 1) index = 0;
+    if (index < 0) continue;
+
+    NSDictionary *dockItem = dockItems[(NSUInteger)index];
+    NSValue *rect = dockItem[@"rect"];
+    if (rect == nil) continue;
+    [usedIndexes addObject:@((NSUInteger)index)];
+    NSMutableDictionary *resolvedItem = [badgeItem mutableCopy];
+    resolvedItem[@"rect"] = rect;
+    [resolvedItems addObject:resolvedItem];
+  }
+
+  return resolvedItems;
 }
 
 NSRect BadgePanelRectForDockRect(NSRect dockRect) {
@@ -566,8 +648,8 @@ void RefreshBadgePanels() {
     ClearBadgePanels();
     return;
   }
-  NSMutableArray<NSValue *> *rects = DiscoverDockRects();
-  NSUInteger applied = MIN(gBadgeItems.count, rects.count);
+  NSMutableArray<NSDictionary *> *resolvedItems = ResolveBadgeDockItems(gBadgeItems);
+  NSUInteger applied = resolvedItems.count;
   if (gBadgePanels == nil) gBadgePanels = [NSMutableArray arrayWithCapacity:applied];
   while (gBadgePanels.count > applied) {
     NSPanel *panel = gBadgePanels.lastObject;
@@ -575,10 +657,11 @@ void RefreshBadgePanels() {
     [gBadgePanels removeLastObject];
   }
   for (NSUInteger index = 0; index < applied; index += 1) {
-    NSDictionary *item = gBadgeItems[index];
+    NSDictionary *item = resolvedItems[index];
     NSString *label = item[@"label"] ?: @"?";
     NSString *color = item[@"color"] ?: @"#0A84FF";
-    NSRect dockRect = rects[index].rectValue;
+    NSValue *rectValue = item[@"rect"];
+    NSRect dockRect = rectValue.rectValue;
     NSRect panelRect = BadgePanelRectForDockRect(dockRect);
     NSPanel *panel = index < gBadgePanels.count ? gBadgePanels[index] : nil;
     if (panel == nil) {
@@ -633,12 +716,15 @@ Napi::Value SetEnvironmentBadges(const Napi::CallbackInfo &info) {
     Napi::Object item = raw.As<Napi::Object>();
     NSString *label = [NSString stringWithUTF8String:item.Get("label").ToString().Utf8Value().c_str()];
     NSString *color = [NSString stringWithUTF8String:item.Get("color").ToString().Utf8Value().c_str()];
-    [normalized addObject:@{ @"label": label ?: @"?", @"color": color ?: @"#0A84FF" }];
+    NSInteger pid = item.Has("pid") && item.Get("pid").IsNumber()
+      ? item.Get("pid").ToNumber().Int64Value()
+      : 0;
+    [normalized addObject:@{ @"pid": @(pid), @"label": label ?: @"?", @"color": color ?: @"#0A84FF" }];
   }
   gBadgeItems = [normalized copy];
   RefreshBadgePanels();
   StartDockObservation();
-  NSUInteger applied = MIN(gBadgeItems.count, DiscoverDockRects().count);
+  NSUInteger applied = ResolveBadgeDockItems(gBadgeItems).count;
   return Napi::Number::New(env, applied);
 }
 

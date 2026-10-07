@@ -1,4 +1,5 @@
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import type { HistoryPersistence, RouteHistorySnapshot } from "./history-store.js";
@@ -25,9 +26,14 @@ export class FileHistoryPersistence implements HistoryPersistence {
   async save(snapshot: RouteHistorySnapshot): Promise<void> {
     await mkdir(this.directory, { recursive: true });
     const target = this.path(snapshot.routeId);
-    const temporary = `${target}.tmp`;
-    await writeFile(temporary, JSON.stringify(snapshot), { mode: 0o600 });
-    await rename(temporary, target);
+    const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporary, JSON.stringify(snapshot), { mode: 0o600 });
+      await rename(temporary, target);
+    } catch (error) {
+      await rm(temporary, { force: true }).catch(() => undefined);
+      throw error;
+    }
     if (process.platform !== "win32") await chmod(target, 0o600);
   }
 

@@ -7,7 +7,7 @@ import test from "node:test";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const repoRoot = "/Users/wangxt/myspace/codex-switcher";
+const repoRoot = process.cwd();
 const codexSwPath = join(repoRoot, "scripts", "bin", "codex-sw.cjs");
 const codexSwNodePath = join(repoRoot, "scripts", "bin", "codex-sw-node.cjs");
 

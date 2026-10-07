@@ -4,6 +4,7 @@ import type { RouteProtocol } from "./usage-routing-model.js";
 
 export type PoolMemberHealth = "healthy" | "degraded" | "cooldown" | "exhausted" | "unauthorized" | "disabled";
 export type PoolStrategy = "sticky_weighted_round_robin";
+export type PoolProtocol = Extract<RouteProtocol, "responses" | "chat_completions">;
 export type PoolFailureReason =
   | "transport"
   | "timeout"
@@ -19,7 +20,7 @@ export type PoolFailureReason =
 export interface AccountPoolMember {
   accountName: string;
   routeId: string;
-  protocol: RouteProtocol;
+  protocol: PoolProtocol;
   upstreamBaseUrl: string;
   originalBaseUrl: string;
   upstreamModel?: string;
@@ -31,7 +32,7 @@ export interface AccountPoolMember {
 export interface AccountPool {
   poolId: string;
   envName: string;
-  protocol: RouteProtocol;
+  protocol: PoolProtocol;
   enabled: boolean;
   strategy: PoolStrategy;
   sessionTtlMinutes: number;
@@ -41,6 +42,15 @@ export interface AccountPool {
   updatedAt: number;
   members: AccountPoolMember[];
 }
+
+/**
+ * Product-facing name for an AccountPool. The old type and storage table stay
+ * as compatibility aliases so existing installations do not need a destructive
+ * migration.
+ */
+export type CredentialPool = AccountPool;
+export type CredentialPoolMember = AccountPoolMember;
+export type CredentialPoolHealth = PoolMemberHealthState;
 
 export interface PoolMemberHealthState {
   poolId: string;
@@ -111,6 +121,10 @@ export function hashPoolSessionKey(value: string): string {
 
 export function createAccountPoolId(envName: string): string {
   return createHash("sha256").update(`pool\0${envName}`).digest("hex").slice(0, 20);
+}
+
+export function createCredentialPoolId(envName: string): string {
+  return createAccountPoolId(envName);
 }
 
 export function buildLocalPoolBaseUrl(port: number, poolId: string): string {

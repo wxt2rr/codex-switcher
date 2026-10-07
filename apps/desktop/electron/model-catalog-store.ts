@@ -1,6 +1,6 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 
 export type ModelCatalogEntry = Record<string, unknown> & {
   slug: string;
@@ -196,9 +196,14 @@ function validateModelRecord(value: unknown): CustomModelRecord {
 
 async function writeSnapshot(path: string, snapshot: ModelCatalogSnapshot): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
-  await rename(temporary, path);
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
+    await rename(temporary, path);
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

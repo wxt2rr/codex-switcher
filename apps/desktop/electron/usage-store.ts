@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
@@ -6,7 +7,11 @@ import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
 
 import type {
   AccountRequestHealth,
+  EnvironmentGateway,
+  GatewayQuotaPolicy,
+  GatewayRouteRule,
   PricingProfile,
+  RouteProtocol,
   RouteTarget,
   UsageDimensionAggregate,
   UsageFilter,
@@ -27,6 +32,9 @@ export interface UsageStore {
   upsertRoute(route: RouteTarget): Promise<void>;
   removeRoute(routeId: string): Promise<void>;
   listRoutes(): Promise<RouteTarget[]>;
+  upsertGateway(gateway: EnvironmentGateway): Promise<void>;
+  removeGateway(gatewayId: string): Promise<void>;
+  listGateways(): Promise<EnvironmentGateway[]>;
   upsertPool(pool: AccountPool, cursor?: number): Promise<void>;
   updatePoolCursor(poolId: string, cursor: number): Promise<void>;
   removePool(poolId: string): Promise<void>;
@@ -84,9 +92,14 @@ function ensureRouteMetadataColumns(db: Database): void {
   const columns = routeColumns(db);
   const migrations = [
     ["protocol", "TEXT NOT NULL DEFAULT 'responses'"],
+    ["provider_id", "TEXT"],
+    ["exposed_model_id", "TEXT"],
+    ["route_group_id", "TEXT"],
     ["upstream_model", "TEXT"],
     ["reasoning_profile", "TEXT NOT NULL DEFAULT 'auto'"],
     ["request_overrides_json", "TEXT"],
+    ["request_headers_json", "TEXT"],
+    ["proxy_url", "TEXT"],
     ["long_conversation_strategy", "TEXT NOT NULL DEFAULT 'safe'"],
     ["instruction_role", "TEXT NOT NULL DEFAULT 'auto'"],
   ] as const;
@@ -110,11 +123,31 @@ function ensureUsageAuditColumns(db: Database): void {
     ["session_key_hash", "TEXT"],
     ["error_message", "TEXT"],
     ["attempts_json", "TEXT"],
+    ["logical_model", "TEXT"],
+    ["served_model", "TEXT"],
+    ["reasoning_tokens", "INTEGER"],
+    ["provider_id", "TEXT"],
+    ["credential_id", "TEXT"],
+    ["agent_id", "TEXT"],
+    ["ingress_protocol", "TEXT"],
+    ["upstream_protocol", "TEXT"],
+    ["route_group_id", "TEXT"],
+    ["route_rule_id", "TEXT"],
+    ["time_to_first_token_ms", "INTEGER"],
+    ["retry_after_ms", "INTEGER"],
+    ["final_candidate", "TEXT"],
+    ["failure_type", "TEXT"],
+    ["price_tier", "TEXT"],
   ] as const;
   for (const [name, definition] of migrations) {
     if (!columns.has(name)) db.run(`ALTER TABLE usage_requests ADD COLUMN ${name} ${definition}`);
   }
   db.run("CREATE INDEX IF NOT EXISTS usage_pool_idx ON usage_requests(pool_id, completed_at)");
+}
+
+function ensurePricingColumns(db: Database): void {
+  const columns = new Set(runRows(db, "PRAGMA table_info(pricing_profiles)", []).map((row) => String(row.name)));
+  if (!columns.has("reasoning_per_million")) db.run("ALTER TABLE pricing_profiles ADD COLUMN reasoning_per_million REAL");
 }
 
 function ensurePoolMemberColumns(db: Database): void {
@@ -131,6 +164,19 @@ function ensurePoolColumns(db: Database): void {
   }
 }
 
+function ensureGatewayColumns(db: Database): void {
+  const columns = new Set(runRows(db, "PRAGMA table_info(environment_gateways)", []).map((row) => String(row.name)));
+  if (!columns.has("route_groups_json")) {
+    db.run("ALTER TABLE environment_gateways ADD COLUMN route_groups_json TEXT NOT NULL DEFAULT '{}'");
+  }
+  if (!columns.has("quota_json")) {
+    db.run("ALTER TABLE environment_gateways ADD COLUMN quota_json TEXT");
+  }
+  if (!columns.has("route_rules_json")) {
+    db.run("ALTER TABLE environment_gateways ADD COLUMN route_rules_json TEXT NOT NULL DEFAULT '[]'");
+  }
+}
+
 function parseOverrides(value: unknown): Record<string, unknown> | undefined {
   if (typeof value !== "string" || !value) return undefined;
   try {
@@ -143,11 +189,69 @@ function parseOverrides(value: unknown): Record<string, unknown> | undefined {
   }
 }
 
+function parseHeaders(value: unknown): Record<string, string> | undefined {
+  if (typeof value !== "string" || !value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    const headers: Record<string, string> = {};
+    for (const [key, child] of Object.entries(parsed)) if (key.trim() && typeof child === "string") headers[key] = child;
+    return Object.keys(headers).length ? headers : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseGatewayQuota(value: unknown): GatewayQuotaPolicy | undefined {
+  if (typeof value !== "string" || !value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as Partial<GatewayQuotaPolicy>;
+    if (!parsed || typeof parsed !== "object" || typeof parsed.windowMinutes !== "number") return undefined;
+    return {
+      windowMinutes: parsed.windowMinutes,
+      ...(typeof parsed.maxRequests === "number" ? { maxRequests: parsed.maxRequests } : {}),
+      ...(typeof parsed.maxTokens === "number" ? { maxTokens: parsed.maxTokens } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function parseGatewayRouteGroups(value: unknown): EnvironmentGateway["routeGroups"] {
+  if (typeof value !== "string" || !value) return {};
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as EnvironmentGateway["routeGroups"]
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function parseGatewayRouteRules(value: unknown): GatewayRouteRule[] {
+  if (typeof value !== "string" || !value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is GatewayRouteRule => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+      const rule = item as Partial<GatewayRouteRule>;
+      return typeof rule.id === "string" && typeof rule.targetModelId === "string"
+        && typeof rule.priority === "number" && typeof rule.enabled === "boolean"
+        && Boolean(rule.match && typeof rule.match === "object");
+    });
+  } catch {
+    return [];
+  }
+}
+
 function emptySummary(): UsageSummary {
   return {
     requests: 0,
     inputTokens: 0,
     outputTokens: 0,
+    reasoningTokens: 0,
     cacheCreationTokens: 0,
     cacheReadTokens: 0,
     totalTokens: 0,
@@ -166,6 +270,7 @@ function summaryFromRow(row: Record<string, unknown> | undefined): UsageSummary 
     requests: asNumber(row.requests),
     inputTokens,
     outputTokens: asNumber(row.output_tokens),
+    reasoningTokens: asNumber(row.reasoning_tokens),
     cacheCreationTokens: asNumber(row.cache_creation_tokens),
     cacheReadTokens,
     totalTokens: asNumber(row.total_tokens),
@@ -184,6 +289,7 @@ function aggregateFromRow(row: Record<string, unknown>, dimension: "model" | "ba
     requests: asNumber(row.requests),
     inputTokens: asNumber(row.input_tokens),
     outputTokens: asNumber(row.output_tokens),
+    reasoningTokens: asNumber(row.reasoning_tokens),
     cacheCreationTokens: asNumber(row.cache_creation_tokens),
     cacheReadTokens: asNumber(row.cache_read_tokens),
     totalTokens: asNumber(row.total_tokens),
@@ -196,6 +302,7 @@ const aggregateColumns = `
   COUNT(*) AS requests,
   COALESCE(SUM(input_tokens), 0) AS input_tokens,
   COALESCE(SUM(output_tokens), 0) AS output_tokens,
+  COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
   COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
   COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
   COALESCE(SUM(total_tokens), 0) AS total_tokens,
@@ -252,6 +359,19 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS environment_gateways (
+      gateway_id TEXT PRIMARY KEY,
+      env_name TEXT NOT NULL UNIQUE,
+      route_ids_json TEXT NOT NULL,
+      route_groups_json TEXT NOT NULL DEFAULT '{}',
+      route_rules_json TEXT NOT NULL DEFAULT '[]',
+      quota_json TEXT,
+      default_route_id TEXT,
+      pool_id TEXT,
+      enabled INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS usage_requests (
       request_id TEXT PRIMARY KEY,
       route_id TEXT NOT NULL,
@@ -264,6 +384,7 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
       model TEXT,
       input_tokens INTEGER,
       output_tokens INTEGER,
+      reasoning_tokens INTEGER,
       cache_creation_tokens INTEGER,
       cache_read_tokens INTEGER,
       total_tokens INTEGER,
@@ -285,6 +406,7 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
       output_per_million REAL NOT NULL,
       cache_creation_per_million REAL,
       cache_read_per_million REAL,
+      reasoning_per_million REAL,
       updated_at INTEGER NOT NULL,
       PRIMARY KEY(kind, base_url, model_pattern)
     );
@@ -343,7 +465,9 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
     CREATE INDEX IF NOT EXISTS pool_binding_expiry_idx ON pool_session_bindings(pool_id, expires_at);
   `);
   ensureRouteMetadataColumns(db);
+  ensureGatewayColumns(db);
   ensureUsageAuditColumns(db);
+  ensurePricingColumns(db);
   ensurePoolMemberColumns(db);
   ensurePoolColumns(db);
 
@@ -351,9 +475,14 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
   let writeQueue = Promise.resolve();
   const persist = async () => {
     if (closed) return;
-    const temporaryPath = `${databasePath}.tmp`;
-    await writeFile(temporaryPath, Buffer.from(db.export()));
-    await rename(temporaryPath, databasePath);
+    const temporaryPath = `${databasePath}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporaryPath, Buffer.from(db.export()));
+      await rename(temporaryPath, databasePath);
+    } catch (error) {
+      await rm(temporaryPath, { force: true }).catch(() => undefined);
+      throw error;
+    }
   };
   const mutate = (operation: () => void): Promise<void> => {
     writeQueue = writeQueue.then(async () => {
@@ -371,14 +500,17 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
         `INSERT INTO route_targets (
            route_id, env_name, account_name, upstream_base_url, original_base_url,
            enabled, created_at, updated_at, protocol, upstream_model, reasoning_profile, request_overrides_json,
-           long_conversation_strategy, instruction_role
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           request_headers_json, proxy_url, long_conversation_strategy, instruction_role, provider_id, exposed_model_id, route_group_id
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(route_id) DO UPDATE SET
            env_name=excluded.env_name, account_name=excluded.account_name,
            upstream_base_url=excluded.upstream_base_url, original_base_url=excluded.original_base_url,
            enabled=excluded.enabled, protocol=excluded.protocol, upstream_model=excluded.upstream_model,
+           provider_id=excluded.provider_id, exposed_model_id=excluded.exposed_model_id, route_group_id=excluded.route_group_id,
            reasoning_profile=excluded.reasoning_profile,
            request_overrides_json=excluded.request_overrides_json,
+           request_headers_json=excluded.request_headers_json,
+           proxy_url=excluded.proxy_url,
            long_conversation_strategy=excluded.long_conversation_strategy,
            instruction_role=excluded.instruction_role,
            updated_at=excluded.updated_at`,
@@ -386,7 +518,10 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
           route.enabled ? 1 : 0, route.createdAt, route.updatedAt, route.protocol,
           route.upstreamModel ?? null, route.reasoningProfile,
           route.requestOverrides ? JSON.stringify(route.requestOverrides) : null,
-          route.longConversationStrategy ?? "safe", route.instructionRole ?? "auto"],
+          route.requestHeaders ? JSON.stringify(route.requestHeaders) : null,
+          route.proxyUrl ?? null,
+          route.longConversationStrategy ?? "safe", route.instructionRole ?? "auto",
+          route.providerId ?? null, route.exposedModelId ?? null, route.routeGroupId ?? null],
       ));
     },
     removeRoute(routeId) {
@@ -397,16 +532,63 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
       return runRows(db, "SELECT * FROM route_targets ORDER BY env_name, account_name", []).map((row) => ({
         routeId: String(row.route_id), envName: String(row.env_name), accountName: String(row.account_name),
         upstreamBaseUrl: String(row.upstream_base_url), originalBaseUrl: String(row.original_base_url),
-        protocol: row.protocol === "chat_completions" ? "chat_completions" : "responses",
+        protocol: row.protocol === "chat_completions" || row.protocol === "anthropic" || row.protocol === "gemini"
+          ? row.protocol as RouteTarget["protocol"] : "responses",
+        providerId: row.provider_id ? String(row.provider_id) : undefined,
+        exposedModelId: row.exposed_model_id ? String(row.exposed_model_id) : undefined,
+        routeGroupId: row.route_group_id ? String(row.route_group_id) : undefined,
         upstreamModel: row.upstream_model ? String(row.upstream_model) : undefined,
         reasoningProfile: ["standard", "reasoning_content", "think_tags"].includes(String(row.reasoning_profile))
           ? String(row.reasoning_profile) as RouteTarget["reasoningProfile"] : "auto",
         requestOverrides: parseOverrides(row.request_overrides_json),
+        requestHeaders: parseHeaders(row.request_headers_json),
+        proxyUrl: row.proxy_url ? String(row.proxy_url) : undefined,
         longConversationStrategy: row.long_conversation_strategy === "continuity" ? "continuity" : "safe",
         instructionRole: row.instruction_role === "system" || row.instruction_role === "developer"
           ? row.instruction_role : "auto",
         enabled: Boolean(row.enabled), createdAt: asNumber(row.created_at), updatedAt: asNumber(row.updated_at),
       }));
+    },
+    upsertGateway(gateway) {
+      return mutate(() => db.run(
+        `INSERT INTO environment_gateways (
+           gateway_id, env_name, route_ids_json, route_groups_json, default_route_id, pool_id,
+           route_rules_json, quota_json, enabled, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(gateway_id) DO UPDATE SET
+           env_name=excluded.env_name, route_ids_json=excluded.route_ids_json,
+           route_groups_json=excluded.route_groups_json,
+           default_route_id=excluded.default_route_id, pool_id=excluded.pool_id,
+           route_rules_json=excluded.route_rules_json,
+           quota_json=excluded.quota_json,
+           enabled=excluded.enabled, updated_at=excluded.updated_at`,
+        [gateway.gatewayId, gateway.envName, JSON.stringify(gateway.routeIds), JSON.stringify(gateway.routeGroups ?? {}), gateway.defaultRouteId ?? null,
+          gateway.poolId ?? null, JSON.stringify(gateway.routeRules ?? []), gateway.quota ? JSON.stringify(gateway.quota) : null,
+          gateway.enabled ? 1 : 0, gateway.createdAt, gateway.updatedAt],
+      ));
+    },
+    removeGateway(gatewayId) {
+      return mutate(() => db.run("DELETE FROM environment_gateways WHERE gateway_id = ?", [gatewayId]));
+    },
+    async listGateways() {
+      await writeQueue;
+      return runRows(db, "SELECT * FROM environment_gateways ORDER BY env_name", []).map((row) => {
+        const routeGroups = parseGatewayRouteGroups(row.route_groups_json);
+        const routeRules = parseGatewayRouteRules(row.route_rules_json);
+        return {
+          gatewayId: String(row.gateway_id),
+          envName: String(row.env_name),
+          routeIds: parseStringArray(row.route_ids_json),
+          ...(Object.keys(routeGroups ?? {}).length > 0 ? { routeGroups } : {}),
+          ...(routeRules.length > 0 ? { routeRules } : {}),
+          ...(parseGatewayQuota(row.quota_json) ? { quota: parseGatewayQuota(row.quota_json) } : {}),
+          defaultRouteId: row.default_route_id ? String(row.default_route_id) : undefined,
+          poolId: row.pool_id ? String(row.pool_id) : undefined,
+          enabled: Boolean(row.enabled),
+          createdAt: asNumber(row.created_at),
+          updatedAt: asNumber(row.updated_at),
+        };
+      });
     },
     upsertPool(pool, cursor = 0) {
       return mutate(() => {
@@ -544,24 +726,33 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
     recordUsage(request) {
       return mutate(() => {
         const costs = calculateRequestCosts(db, request);
+        const priceTier = request.priceTier
+          ?? (request.actualCost !== null || costs.actual !== null ? "actual" : request.standardCost !== null || costs.standard !== null ? "standard" : null);
         db.run(
         `INSERT OR REPLACE INTO usage_requests (
            request_id, route_id, started_at, completed_at, env_name, account_name,
-           upstream_base_url, endpoint, model, input_tokens, output_tokens,
+           upstream_base_url, endpoint, model, input_tokens, output_tokens, reasoning_tokens,
            cache_creation_tokens, cache_read_tokens, total_tokens, http_status,
            latency_ms, actual_cost, standard_cost, pool_id, entry_account_name,
            attempted_accounts_json, attempt_count, failover_reason, session_key_hash,
-           error_message, attempts_json
-         ) VALUES (${Array.from({ length: 26 }, () => "?").join(",")})`,
+           error_message, attempts_json, logical_model, served_model, provider_id,
+           credential_id, agent_id, ingress_protocol, upstream_protocol, route_group_id,
+           route_rule_id, time_to_first_token_ms, retry_after_ms, final_candidate,
+           failure_type, price_tier
+         ) VALUES (${Array.from({ length: 41 }, () => "?").join(",")})`,
         [request.requestId, request.routeId, request.startedAt, request.completedAt, request.envName,
           request.accountName, request.upstreamBaseUrl, request.endpoint, request.model,
-          request.inputTokens, request.outputTokens, request.cacheCreationTokens, request.cacheReadTokens,
+          request.inputTokens, request.outputTokens, request.reasoningTokens ?? null, request.cacheCreationTokens, request.cacheReadTokens,
           request.totalTokens, request.httpStatus, request.latencyMs,
           request.actualCost ?? costs.actual, request.standardCost ?? costs.standard,
           request.poolId ?? null, request.entryAccountName ?? null,
           JSON.stringify(request.attemptedAccounts ?? [request.accountName]), request.attemptCount ?? 1,
           request.failoverReason ?? null, request.sessionKeyHash ?? null, request.errorMessage ?? null,
-          JSON.stringify(request.attempts ?? [])],
+          JSON.stringify(request.attempts ?? []), request.logicalModel ?? null, request.servedModel ?? null,
+          request.providerId ?? null, request.credentialId ?? null, request.agentId ?? null,
+          request.ingressProtocol ?? null, request.upstreamProtocol ?? null, request.routeGroupId ?? null,
+          request.routeRuleId ?? null, request.timeToFirstTokenMs ?? null, request.retryAfterMs ?? null,
+          request.finalCandidate ?? null, request.failureType ?? null, priceTier],
         );
       });
     },
@@ -713,12 +904,16 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
     upsertPricing(profile) {
       return mutate(() => {
         db.run(
-        `INSERT INTO pricing_profiles VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO pricing_profiles (
+           kind, base_url, model_pattern, input_per_million, output_per_million,
+           cache_creation_per_million, cache_read_per_million, reasoning_per_million, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(kind, base_url, model_pattern) DO UPDATE SET input_per_million=excluded.input_per_million,
          output_per_million=excluded.output_per_million, cache_creation_per_million=excluded.cache_creation_per_million,
-         cache_read_per_million=excluded.cache_read_per_million, updated_at=excluded.updated_at`,
+         cache_read_per_million=excluded.cache_read_per_million, reasoning_per_million=excluded.reasoning_per_million,
+         updated_at=excluded.updated_at`,
         [profile.kind, profile.baseUrl, profile.modelPattern, profile.inputPerMillion, profile.outputPerMillion,
-          profile.cacheCreationPerMillion, profile.cacheReadPerMillion, profile.updatedAt],
+          profile.cacheCreationPerMillion, profile.cacheReadPerMillion, profile.reasoningPerMillion ?? null, profile.updatedAt],
         );
         repriceBaseUrl(db, profile.baseUrl);
       });
@@ -729,7 +924,8 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
         kind: String(row.kind) as "actual" | "standard", baseUrl: String(row.base_url), modelPattern: String(row.model_pattern),
         inputPerMillion: asNumber(row.input_per_million), outputPerMillion: asNumber(row.output_per_million),
         cacheCreationPerMillion: nullableSum(row.cache_creation_per_million),
-        cacheReadPerMillion: nullableSum(row.cache_read_per_million), updatedAt: asNumber(row.updated_at),
+        cacheReadPerMillion: nullableSum(row.cache_read_per_million),
+        reasoningPerMillion: nullableSum(row.reasoning_per_million), updatedAt: asNumber(row.updated_at),
       }));
     },
     async close() {
@@ -743,6 +939,9 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
 
 function usageRequestFromRow(row: Record<string, unknown>): UsageRequest {
   const nullableNumber = (value: unknown) => value === null || value === undefined ? null : asNumber(value);
+  const nullableText = (value: unknown) => value === null || value === undefined ? null : String(value);
+  const protocol = (value: unknown): RouteProtocol | null => ["responses", "chat_completions", "anthropic", "gemini"].includes(String(value))
+    ? String(value) as RouteProtocol : null;
   return {
     requestId: String(row.request_id),
     routeId: String(row.route_id),
@@ -755,6 +954,7 @@ function usageRequestFromRow(row: Record<string, unknown>): UsageRequest {
     model: row.model === null ? null : String(row.model),
     inputTokens: nullableNumber(row.input_tokens),
     outputTokens: nullableNumber(row.output_tokens),
+    reasoningTokens: nullableNumber(row.reasoning_tokens),
     cacheCreationTokens: nullableNumber(row.cache_creation_tokens),
     cacheReadTokens: nullableNumber(row.cache_read_tokens),
     totalTokens: nullableNumber(row.total_tokens),
@@ -762,6 +962,20 @@ function usageRequestFromRow(row: Record<string, unknown>): UsageRequest {
     latencyMs: asNumber(row.latency_ms),
     actualCost: nullableNumber(row.actual_cost),
     standardCost: nullableNumber(row.standard_cost),
+    logicalModel: nullableText(row.logical_model),
+    servedModel: nullableText(row.served_model),
+    providerId: nullableText(row.provider_id),
+    credentialId: nullableText(row.credential_id),
+    agentId: nullableText(row.agent_id),
+    ingressProtocol: protocol(row.ingress_protocol),
+    upstreamProtocol: protocol(row.upstream_protocol),
+    routeGroupId: nullableText(row.route_group_id),
+    routeRuleId: nullableText(row.route_rule_id),
+    timeToFirstTokenMs: nullableNumber(row.time_to_first_token_ms),
+    retryAfterMs: nullableNumber(row.retry_after_ms),
+    finalCandidate: nullableText(row.final_candidate),
+    failureType: nullableText(row.failure_type),
+    priceTier: nullableText(row.price_tier),
     poolId: row.pool_id === null || row.pool_id === undefined ? null : String(row.pool_id),
     entryAccountName: row.entry_account_name === null || row.entry_account_name === undefined ? null : String(row.entry_account_name),
     attemptedAccounts: parseStringArray(row.attempted_accounts_json),
@@ -816,9 +1030,11 @@ function calculateRequestCosts(db: Database, request: UsageRequest): { actual: n
     if (!row) return null;
     const cacheCreation = request.cacheCreationTokens ?? 0;
     const cacheRead = request.cacheReadTokens ?? 0;
+    const reasoning = request.reasoningTokens ?? 0;
     const uncachedInput = Math.max(0, request.inputTokens! - cacheRead - cacheCreation);
     return (uncachedInput * asNumber(row.input_per_million)
       + request.outputTokens! * asNumber(row.output_per_million)
+      + reasoning * asNumber(row.reasoning_per_million ?? row.output_per_million)
       + cacheCreation * asNumber(row.cache_creation_per_million ?? row.input_per_million)
       + cacheRead * asNumber(row.cache_read_per_million ?? row.input_per_million)) / 1_000_000;
   };
@@ -834,6 +1050,7 @@ function repriceBaseUrl(db: Database, baseUrl: string): void {
       upstreamBaseUrl: String(row.upstream_base_url), endpoint: String(row.endpoint),
       model: row.model === null ? null : String(row.model), inputTokens: row.input_tokens === null ? null : asNumber(row.input_tokens),
       outputTokens: row.output_tokens === null ? null : asNumber(row.output_tokens),
+      reasoningTokens: row.reasoning_tokens === null ? null : asNumber(row.reasoning_tokens),
       cacheCreationTokens: row.cache_creation_tokens === null ? null : asNumber(row.cache_creation_tokens),
       cacheReadTokens: row.cache_read_tokens === null ? null : asNumber(row.cache_read_tokens),
       totalTokens: row.total_tokens === null ? null : asNumber(row.total_tokens), httpStatus: asNumber(row.http_status),

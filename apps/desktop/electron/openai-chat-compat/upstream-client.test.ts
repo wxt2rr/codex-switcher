@@ -21,3 +21,23 @@ test("upstream client uses chat endpoint, injects upstream token, filters header
   assert.deepEqual(seen, { url: "/v1/chat/completions", authorization: "Bearer sk-upstream", local: undefined, body: { model: "m" } });
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
+
+test("upstream client forwards explicit non-sensitive route headers without forwarding arbitrary client headers", async () => {
+  let seenLocal = "";
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) { /* drain */ }
+    seenLocal = String(request.headers["x-route-tag"] ?? "");
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ choices: [{ message: { content: "ok" } }] }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address(); assert(address && typeof address !== "string");
+  const response = await new ChatUpstreamClient().execute({
+    baseUrl: `http://127.0.0.1:${address.port}/v1`, apiKey: "sk-upstream", body: { model: "m" },
+    headers: { "x-route-tag": "client-must-not-pass", authorization: "Bearer local" },
+    configuredHeaders: { "x-route-tag": "explicit" },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(seenLocal, "explicit");
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+});

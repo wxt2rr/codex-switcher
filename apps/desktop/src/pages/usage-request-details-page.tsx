@@ -146,7 +146,7 @@ export function UsageRequestDetailsPage({
             items={[{ value: "all", label: zh ? "全部端点" : "All endpoints" }, ...data.facets.endpoints.map((value) => ({ value, label: value }))]}
             className="h-8 w-[150px] border-transparent bg-[#f7f8fa]" />
           <Select value={poolId} onValueChange={(value) => updateFilter(setPoolId, value)}
-            items={[{ value: "all", label: zh ? "全部账号池" : "All pools" }, ...data.facets.poolIds.map((value) => ({ value, label: value }))]}
+            items={[{ value: "all", label: zh ? "全部凭证池" : "All credential pools" }, ...data.facets.poolIds.map((value) => ({ value, label: value }))]}
             className="h-8 w-[145px] border-transparent bg-[#f7f8fa]" />
           <Select value={failoverReason} onValueChange={(value) => updateFilter(setFailoverReason, value)}
             items={[{ value: "all", label: zh ? "全部切换原因" : "All failovers" }, ...data.facets.failoverReasons.map((value) => ({ value, label: value }))]}
@@ -171,6 +171,7 @@ export function UsageRequestDetailsPage({
                   <th className="px-3 font-medium">{zh ? "路由尝试" : "Routing"}</th>
                   <th className="px-3 font-medium text-blue-600">Input</th>
                   <th className="px-3 font-medium text-emerald-600">Output</th>
+                  <th className="px-3 font-medium text-fuchsia-600">Reasoning</th>
                   <th className="px-3 font-medium text-cyan-600">Cache Read</th>
                   <th className="px-3 font-medium">Token</th>
                   <th className="px-3 font-medium">{zh ? "延迟" : "Latency"}</th>
@@ -188,6 +189,7 @@ export function UsageRequestDetailsPage({
                     <td className="px-3"><RoutingAttempts item={item} zh={zh} /></td>
                     <td className="px-3 tabular-nums text-blue-600">{formatNullableTokens(item.inputTokens)}</td>
                     <td className="px-3 tabular-nums text-emerald-600">{formatNullableTokens(item.outputTokens)}</td>
+                    <td className="px-3 tabular-nums text-fuchsia-600">{formatNullableTokens(item.reasoningTokens ?? null)}</td>
                     <td className="px-3 tabular-nums text-cyan-600">{formatNullableTokens(item.cacheReadTokens)}</td>
                     <td className="px-3 font-medium tabular-nums">{formatNullableTokens(item.totalTokens)}</td>
                     <td className="px-3 tabular-nums text-slate-600">{formatLatency(item.latencyMs)}</td>

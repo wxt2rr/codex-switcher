@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const repoRoot = "/Users/wangxt/myspace/codex-switcher";
+const repoRoot = process.cwd();
 
 test("windows manual start script runs capture and result-template helpers together", async () => {
   const content = await readFile(`${repoRoot}/scripts/windows-manual-start.ps1`, "utf8");

@@ -8,6 +8,7 @@ export const HOME_MENU_ITEMS = [
     { title: "Setup", description: "Initialize codex-sw for your shell or terminal" },
     { title: "Refresh", description: "Run one token refresh scan now" },
     { title: "Logs", description: "View token refresh logs" },
+    { title: "Gateway", description: "Manage explicit model routing and Gateway operations" },
     { title: "Quit", description: "Exit" },
 ];
 const HOME_LOGO = [

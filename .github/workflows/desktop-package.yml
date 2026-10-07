@@ -15,6 +15,15 @@ jobs:
   package-macos:
     runs-on: macos-latest
     timeout-minutes: 45
+    env:
+      # Manual workflow runs remain usable without release certificates. Tag
+      # builds must provide the Developer ID and notarization credentials.
+      CSC_IDENTITY_AUTO_DISCOVERY: ${{ startsWith(github.ref, 'refs/tags/desktop-v') && 'true' || 'false' }}
+      CSC_LINK: ${{ secrets.CODEX_SWITCHER_MACOS_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CODEX_SWITCHER_MACOS_CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.CODEX_SWITCHER_APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.CODEX_SWITCHER_APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.CODEX_SWITCHER_APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v7
 
@@ -29,8 +38,32 @@ jobs:
       - name: Build desktop application
         run: npm run desktop:build
 
+      - name: Run macOS plugin sandbox smoke test
+        run: |
+          mkdir -p .wxt/evidence
+          CODEX_SWITCHER_EVIDENCE_OUT=.wxt/evidence/macos-sandbox.json node scripts/posix-plugin-sandbox-smoke.mjs
+      - name: Verify macOS sandbox evidence
+        run: node scripts/verify-sandbox-evidence.mjs .wxt/evidence/macos-sandbox.json
+
+      - name: Upload macOS sandbox evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-sandbox-evidence-macos
+          path: .wxt/evidence/macos-sandbox.json
+          if-no-files-found: error
+
       - name: Run desktop tests
         run: npm run desktop:test
+
+      - name: Verify macOS release signing credentials
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        shell: bash
+        run: |
+          test -n "$CSC_LINK" || { echo "CODEX_SWITCHER_MACOS_CSC_LINK is required for tagged releases" >&2; exit 1; }
+          test -n "$CSC_KEY_PASSWORD" || { echo "CODEX_SWITCHER_MACOS_CSC_KEY_PASSWORD is required for tagged releases" >&2; exit 1; }
+          test -n "$APPLE_ID" || { echo "CODEX_SWITCHER_APPLE_ID is required for tagged releases" >&2; exit 1; }
+          test -n "$APPLE_APP_SPECIFIC_PASSWORD" || { echo "CODEX_SWITCHER_APPLE_APP_SPECIFIC_PASSWORD is required for tagged releases" >&2; exit 1; }
+          test -n "$APPLE_TEAM_ID" || { echo "CODEX_SWITCHER_APPLE_TEAM_ID is required for tagged releases" >&2; exit 1; }
 
       - name: Package macOS installers
         run: npm run desktop:package:mac
@@ -39,6 +72,19 @@ jobs:
         run: |
           npm run package:verify --workspace apps/desktop -- release/mac-arm64/codex-switcher.app
           npm run package:verify --workspace apps/desktop -- release/mac/codex-switcher.app
+
+      - name: Verify macOS release signature and notarization
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        shell: bash
+        run: |
+          codesign --verify --deep --strict --verbose=2 release/mac-arm64/codex-switcher.app
+          codesign --verify --deep --strict --verbose=2 release/mac/codex-switcher.app
+          arm64_dmg="$(find apps/desktop/release -maxdepth 1 -name '*-arm64.dmg' -print -quit)"
+          x64_dmg="$(find apps/desktop/release -maxdepth 1 -name '*.dmg' ! -name '*-arm64.dmg' -print -quit)"
+          test -n "$arm64_dmg"
+          test -n "$x64_dmg"
+          xcrun stapler validate "$arm64_dmg"
+          xcrun stapler validate "$x64_dmg"
 
       - name: Upload macOS installers
         uses: actions/upload-artifact@v7
@@ -54,6 +100,13 @@ jobs:
   package-windows:
     runs-on: windows-latest
     timeout-minutes: 45
+    env:
+      # electron-builder accepts the Windows-specific variables; the generic
+      # aliases keep older builder versions compatible with the same secret.
+      WIN_CSC_LINK: ${{ secrets.CODEX_SWITCHER_WINDOWS_CSC_LINK }}
+      WIN_CSC_KEY_PASSWORD: ${{ secrets.CODEX_SWITCHER_WINDOWS_CSC_KEY_PASSWORD }}
+      CSC_LINK: ${{ secrets.CODEX_SWITCHER_WINDOWS_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CODEX_SWITCHER_WINDOWS_CSC_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v7
 
@@ -68,11 +121,64 @@ jobs:
       - name: Build desktop application
         run: npm run desktop:build
 
+      - name: Verify Windows plugin sandbox helper
+        shell: pwsh
+        run: |
+          if (-not (Test-Path apps/desktop/resources/native/windows/codex-switcher-plugin-sandbox.exe)) {
+            throw "Windows AppContainer plugin sandbox helper was not built"
+          }
+
+      - name: Run Windows plugin sandbox smoke test
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .wxt/evidence | Out-Null
+          $node = (Get-Command node.exe).Source
+          $env:CODEX_SWITCHER_EVIDENCE_OUT = (Resolve-Path .wxt/evidence).Path + "\\windows-sandbox.json"
+          node scripts/windows-plugin-sandbox-smoke.cjs `
+            --launcher (Resolve-Path apps/desktop/resources/native/windows/codex-switcher-plugin-sandbox.exe) `
+            --node $node
+      - name: Verify Windows sandbox evidence
+        shell: pwsh
+        run: node scripts/verify-sandbox-evidence.mjs .wxt/evidence/windows-sandbox.json
+
+      - name: Upload Windows sandbox evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-sandbox-evidence-windows
+          path: .wxt/evidence/windows-sandbox.json
+          if-no-files-found: error
+
       - name: Run desktop tests
         run: npm run desktop:test
 
+      - name: Verify Windows release signing credentials
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK)) { throw "CODEX_SWITCHER_WINDOWS_CSC_LINK is required for tagged releases" }
+          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_KEY_PASSWORD)) { throw "CODEX_SWITCHER_WINDOWS_CSC_KEY_PASSWORD is required for tagged releases" }
+
       - name: Package Windows installer
         run: npm run desktop:package:win
+
+      - name: Verify packaged Windows plugin sandbox helper
+        shell: pwsh
+        run: |
+          $helper = "apps/desktop/release/win-unpacked/resources/native/windows/codex-switcher-plugin-sandbox.exe"
+          if (-not (Test-Path $helper)) { throw "Packaged Windows AppContainer helper not found: $helper" }
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $helper))
+          if ($bytes.Length -lt 2 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { throw "Packaged Windows AppContainer helper is not a PE executable" }
+
+      - name: Verify Windows installer
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem apps/desktop/release -Filter *.exe | Select-Object -First 1
+          if ($null -eq $installer) { throw "Windows installer not found" }
+          npm run package:verify --workspace apps/desktop -- "$($installer.FullName)"
+          if ($env:GITHUB_REF -like "refs/tags/desktop-v*") {
+            $signature = Get-AuthenticodeSignature -FilePath $installer.FullName
+            if ($signature.Status -ne "Valid") { throw "Windows installer Authenticode signature is not valid: $($signature.Status)" }
+          }
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v7
@@ -84,8 +190,74 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  package-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build desktop application
+        run: npm run desktop:build
+
+      - name: Install and verify bubblewrap
+        shell: bash
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install --yes bubblewrap libc6:i386 libcrypt1:i386
+          command -v bwrap
+          bwrap --version
+
+      - name: Run Linux plugin sandbox smoke test
+        run: |
+          mkdir -p .wxt/evidence
+          CODEX_SWITCHER_EVIDENCE_OUT=.wxt/evidence/linux-sandbox.json node scripts/posix-plugin-sandbox-smoke.mjs
+      - name: Verify Linux sandbox evidence
+        run: node scripts/verify-sandbox-evidence.mjs .wxt/evidence/linux-sandbox.json
+
+      - name: Upload Linux sandbox evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-sandbox-evidence-linux
+          path: .wxt/evidence/linux-sandbox.json
+          if-no-files-found: error
+
+      - name: Run desktop tests
+        run: npm run desktop:test
+
+      - name: Package Linux installers
+        run: npm run desktop:package:linux
+
+      - name: Verify Linux packages
+        shell: bash
+        run: |
+          appimage="$(find apps/desktop/release -maxdepth 1 -name '*.AppImage' -print -quit)"
+          deb="$(find apps/desktop/release -maxdepth 1 -name '*.deb' -print -quit)"
+          test -n "$appimage"
+          test -n "$deb"
+          npm run package:verify --workspace apps/desktop -- "$appimage"
+          npm run package:verify --workspace apps/desktop -- "$deb"
+
+      - name: Upload Linux installers
+        uses: actions/upload-artifact@v7
+        with:
+          name: codex-switcher-linux-x64
+          path: |
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb
+          if-no-files-found: error
+          retention-days: 14
+
   release:
-    needs: [package-macos, package-windows]
+    needs: [package-macos, package-windows, package-linux]
     if: startsWith(github.ref, 'refs/tags/desktop-v')
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -112,8 +284,43 @@ jobs:
           test -n "$(find release-assets -maxdepth 1 -name '*.dmg' ! -name '*-arm64.dmg' -print -quit)"
           test -n "$(find release-assets -maxdepth 1 -name '*.zip' ! -name '*-arm64-mac.zip' -print -quit)"
           test -n "$(find release-assets -maxdepth 1 -name '*.exe' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.AppImage' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.deb' -print -quit)"
           test -n "$(find release-assets -maxdepth 1 -name '*.blockmap' -print -quit)"
           find release-assets -maxdepth 1 -type f -print
+
+      - name: Generate signed update manifests
+        shell: bash
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.CODEX_SWITCHER_UPDATE_SIGNING_KEY }}
+        run: |
+          test -n "$RELEASE_SIGNING_KEY"
+          key_file="$(mktemp)"
+          trap 'rm -f "$key_file"' EXIT
+          umask 077
+          printf '%s' "$RELEASE_SIGNING_KEY" > "$key_file"
+          shopt -s nullglob
+          for artifact in release-assets/*; do
+            case "$artifact" in
+              *.exe) platform="win32-x64" ;;
+              *.AppImage|*.deb) platform="linux-x64" ;;
+              *-arm64.dmg|*-arm64-mac.zip) platform="darwin-arm64" ;;
+              *.dmg|*-mac.zip) platform="darwin-x64" ;;
+              *) continue ;;
+            esac
+            base="$(basename "$artifact")"
+            node scripts/create-update-manifest.mjs \
+              --artifact "$artifact" \
+              --key-file "$key_file" \
+              --version "${GITHUB_REF_NAME#desktop-v}" \
+              --channel stable \
+              --platform "$platform" \
+              --url "https://github.com/${GH_REPO}/releases/download/${GITHUB_REF_NAME}/${base}" \
+              --out "release-assets/${base}.manifest.json"
+            node scripts/verify-update-manifest.mjs \
+              --manifest "release-assets/${base}.manifest.json" \
+              --artifact "$artifact"
+          done
 
       - name: Create or update GitHub Pre-release
         shell: bash

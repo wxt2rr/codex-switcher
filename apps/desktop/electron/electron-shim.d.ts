@@ -26,6 +26,12 @@ declare module "electron" {
 
   export const app: {
     whenReady(): Promise<void>;
+    getPath(name: string): string;
+    getVersion(): string;
+    getAppPath(): string;
+    setLoginItemSettings(settings: { openAtLogin: boolean }): void;
+    relaunch(): void;
+    exit(exitCode?: number): void;
     on(event: string, listener: () => void | Promise<void>): void;
     quit(): void;
   };

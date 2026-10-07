@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const repoRoot = "/Users/wangxt/myspace/codex-switcher";
+const repoRoot = process.cwd();
 
 test("windows manual result template generator script pre-fills metadata and checklist structure", async () => {
   const content = await readFile(`${repoRoot}/scripts/windows-manual-result-template.ps1`, "utf8");
@@ -26,6 +26,12 @@ test("windows manual result template generator script pre-fills metadata and che
     "- Windows version: $windowsVersion",
     "- [$installSourceNpm] npm global install",
     "- [$installSourceSource] source install",
+    "- [ ] Gateway and plugin isolation",
+    "- [ ] Packaging and update recovery",
+    "Evidence file: `windows-sandbox.json`",
+    "`filesystemWriteGranted`:",
+    "Authenticode status:",
+    "Failed-boot rollback result:",
     "attach `$EvidencePath`",
     "Ensure-ParentDirectory -Path $OutputPath",
     "Set-Content -Path $OutputPath -Value $content",

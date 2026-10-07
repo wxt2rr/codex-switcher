@@ -99,7 +99,7 @@ function EnvCard({
   onDelete,
   routeStatus,
   canRoute,
-  onToggleRoute,
+  onToggleGateway,
   poolStatus,
   onOpenPool,
 }: {
@@ -113,7 +113,7 @@ function EnvCard({
   onDelete: () => void;
   routeStatus?: EnvironmentRouteStatus;
   canRoute: boolean;
-  onToggleRoute: () => void;
+  onToggleGateway: () => void;
   poolStatus?: AccountPoolStatus;
   onOpenPool: () => void;
 }) {
@@ -127,6 +127,11 @@ function EnvCard({
             {env.isCurrentCli ? <SoftBadge tone="brand" label="CLI" className="h-5 px-2 text-[10px]" /> : null}
             {env.isCurrentApp ? <SoftBadge tone="brand" label="App" className="h-5 px-2 text-[10px]" /> : null}
             <SoftBadge tone="neutral" label={language === "zh" ? `${accountCount} 个账号` : `${accountCount} accounts`} className="h-5 px-2 text-[10px]" />
+            <SoftBadge
+              tone={routeStatus?.gatewayEnabled ? "brand" : "neutral"}
+              label={language === "zh" ? (routeStatus?.gatewayEnabled ? "网关模式" : "手动模式") : (routeStatus?.gatewayEnabled ? "Gateway mode" : "Manual mode")}
+              className="h-5 px-2 text-[10px]"
+            />
             {routeStatus?.enabled ? (
               <SoftBadge
                 tone="success"
@@ -137,6 +142,19 @@ function EnvCard({
                     : language === "ja"
                       ? `ルート有効 · 127.0.0.1:${routeStatus.port} · ${routeStatus.routedAccounts} アカウント`
                       : `Routing enabled · 127.0.0.1:${routeStatus.port} · ${routeStatus.routedAccounts} accounts`
+                }
+              />
+            ) : null}
+            {routeStatus?.gatewayEnabled ? (
+              <SoftBadge
+                tone="brand"
+                className="h-5 px-2 text-[10px]"
+                label={
+                  language === "zh"
+                    ? `网关模式 · ${routeStatus.localGatewayBaseUrl ?? "本地"}`
+                    : language === "ja"
+                      ? `ゲートウェイモード · ${routeStatus.localGatewayBaseUrl ?? "ローカル"}`
+                      : `Gateway mode · ${routeStatus.localGatewayBaseUrl ?? "local"}`
                 }
               />
             ) : null}
@@ -155,8 +173,8 @@ function EnvCard({
       </div>
 
       <div className="responsive-actions">
-        <IconActionButton icon={<Network className="size-4" />} label={language === "zh" ? (routeStatus?.enabled ? "关闭路由" : "开启路由") : (routeStatus?.enabled ? "Disable route" : "Enable route")} onClick={onToggleRoute} disabled={busy || (!canRoute && !routeStatus?.enabled)} active={routeStatus?.enabled} />
-        <IconActionButton icon={<Shuffle className="size-4" />} label={language === "zh" ? "账号池" : "Account pool"} onClick={onOpenPool} disabled={busy || !canRoute} active={Boolean(poolStatus?.enabled)} />
+        <IconActionButton icon={<Network className="size-4" />} label={language === "zh" ? (routeStatus?.gatewayEnabled ? "关闭网关" : "开启网关") : (routeStatus?.gatewayEnabled ? "Disable gateway" : "Enable gateway")} onClick={onToggleGateway} disabled={busy || (!canRoute && !routeStatus?.gatewayEnabled)} active={routeStatus?.gatewayEnabled} />
+        <IconActionButton icon={<Shuffle className="size-4" />} label={language === "zh" ? "凭证池" : "Credential pool"} onClick={onOpenPool} disabled={busy || !canRoute} active={Boolean(poolStatus?.enabled)} />
         <IconActionButton icon={<FilePenLine className="size-4" />} label={language === "zh" ? "编辑" : "Edit"} onClick={onEdit} disabled={busy} />
         <IconActionButton icon={<FileText className="size-4" />} label={language === "zh" ? "修改" : "Modify"} onClick={onConfig} disabled={busy} />
         <IconActionButton icon={<History className="size-4" />} label={language === "zh" ? "历史" : "History"} onClick={onHistory} disabled={busy} />
@@ -195,7 +213,7 @@ export function EnvironmentsPage({
   onImportDefaultEnv,
   onDeleteEnv,
   routeStatuses,
-  onToggleRoute,
+  onToggleGateway,
   accountPools,
   onSaveAccountPool,
 }: {
@@ -218,7 +236,7 @@ export function EnvironmentsPage({
   onImportDefaultEnv: (envName: string) => void;
   onDeleteEnv: () => void;
   routeStatuses: EnvironmentRouteStatus[];
-  onToggleRoute: (envName: string, enabled: boolean) => Promise<void>;
+  onToggleGateway: (envName: string, enabled: boolean) => Promise<void>;
   accountPools: AccountPoolStatus[];
   onSaveAccountPool: (input: AccountPoolInput) => Promise<boolean>;
 }) {
@@ -330,13 +348,9 @@ export function EnvironmentsPage({
               routeStatus={routeStatuses.find((item) => item.envName === env.name)}
               poolStatus={accountPools.find((item) => item.envName === env.name)}
                   canRoute={overview.accounts.some((account) => account.envName === env.name)}
-              onToggleRoute={() => {
-                const activePool = accountPools.find((item) => item.envName === env.name && item.enabled);
-                if (activePool) {
-                  void onSaveAccountPool({ envName: env.name, enabled: false, protocol: activePool.protocol, members: [] });
-                } else {
-                  void onToggleRoute(env.name, !routeStatuses.find((item) => item.envName === env.name)?.enabled);
-                }
+              onToggleGateway={() => {
+                const status = routeStatuses.find((item) => item.envName === env.name);
+                void onToggleGateway(env.name, !status?.gatewayEnabled);
               }}
               onOpenPool={() => openPoolEditor(env.name)}
               onEdit={() => {
@@ -397,7 +411,7 @@ export function EnvironmentsPage({
         </div>
       </SidePanel>
 
-      <SidePanel open={poolOpen} title={language === "zh" ? `${poolEnvName} · 账号池` : `${poolEnvName} · Account pool`} onClose={() => setPoolOpen(false)} closeLabel={pageCopy.common.close}>
+      <SidePanel open={poolOpen} title={language === "zh" ? `${poolEnvName} · 凭证池` : `${poolEnvName} · Credential pool`} onClose={() => setPoolOpen(false)} closeLabel={pageCopy.common.close}>
         <div className="space-y-4">
           <div className="rounded-lg bg-[#f7f8fa] px-4 py-3 text-xs leading-5 text-slate-600">
             {language === "zh" ? "新会话按权重选择账号，同一会话优先保持原账号；只有限流、额度或网络失败才会自动切换。Responses 模式支持 AUTH 与 API Key 混合自动分发。" : "New sessions use weighted selection and stay on one account; failover is limited to rate, quota, and network failures. Responses pools can mix AUTH and API-key accounts."}
@@ -464,8 +478,8 @@ export function EnvironmentsPage({
           </div>
           <div className="flex justify-end gap-2.5">
             <Button variant="outline" onClick={() => setPoolOpen(false)}>{pageCopy.common.cancel}</Button>
-            {poolStatus ? <Button variant="destructive" onClick={async () => { if (await onSaveAccountPool({ envName: poolEnvName, enabled: false, protocol: poolProtocol, members: [] })) setPoolOpen(false); }}>{language === "zh" ? "关闭账号池" : "Disable pool"}</Button> : null}
-            <Button onClick={async () => { if (poolMembers.length && await onSaveAccountPool({ envName: poolEnvName, enabled: true, protocol: poolProtocol, members: poolMembers.map((accountName, priority) => ({ accountName, priority, weight: poolWeights[accountName] ?? 1 })), sessionTtlMinutes: Number(poolTtl), maxSameAccountFailures: Number(poolSameAccountFailures), maxFailoverAttempts: Number(poolFailover) })) setPoolOpen(false); }} disabled={busy || poolMembers.length === 0}>{language === "zh" ? "保存账号池" : "Save pool"}</Button>
+            {poolStatus ? <Button variant="destructive" onClick={async () => { if (await onSaveAccountPool({ envName: poolEnvName, enabled: false, protocol: poolProtocol, members: [] })) setPoolOpen(false); }}>{language === "zh" ? "关闭凭证池" : "Disable credential pool"}</Button> : null}
+            <Button onClick={async () => { if (poolMembers.length && await onSaveAccountPool({ envName: poolEnvName, enabled: true, protocol: poolProtocol, members: poolMembers.map((accountName, priority) => ({ accountName, priority, weight: poolWeights[accountName] ?? 1 })), sessionTtlMinutes: Number(poolTtl), maxSameAccountFailures: Number(poolSameAccountFailures), maxFailoverAttempts: Number(poolFailover) })) setPoolOpen(false); }} disabled={busy || poolMembers.length === 0}>{language === "zh" ? "保存凭证池" : "Save credential pool"}</Button>
           </div>
         </div>
       </SidePanel>
