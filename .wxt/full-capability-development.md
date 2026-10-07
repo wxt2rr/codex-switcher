@@ -398,3 +398,5 @@
 - `scripts/package-install-recovery.ts` 复用桌面更新回滚实现，对已安装的真实可执行文件执行“备份 → 模拟损坏升级 → 原子恢复”，并以 SHA-256 验证恢复前后字节完全一致。
 - `scripts/package-install-smoke.mjs` 已在三平台安装验证后调用该恢复检查，证据新增 `rollbackSmoke: "passed"`；本机 macOS arm64 ZIP 安装与回滚 smoke 通过。
 - 定向验证：`npx tsx --test scripts/desktop-package-workflow.test.ts` 1/1、`npx tsx --test apps/desktop/electron/update-rollback.test.ts` 4/4、`node --check scripts/package-install-smoke.mjs` 通过。
+- 当前 `main` 提交 `c4667d0` 的三平台打包运行 `37588896102` 已成功：Linux、Windows、macOS package job 全部通过，且三端安装 smoke（包含回滚恢复检查）均通过；release job 按非标签规则跳过。
+- 对应 artifact `codex-switcher-linux-x64`、`codex-switcher-windows-x64`、`codex-switcher-macos` 及三端 sandbox evidence 均成功上传；本次 macOS/Windows 签名、公证步骤因无发布凭据按设计跳过，未将非签名产物当作正式发布结果。
