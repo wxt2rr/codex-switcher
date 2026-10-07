@@ -330,3 +330,9 @@
 - 远端日志确认 Node 启动探针已经输出并正常退出；剩余超时发生在 helper 回滚工作区上层目录 ACL 时，属于过宽父级授权的清理问题。
 - ACL 现在只修改目标目录的直接父级遍历权限和目标目录自身权限，不再沿工作区/盘符继续修改共享父目录；保留句柄清理、有限等待和回滚逻辑。
 - 本地 builder contract、sandbox 证据测试、lint 和 diff check 继续通过；下一次远端运行用于确认完整 Windows 文件/网络隔离探针和证据校验。
+
+## 2026-10-07 Windows 原生隔离证据闭环
+
+- 远端 CI `37563561262` 全部通过：macOS legacy/Desktop、macOS/Ubuntu/Windows cross-platform、Ubuntu Desktop 均通过。
+- Windows runner 的 AppContainer helper 构建、文件系统拒绝/授权、Home 读取拒绝、网络拒绝、证据生成和证据校验全部通过；本次不再存在 Windows smoke 未执行或超时遗留。
+- 当前 macOS x64/arm64 安装包继续使用已核验的 `0.1.33` 产物；正式 Developer ID/公证仍受本机证书环境限制，但不影响本地启动和包完整性证据。
