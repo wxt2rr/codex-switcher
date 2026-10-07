@@ -49,6 +49,7 @@
 - Current P8/P9 slice: pin the update-manifest verifier to the release public key so a manifest cannot replace its own trust root; tag release verification must pass the trusted public key explicitly.
 - Current P8 slice: make a configured desktop update feed require a signed manifest by default; unsigned feeds remain available only through an explicit test/development override.
 - Current P8 slice: route Gateway/provider/agent/group/model/usage/profile domain commands from the cross-platform launcher to the Node CLI on macOS/Linux, while preserving the legacy Bash manual env/account commands.
+- Current P9/P10 slice: add a runner-side package-install smoke that extracts macOS/Linux installers and silently installs the Windows NSIS package into an isolated directory, then uploads redacted install evidence.
 - Current P10 slice: add a Gateway lifecycle regression for simultaneous requests from multiple explicit Agent IDs, including fallback dispatch and per-Agent usage records; this slice does not add Prompt analysis or intent routing.
 - Current P6 slice: expose the existing signed/fail-closed Provider Plugin Market through the desktop bridge and Operations UI, including cached entries, explicit refresh, and market-entry installation; this slice does not add Prompt analysis or intent routing.
 - Current P8/P9 slice: make update rollback staging names collision-safe under concurrent checks and preserve the existing fail-closed manifest/hash verification; this slice does not add Prompt analysis or intent routing.
@@ -382,3 +383,9 @@
 
 - 针对当前 `main` 提交 `0dd1b94` 重新触发的三平台打包运行 `37567205074` 已成功：macOS、Windows、Linux package job 全部通过，release job 按非标签规则跳过。
 - 当前运行上传了 `codex-switcher-macos`、`codex-switcher-windows-x64`、`codex-switcher-linux-x64` 和三端 sandbox evidence；产物大小与非空校验已由 GitHub Artifacts API 确认。
+
+## 2026-10-07 安装产物 smoke 切片
+
+- 新增 `scripts/package-install-smoke.mjs`：macOS 从目标 ZIP 解包并验证应用可执行文件，Linux 使用 `dpkg-deb --extract` 验证安装树，Windows 使用 NSIS `/S` 安装到临时目录并验证 `codex-switcher.exe`。
+- 三个平台 package job 会把安装结果写入 `package-install-*.json` 并随对应安装包 artifact 上传；证据只包含平台、架构、产物文件名、安装方式和可执行文件名，不记录用户路径或凭证。
+- 本机 macOS arm64 ZIP smoke 通过；`npx tsx --test scripts/desktop-package-workflow.test.ts` 1/1，`npm run test:cross-platform` 通过 Core 157/157、Gateway 79/79、脚本/工作流 34/34，Node 语法和 diff check 通过。
