@@ -1,6 +1,6 @@
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { codexAppCandidatePaths, codexCliCandidatePaths, getWindowsReadinessSnapshot, resolveCodexAppPath, resolveCommandPath, resolveWindowsLauncherCommands, } from "./command-discovery.js";
@@ -13,7 +13,7 @@ test("resolveCommandPath finds a PATH executable on unix-like platforms", async 
         await writeFile(cliPath, "#!/bin/sh\nexit 0\n", "utf8");
         await chmod(cliPath, 0o755);
         const result = await resolveCommandPath("codex", {
-            PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
+            PATH: binDir,
         }, "darwin");
         assert.deepEqual(result, {
             source: "env",
@@ -81,7 +81,7 @@ test("resolveWindowsLauncherCommands reports launcher executables from PATH on w
         await chmod(wtPath, 0o755);
         await chmod(pwshPath, 0o755);
         const result = await resolveWindowsLauncherCommands({
-            PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
+            PATH: binDir,
         }, "win32");
         assert.deepEqual(result, [
             {
@@ -131,7 +131,7 @@ test("getWindowsReadinessSnapshot aggregates launcher commands, candidates, and 
         await chmod(wtPath, 0o755);
         const snapshot = await getWindowsReadinessSnapshot({
             USERPROFILE: "C:\\Users\\alice",
-            PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
+            PATH: binDir,
         }, "win32");
         assert.deepEqual(snapshot.launchers, [
             {
