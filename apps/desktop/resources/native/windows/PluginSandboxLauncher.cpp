@@ -304,9 +304,11 @@ bool grantDirectoryTraversal(const std::wstring& path, PSID appContainerSid, Acl
   return true;
 }
 
-bool grantDirectoryAncestors(const std::wstring& path, PSID appContainerSid, std::vector<std::unique_ptr<AclGrant>>& grants) {
+bool grantDirectoryAncestors(const std::wstring& path, PSID appContainerSid, std::vector<std::unique_ptr<AclGrant>>& grants, bool debug) {
   std::filesystem::path current = std::filesystem::path(path).parent_path();
-  while (!current.empty() && current != current.parent_path()) {
+  const std::filesystem::path root = current.root_path();
+  while (!current.empty() && current != current.parent_path() && current != root) {
+    if (debug) std::wcerr << L"[sandbox] granting traversal: " << current.wstring() << std::endl;
     auto grant = std::make_unique<AclGrant>();
     if (!grantDirectoryTraversal(current.wstring(), appContainerSid, *grant)) return false;
     grants.push_back(std::move(grant));
@@ -363,8 +365,8 @@ int wmain(int argc, wchar_t** argv) {
   const std::wstring nodeDirectory = std::filesystem::path(node).parent_path().wstring();
   std::vector<std::unique_ptr<AclGrant>> traversalGrants;
   if (nodeDirectory.empty()
-      || !grantDirectoryAncestors(nodeDirectory, appContainerSid, traversalGrants)
-      || !grantDirectoryAncestors(cwd, appContainerSid, traversalGrants)
+      || !grantDirectoryAncestors(nodeDirectory, appContainerSid, traversalGrants, debug)
+      || !grantDirectoryAncestors(cwd, appContainerSid, traversalGrants, debug)
       || !grantDirectoryAccess(nodeDirectory, appContainerSid, false, nodeGrant)) {
     FreeSid(appContainerSid);
     return fail(L"cannot grant AppContainer access to Node runtime directory", HRESULT_FROM_WIN32(GetLastError()));
