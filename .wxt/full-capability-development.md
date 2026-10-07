@@ -349,3 +349,4 @@
 - 修复 `desktop-package` workflow：手动运行时不再把空的 macOS/Windows 签名变量传给 electron-builder；标签运行仍保留签名凭据强制门禁。
 - 修复 Linux package verify 的 workspace cwd 路径拼接，校验现在针对 `apps/desktop/release` 中实际生成的 AppImage 和 deb。
 - `desktop-package` 运行 `37565196259` 全部通过：macOS 5m04s、Ubuntu 3m29s、Windows 3m52s；三端沙箱证据、桌面测试、安装包构建和产物校验均成功。非标签运行不产生正式签名/公证结论。
+- 运行产物已上传为 `codex-switcher-macos`、`codex-switcher-windows-x64`、`codex-switcher-linux-x64` 及三端 sandbox evidence；仓库当前没有配置发布签名密钥，因此未触发标签发布路径。
