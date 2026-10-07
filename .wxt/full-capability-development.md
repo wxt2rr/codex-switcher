@@ -424,3 +424,10 @@
 - 签名证书、公证、真实 Intel Mac 安装以及真实第三方 Provider/模型调用不再作为本次工程开发的待办项，由使用者自行验证。
 - 本仓库负责的自动化范围已重新验收：`npm test` 通过 Core 157/157、Gateway 79/79、根级脚本 34/34、legacy-bash 1/1；`npm run desktop:test` 通过 390 项并保留 1 个明确标注的外部 Codex E2E skip；Core/Gateway/Desktop build、lint 和 `git diff --check` 均通过。
 - 计划中的 P8、P9、P10 已按上述边界更新为 `complete`；手动账号切换和 Gateway 模式均保留，未引入意图路由。
+
+## 2026-10-07 Desktop v0.1.35 打包运行时修复
+
+- 根因是打包后的 Electron 应用已经包含编译后的 Core/Gateway 运行时，但启动时仍提前解析源码工作区根目录；由于安装包内不存在源码工作区，`desktop:loadOverview` 在加载账号概览前失败。
+- `apps/desktop/electron/core-runtime.ts` 现在优先使用打包资源目录解析运行时，并保留开发环境源码 fallback，避免打包运行时触发无意义的源码目录解析。
+- 本机 macOS arm64 目录包已实际打开并进入账号管理页面；`runtime-paths` 测试 2/2、Desktop package 测试 3/3、Desktop build 和两种 macOS 目录包校验均通过。
+- `desktop-v0.1.35` 标签对应的 GitHub Actions 运行 `37599986298` 已成功完成 macOS、Windows、Linux 打包、安装 smoke、回滚 smoke、产物校验和预发布 Release 上传；保持未签名交付方式。
