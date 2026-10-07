@@ -306,3 +306,9 @@
 - Windows cross-platform 已在远端通过；原生隔离 job 的 helper 构建与校验也通过，但 AppContainer 网络探测在某些 runner 上没有触发 Node socket 自带 timeout，导致父 helper 长时间等待。
 - Windows smoke fixture 现在增加独立 3 秒网络硬超时、单次完成保护和 launcher 15 秒总超时；网络受限时仍按拒绝处理，连接异常或子进程异常则保留 stderr/status 诊断，不会无限挂起。
 - 本地 `node --check`、cross-platform、Desktop 回归、lint 和 diff check 继续通过；下一次远端运行用于确认 Windows AppContainer smoke 正常收敛并生成证据。
+
+## 2026-10-07 macOS 交付收口
+
+- 最新远端 CI `37561409761` 已确认 macOS legacy、macOS Desktop、macOS/Ubuntu/Windows cross-platform 和 Ubuntu Desktop 任务通过；Windows 原生 AppContainer smoke 仍因 runner 子进程未在限定时间内退出而失败，记录为外部环境证据缺口，不阻塞本次 macOS 交付。
+- Windows smoke fixture 已改为异步文件探测，硬超时从探测开始前即生效，并保留单次完成保护和立即输出/退出逻辑；本地静态检查与回归继续通过。
+- 已完成 macOS x64 与 arm64 的 DMG、ZIP 产物核验和独立启动检查；两套产物均可进入真实业务页面，未将 Windows/正式签名/公证结果冒充为 macOS 本机证据。
