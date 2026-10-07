@@ -5,7 +5,6 @@ import {
   getConfiguredResourcesPath,
   resolveRuntimeResource,
   resolveRuntimeRoot,
-  resolveWorkspaceRoot,
 } from "./runtime-paths.js";
 
 export interface CoreRuntime {
@@ -328,7 +327,14 @@ function getRepoRoot(): string {
 }
 
 function getSourceRepoRoot(): string {
-  return resolveWorkspaceRoot(resolveCurrentFile());
+  // Packaged Electron builds keep the compiled Core/Gateway runtime in
+  // process.resourcesPath. The source fallback is still needed in development,
+  // but resolving it eagerly must not fail before the packaged dist module is
+  // selected.
+  return resolveRuntimeRoot({
+    currentFile: resolveCurrentFile(),
+    resourcesPath: getConfiguredResourcesPath(),
+  });
 }
 
 function getCoreDist(): string {
