@@ -9,9 +9,9 @@ await collectTests(join(gatewayRoot, "src"));
 testFiles.sort((left, right) => left.localeCompare(right));
 if (!testFiles.length) throw new Error("No Gateway test files were found");
 
-const loader = resolve(gatewayRoot, "../../node_modules/tsx/dist/loader.mjs");
+const tsxCli = resolve(gatewayRoot, "../../node_modules/tsx/dist/cli.mjs");
 const child = spawn(process.execPath, [
-  "--import", loader,
+  tsxCli,
   "--test",
   "--test-concurrency=1",
   ...testFiles.map((path) => relative(gatewayRoot, path)),

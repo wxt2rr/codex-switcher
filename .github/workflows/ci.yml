@@ -80,9 +80,23 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install --yes bubblewrap g++-mingw-w64-x86-64
+          sudo apt-get install --yes bubblewrap apparmor-utils g++-mingw-w64-x86-64
           command -v bwrap
           bwrap --version
+      - name: Allow bubblewrap user namespaces on Ubuntu runners
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          if command -v apparmor_parser >/dev/null 2>&1; then
+            sudo tee /etc/apparmor.d/codex-switcher-bwrap >/dev/null <<'EOF'
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile codex-switcher-bwrap /usr/bin/bwrap flags=(unconfined) {
+            userns,
+          }
+          EOF
+            sudo apparmor_parser -r /etc/apparmor.d/codex-switcher-bwrap
+          fi
       - name: Cross-compile Windows plugin sandbox helper
         if: matrix.os == 'ubuntu-latest'
         shell: bash

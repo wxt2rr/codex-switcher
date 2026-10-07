@@ -212,9 +212,22 @@ jobs:
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
-          sudo apt-get install --yes bubblewrap libc6:i386 libcrypt1:i386
+          sudo apt-get install --yes bubblewrap apparmor-utils libc6:i386 libcrypt1:i386
           command -v bwrap
           bwrap --version
+      - name: Allow bubblewrap user namespaces on Ubuntu runners
+        shell: bash
+        run: |
+          if command -v apparmor_parser >/dev/null 2>&1; then
+            sudo tee /etc/apparmor.d/codex-switcher-bwrap >/dev/null <<'EOF'
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile codex-switcher-bwrap /usr/bin/bwrap flags=(unconfined) {
+            userns,
+          }
+          EOF
+            sudo apparmor_parser -r /etc/apparmor.d/codex-switcher-bwrap
+          fi
 
       - name: Run Linux plugin sandbox smoke test
         run: |

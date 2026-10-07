@@ -106,6 +106,8 @@ test("desktop package defines electron packaging entrypoints", () => {
   assert.match(nativeBuildSource, /PluginSandboxLauncher\.cpp/);
   assert.match(nativeBuildSource, /codex-switcher-plugin-sandbox\.exe/);
   assert.match(nativeBuildSource, /vswhere\.exe/);
+  assert.match(nativeBuildSource, /windowsVerbatimArguments: true/);
+  assert.doesNotMatch(nativeBuildSource, /replaceAll\('\"', '\"\"'\)/);
   const windowsSandboxSource = readFileSync(join(desktopRoot, "resources", "native", "windows", "PluginSandboxLauncher.cpp"), "utf8");
   assert.match(windowsSandboxSource, /CreateAppContainerProfile/);
   assert.match(windowsSandboxSource, /DeriveAppContainerSidFromAppContainerName/);

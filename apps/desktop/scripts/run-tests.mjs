@@ -11,9 +11,9 @@ for (const root of testRoots) await collectTests(root);
 testFiles.sort((left, right) => left.localeCompare(right));
 if (!testFiles.length) throw new Error("No desktop test files were found");
 
-const loader = resolve(desktopRoot, "../../node_modules/tsx/dist/loader.mjs");
+const tsxCli = resolve(desktopRoot, "../../node_modules/tsx/dist/cli.mjs");
 const child = spawn(process.execPath, [
-  "--import", loader,
+  tsxCli,
   "--test",
   "--test-concurrency=1",
   ...testFiles.map((path) => relative(desktopRoot, path)),

@@ -22,6 +22,10 @@ test("GitHub Actions CI covers cross-platform core and desktop sandbox regressio
     "desktop-non-macos:",
     "matrix.os",
     "Install and verify bubblewrap",
+    "apparmor-utils",
+    "Allow bubblewrap user namespaces on Ubuntu runners",
+    "/etc/apparmor.d/codex-switcher-bwrap",
+    "apparmor_parser -r",
     "g++-mingw-w64-x86-64",
     "Cross-compile Windows plugin sandbox helper",
     "x86_64-w64-mingw32-g++",
@@ -52,6 +56,7 @@ test("GitHub Actions CI covers cross-platform core and desktop sandbox regressio
   assert.deepEqual(desktopNonMacos?.strategy?.matrix?.os, ["windows-latest", "ubuntu-latest"]);
   const steps = desktopNonMacos?.steps ?? [];
   assert.ok(steps.some((step) => step.if === "matrix.os == 'ubuntu-latest'" && step.run?.includes("bwrap --version")));
+  assert.ok(steps.some((step) => step.name === "Allow bubblewrap user namespaces on Ubuntu runners" && step.if === "matrix.os == 'ubuntu-latest'" && step.run?.includes("apparmor_parser -r")));
   assert.ok(steps.some((step) => step.name === "Cross-compile Windows plugin sandbox helper" && step.if === "matrix.os == 'ubuntu-latest'" && step.run?.includes("x86_64-w64-mingw32-g++")));
   assert.ok(steps.some((step) => step.if === "matrix.os == 'windows-latest'" && step.run?.includes("codex-switcher-plugin-sandbox.exe")));
   assert.ok(steps.some((step) => step.name === "Upload plugin sandbox evidence" && step.run === undefined));

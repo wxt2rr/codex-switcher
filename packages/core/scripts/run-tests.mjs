@@ -9,9 +9,9 @@ await collectTests(join(coreRoot, "src"));
 testFiles.sort((left, right) => left.localeCompare(right));
 if (!testFiles.length) throw new Error("No core test files were found");
 
-const loader = resolve(coreRoot, "../../node_modules/tsx/dist/loader.mjs");
+const tsxCli = resolve(coreRoot, "../../node_modules/tsx/dist/cli.mjs");
 const child = spawn(process.execPath, [
-  "--import", loader,
+  tsxCli,
   "--test",
   "--test-concurrency=1",
   ...testFiles.map((path) => relative(coreRoot, path)),

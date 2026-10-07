@@ -54,8 +54,11 @@ if (process.platform === "win32" && existsSync(windowsSandboxSource)) {
     ], { encoding: "utf8" }).trim();
     if (!installationPath) throw new Error("MSVC installation with VC.Tools.x86.x64 was not found");
     const vsDevCmd = join(installationPath, "Common7", "Tools", "VsDevCmd.bat");
-    const quoteCmd = (value) => `"${String(value).replaceAll('"', '""')}"`;
+    const quoteCmd = (value) => `"${String(value)}"`;
     const command = `call ${quoteCmd(vsDevCmd)} -arch=x64 && cl.exe ${compilerArgs.map(quoteCmd).join(" ")}`;
-    execFileSync("cmd.exe", ["/d", "/s", "/c", command], { stdio: "inherit" });
+    execFileSync(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", command], {
+      stdio: "inherit",
+      windowsVerbatimArguments: true,
+    });
   }
 }

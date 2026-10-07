@@ -53,6 +53,7 @@
 - Current P1/P7 slice: make desktop Gateway Agent bindings materialize, restore, and report Drift through the existing Agent adapters instead of persisting metadata only; this slice does not add Prompt analysis or intent routing.
 - Current P7 audit slice: complete privacy-safe Usage completion fields by hashing the explicit session identifier and accepting an optional first-byte timestamp, and make CLI usage read the persistent Router ledger before the legacy JSON fallback; this slice does not add Prompt analysis or intent routing.
 - Current P10 audit slice: remove host-specific absolute repository paths from cross-platform tests so Linux/Windows CI validates the current checkout; this slice does not add Prompt analysis or intent routing.
+- Current P6/P10 CI portability slice: run Core/Gateway/Desktop recursive TypeScript tests through the tsx CLI entrypoint so Windows receives valid module URLs; build the Windows native helper through `ComSpec` with verbatim arguments; install an explicit Ubuntu AppArmor profile for bubblewrap user namespaces before Linux sandbox smoke; this slice does not add Prompt analysis or intent routing.
 - Current P10 cross-platform runner slice: replace Unix-only `find`/shell test discovery for Core and Gateway with Node recursive runners, so Windows/Linux CI executes the same complete test set; this slice does not add Prompt analysis or intent routing.
 - Current P2/P4 runtime slice: enable explicit protocol conversion in desktop Gateway route selection when the ingress Gateway opts into the existing 4-protocol conversion chain; direct route callers keep exact-protocol matching by default and credential-pool protocol constraints remain explicit; this slice does not add Prompt analysis or intent routing.
 - Current P4 runtime metrics slice: feed bounded per-Gateway route request/token/latency counters into the shared `usage`, `pace`, and `smart` strategies, with explicit window expiry and no prompt inspection; this slice does not add Prompt analysis or intent routing.
@@ -275,3 +276,9 @@
 - 最终生成 macOS x64 与 arm64 directory `.app`；主程序分别为 `Mach-O 64-bit executable x86_64` 与 `Mach-O 64-bit executable arm64`，两套均通过 `package:verify` 和本地嵌套签名校验。
 - 独立包启动检查确认二进制架构和进程可创建；本机进程未进入业务窗口阶段，未把 macOS 原生启动阶段停留误报为运行态通过。正式 Developer ID 签名、公证和真实 Intel 设备仍属于外部环境证据。
 - 工作树、提交范围和 macOS release 产物继续通过禁用术语扫描；提交信息使用本项目自身术语，不包含外部品牌或比较性参考文案。
+
+## 2026-10-07 CI 跨平台修复
+
+- 远端 CI 对提交 `a236dda` 的真实失败日志确认了三类问题：Windows Node 20 测试 runner 通过 loader 直接启动时无法处理盘符 URL；Windows MSVC 回退构建的 `VsDevCmd.bat` 引号被重复转义；Ubuntu runner 的 AppArmor 限制阻止 bubblewrap 配置隔离网络命名空间。
+- Core、Gateway、Desktop 测试 runner 已统一改为调用 `tsx/dist/cli.mjs`；Windows 原生 helper 构建改用 `ComSpec`、`windowsVerbatimArguments` 和不重复转义的命令参数；CI 与桌面打包 workflow 在 Linux smoke 前安装并加载最小 bubblewrap AppArmor userns profile；POSIX smoke 在子进程无 JSON 输出时也会给出明确失败诊断。
+- 本地回归：Core 157/157、Gateway 79/79、脚本/工作流 33/33、Desktop 390/391（1 个显式外部 Codex E2E skip）、builder contract 1/1、lint 和 `git diff --check` 通过；远端 CI 将在本次提交后重新取得 Windows/Linux 真机证据。

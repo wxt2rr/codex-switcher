@@ -36,7 +36,11 @@ try {
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
   if (result.error) throw result.error;
-  const observation = JSON.parse((result.stdout || "").trim());
+  const output = (result.stdout || "").trim();
+  if (!output) {
+    throw new Error(`sandbox child emitted no JSON (status=${result.status ?? "null"}, stderr=${(result.stderr || "").trim() || "<empty>"})`);
+  }
+  const observation = JSON.parse(output);
   const passed = result.status === 0 && observation.writeDenied === true && observation.readDenied === true && observation.networkDenied === true && !existsSync(marker);
   writeEvidence(evidencePath, {
     schemaVersion: 1,
