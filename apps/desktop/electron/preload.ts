@@ -105,8 +105,8 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   deleteCustomModel: (id: string) => ipcRenderer.invoke("desktop:deleteCustomModel", id),
   setAccountModelBindings: (accountKey: string, modelIds: string[]) =>
     ipcRenderer.invoke("desktop:setAccountModelBindings", accountKey, modelIds),
-  setModelAccountBindings: (modelId: string, accountKeys: string[]) =>
-    ipcRenderer.invoke("desktop:setModelAccountBindings", modelId, accountKeys),
+  setModelAccountBindings: (modelId: string, accountKeys: string[], optionsByAccount?: Record<string, unknown>) =>
+    ipcRenderer.invoke("desktop:setModelAccountBindings", modelId, accountKeys, optionsByAccount),
   logoutAccount: (envName: string, accountName: string, target: "cli" | "app" | "both") =>
     ipcRenderer.invoke("desktop:logoutAccount", envName, accountName, target),
   deleteAccount: (envName: string, accountName: string) =>

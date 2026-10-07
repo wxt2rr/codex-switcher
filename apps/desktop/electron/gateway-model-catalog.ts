@@ -9,6 +9,9 @@ export function normalizeGatewayModelSlug(value: string): string {
 export function buildGatewayModelCatalog(gateway: GatewayEnvironmentState): ModelCatalogEntry[] {
   const entries: ModelCatalogEntry[] = [];
   const seen = new Set<string>();
+  const groupedModelIds = new Set(
+    Object.values(gateway.routeGroups).flatMap((group) => group.members.map((member) => member.modelId)),
+  );
   const add = (slug: string, displayName: string, description: string) => {
     if (seen.has(slug)) return;
     seen.add(slug);
@@ -27,7 +30,7 @@ export function buildGatewayModelCatalog(gateway: GatewayEnvironmentState): Mode
   };
 
   for (const model of Object.values(gateway.models)) {
-    if (!model.enabled) continue;
+    if (!model.enabled || groupedModelIds.has(model.id)) continue;
     add(
       normalizeGatewayModelSlug(model.id),
       model.displayName,
@@ -35,7 +38,7 @@ export function buildGatewayModelCatalog(gateway: GatewayEnvironmentState): Mode
     );
   }
   for (const group of Object.values(gateway.routeGroups)) {
-    if (!group.members.length) continue;
+    if (!group.members.length || !group.members.some((member) => gateway.models[member.modelId]?.enabled !== false)) continue;
     add(
       normalizeGatewayModelSlug(group.exposedModelId),
       group.displayName,

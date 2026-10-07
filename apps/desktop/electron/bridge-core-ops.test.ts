@@ -816,6 +816,61 @@ test("desktop bridge custom model listing seeds built-in provider models without
   }
 });
 
+test("desktop bridge compiles model page bindings into the environment gateway configuration", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-gateway-model-bindings-"));
+  const previousEnv = { ...process.env };
+  try {
+    process.env.HOME = root;
+    process.env.PATH = "";
+    delete process.env.CODEX_SWITCHER_DESKTOP_RESOURCES_PATH;
+    process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
+    process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
+    process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
+    bridge.__testUtils.resetUsageRouterManagerForTest();
+    await bridge.createEnv({ envName: "work", source: { kind: "empty" } });
+
+    await bridge.nativeLogin({
+      providerId: "openai",
+      mode: "apikey",
+      account: "alpha",
+      envName: "work",
+      target: "none",
+      relogin: false,
+      apiKey: "sk-alpha",
+      baseUrl: "https://alpha.example/v1",
+      baseUrlMode: "custom",
+    });
+    await bridge.nativeLogin({
+      providerId: "openai",
+      mode: "apikey",
+      account: "beta",
+      envName: "work",
+      target: "none",
+      relogin: false,
+      apiKey: "sk-beta",
+      baseUrl: "https://beta.example/v1",
+      baseUrlMode: "custom",
+    });
+
+    const model = await bridge.saveCustomModel({
+      entry: { slug: "shared-work-model", display_name: "Shared Work Model" },
+    });
+    const modelId = model.models.find((item) => item.entry.slug === "shared-work-model")?.id;
+    assert.ok(modelId);
+    await bridge.setModelAccountBindings(modelId, ["work/alpha", "work/beta"]);
+
+    const configuration = await bridge.loadGatewayAdminConfiguration("work");
+    assert.ok(configuration);
+    const routeGroup = Object.values(configuration.gateway.routeGroups as Record<string, { exposedModelId: string; members: unknown[] }>)
+      .find((group) => group.exposedModelId === "shared-work-model");
+    assert.equal(routeGroup?.members.length, 2);
+  } finally {
+    bridge.__testUtils.resetUsageRouterManagerForTest();
+    restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("desktop bridge recreates Chat compatibility routing for the copied account", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-account-copy-chat-"));
   const previousEnv = { ...process.env };

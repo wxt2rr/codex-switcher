@@ -453,8 +453,8 @@ function registerHandlers() {
   );
   ipcMain.handle(
     "desktop:setModelAccountBindings",
-    (_event: IpcMainInvokeEvent, modelId: string, accountKeys: string[]) =>
-      setModelAccountBindings(modelId, accountKeys),
+    (_event: IpcMainInvokeEvent, modelId: string, accountKeys: string[], optionsByAccount) =>
+      setModelAccountBindings(modelId, accountKeys, optionsByAccount),
   );
   ipcMain.handle("desktop:logoutAccount", (_event: IpcMainInvokeEvent, envName: string, accountName: string, target: "cli" | "app" | "both") =>
     logoutAccount(envName, accountName, target)

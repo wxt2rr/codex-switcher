@@ -80,6 +80,7 @@ import {
   createModelCatalogStore,
   accountModelBindingKey,
   filterModelCatalogBindings,
+  type ModelBindingOptions,
   type SaveCustomModelInput,
 } from "./model-catalog-store.js";
 import {
@@ -87,6 +88,7 @@ import {
   synchronizeAccountModelCatalog,
   synchronizeEnvironmentGatewayModelCatalog,
 } from "./account-model-catalog.js";
+import { applyModelCatalogBindings } from "./gateway-model-bindings.js";
 import {
   DEEPSEEK_DEFAULT_MODEL_SLUG,
   DEEPSEEK_DEFAULT_MODEL_SLUGS,
@@ -649,10 +651,12 @@ async function restoreEnabledRoutes(): Promise<void> {
   const manager = getUsageRouterManager();
   const routes = (await manager.listPersistedRoutes()).filter((route) => route.enabled);
   const pools = (await manager.listPersistedAccountPools()).filter((pool) => pool.enabled);
-  if (!routes.length && !pools.length) return;
+  const gateways = (await manager.listPersistedEnvironmentGateways()).filter((gateway) => gateway.enabled);
+  if (!routes.length && !pools.length && !gateways.length) return;
 
   const runtime = await loadCoreRuntime();
-  const initialState = await runtime.readLegacyState(getLegacyOptions());
+  let initialState = await runtime.readLegacyState(getLegacyOptions());
+  const gatewayEnvironments = new Set(gateways.map((gateway) => gateway.envName));
   for (const pool of pools) {
     if (!initialState.envs[pool.envName]) {
       await manager.removeAccountPoolConfiguration(pool.envName).catch(() => undefined);
@@ -671,7 +675,9 @@ async function restoreEnabledRoutes(): Promise<void> {
     }, poolAccounts, createAccountPoolRuntimeUpdater(runtime, pool.envName, pool.protocol));
   }
   const responseEnvNames = Array.from(new Set(
-    routes.filter((route) => route.protocol === "responses").map((route) => route.envName),
+    routes
+      .filter((route) => route.protocol === "responses" && !gatewayEnvironments.has(route.envName))
+      .map((route) => route.envName),
   ));
   for (const envName of responseEnvNames) {
     if (!initialState.envs[envName]) {
@@ -717,6 +723,41 @@ async function restoreEnabledRoutes(): Promise<void> {
       });
     });
   }
+
+  for (const persistedGateway of gateways) {
+    const environment = initialState.envs[persistedGateway.envName];
+    if (!environment) {
+      await manager.disableEnvironmentGateway(persistedGateway.envName, async () => undefined).catch(() => undefined);
+      continue;
+    }
+    const generated = await buildEnvironmentGatewayState(runtime, environment);
+    const gateway: GatewayEnvironmentState = {
+      ...generated,
+      mode: "gateway",
+      gatewayId: persistedGateway.gatewayId ?? generated.gatewayId,
+      catalogVersion: generated.catalogVersion + 1,
+    };
+    await runtime.writeLegacyGateway({ stateDir: getStateDir(), envName: environment.name, gateway });
+    initialState = await runtime.readLegacyState(getLegacyOptions());
+    const accounts = getEnvironmentRouteAccounts(initialState, environment.name, gateway);
+    const updateBaseUrl = createEnvironmentRouteBaseUrlUpdater(runtime, environment.name);
+    await manager.enableEnvironmentGateway(
+      environment.name,
+      accounts,
+      updateBaseUrl,
+      gateway.routeGroups,
+      buildGatewayRouteBindings(initialState.envs[environment.name]!, gateway),
+      gateway.routeRules ?? [],
+    );
+    const cliStatus = await getCodexToolStatus("cli", getCodexToolPathOptions());
+    await synchronizeEnvironmentGatewayModelCatalog({
+      homePath: environment.path,
+      gateway,
+      loadBundledCatalog: cliStatus.available
+        ? () => loadBundledModelCatalog(cliStatus.path)
+        : undefined,
+    });
+  }
 }
 
 export async function toggleEnvironmentRoute(envName: string, enabled: boolean) {
@@ -734,7 +775,7 @@ export async function toggleEnvironmentGateway(envName: string, enabled: boolean
   const state = await runtime.readLegacyState(getLegacyOptions());
   const env = state.envs[envName];
   if (!env) throw new Error(`Environment '${envName}' not found`);
-  const generated = runtime.buildLegacyGatewayEnvironmentState(env);
+  const generated = await buildEnvironmentGatewayState(runtime, env);
   const accounts = getEnvironmentRouteAccounts(state, envName, generated);
   const updateBaseUrl = createEnvironmentRouteBaseUrlUpdater(runtime, envName);
   const manager = getUsageRouterManager();
@@ -771,6 +812,15 @@ export async function toggleEnvironmentGateway(envName: string, enabled: boolean
     await runtime.clearLegacyGateway({ stateDir: getStateDir(), envName }).catch(() => undefined);
     throw error;
   }
+}
+
+async function buildEnvironmentGatewayState(
+  runtime: Awaited<ReturnType<typeof loadCoreRuntime>>,
+  environment: Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>["envs"][string],
+): Promise<GatewayEnvironmentState> {
+  const base = environment.gateway ?? runtime.buildLegacyGatewayEnvironmentState(environment);
+  const snapshot = await getModelCatalogStore().load();
+  return applyModelCatalogBindings(environment, base, snapshot);
 }
 
 async function reapplyEnvironmentTargetHomes(
@@ -890,7 +940,7 @@ export async function loadGatewayAdminConfiguration(envName: string): Promise<Ga
   const state = await runtime.readLegacyState(getLegacyOptions());
   const environment = state.envs[envName];
   if (!environment) return null;
-  const gateway = environment.gateway ?? runtime.buildLegacyGatewayEnvironmentState(environment);
+  const gateway = environment.gateway ?? await buildEnvironmentGatewayState(runtime, environment);
   const v2 = await runtime.readLegacyGatewayV2({ stateDir: getStateDir(), envName }).catch(() => undefined);
   return {
     envName,
@@ -905,7 +955,7 @@ export async function discoverGatewayAdminModels(input: { envName: string; provi
   const state = await runtime.readLegacyState(getLegacyOptions());
   const environment = state.envs[input.envName];
   if (!environment) throw new Error(`Environment '${input.envName}' not found`);
-  let gateway = environment.gateway ?? runtime.buildLegacyGatewayEnvironmentState(environment);
+  let gateway = environment.gateway ?? await buildEnvironmentGatewayState(runtime, environment);
   const pluginDescriptor = await getProviderPluginDescriptor(getStateDir(), input.providerId);
   if (pluginDescriptor && !gateway.providers[input.providerId]) {
     const endpoints = Object.fromEntries(pluginDescriptor.endpoints.map((endpoint) => [
@@ -1116,7 +1166,11 @@ export async function saveGatewayAdminConfiguration(input: SaveGatewayAdminConfi
   const state = await runtime.readLegacyState(getLegacyOptions());
   const environment = state.envs[input.envName];
   if (!environment) throw new Error(`Environment '${input.envName}' not found`);
-  const gateway = stripExcludedGatewayFields(input.gateway);
+  const gateway = applyModelCatalogBindings(
+    environment,
+    stripExcludedGatewayFields(input.gateway) as unknown as GatewayEnvironmentState,
+    await getModelCatalogStore().load(),
+  );
   const previousV2 = await runtime.readLegacyGatewayV2({ stateDir: getStateDir(), envName: input.envName }).catch(() => undefined);
   await runtime.writeLegacyGateway({ stateDir: getStateDir(), envName: input.envName, gateway: gateway as unknown as Parameters<CoreRuntime["writeLegacyGateway"]>[0]["gateway"] });
   if (input.agentBindings) {
@@ -1135,7 +1189,7 @@ export async function saveGatewayAdminConfiguration(input: SaveGatewayAdminConfi
     await synchronizeDesktopGatewayAgents({
       envName: input.envName,
       environment,
-      gateway: gateway as unknown as GatewayEnvironmentState,
+      gateway,
       previousBindings: (previousV2?.agentBindings ?? {}) as unknown as Record<string, DesktopAgentBindingRecord>,
       nextBindings: input.agentBindings,
     });
@@ -2270,8 +2324,12 @@ export async function setAccountModelBindings(accountKey: string, modelIds: stri
   return filterModelCatalogBindings(snapshot, await loadKnownAccountKeys());
 }
 
-export async function setModelAccountBindings(modelId: string, accountKeys: string[]) {
-  const snapshot = await getModelCatalogStore().setModelBindings(modelId, accountKeys);
+export async function setModelAccountBindings(
+  modelId: string,
+  accountKeys: string[],
+  optionsByAccount?: Record<string, ModelBindingOptions>,
+) {
+  const snapshot = await getModelCatalogStore().setModelBindings(modelId, accountKeys, optionsByAccount);
   await resynchronizeActiveModelCatalogs();
   return filterModelCatalogBindings(snapshot, await loadKnownAccountKeys());
 }
@@ -2287,10 +2345,13 @@ async function loadKnownAccountKeys(): Promise<ReadonlySet<string>> {
 
 async function resynchronizeActiveModelCatalogs(accountKey?: string): Promise<void> {
   const runtime = await loadCoreRuntime();
-  const state = await runtime.readLegacyState(getLegacyOptions());
+  let state = await runtime.readLegacyState(getLegacyOptions());
+  state = await resynchronizeActiveEnvironmentGateways(runtime, state);
   for (const target of ["cli", "app"] as const) {
     const pointer = state.targets[target];
-    if (!accountKey || `${pointer.env}/${pointer.account}` === accountKey) {
+    const targetKey = `${pointer.env}/${pointer.account}`;
+    const gatewayActive = state.envs[pointer.env]?.gateway?.mode === "gateway";
+    if (!accountKey || targetKey === accountKey || gatewayActive) {
       await applyTargetHomeStateWithHistory(
         runtime,
         state,
@@ -2299,6 +2360,47 @@ async function resynchronizeActiveModelCatalogs(accountKey?: string): Promise<vo
       );
     }
   }
+}
+
+async function resynchronizeActiveEnvironmentGateways(
+  runtime: Awaited<ReturnType<typeof loadCoreRuntime>>,
+  initialState: Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>,
+): Promise<Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>> {
+  let state = initialState;
+  const activeGateways = (await getUsageRouterManager().listPersistedEnvironmentGateways())
+    .filter((item) => item.enabled);
+  for (const activeGateway of activeGateways) {
+    const environment = state.envs[activeGateway.envName];
+    if (!environment) continue;
+    const generated = await buildEnvironmentGatewayState(runtime, environment);
+    const gateway: GatewayEnvironmentState = {
+      ...generated,
+      mode: "gateway",
+      gatewayId: activeGateway.gatewayId ?? generated.gatewayId,
+      catalogVersion: generated.catalogVersion + 1,
+    };
+    await runtime.writeLegacyGateway({ stateDir: getStateDir(), envName: environment.name, gateway });
+    state = await runtime.readLegacyState(getLegacyOptions());
+    const accounts = getEnvironmentRouteAccounts(state, environment.name, gateway);
+    const updateBaseUrl = createEnvironmentRouteBaseUrlUpdater(runtime, environment.name);
+    await getUsageRouterManager().enableEnvironmentGateway(
+      environment.name,
+      accounts,
+      updateBaseUrl,
+      gateway.routeGroups,
+      buildGatewayRouteBindings(state.envs[environment.name]!, gateway),
+      gateway.routeRules ?? [],
+    );
+    const cliStatus = await getCodexToolStatus("cli", getCodexToolPathOptions());
+    await synchronizeEnvironmentGatewayModelCatalog({
+      homePath: environment.path,
+      gateway,
+      loadBundledCatalog: cliStatus.available
+        ? () => loadBundledModelCatalog(cliStatus.path)
+        : undefined,
+    });
+  }
+  return state;
 }
 
 async function getEffectiveCodexEnv(): Promise<NodeJS.ProcessEnv> {
@@ -2411,9 +2513,16 @@ export async function copyAccount(
     });
 
     const catalog = await getModelCatalogStore().load();
+    const sourceModelIds = catalog.accountBindings[sourceKey] ?? [];
+    const sourceBindingOptions = Object.fromEntries(
+      sourceModelIds
+        .map((modelId) => [modelId, catalog.accountBindingOptions?.[sourceKey]?.[modelId] ?? {}] as const)
+        .filter(([, options]) => Object.keys(options).length),
+    );
     await getModelCatalogStore().setAccountBindings(
       targetKey,
-      catalog.accountBindings[sourceKey] ?? [],
+      sourceModelIds,
+      sourceBindingOptions,
     );
 
     await syncEnvironmentRouteIfEnabled(targetEnvName);

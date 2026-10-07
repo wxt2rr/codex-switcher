@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Braces, FilePenLine, Link2, Pencil, Plus, Save, Search, Trash2 } from "lucide-react";
 
-import type { CustomModelRecord, DesktopBridge, ModelCatalogEntry, ModelCatalogSnapshot } from "../bridge";
+import type { CustomModelRecord, DesktopBridge, ModelBindingOptions, ModelCatalogEntry, ModelCatalogSnapshot } from "../bridge";
 import type { AccountSummary, OverviewPayload } from "../desktop-model";
 import type { UiLanguage } from "../i18n";
 import {
@@ -45,7 +45,9 @@ export function ModelsPage({
   const [draft, setDraft] = useState<ModelCatalogEntry>(createDefaultModelEntry());
   const [jsonDraft, setJsonDraft] = useState(serializeSingleModelCatalog(createDefaultModelEntry()));
   const [bindingDraft, setBindingDraft] = useState<string[]>([]);
+  const [bindingOptionsDraft, setBindingOptionsDraft] = useState<Record<string, ModelBindingOptions>>({});
   const [bindingSearch, setBindingSearch] = useState("");
+  const [bindingEnvironment, setBindingEnvironment] = useState("all");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -53,6 +55,7 @@ export function ModelsPage({
   const visibleAccounts = useMemo(() => {
     const query = bindingSearch.trim().toLowerCase();
     return [...overview.accounts]
+      .filter((account) => bindingEnvironment === "all" || account.envName === bindingEnvironment)
       .filter((account) => !query || `${account.envName}/${account.name}`.toLowerCase().includes(query))
       .sort((a, b) => `${a.envName}/${a.name}`.localeCompare(`${b.envName}/${b.name}`));
   }, [bindingSearch, overview.accounts]);
@@ -89,12 +92,21 @@ export function ModelsPage({
 
   function openBindings(model: CustomModelRecord) {
     setActiveModelId(model.id);
-    setBindingDraft(
-      Object.entries(snapshot.accountBindings)
-        .filter(([accountKey, modelIds]) => knownAccountKeys.has(accountKey) && modelIds.includes(model.id))
-        .map(([accountKey]) => accountKey),
-    );
+    const selectedKeys = Object.entries(snapshot.accountBindings)
+      .filter(([accountKey, modelIds]) => knownAccountKeys.has(accountKey) && modelIds.includes(model.id))
+      .map(([accountKey]) => accountKey);
+    setBindingDraft(selectedKeys);
+    setBindingOptionsDraft(Object.fromEntries(selectedKeys.map((accountKey) => {
+      const options = snapshot.accountBindingOptions?.[accountKey]?.[model.id] ?? {};
+      return [accountKey, {
+        upstreamModelId: options.upstreamModelId ?? model.entry.slug,
+        enabled: options.enabled !== false,
+        priority: options.priority ?? 0,
+        weight: options.weight ?? 1,
+      }];
+    })));
     setBindingSearch("");
+    setBindingEnvironment("all");
     setBindingOpen(true);
   }
 
@@ -140,7 +152,7 @@ export function ModelsPage({
     if (!activeModelId) return;
     setBusy(true);
     try {
-      setSnapshot(await bridge.setModelAccountBindings(activeModelId, bindingDraft));
+      setSnapshot(await bridge.setModelAccountBindings(activeModelId, bindingDraft, bindingOptionsDraft));
       setBindingOpen(false);
       onSuccess(zh ? "账号绑定已保存" : "Account bindings saved");
     } catch (error) {
@@ -232,6 +244,18 @@ export function ModelsPage({
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
           <Input value={bindingSearch} onChange={(event) => setBindingSearch(event.target.value)} placeholder={zh ? "搜索账号或环境" : "Search accounts or environments"} className="pl-9" />
         </div>
+        <div className="mb-4">
+          <select
+            value={bindingEnvironment}
+            onChange={(event) => setBindingEnvironment(event.target.value)}
+            className="h-9 w-full rounded-md border border-black/[0.08] bg-white px-3 text-[12px] text-slate-700 outline-none"
+          >
+            <option value="all">{zh ? "全部环境" : "All environments"}</option>
+            {overview.envs.map((environment) => (
+              <option key={environment.name} value={environment.name}>{environment.name}</option>
+            ))}
+          </select>
+        </div>
         <div className="max-h-[430px] space-y-5 overflow-auto pr-1">
           {[...accountGroups.entries()].map(([envName, accounts]) => (
             <section key={envName}>
@@ -241,15 +265,64 @@ export function ModelsPage({
                   const key = `${account.envName}/${account.name}`;
                   const checked = bindingDraft.includes(key);
                   return (
-                    <label key={key} className="flex cursor-pointer items-center justify-between border-b border-black/[0.05] px-4 py-3 last:border-b-0 hover:bg-neutral-50">
-                      <span className="text-[13px] font-medium text-neutral-800">{account.name}</span>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(event) => setBindingDraft((current) => event.target.checked ? [...new Set([...current, key])] : current.filter((item) => item !== key))}
-                        className="size-4 accent-[#34C759]"
-                      />
-                    </label>
+                    <div key={key} className="border-b border-black/[0.05] px-4 py-3 last:border-b-0 hover:bg-neutral-50">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[13px] font-medium text-neutral-800">{account.name}</span>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(event) => {
+                            if (event.target.checked) {
+                              setBindingDraft((current) => [...new Set([...current, key])]);
+                              setBindingOptionsDraft((current) => ({
+                                ...current,
+                                [key]: current[key] ?? { upstreamModelId: activeModel?.entry.slug, enabled: true, priority: 0, weight: 1 },
+                              }));
+                            } else {
+                              setBindingDraft((current) => current.filter((item) => item !== key));
+                              setBindingOptionsDraft((current) => {
+                                const next = { ...current };
+                                delete next[key];
+                                return next;
+                              });
+                            }
+                          }}
+                          className="size-4 accent-[#34C759]"
+                        />
+                      </div>
+                      {checked && (
+                        <div className="mt-3 grid grid-cols-[minmax(0,1fr)_80px_80px] gap-2">
+                          <Input
+                            value={bindingOptionsDraft[key]?.upstreamModelId ?? activeModel?.entry.slug ?? ""}
+                            onChange={(event) => setBindingOptionsDraft((current) => ({
+                              ...current,
+                              [key]: { ...current[key], upstreamModelId: event.target.value },
+                            }))}
+                            placeholder={zh ? "上游模型名" : "Upstream model"}
+                          />
+                          <Input
+                            type="number"
+                            min={0}
+                            value={String(bindingOptionsDraft[key]?.priority ?? 0)}
+                            onChange={(event) => setBindingOptionsDraft((current) => ({
+                              ...current,
+                              [key]: { ...current[key], priority: Number(event.target.value) || 0 },
+                            }))}
+                            placeholder={zh ? "优先级" : "Priority"}
+                          />
+                          <Input
+                            type="number"
+                            min={1}
+                            value={String(bindingOptionsDraft[key]?.weight ?? 1)}
+                            onChange={(event) => setBindingOptionsDraft((current) => ({
+                              ...current,
+                              [key]: { ...current[key], weight: Number(event.target.value) || 1 },
+                            }))}
+                            placeholder={zh ? "权重" : "Weight"}
+                          />
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>

@@ -15,10 +15,18 @@ export interface CustomModelRecord {
   updatedAt: string;
 }
 
+export interface ModelBindingOptions {
+  upstreamModelId?: string;
+  enabled?: boolean;
+  priority?: number;
+  weight?: number;
+}
+
 export interface ModelCatalogSnapshot {
   version: 1;
   models: CustomModelRecord[];
   accountBindings: Record<string, string[]>;
+  accountBindingOptions?: Record<string, Record<string, ModelBindingOptions>>;
 }
 
 export interface SaveCustomModelInput {
@@ -30,8 +38,16 @@ export interface ModelCatalogStore {
   load(): Promise<ModelCatalogSnapshot>;
   saveModel(input: SaveCustomModelInput): Promise<CustomModelRecord>;
   deleteModel(id: string): Promise<void>;
-  setAccountBindings(accountKey: string, modelIds: string[]): Promise<ModelCatalogSnapshot>;
-  setModelBindings(modelId: string, accountKeys: string[]): Promise<ModelCatalogSnapshot>;
+  setAccountBindings(
+    accountKey: string,
+    modelIds: string[],
+    optionsByModel?: Record<string, ModelBindingOptions>,
+  ): Promise<ModelCatalogSnapshot>;
+  setModelBindings(
+    modelId: string,
+    accountKeys: string[],
+    optionsByAccount?: Record<string, ModelBindingOptions>,
+  ): Promise<ModelCatalogSnapshot>;
 }
 
 const EMPTY_SNAPSHOT: ModelCatalogSnapshot = { version: 1, models: [], accountBindings: {} };
@@ -73,9 +89,10 @@ export function createModelCatalogStore(path: string): ModelCatalogStore {
           ids.filter((modelId) => modelId !== id),
         ]),
       );
+      snapshot.accountBindingOptions = removeModelBindingOptions(snapshot.accountBindingOptions, id);
       await writeSnapshot(path, snapshot);
     },
-    async setAccountBindings(accountKey, modelIds) {
+    async setAccountBindings(accountKey, modelIds, optionsByModel) {
       const snapshot = await readSnapshot(path);
       const knownIds = new Set(snapshot.models.map((model) => model.id));
       const uniqueIds = [...new Set(modelIds)];
@@ -83,10 +100,29 @@ export function createModelCatalogStore(path: string): ModelCatalogStore {
       if (missing) throw new Error(`Model '${missing}' not found`);
       if (uniqueIds.length === 0) delete snapshot.accountBindings[accountKey];
       else snapshot.accountBindings[accountKey] = uniqueIds;
+      if (optionsByModel !== undefined) {
+        const nextOptions = Object.fromEntries(
+          uniqueIds
+            .map((modelId) => [modelId, normalizeModelBindingOptions(optionsByModel[modelId])] as const)
+            .filter(([, options]) => Object.keys(options).length),
+        );
+        if (Object.keys(nextOptions).length) {
+          snapshot.accountBindingOptions ??= {};
+          snapshot.accountBindingOptions[accountKey] = nextOptions;
+        } else if (snapshot.accountBindingOptions) {
+          delete snapshot.accountBindingOptions[accountKey];
+        }
+      } else {
+        snapshot.accountBindingOptions = retainModelBindingOptions(
+          snapshot.accountBindingOptions,
+          accountKey,
+          new Set(uniqueIds),
+        );
+      }
       await writeSnapshot(path, snapshot);
       return snapshot;
     },
-    async setModelBindings(modelId, accountKeys) {
+    async setModelBindings(modelId, accountKeys, optionsByAccount = {}) {
       const snapshot = await readSnapshot(path);
       if (!snapshot.models.some((model) => model.id === modelId)) {
         throw new Error(`Model '${modelId}' not found`);
@@ -98,6 +134,21 @@ export function createModelCatalogStore(path: string): ModelCatalogStore {
         const nextIds = selectedKeys.has(accountKey) ? [...withoutModel, modelId] : withoutModel;
         if (nextIds.length === 0) delete snapshot.accountBindings[accountKey];
         else snapshot.accountBindings[accountKey] = nextIds;
+
+        const existingOptions = snapshot.accountBindingOptions?.[accountKey] ?? {};
+        const nextOptions = Object.fromEntries(
+          Object.entries(existingOptions).filter(([id]) => id !== modelId),
+        );
+        if (selectedKeys.has(accountKey)) {
+          const options = normalizeModelBindingOptions(optionsByAccount[accountKey]);
+          if (Object.keys(options).length) nextOptions[modelId] = options;
+        }
+        if (Object.keys(nextOptions).length) {
+          snapshot.accountBindingOptions ??= {};
+          snapshot.accountBindingOptions[accountKey] = nextOptions;
+        } else if (snapshot.accountBindingOptions) {
+          delete snapshot.accountBindingOptions[accountKey];
+        }
       }
       await writeSnapshot(path, snapshot);
       return snapshot;
@@ -146,6 +197,24 @@ export function accountModelBindingKey(envName: string, accountName: string): st
   return `${envName}/${accountName}`;
 }
 
+export function resolveModelBinding(
+  snapshot: ModelCatalogSnapshot,
+  model: CustomModelRecord,
+  accountKey: string,
+): Required<Pick<ModelBindingOptions, "enabled" | "priority" | "weight">> & {
+  modelId: string;
+  upstreamModelId: string;
+} {
+  const options = snapshot.accountBindingOptions?.[accountKey]?.[model.id] ?? {};
+  return {
+    modelId: model.id,
+    upstreamModelId: options.upstreamModelId?.trim() || model.entry.slug,
+    enabled: options.enabled !== false,
+    priority: Number.isFinite(options.priority) ? Math.max(0, options.priority ?? 0) : 0,
+    weight: Number.isFinite(options.weight) ? Math.max(1, options.weight ?? 1) : 1,
+  };
+}
+
 export function filterModelCatalogBindings(
   snapshot: ModelCatalogSnapshot,
   accountKeys: ReadonlySet<string>,
@@ -155,6 +224,13 @@ export function filterModelCatalogBindings(
     accountBindings: Object.fromEntries(
       Object.entries(snapshot.accountBindings).filter(([accountKey]) => accountKeys.has(accountKey)),
     ),
+    ...(snapshot.accountBindingOptions
+      ? {
+          accountBindingOptions: Object.fromEntries(
+            Object.entries(snapshot.accountBindingOptions).filter(([accountKey]) => accountKeys.has(accountKey)),
+          ),
+        }
+      : {}),
   };
 }
 
@@ -179,7 +255,10 @@ async function readSnapshot(path: string): Promise<ModelCatalogSnapshot> {
       return [key, [...new Set(value)]];
     }),
   );
-  return { version: 1, models, accountBindings };
+  const accountBindingOptions = parsed.accountBindingOptions === undefined
+    ? undefined
+    : normalizeAccountBindingOptions(parsed.accountBindingOptions, ids);
+  return { version: 1, models, accountBindings, ...(accountBindingOptions ? { accountBindingOptions } : {}) };
 }
 
 function validateModelRecord(value: unknown): CustomModelRecord {
@@ -208,4 +287,61 @@ async function writeSnapshot(path: string, snapshot: ModelCatalogSnapshot): Prom
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeModelBindingOptions(value: ModelBindingOptions | undefined): ModelBindingOptions {
+  if (!value || typeof value !== "object") return {};
+  const result: ModelBindingOptions = {};
+  const upstreamModelId = typeof value.upstreamModelId === "string" ? value.upstreamModelId.trim() : "";
+  if (upstreamModelId) result.upstreamModelId = upstreamModelId;
+  if (value.enabled !== undefined) result.enabled = value.enabled === true;
+  if (typeof value.priority === "number" && Number.isFinite(value.priority)) result.priority = Math.max(0, value.priority);
+  if (typeof value.weight === "number" && Number.isFinite(value.weight)) result.weight = Math.max(1, value.weight);
+  return result;
+}
+
+function normalizeAccountBindingOptions(
+  value: unknown,
+  modelIds: ReadonlySet<string>,
+): Record<string, Record<string, ModelBindingOptions>> {
+  if (!isRecord(value)) throw new Error("Custom model binding options are invalid");
+  const result: Record<string, Record<string, ModelBindingOptions>> = {};
+  for (const [accountKey, rawOptions] of Object.entries(value)) {
+    if (!isRecord(rawOptions)) throw new Error(`Custom model binding options for '${accountKey}' are invalid`);
+    const options: Record<string, ModelBindingOptions> = {};
+    for (const [modelId, rawOption] of Object.entries(rawOptions)) {
+      if (!modelIds.has(modelId) || !isRecord(rawOption)) continue;
+      const normalized = normalizeModelBindingOptions(rawOption);
+      if (Object.keys(normalized).length) options[modelId] = normalized;
+    }
+    if (Object.keys(options).length) result[accountKey] = options;
+  }
+  return result;
+}
+
+function retainModelBindingOptions(
+  options: Record<string, Record<string, ModelBindingOptions>> | undefined,
+  accountKey: string,
+  modelIds: ReadonlySet<string>,
+): Record<string, Record<string, ModelBindingOptions>> | undefined {
+  if (!options) return undefined;
+  const current = options[accountKey];
+  if (!current) return options;
+  const next = Object.fromEntries(Object.entries(current).filter(([modelId]) => modelIds.has(modelId)));
+  if (Object.keys(next).length) options[accountKey] = next;
+  else delete options[accountKey];
+  return Object.keys(options).length ? options : undefined;
+}
+
+function removeModelBindingOptions(
+  options: Record<string, Record<string, ModelBindingOptions>> | undefined,
+  modelId: string,
+): Record<string, Record<string, ModelBindingOptions>> | undefined {
+  if (!options) return undefined;
+  for (const [accountKey, accountOptions] of Object.entries(options)) {
+    const next = Object.fromEntries(Object.entries(accountOptions).filter(([id]) => id !== modelId));
+    if (Object.keys(next).length) options[accountKey] = next;
+    else delete options[accountKey];
+  }
+  return Object.keys(options).length ? options : undefined;
 }

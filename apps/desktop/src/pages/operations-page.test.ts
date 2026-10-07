@@ -23,25 +23,11 @@ test("permission flow rechecks after returning from System Settings", async () =
   assert.doesNotMatch(source, /未获得辅助功能权限，环境标识尚未开启/);
 });
 
-test("Gateway operations exposes structured provider, credential, model, route-group, and agent editing", async () => {
+test("settings page does not render gateway or provider runtime panels", async () => {
   const source = await readFile(sourcePath("./operations-page.tsx"), "utf8");
-  const editor = await readFile(sourcePath("./gateway-admin-editor.tsx"), "utf8");
-  assert.match(source, /GatewayAdminStructuredEditor/);
-  assert.match(source, /结构化表单/);
-  for (const field of ["providers", "credentials", "models", "routeGroups", "agentBindings"]) {
-    assert.match(editor, new RegExp(field));
-  }
-  assert.match(editor, /plaintext secrets are never exposed|不会暴露或保存明文密钥/);
-  assert.match(source, /已漂移|Drifted/);
-  assert.match(source, /配置缺失|Missing/);
-});
-
-test("Provider plugin operations exposes a signed, explicit-source market", async () => {
-  const source = await readFile(sourcePath("./operations-page.tsx"), "utf8");
-  assert.match(source, /Provider 插件市场/);
-  assert.match(source, /refreshProviderPluginMarket/);
-  assert.match(source, /local\/npm\/git/);
-  assert.match(source, /签名条目在未配置受信校验器时会被拒绝/);
+  assert.doesNotMatch(source, /Gateway 运营视图|Gateway operations/);
+  assert.doesNotMatch(source, /Provider 插件运行时|Provider plugin runtime/);
+  assert.doesNotMatch(source, /gatewayAdminSnapshot|providerPlugins|providerPluginMarket/);
 });
 
 test("settings page exposes login-at-startup control without adding intent routing", async () => {

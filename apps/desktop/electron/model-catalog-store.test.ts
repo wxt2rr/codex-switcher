@@ -68,6 +68,22 @@ test("model bindings replace all account relations in one atomic update", async 
   });
 });
 
+test("model bindings persist per-account upstream and pool options", async () => {
+  const root = await mkdtemp(join(tmpdir(), "model-binding-options-"));
+  const store = createModelCatalogStore(join(root, "models.json"));
+  const model = await store.saveModel({ entry });
+
+  await store.setModelBindings(model.id, ["work/one", "work/two"], {
+    "work/one": { upstreamModelId: "vendor-model-v2", priority: 2, weight: 3 },
+    "work/two": { enabled: false },
+  });
+
+  const snapshot = await store.load();
+  assert.equal(snapshot.accountBindingOptions?.["work/one"]?.[model.id]?.upstreamModelId, "vendor-model-v2");
+  assert.equal(snapshot.accountBindingOptions?.["work/one"]?.[model.id]?.weight, 3);
+  assert.equal(snapshot.accountBindingOptions?.["work/two"]?.[model.id]?.enabled, false);
+});
+
 test("model catalog binding filter hides stale account keys", () => {
   const snapshot = {
     version: 1 as const,

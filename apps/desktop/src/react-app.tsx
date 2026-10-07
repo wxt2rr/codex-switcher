@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { mergeAccountUsageMetrics, mergeOverviewWithAuthMetrics } from "@/auth-metrics";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/components/theme-provider";
-import type { AccountPoolInput, AccountPoolStatus, AppEnvironmentBadgeStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, DesktopAutoUpdateStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry, DesktopLaunchStrategy, EnvHistoryRetentionSettings, GatewayAdminEnvironment, GeneratedImageRecoveryStatus, LaunchAtLoginStatus, ProviderPluginMarketEntry, ProviderPluginSnapshot, RouterLifecycleSettings, RouterPortSettings } from "./bridge";
+import type { AccountPoolInput, AccountPoolStatus, AppEnvironmentBadgeStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, DesktopAutoUpdateStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry, DesktopLaunchStrategy, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, LaunchAtLoginStatus, RouterLifecycleSettings, RouterPortSettings } from "./bridge";
 import { DesktopShell } from "./components/desktop-shell";
 import type { AccountSummary, AuthMetricsPayload, EnvironmentRouteStatus, NavView, OverviewPayload } from "./desktop-model";
 import { resolveDesktopBridge } from "./bridge";
@@ -99,9 +99,6 @@ export function App() {
   const [cliTerminalSaving, setCliTerminalSaving] = useState(false);
   const [routeStatuses, setRouteStatuses] = useState<EnvironmentRouteStatus[]>([]);
   const [accountPools, setAccountPools] = useState<AccountPoolStatus[]>([]);
-  const [gatewayAdminSnapshot, setGatewayAdminSnapshot] = useState<GatewayAdminEnvironment[]>([]);
-  const [providerPlugins, setProviderPlugins] = useState<ProviderPluginSnapshot[]>([]);
-  const [providerPluginMarket, setProviderPluginMarket] = useState<ProviderPluginMarketEntry[]>([]);
   const [autoUpdateStatus, setAutoUpdateStatus] = useState<DesktopAutoUpdateStatus>({ enabled: false, state: "disabled" });
   const authMetricsRequestRef = useRef(0);
   const authMetricsInFlightRef = useRef(false);
@@ -186,9 +183,6 @@ export function App() {
     void bridge.getEnvHistoryRetentionSettings().then(setEnvHistoryRetention).catch(setErrorMessage);
     void bridge.getGeneratedImageRecoverySettings().then(setGeneratedImageRecovery).catch(setErrorMessage);
     void bridge.getAppEnvironmentBadgeStatus().then(setAppEnvironmentBadges).catch(setErrorMessage);
-    void bridge.loadGatewayAdminSnapshot().then(setGatewayAdminSnapshot).catch(setErrorMessage);
-    void bridge.loadProviderPluginSnapshot().then(setProviderPlugins).catch(setErrorMessage);
-    void bridge.loadProviderPluginMarket().then(setProviderPluginMarket).catch(setErrorMessage);
     void bridge.getAutoUpdateStatus().then(setAutoUpdateStatus).catch(setErrorMessage);
   }, [view]);
 
@@ -1335,32 +1329,9 @@ export function App() {
           appEnvironmentBadgesSaving={appEnvironmentBadgesSaving}
           onAppEnvironmentBadgesChange={(enabled) => void handleAppEnvironmentBadgesChange(enabled)}
           onRequestAppEnvironmentBadgePermission={() => void handleRequestAppEnvironmentBadgePermission()}
-          gatewayAdminSnapshot={gatewayAdminSnapshot}
-          providerPlugins={providerPlugins}
-          providerPluginMarket={providerPluginMarket}
-          onInstallProviderPlugin={async (request) => {
-            await bridge.installProviderPlugin(request);
-            setProviderPlugins(await bridge.loadProviderPluginSnapshot());
-          }}
-          onRefreshProviderPluginMarket={async (url) => setProviderPluginMarket(await bridge.refreshProviderPluginMarket(url))}
-          onInstallProviderPluginFromMarket={async (input) => {
-            await bridge.installProviderPluginFromMarket(input);
-            setProviderPlugins(await bridge.loadProviderPluginSnapshot());
-          }}
-          onDeactivateProviderPlugin={(id) => void bridge.deactivateProviderPlugin(id).then(setProviderPlugins).catch(setErrorMessage)}
-          onRollbackProviderPlugin={(id) => void bridge.rollbackProviderPlugin(id).then(setProviderPlugins).catch(setErrorMessage)}
-          onRemoveProviderPlugin={(id) => void bridge.removeProviderPlugin(id).then(setProviderPlugins).catch(setErrorMessage)}
           autoUpdateStatus={autoUpdateStatus}
           onCheckForAutoUpdate={() => void bridge.checkForAutoUpdate().then(setAutoUpdateStatus).catch(setErrorMessage)}
           onInstallDownloadedUpdate={() => void bridge.installDownloadedUpdate().then(setAutoUpdateStatus).catch(setErrorMessage)}
-          loadGatewayAdminConfiguration={(envName) => bridge.loadGatewayAdminConfiguration(envName)}
-          saveGatewayAdminConfiguration={(request) => bridge.saveGatewayAdminConfiguration(request)}
-          onGatewayConfigurationSaved={() => void bridge.loadGatewayAdminSnapshot().then(setGatewayAdminSnapshot).catch(setErrorMessage)}
-          onDiscoverGatewayModels={async (request) => {
-            await bridge.discoverGatewayAdminModels(request);
-            const snapshot = await bridge.loadGatewayAdminSnapshot();
-            setGatewayAdminSnapshot(snapshot);
-          }}
         />
       ) : null}
 

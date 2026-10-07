@@ -254,10 +254,19 @@ export interface CustomModelRecord {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface ModelBindingOptions {
+  upstreamModelId?: string;
+  enabled?: boolean;
+  priority?: number;
+  weight?: number;
+}
+
 export interface ModelCatalogSnapshot {
   version: 1;
   models: CustomModelRecord[];
   accountBindings: Record<string, string[]>;
+  accountBindingOptions?: Record<string, Record<string, ModelBindingOptions>>;
 }
 export interface SaveCustomModelRequest { id?: string; entry: Record<string, unknown>; }
 
@@ -365,7 +374,7 @@ export interface DesktopElectronApi {
   saveCustomModel(request: SaveCustomModelRequest): Promise<ModelCatalogSnapshot>;
   deleteCustomModel(id: string): Promise<ModelCatalogSnapshot>;
   setAccountModelBindings(accountKey: string, modelIds: string[]): Promise<ModelCatalogSnapshot>;
-  setModelAccountBindings(modelId: string, accountKeys: string[]): Promise<ModelCatalogSnapshot>;
+  setModelAccountBindings(modelId: string, accountKeys: string[], optionsByAccount?: Record<string, ModelBindingOptions>): Promise<ModelCatalogSnapshot>;
   logoutAccount(envName: string, accountName: string, target: "cli" | "app" | "both"): Promise<DesktopActionResult>;
   deleteAccount(envName: string, accountName: string): Promise<DesktopActionResult>;
   copyAccount(sourceEnvName: string, sourceAccountName: string, targetEnvName: string): Promise<DesktopActionResult>;
@@ -481,7 +490,7 @@ export interface DesktopBridge {
   saveCustomModel(request: SaveCustomModelRequest): Promise<ModelCatalogSnapshot>;
   deleteCustomModel(id: string): Promise<ModelCatalogSnapshot>;
   setAccountModelBindings(accountKey: string, modelIds: string[]): Promise<ModelCatalogSnapshot>;
-  setModelAccountBindings(modelId: string, accountKeys: string[]): Promise<ModelCatalogSnapshot>;
+  setModelAccountBindings(modelId: string, accountKeys: string[], optionsByAccount?: Record<string, ModelBindingOptions>): Promise<ModelCatalogSnapshot>;
   logoutAccount(envName: string, accountName: string, target: "cli" | "app" | "both"): Promise<DesktopActionResult>;
   deleteAccount(envName: string, accountName: string): Promise<DesktopActionResult>;
   copyAccount(sourceEnvName: string, sourceAccountName: string, targetEnvName: string): Promise<DesktopActionResult>;
