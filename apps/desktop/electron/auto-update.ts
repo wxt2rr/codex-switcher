@@ -63,6 +63,7 @@ export function createDesktopAutoUpdateController(
   const now = options.now ?? Date.now;
   const feedUrl = options.feedUrl?.trim();
   const manifest = options.manifest;
+  const requireSignedManifest = options.requireSignedManifest ?? Boolean(feedUrl);
   let status: DesktopAutoUpdateStatus = feedUrl
     ? { enabled: true, state: "idle" }
     : { enabled: false, state: "disabled", message: "Update feed is not configured" };
@@ -98,7 +99,7 @@ export function createDesktopAutoUpdateController(
     async check() {
       if (!feedUrl) return { ...status };
       status = { ...status, state: "checking", checkedAt: now(), message: undefined };
-      if (options.requireSignedManifest && !manifest) {
+      if (requireSignedManifest && !manifest) {
         status = {
           ...status,
           state: "error",
@@ -111,7 +112,7 @@ export function createDesktopAutoUpdateController(
       if (manifest) {
         const verification = verifyUpdateManifest(manifest, {
           trustedPublicKeyPem: options.trustedPublicKeyPem,
-          requireSignature: options.requireSignedManifest,
+          requireSignature: requireSignedManifest,
         });
         if (!verification.ok) {
           status = { ...status, state: "error", checkedAt: now(), message: verification.reason, signatureVerified: false };

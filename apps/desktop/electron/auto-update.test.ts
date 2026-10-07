@@ -51,9 +51,9 @@ test("update manifest validation rejects malformed release metadata", () => {
   assert.deepEqual(verifyUpdateManifest({ ...valid, version: "latest" }), { ok: false, reason: "Update manifest metadata is invalid" });
 });
 
-test("auto update controller reports downloaded updates and installs only after download", async () => {
+test("explicitly unsigned development feeds report downloaded updates and install only after download", async () => {
   const fake = fakeUpdater();
-  const controller = createDesktopAutoUpdateController(fake.updater, { feedUrl: "https://updates.example.test/codex/" });
+  const controller = createDesktopAutoUpdateController(fake.updater, { feedUrl: "https://updates.example.test/codex/", requireSignedManifest: false });
   await assert.rejects(Promise.resolve().then(() => controller.install()), /No downloaded update/);
   const status = await controller.check();
   assert.equal(fake.checks, 1);
@@ -75,7 +75,6 @@ test("required signed updates fail closed when the manifest is missing", async (
   const fake = fakeUpdater();
   const controller = createDesktopAutoUpdateController(fake.updater, {
     feedUrl: "https://updates.example.test/codex/",
-    requireSignedManifest: true,
     trustedPublicKeyPem: "not-used-because-the-manifest-is-missing",
   });
   const status = await controller.check();
@@ -129,6 +128,7 @@ test("auto update prepares a rollback journal and clears it after a healthy rest
   const journal = createUpdateRollbackJournal(join(root, "updates", "install-rollback.json"));
   const controller = createDesktopAutoUpdateController(fake.updater, {
     feedUrl: "https://updates.example.test/codex/",
+    requireSignedManifest: false,
     rollbackJournal: journal,
     currentVersion: "1.0.0",
     backupPath: join(root, "codex-switcher-1.0.0.app"),
@@ -165,6 +165,7 @@ test("auto-update rollback restores the installed app after a failed upgraded bo
   writeFileSync(versionFile, "1.0.0");
   const controller = createDesktopAutoUpdateController(fake.updater, {
     feedUrl: "https://updates.example.test/codex/",
+    requireSignedManifest: false,
     rollbackJournal: journal,
     currentVersion: "1.0.0",
     backupPath: backup,

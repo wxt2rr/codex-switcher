@@ -47,6 +47,7 @@
 - Current P9 slice: encode Agent snapshot filenames for Windows-safe environment/agent binding IDs while retaining legacy snapshot lookup for migration compatibility; this slice does not add Prompt analysis or intent routing.
 - Current P9 slice: make manual unsigned macOS/Windows packaging omit empty signing inputs and make Linux artifact verification resolve paths from the workspace package cwd; tag builds retain mandatory signing credential gates.
 - Current P8/P9 slice: pin the update-manifest verifier to the release public key so a manifest cannot replace its own trust root; tag release verification must pass the trusted public key explicitly.
+- Current P8 slice: make a configured desktop update feed require a signed manifest by default; unsigned feeds remain available only through an explicit test/development override.
 - Current P10 slice: add a Gateway lifecycle regression for simultaneous requests from multiple explicit Agent IDs, including fallback dispatch and per-Agent usage records; this slice does not add Prompt analysis or intent routing.
 - Current P6 slice: expose the existing signed/fail-closed Provider Plugin Market through the desktop bridge and Operations UI, including cached entries, explicit refresh, and market-entry installation; this slice does not add Prompt analysis or intent routing.
 - Current P8/P9 slice: make update rollback staging names collision-safe under concurrent checks and preserve the existing fail-closed manifest/hash verification; this slice does not add Prompt analysis or intent routing.
@@ -364,3 +365,8 @@
 - `scripts/verify-update-manifest.mjs` 新增受信公钥文件/环境变量校验；当调用方提供受信公钥时，清单内声明的公钥必须与受信公钥的 DER 表示一致，并使用受信公钥验证签名。
 - 标签发布工作流从发布私钥派生临时受信公钥，并将其显式传给每个产物的清单校验步骤；手动非标签打包路径保持不需要发布密钥。
 - 正确公钥、错误公钥、产物篡改和非法元数据测试均通过；`npm run test:cross-platform` 通过 Core 157/157、Gateway 79/79、脚本/工作流 33/33；`node --check scripts/verify-update-manifest.mjs`、`git diff --check` 通过。
+
+## 2026-10-07 自动更新默认拒绝未签名源
+
+- `createDesktopAutoUpdateController` 现在在配置更新源时默认要求签名清单；只有显式传入 `requireSignedManifest: false` 的开发/测试调用才允许未签名源。
+- 自动更新回滚、健康启动、签名清单、产物 Hash 和开发覆盖路径测试均通过：`npx tsx --test apps/desktop/electron/auto-update.test.ts` 9/9，`npm run desktop:test` 390 passed/1 skipped；唯一 skip 仍是需要外部安装的 Codex E2E。
