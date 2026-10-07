@@ -300,3 +300,9 @@
 - Windows runner 的第二轮失败来自测试启动方式，而非功能实现：测试直接调用 `npx`、批处理包管理器和 Unix 可执行 shell 脚本，导致 Windows 下分别出现 `ENOENT`、`EINVAL` 和 `spawn UNKNOWN`。
 - Core CLI 测试现在直接使用当前 Node 与仓库内的 `tsx` CLI；发布清单测试对 Windows 包管理器启用 shell 兼容；CLI launcher 对显式 `.cmd/.bat` 入口启用 Windows shell；legacy launcher fixture 在 Windows 使用等价 batch 脚本，在 Unix 保持 Bash fixture。
 - 定向回归 12/12 通过；完整本地 `npm test`、Desktop 回归、lint 和 diff check 通过。远端 CI 将验证 Windows cross-platform 测试及原生隔离 job 的最终结果。
+
+## 2026-10-07 Windows smoke 超时收口
+
+- Windows cross-platform 已在远端通过；原生隔离 job 的 helper 构建与校验也通过，但 AppContainer 网络探测在某些 runner 上没有触发 Node socket 自带 timeout，导致父 helper 长时间等待。
+- Windows smoke fixture 现在增加独立 3 秒网络硬超时、单次完成保护和 launcher 15 秒总超时；网络受限时仍按拒绝处理，连接异常或子进程异常则保留 stderr/status 诊断，不会无限挂起。
+- 本地 `node --check`、cross-platform、Desktop 回归、lint 和 diff check 继续通过；下一次远端运行用于确认 Windows AppContainer smoke 正常收敛并生成证据。
