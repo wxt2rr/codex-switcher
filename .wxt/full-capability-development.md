@@ -312,3 +312,9 @@
 - 最新远端 CI `37561409761` 已确认 macOS legacy、macOS Desktop、macOS/Ubuntu/Windows cross-platform 和 Ubuntu Desktop 任务通过；Windows 原生 AppContainer smoke 仍因 runner 子进程未在限定时间内退出而失败，记录为外部环境证据缺口，不阻塞本次 macOS 交付。
 - Windows smoke fixture 已改为异步文件探测，硬超时从探测开始前即生效，并保留单次完成保护和立即输出/退出逻辑；本地静态检查与回归继续通过。
 - 已完成 macOS x64 与 arm64 的 DMG、ZIP 产物核验和独立启动检查；两套产物均可进入真实业务页面，未将 Windows/正式签名/公证结果冒充为 macOS 本机证据。
+
+## 2026-10-07 Windows 原生等待边界修复
+
+- 最新 Windows CI 日志确认失败点在原生 helper 等待 AppContainer 子进程退出，而不是 smoke 脚本 JSON 解析；原实现使用无限等待，导致 runner 只能在 Node 侧 15 秒后中止 helper。
+- helper 现在支持 `--timeout-ms`，在限定时间内主动终止未退出的 AppContainer 子进程并释放句柄；smoke 脚本先执行最小 Node 启动探针，再执行文件和网络隔离探测，并把 profile/status/stderr 纳入失败诊断。
+- 新增 builder contract 断言覆盖超时解析、有限等待和子进程清理；本地脚本静态检查、sandbox 证据测试、Desktop builder contract、lint 和 diff check 通过。下一次远端 CI 用于验证真实 Windows runner 行为。

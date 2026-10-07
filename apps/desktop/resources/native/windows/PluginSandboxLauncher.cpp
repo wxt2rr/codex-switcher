@@ -10,6 +10,7 @@
 #include <userenv.h>
 
 #include <filesystem>
+#include <cwchar>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -93,6 +94,16 @@ bool hasFlag(int argc, wchar_t** argv, const wchar_t* name) {
     if (std::wstring(argv[i]) == name) return true;
   }
   return false;
+}
+
+bool readTimeoutMilliseconds(int argc, wchar_t** argv, DWORD& timeoutMilliseconds) {
+  const std::wstring value = valueFor(argc, argv, L"--timeout-ms");
+  if (value.empty()) return true;
+  wchar_t* end = nullptr;
+  const unsigned long parsed = std::wcstoul(value.c_str(), &end, 10);
+  if (end == value.c_str() || *end != L'\0' || parsed == 0 || parsed > MAXDWORD) return false;
+  timeoutMilliseconds = static_cast<DWORD>(parsed);
+  return true;
 }
 
 std::wstring quoteArgument(const std::wstring& value) {
@@ -319,6 +330,8 @@ int wmain(int argc, wchar_t** argv) {
   const std::wstring node = valueFor(argc, argv, L"--node");
   const std::wstring entry = valueFor(argc, argv, L"--entry");
   if (profileName.empty() || cwd.empty() || node.empty() || entry.empty()) return fail(L"missing AppContainer launcher arguments");
+  DWORD timeoutMilliseconds = 15000;
+  if (!readTimeoutMilliseconds(argc, argv, timeoutMilliseconds)) return fail(L"invalid AppContainer child timeout");
 
   CapabilityBuffer capabilities;
   if (hasFlag(argc, argv, L"--network") && !deriveInternetCapability(capabilities)) return fail(L"cannot derive internetClient capability", HRESULT_FROM_WIN32(GetLastError()));
@@ -418,7 +431,24 @@ int wmain(int argc, wchar_t** argv) {
   }
 
   CloseHandle(process.hThread);
-  WaitForSingleObject(process.hProcess, INFINITE);
+  const DWORD waitResult = WaitForSingleObject(process.hProcess, timeoutMilliseconds);
+  if (waitResult == WAIT_TIMEOUT) {
+    TerminateProcess(process.hProcess, 124);
+    WaitForSingleObject(process.hProcess, 2000);
+    CloseHandle(process.hProcess);
+    DeleteProcThreadAttributeList(attributes);
+    HeapFree(GetProcessHeap(), 0, attributes);
+    FreeSid(appContainerSid);
+    return fail(L"AppContainer plugin did not exit before timeout", HRESULT_FROM_WIN32(ERROR_TIMEOUT));
+  }
+  if (waitResult != WAIT_OBJECT_0) {
+    const HRESULT error = HRESULT_FROM_WIN32(GetLastError());
+    CloseHandle(process.hProcess);
+    DeleteProcThreadAttributeList(attributes);
+    HeapFree(GetProcessHeap(), 0, attributes);
+    FreeSid(appContainerSid);
+    return fail(L"failed waiting for AppContainer plugin", error);
+  }
   DWORD exitCode = 1;
   GetExitCodeProcess(process.hProcess, &exitCode);
   CloseHandle(process.hProcess);

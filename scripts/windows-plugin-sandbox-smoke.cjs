@@ -10,11 +10,22 @@ const evidencePath = args["evidence-out"] || process.env.CODEX_SWITCHER_EVIDENCE
 const root = mkdtempSync(join(tmpdir(), "codex-switcher-plugin-sandbox-"));
 const homeRoot = mkdtempSync(join(process.env.USERPROFILE || tmpdir(), "codex-switcher-plugin-home-"));
 const entry = join(root, "plugin.cjs");
+const bootstrapEntry = join(root, "bootstrap.cjs");
 const marker = join(root, "should-not-exist.txt");
 const homeSecret = join(homeRoot, "secret.txt");
 writeFileSync(homeSecret, "must stay unreadable", "utf8");
 
 try {
+  writeFileSync(bootstrapEntry, "process.stdout.write(JSON.stringify({ ready: true })); process.exit(0);\n", "utf8");
+  const bootstrap = runLauncher({
+    profile: "codex-switcher-smoke-bootstrap",
+    entry: bootstrapEntry,
+    extraArgs: [],
+  });
+  if (bootstrap.result.status !== 0 || bootstrap.observation.ready !== true) {
+    throw new Error(`sandbox Node bootstrap failed: ${JSON.stringify(bootstrap.observation)}`);
+  }
+
   writeFileSync(entry, buildSmokePlugin({
     marker,
     expectWriteDenied: true,
@@ -101,13 +112,13 @@ function buildSmokePlugin({ marker, expectWriteDenied }) {
 }
 
 function runLauncher({ profile, entry, extraArgs }) {
-  const result = spawnSync(launcher, ["--profile", profile, "--cwd", root, "--node", node, "--entry", entry, ...extraArgs], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15000 });
-  if (result.error) throw result.error;
+  const result = spawnSync(launcher, ["--profile", profile, "--cwd", root, "--node", node, "--entry", entry, "--timeout-ms", "7000", ...extraArgs], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15000 });
+  if (result.error) throw new Error(`sandbox launcher failed for ${profile}: ${result.error.message}`);
   process.stdout.write(result.stdout || "");
   if (result.stderr) process.stderr.write(result.stderr);
   const output = (result.stdout || "").trim();
   if (!output) {
-    throw new Error(`sandbox child emitted no JSON (status=${result.status ?? "null"}, stderr=${(result.stderr || "").trim() || "<empty>"})`);
+    throw new Error(`sandbox child emitted no JSON (profile=${profile}, status=${result.status ?? "null"}, stderr=${(result.stderr || "").trim() || "<empty>"})`);
   }
   return { result, observation: JSON.parse(output) };
 }
