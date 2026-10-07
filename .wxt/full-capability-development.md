@@ -318,3 +318,9 @@
 - 最新 Windows CI 日志确认失败点在原生 helper 等待 AppContainer 子进程退出，而不是 smoke 脚本 JSON 解析；原实现使用无限等待，导致 runner 只能在 Node 侧 15 秒后中止 helper。
 - helper 现在支持 `--timeout-ms`，在限定时间内主动终止未退出的 AppContainer 子进程并释放句柄；smoke 脚本先执行最小 Node 启动探针，再执行文件和网络隔离探测，并把 profile/status/stderr 纳入失败诊断。
 - 新增 builder contract 断言覆盖超时解析、有限等待和子进程清理；本地脚本静态检查、sandbox 证据测试、Desktop builder contract、lint 和 diff check 通过。下一次远端 CI 用于验证真实 Windows runner 行为。
+
+## 2026-10-07 Windows AppContainer 入口解析修复
+
+- 远端阶段诊断确认 ACL 已完成、AppContainer 子进程已创建并退出；失败点是 Node 解析绝对入口文件时尝试读取盘符根目录，最小 ACL 策略会拒绝该访问。
+- 原生 helper 启动 Node 时加入 `--preserve-symlinks-main`，避免为主入口做盘符根 realpath 探测；smoke 继续在本地受控目录内复制 Node runtime，避免修改共享工具缓存目录的 ACL。
+- 该修复已通过本地 builder contract、sandbox 证据测试、Node 语法检查、lint 和 diff check；下一次远端 CI 将验证文件/网络隔离探针是否可以完整运行。

@@ -128,6 +128,7 @@ test("desktop package defines electron packaging entrypoints", () => {
   assert.match(windowsSandboxSource, /readTimeoutMilliseconds/);
   assert.match(windowsSandboxSource, /WaitForSingleObject\(process\.hProcess, timeoutMilliseconds\)/);
   assert.match(windowsSandboxSource, /TerminateProcess\(process\.hProcess, 124\)/);
+  assert.match(windowsSandboxSource, /--preserve-symlinks-main/);
   const nativeModuleSource = readFileSync(join(desktopRoot, "resources", "native", "macos", "AppEnvironmentBadgeNative.mm"), "utf8");
   assert.match(nativeModuleSource, /hidesOnDeactivate = NO/);
   assert.match(nativeModuleSource, /canHide = NO/);

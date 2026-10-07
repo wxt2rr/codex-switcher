@@ -412,7 +412,7 @@ int wmain(int argc, wchar_t** argv) {
     return fail(L"cannot attach AppContainer security capabilities", HRESULT_FROM_WIN32(GetLastError()));
   }
 
-  std::wstring commandLine = quoteArgument(node) + L" " + quoteArgument(entry);
+  std::wstring commandLine = quoteArgument(node) + L" --preserve-symlinks-main " + quoteArgument(entry);
   std::vector<wchar_t> mutableCommand(commandLine.begin(), commandLine.end());
   mutableCommand.push_back(L'\0');
   STARTUPINFOEXW startup{};
