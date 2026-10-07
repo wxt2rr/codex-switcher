@@ -44,6 +44,10 @@ function resolveLegacyScript() {
   );
 }
 
+function shouldUseNodeCli(args) {
+  return new Set(["gateway", "provider", "agent", "group", "model", "usage", "profile"]).has(args[0]);
+}
+
 function spawnAndMirror(command, args, options) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -86,7 +90,7 @@ async function launchLegacyBash(invokedAs) {
 
 async function runCodexSw() {
   const invokedAs = resolveInvokedAs("codex-sw");
-  if (detectPlatform() === "win32") {
+  if (detectPlatform() === "win32" || shouldUseNodeCli(process.argv.slice(2))) {
     await launchNodeCli(invokedAs);
     return;
   }

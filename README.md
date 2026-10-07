@@ -32,11 +32,11 @@ codex-sw check
 ### 平台支持现状
 
 - 当前默认入口：`codex-sw`
-- macOS / 类 Unix 终端下：`codex-sw` 默认继续走 Bash 版入口，保持现有工作流稳定
+- macOS / 类 Unix 终端下：手动环境/账号命令继续走 Bash 版入口；`gateway/provider/agent/group/model/usage/profile` 领域命令自动走 Node/TypeScript CLI
 - Windows 下：`codex-sw` / `codex-switcher` / `codex-sw-node` 安装后默认走 Node/TypeScript CLI 入口
 - Windows 原生支持：`cmd`、PowerShell、Windows Terminal
 - `codex-sw-node` 仍保留为显式 Node 入口，便于脚本化调用、验证与排障
-- macOS 当前仍以现有 Bash 入口为默认工作流，避免打断已有使用习惯
+- macOS 当前仍以现有 Bash 入口承载手动环境/账号工作流，避免打断已有使用习惯
 
 ## 桌面版（Electron）
 

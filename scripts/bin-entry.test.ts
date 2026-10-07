@@ -52,6 +52,39 @@ printf 'invoked=%s\\n' "$CODEX_SWITCHER_INVOKED_AS" >> "${legacyLog}"
   }
 });
 
+test("codex-sw launcher routes Gateway domain commands through the Node CLI on macos", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-bin-domain-"));
+  const nodeLog = join(root, "node.log");
+  const tsxCli = join(root, "fake-tsx.mjs");
+  const nodeCli = join(root, "fake-node-cli.ts");
+
+  try {
+    await writeFile(
+      tsxCli,
+      `import { appendFileSync } from "node:fs";
+appendFileSync(${JSON.stringify(nodeLog)}, JSON.stringify({ argv: process.argv.slice(2), invokedAs: process.env.CODEX_SWITCHER_INVOKED_AS ?? "" }) + "\\n");
+`,
+      "utf8",
+    );
+    await writeFile(nodeCli, "export {};\n", "utf8");
+    await execFileAsync(process.execPath, [codexSwPath, "gateway", "status", "--env", "default"], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        CODEX_SWITCHER_BIN_PLATFORM: "darwin",
+        CODEX_SWITCHER_BIN_TSX_CLI: tsxCli,
+        CODEX_SWITCHER_BIN_NODE_CLI: nodeCli,
+      },
+    });
+
+    const payload = JSON.parse((await readFile(nodeLog, "utf8")).trim()) as { argv: string[]; invokedAs: string };
+    assert.deepEqual(payload.argv.slice(1), ["gateway", "status", "--env", "default"]);
+    assert.equal(payload.invokedAs, "codex-sw");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("codex-sw launcher routes windows invocations through the node cli entrypoint", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-bin-win-"));
   const nodeLog = join(root, "node.log");

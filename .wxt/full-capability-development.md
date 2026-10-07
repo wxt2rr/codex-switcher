@@ -48,6 +48,7 @@
 - Current P9 slice: make manual unsigned macOS/Windows packaging omit empty signing inputs and make Linux artifact verification resolve paths from the workspace package cwd; tag builds retain mandatory signing credential gates.
 - Current P8/P9 slice: pin the update-manifest verifier to the release public key so a manifest cannot replace its own trust root; tag release verification must pass the trusted public key explicitly.
 - Current P8 slice: make a configured desktop update feed require a signed manifest by default; unsigned feeds remain available only through an explicit test/development override.
+- Current P8 slice: route Gateway/provider/agent/group/model/usage/profile domain commands from the cross-platform launcher to the Node CLI on macOS/Linux, while preserving the legacy Bash manual env/account commands.
 - Current P10 slice: add a Gateway lifecycle regression for simultaneous requests from multiple explicit Agent IDs, including fallback dispatch and per-Agent usage records; this slice does not add Prompt analysis or intent routing.
 - Current P6 slice: expose the existing signed/fail-closed Provider Plugin Market through the desktop bridge and Operations UI, including cached entries, explicit refresh, and market-entry installation; this slice does not add Prompt analysis or intent routing.
 - Current P8/P9 slice: make update rollback staging names collision-safe under concurrent checks and preserve the existing fail-closed manifest/hash verification; this slice does not add Prompt analysis or intent routing.
@@ -370,3 +371,8 @@
 
 - `createDesktopAutoUpdateController` 现在在配置更新源时默认要求签名清单；只有显式传入 `requireSignedManifest: false` 的开发/测试调用才允许未签名源。
 - 自动更新回滚、健康启动、签名清单、产物 Hash 和开发覆盖路径测试均通过：`npx tsx --test apps/desktop/electron/auto-update.test.ts` 9/9，`npm run desktop:test` 390 passed/1 skipped；唯一 skip 仍是需要外部安装的 Codex E2E。
+
+## 2026-10-07 CLI 领域入口收口
+
+- `scripts/bin/launcher.cjs` 现在在 macOS/Linux 下将 `gateway`、`provider`、`agent`、`group`、`model`、`usage`、`profile` 命令转入 Node CLI；旧的环境/账号手动命令继续使用 Bash 入口。
+- README 中英文说明和一致性断言已同步；入口回归 5/5，`npm run test:cross-platform` 通过 Core 157/157、Gateway 79/79、脚本/工作流 34/34。

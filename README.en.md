@@ -32,11 +32,11 @@ codex-sw check
 ### Platform Support Status
 
 - Current default entrypoint: `codex-sw`
-- On macOS and Unix-like terminals: `codex-sw` still defaults to the legacy Bash entrypoint to preserve the current workflow
+- On macOS and Unix-like terminals: manual environment/account commands stay on the legacy Bash entrypoint; `gateway/provider/agent/group/model/usage/profile` domain commands use the Node/TypeScript CLI
 - On Windows: installed `codex-sw`, `codex-switcher`, and `codex-sw-node` now default to the Node/TypeScript CLI entrypoint
 - Windows native support: `cmd`, PowerShell, and Windows Terminal
 - `codex-sw-node` remains available as the explicit Node entrypoint for scripting, verification, and troubleshooting
-- macOS currently keeps the existing Bash entrypoints as the default workflow to avoid disrupting established usage
+- macOS keeps the existing Bash entrypoints for manual environment/account workflows to avoid disrupting established usage
 
 ## Desktop App (Electron)
 

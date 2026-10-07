@@ -13,10 +13,10 @@ test("README files document the current Windows-facing command surface", async (
   const en = await read("README.en.md");
 
   const requiredZh = [
-    "macOS / 类 Unix 终端下：`codex-sw` 默认继续走 Bash 版入口，保持现有工作流稳定",
+    "macOS / 类 Unix 终端下：手动环境/账号命令继续走 Bash 版入口；`gateway/provider/agent/group/model/usage/profile` 领域命令自动走 Node/TypeScript CLI",
     "Windows 原生支持：`cmd`、PowerShell、Windows Terminal",
     "`codex-sw-node` 仍保留为显式 Node 入口，便于脚本化调用、验证与排障",
-    "macOS 当前仍以现有 Bash 入口为默认工作流，避免打断已有使用习惯",
+    "macOS 当前仍以现有 Bash 入口承载手动环境/账号工作流，避免打断已有使用习惯",
     "codex-sw ac login <account> [--env <env>] [-t cli\\|app\\|both] [--sync\\|--no-sync] [--mode auth\\|apikey\\|sub2api]",
     "codex-sw ac relogin [account] [--env <env>] [-t cli\\|app\\|both] [--sync\\|--no-sync] [--mode auth\\|apikey\\|sub2api]",
     "codex-sw app status",
@@ -41,10 +41,10 @@ test("README files document the current Windows-facing command surface", async (
   ];
 
   const requiredEn = [
-    "On macOS and Unix-like terminals: `codex-sw` still defaults to the legacy Bash entrypoint to preserve the current workflow",
+    "On macOS and Unix-like terminals: manual environment/account commands stay on the legacy Bash entrypoint; `gateway/provider/agent/group/model/usage/profile` domain commands use the Node/TypeScript CLI",
     "Windows native support: `cmd`, PowerShell, and Windows Terminal",
     "`codex-sw-node` remains available as the explicit Node entrypoint for scripting, verification, and troubleshooting",
-    "macOS currently keeps the existing Bash entrypoints as the default workflow to avoid disrupting established usage",
+    "macOS keeps the existing Bash entrypoints for manual environment/account workflows to avoid disrupting established usage",
     "codex-sw ac login <account> [--env <env>] [-t cli\\|app\\|both] [--sync\\|--no-sync] [--mode auth\\|apikey\\|sub2api]",
     "codex-sw ac relogin [account] [--env <env>] [-t cli\\|app\\|both] [--sync\\|--no-sync] [--mode auth\\|apikey\\|sub2api]",
     "codex-sw app status",
