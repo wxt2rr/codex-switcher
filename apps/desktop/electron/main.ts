@@ -120,8 +120,7 @@ import {
   repairLegacyEnvironmentConfigs,
 } from "./bridge.js";
 import { closeProviderPluginRuntime } from "./provider-plugin-runtime.js";
-import { autoUpdater } from "electron";
-import { createDesktopAutoUpdateController, restartAfterRollback } from "./auto-update.js";
+import { createDesktopAutoUpdateController, restartAfterRollback, type AutoUpdaterLike } from "./auto-update.js";
 import { buildDesktopTrayActions } from "./tray-menu.js";
 import { createUpdateRollbackJournal, resolveUpdateJournalPath, validateUpdateManifest, type DesktopUpdateManifest } from "./update-security.js";
 import { copyInstallForRollback, restoreInstallFromRollback } from "./update-rollback.js";
@@ -245,7 +244,15 @@ app.whenReady().then(async () => {
   registerHandlers();
   const updateFeedUrl = process.env.CODEX_SWITCHER_UPDATE_FEED_URL?.trim();
   const updateBackupPath = process.env.CODEX_SWITCHER_UPDATE_BACKUP_PATH?.trim() || join(app.getPath("userData"), "updates", "app-backup");
-  const autoUpdateController = createDesktopAutoUpdateController(autoUpdater, {
+  const updateSource: AutoUpdaterLike = updateFeedUrl
+    ? (await import("electron")).autoUpdater
+    : {
+      setFeedURL: () => undefined,
+      checkForUpdates: () => undefined,
+      quitAndInstall: () => undefined,
+      on: () => undefined,
+    };
+  const autoUpdateController = createDesktopAutoUpdateController(updateSource, {
     feedUrl: updateFeedUrl,
     manifest: readConfiguredUpdateManifest(),
     trustedPublicKeyPem: process.env.CODEX_SWITCHER_UPDATE_TRUSTED_PUBLIC_KEY,

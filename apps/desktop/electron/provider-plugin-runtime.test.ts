@@ -12,6 +12,7 @@ import {
   refreshProviderPluginMarket,
 } from "./provider-plugin-runtime.js";
 import { PluginMarket } from "../../../packages/gateway/dist/index.js";
+import { loadGatewayPluginRuntime } from "./core-runtime.js";
 
 test("desktop provider plugin runtime keeps an empty installation state lazy", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-plugin-runtime-"));
@@ -21,6 +22,13 @@ test("desktop provider plugin runtime keeps an empty installation state lazy", a
   } finally {
     await closeProviderPluginRuntime();
   }
+});
+
+test("desktop provider plugin runtime resolves packaged Gateway modules lazily", async () => {
+  const runtime = await loadGatewayPluginRuntime();
+  assert.equal(typeof runtime.ProviderPluginManager, "function");
+  assert.equal(typeof runtime.PluginMarket, "function");
+  assert.equal(typeof runtime.verifyPluginManifestSignature, "function");
 });
 
 test("desktop provider plugin market reads explicit sources and rejects unsupported URLs", async () => {

@@ -104,3 +104,11 @@ test("desktop package defines packaged artifact verification script", async () =
   assert.match(verifySource, /CFBundleDisplayName/);
   assert.match(verifySource, /icon\.icns/);
 });
+
+test("packaged provider plugin runtime resolves Gateway modules from resources", async () => {
+  const providerRuntimeSource = await readFile(join(desktopRoot, "electron", "provider-plugin-runtime.ts"), "utf8");
+  const coreRuntimeSource = await readFile(join(desktopRoot, "electron", "core-runtime.ts"), "utf8");
+  assert.doesNotMatch(providerRuntimeSource, /^import \{[^\n]+\} from ["'][^"']*packages\/gateway\/dist\/index\.js/m);
+  assert.match(coreRuntimeSource, /packages", "gateway", "dist", "plugin"/);
+  assert.match(coreRuntimeSource, /PluginMarket/);
+});

@@ -28,6 +28,8 @@
 - `npm test` 通过 Core 157/157、Gateway 79/79、脚本/工作流 33/33、legacy-bash 1/1；`npm run desktop:test` 通过 388/389（1 项显式 Codex E2E skip），`npm run desktop:build` 和 `npm run lint` 通过。
 - 最终重打包后，x64 与 arm64 两套 `.app` 均再次通过 `package:verify` 和本地嵌套签名校验；本机运行态检查确认二进制架构正确，但独立启动进程停留在 macOS 原生启动阶段，未形成业务窗口启动证据，因此不将其误记为包运行态通过。
 - 工作树源文件、变更文档和生成的 macOS release 内容均通过禁用术语扫描；本次变更准备提交并推送，未宣称正式 Developer ID 签名或公证。
+- 启动阻塞修复：Provider Plugin Runtime 不再静态引用工作区 Gateway 入口，改由 `core-runtime` 按打包资源路径懒加载 Manager、Market 和签名模块；重新打包后通过 `open -n` 分别启动 x64/Rosetta 与 arm64，两个窗口均加载到业务页面，x64/Rosetta 与 arm64 各有 Electron 子进程运行。
+- 新增启动回归门禁：`package.test.ts` 检查资源加载边界，`provider-plugin-runtime.test.ts` 检查 Manager、Market 和签名实现可由运行时解析。
 
 ## Rules
 - 同时只能有一个 `in_progress`。

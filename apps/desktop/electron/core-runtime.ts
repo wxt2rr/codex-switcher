@@ -30,6 +30,8 @@ export interface GatewayProviderRuntime {
 
 export interface GatewayPluginRuntime {
   ProviderPluginManager: typeof import("../../../packages/gateway/dist/plugin/manager.js").ProviderPluginManager;
+  PluginMarket: typeof import("../../../packages/gateway/dist/plugin/market.js").PluginMarket;
+  verifyPluginManifestSignature: typeof import("../../../packages/gateway/dist/plugin/signing.js").verifyPluginManifestSignature;
 }
 
 export interface GatewayAgentRuntime {
@@ -42,6 +44,8 @@ type CoreApiModule = typeof import("../../../packages/core/dist/api/core-api.js"
 type LegacyModule = typeof import("../../../packages/core/dist/state/legacy.js");
 type GatewayLegacyAdapterModule = typeof import("../../../packages/core/dist/gateway/legacy-adapter.js");
 type GatewayPluginRuntimeModule = typeof import("../../../packages/gateway/dist/plugin/manager.js");
+type GatewayPluginMarketModule = typeof import("../../../packages/gateway/dist/plugin/market.js");
+type GatewayPluginSigningModule = typeof import("../../../packages/gateway/dist/plugin/signing.js");
 type GatewayAgentAdapterModule = typeof import("../../../packages/gateway/dist/agent/adapter.js");
 type GatewayAgentProfilesModule = typeof import("../../../packages/gateway/dist/agent/profiles.js");
 type TargetHomeModule = typeof import("../../../packages/core/dist/system/target-home.js");
@@ -127,13 +131,30 @@ export async function loadGatewayProviderRuntime(): Promise<GatewayProviderRunti
 }
 
 export async function loadGatewayPluginRuntime(): Promise<GatewayPluginRuntime> {
-  const runtimePath = resolveRuntimeResource(join("packages", "gateway", "dist", "plugin", "manager.js"), {
+  const runtimeRoot = resolveRuntimeResource(join("packages", "gateway", "dist", "plugin"), {
     currentFile: resolveCurrentFile(),
     resourcesPath: getConfiguredResourcesPath(),
   });
-  const sourcePath = join(getSourceRepoRoot(), "packages", "gateway", "src", "plugin", "manager.ts");
-  const module = await importFirstExisting<GatewayPluginRuntimeModule>([runtimePath, sourcePath]);
-  return { ProviderPluginManager: module.ProviderPluginManager };
+  const sourceRoot = join(getSourceRepoRoot(), "packages", "gateway", "src", "plugin");
+  const [manager, market, signing] = await Promise.all([
+    importFirstExisting<GatewayPluginRuntimeModule>([
+      join(runtimeRoot, "manager.js"),
+      join(sourceRoot, "manager.ts"),
+    ]),
+    importFirstExisting<GatewayPluginMarketModule>([
+      join(runtimeRoot, "market.js"),
+      join(sourceRoot, "market.ts"),
+    ]),
+    importFirstExisting<GatewayPluginSigningModule>([
+      join(runtimeRoot, "signing.js"),
+      join(sourceRoot, "signing.ts"),
+    ]),
+  ]);
+  return {
+    ProviderPluginManager: manager.ProviderPluginManager,
+    PluginMarket: market.PluginMarket,
+    verifyPluginManifestSignature: signing.verifyPluginManifestSignature,
+  };
 }
 
 export async function loadGatewayAgentRuntime(): Promise<GatewayAgentRuntime> {

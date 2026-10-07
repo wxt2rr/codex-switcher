@@ -5,9 +5,8 @@ import type {
   PluginInstallSource,
   PluginMarketEntry,
 } from "../../../packages/gateway/dist/index.js";
-import { PluginMarket, verifyPluginManifestSignature } from "../../../packages/gateway/dist/index.js";
 import type { ProviderAdapter } from "../../../packages/gateway/dist/provider/adapters.js";
-import { loadGatewayPluginRuntime } from "./core-runtime.js";
+import { loadGatewayPluginRuntime, type GatewayPluginRuntime } from "./core-runtime.js";
 
 export interface ProviderPluginSnapshot {
   id: string;
@@ -39,7 +38,7 @@ let manager: InstanceType<Awaited<ReturnType<typeof loadGatewayPluginRuntime>>["
 let managerLoad: Promise<NonNullable<typeof manager>> | undefined;
 let activationFailures = new Map<string, string>();
 
-function getPluginSignatureVerifier() {
+function getPluginSignatureVerifier(verifyPluginManifestSignature: GatewayPluginRuntime["verifyPluginManifestSignature"]) {
   const trustedPublicKeyPem = process.env.CODEX_SWITCHER_PLUGIN_TRUSTED_PUBLIC_KEY?.trim();
   if (!trustedPublicKeyPem) return undefined;
   return (manifest: GatewayPluginManifest, checksum?: string) =>
@@ -60,7 +59,7 @@ async function getManager(stateDir: string) {
   activationFailures = new Map();
   managerLoad = (async () => {
     const runtime = await loadGatewayPluginRuntime();
-    const verifySignature = getPluginSignatureVerifier();
+    const verifySignature = getPluginSignatureVerifier(runtime.verifyPluginManifestSignature);
     const next = new runtime.ProviderPluginManager({
       rootDir: join(stateDir, "provider-plugins"),
       ...(verifySignature ? { verifySignature } : {}),
@@ -121,8 +120,9 @@ export async function installProviderPlugin(stateDir: string, input: ProviderPlu
 }
 
 export async function listProviderPluginMarket(stateDir: string): Promise<PluginMarketEntry[]> {
-  const verifySignature = getPluginSignatureVerifier();
-  return new PluginMarket(PluginMarket.cachePath(stateDir), verifySignature ? { verifySignature } : {}).list();
+  const runtime = await loadGatewayPluginRuntime();
+  const verifySignature = getPluginSignatureVerifier(runtime.verifyPluginManifestSignature);
+  return new runtime.PluginMarket(runtime.PluginMarket.cachePath(stateDir), verifySignature ? { verifySignature } : {}).list();
 }
 
 export async function refreshProviderPluginMarket(stateDir: string, url: string): Promise<PluginMarketEntry[]> {
@@ -130,8 +130,9 @@ export async function refreshProviderPluginMarket(stateDir: string, url: string)
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
     throw new Error("Provider plugin market URL must use http or https");
   }
-  const verifySignature = getPluginSignatureVerifier();
-  const market = new PluginMarket(PluginMarket.cachePath(stateDir), verifySignature ? { verifySignature } : {});
+  const runtime = await loadGatewayPluginRuntime();
+  const verifySignature = getPluginSignatureVerifier(runtime.verifyPluginManifestSignature);
+  const market = new runtime.PluginMarket(runtime.PluginMarket.cachePath(stateDir), verifySignature ? { verifySignature } : {});
   return market.update(url, {
     fetchIndex: async (indexUrl) => {
       const response = await fetch(indexUrl, {

@@ -263,6 +263,12 @@
 - npm 包 Windows launcher 分支复核：在同一隔离安装包上以 `CODEX_SWITCHER_BIN_PLATFORM=win32` 执行 `codex-sw.cjs status`，确认 Windows 入口会进入 Node CLI，并成功返回默认状态；这不是 Windows 原生运行证据，但闭合了发布包的入口选择路径。
 - Provider Plugin Market 成功路径补测：新增隔离集成测试，使用受控本地 runner 实际 materialize npm tarball 和 Git source，再进入安装、checksum、active 指针和版本列表；`packages/gateway/src/plugin/market.test.ts` 9/9 通过，npm/git 不再只有失败路径契约覆盖。
 
+## 2026-10-07 macOS 启动闭环修复
+
+- 发现并修复打包后主进程静态引用工作区 Gateway 入口的问题：该入口在 extraResources 中，不在 app.asar 内；改为由 `core-runtime` 按资源路径懒加载插件 Manager、Market 和签名模块，避免启动阶段原生错误弹窗。
+- 重新生成 macOS x64 与 arm64 directory `.app` 后，通过 `open -n` 启动验证：x64/Rosetta 与 arm64 均进入真实业务页面并创建 Electron 子进程；当前不再只以“进程可创建”作为启动证据。
+- 新增资源边界契约测试和运行时解析测试；Provider Plugin Runtime 定向测试、Desktop package 契约测试均通过。
+
 ## 2026-10-07 macOS 提交前验收
 
 - 最终 `npm test`：Core 157/157、Gateway 79/79、脚本/工作流 33/33、legacy-bash 1/1；`npm run desktop:test`：388 passed/1 skipped（唯一 skip 为显式外部 Codex E2E）；`npm run desktop:build`、`npm run lint`、`git diff --check` 通过。
