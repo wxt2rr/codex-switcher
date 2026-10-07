@@ -82,7 +82,9 @@ function buildSmokePlugin({ marker, expectWriteDenied }) {
       if (finished) return;
       finished = true;
       clearTimeout(networkTimer);
-      process.stdout.write(JSON.stringify({ writeDenied, readDenied, networkDenied }), () => process.exit(writeDenied === ${JSON.stringify(expectWriteDenied)} && readDenied && networkDenied ? 0 : 1));
+      const passed = writeDenied === ${JSON.stringify(expectWriteDenied)} && readDenied && networkDenied;
+      process.stdout.write(JSON.stringify({ writeDenied, readDenied, networkDenied }));
+      process.exit(passed ? 0 : 1);
     };
     const socket = net.createConnection({ host: "1.1.1.1", port: 80 });
     socket.setTimeout(1500);
