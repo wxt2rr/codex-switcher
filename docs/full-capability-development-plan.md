@@ -430,7 +430,7 @@ codex-switcher gateway start|stop|status|serve
 - 端口冲突恢复；
 - 后台更新；
 - 更新失败回滚；
-- macOS 签名/公证流程；
+- 未签名安装包的发布和自动更新校验路径；签名、公证不属于本次交付前置条件；
 - Windows/Linux 打包流程。
 
 ### P9：兼容迁移、数据恢复和多平台发布
@@ -449,6 +449,8 @@ codex-switcher gateway start|stop|status|serve
 - macOS、Windows、Linux 路径和权限差异；
 - WSL/远程 Agent 路径处理。
 
+本次交付边界：签名、公证、真实 Intel Mac 安装、真实第三方 Provider/模型调用由使用者自行验证，不作为本仓库开发完成条件。仓库负责实现和验证对应的代码、自动化测试、未签名打包、安装 smoke、回滚 smoke 以及 CI 产物校验。
+
 ### P10：全量测试、真实 Provider 验证和最终交付
 
 必须建立：
@@ -462,10 +464,11 @@ codex-switcher gateway start|stop|status|serve
 - 手动模式回归测试；
 - Gateway 模式端到端测试；
 - 多 Agent 同时请求测试；
-- Windows 真机测试；
-- macOS 真机测试；
-- Linux 真机测试；
-- 打包、签名、公证、升级和回滚测试。
+- macOS/Windows/Linux CI 运行验证；
+- 本机 macOS arm64 业务启动、安装和回滚 smoke；
+- 未签名打包、升级清单校验、升级和回滚测试。
+
+真实 Windows/Linux/Intel Mac 安装、签名/公证和真实第三方 Provider 调用由使用者自行执行，不作为本次自动化交付门槛。
 
 桌面验收入口 `npm run desktop:test` 必须递归发现并串行执行 `apps/desktop/electron` 与 `apps/desktop/src` 下全部 `*.test.ts`，不能依赖维护者手工维护的测试文件清单；只有显式标注且需要外部 Codex 安装的 E2E 才允许作为可见 skip。
 
@@ -514,7 +517,7 @@ P0 内核拆分
 6. Provider 插件可以独立运行、失败恢复并参与真实路由。
 7. Desktop、CLI、TUI、Profile、托盘和自动更新功能完整可用。
 8. 手动模式可以随时恢复并保持旧行为。
-9. `npm test`、Core/Gateway/Desktop 测试、类型检查、构建和打包全部通过。
-10. macOS、Windows、Linux 真机验收记录完整。
+9. `npm test`、Core/Gateway/Desktop 测试、类型检查、构建和未签名打包全部通过。
+10. macOS/Windows/Linux CI 证据、本机 macOS arm64 安装与回滚证据完整；签名、公证、真实 Intel Mac 和真实第三方调用由使用者自行验收。
 11. 无纳入范围的“首版不做”“后续再做”“不阻塞”遗留项目；意图路由因产品决策明确不属于范围。
 12. 所有变更和证据记录在 `.wxt/full-capability-development.md`。
