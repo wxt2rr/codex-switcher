@@ -2,8 +2,11 @@
 
 import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { arch, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
+
+const require = createRequire(import.meta.url);
 
 const releaseDir = resolve(process.argv[2] ?? join(process.cwd(), "apps", "desktop", "release"));
 const evidencePath = process.env.CODEX_SWITCHER_INSTALL_EVIDENCE_OUT
@@ -28,6 +31,8 @@ try {
       ? extractMacOS(artifact, installRoot)
       : extractLinux(artifact, installRoot);
   evidence.installedExecutable = basename(installedExecutable);
+  runRollbackSmoke(installedExecutable, installRoot);
+  evidence.rollbackSmoke = "passed";
   evidence.status = "passed";
   writeEvidence(evidencePath, evidence);
   console.log(JSON.stringify(evidence));
@@ -80,6 +85,22 @@ function extractLinux(debPath, destination) {
   if (!executable) throw new Error("Linux package did not materialize the application executable");
   accessSync(executable, constants.X_OK);
   return executable;
+}
+
+function runRollbackSmoke(installedExecutable, destination) {
+  const rollbackRoot = join(destination, "..", `${basename(destination)}-rollback`);
+  const rollbackBackup = join(rollbackRoot, basename(installedExecutable));
+  const recoveryScript = join(process.cwd(), "scripts", "package-install-recovery.ts");
+  const tsxCli = resolveTsxCli();
+  execFileSync(process.execPath, [tsxCli, recoveryScript, installedExecutable, rollbackBackup], { stdio: "inherit" });
+}
+
+function resolveTsxCli() {
+  try {
+    return require.resolve("tsx/cli");
+  } catch {
+    return require.resolve("tsx/dist/cli.mjs");
+  }
 }
 
 function findByBasename(root, expectedName) {

@@ -50,6 +50,7 @@
 - Current P8 slice: make a configured desktop update feed require a signed manifest by default; unsigned feeds remain available only through an explicit test/development override.
 - Current P8 slice: route Gateway/provider/agent/group/model/usage/profile domain commands from the cross-platform launcher to the Node CLI on macOS/Linux, while preserving the legacy Bash manual env/account commands.
 - Current P9/P10 slice: add a runner-side package-install smoke that extracts macOS/Linux installers and silently installs the Windows NSIS package into an isolated directory, then uploads redacted install evidence.
+- Current P9 slice: run the existing atomic rollback implementation against the executable materialized by each package-install smoke, simulating a corrupt upgrade and verifying byte-for-byte restoration.
 - Current P10 slice: add a Gateway lifecycle regression for simultaneous requests from multiple explicit Agent IDs, including fallback dispatch and per-Agent usage records; this slice does not add Prompt analysis or intent routing.
 - Current P6 slice: expose the existing signed/fail-closed Provider Plugin Market through the desktop bridge and Operations UI, including cached entries, explicit refresh, and market-entry installation; this slice does not add Prompt analysis or intent routing.
 - Current P8/P9 slice: make update rollback staging names collision-safe under concurrent checks and preserve the existing fail-closed manifest/hash verification; this slice does not add Prompt analysis or intent routing.
@@ -391,3 +392,9 @@
 - 本机 macOS arm64 ZIP smoke 通过；`npx tsx --test scripts/desktop-package-workflow.test.ts` 1/1，`npm run test:cross-platform` 通过 Core 157/157、Gateway 79/79、脚本/工作流 34/34，Node 语法和 diff check 通过。
 - 当前 `main` 提交 `4126d05` 的三平台打包运行 `37567933101` 已成功：macOS、Windows、Linux package job 全部通过，且 Windows NSIS、Linux deb、macOS ZIP 的安装 smoke 步骤均为成功；release job 按非标签规则跳过。
 - 对应 artifact `codex-switcher-macos`、`codex-switcher-windows-x64`、`codex-switcher-linux-x64` 均成功上传并包含各自的 `package-install-*.json` 证据文件；正式签名/公证仍未在非标签运行中执行。
+
+## 2026-10-07 安装后回滚恢复 smoke 切片
+
+- `scripts/package-install-recovery.ts` 复用桌面更新回滚实现，对已安装的真实可执行文件执行“备份 → 模拟损坏升级 → 原子恢复”，并以 SHA-256 验证恢复前后字节完全一致。
+- `scripts/package-install-smoke.mjs` 已在三平台安装验证后调用该恢复检查，证据新增 `rollbackSmoke: "passed"`；本机 macOS arm64 ZIP 安装与回滚 smoke 通过。
+- 定向验证：`npx tsx --test scripts/desktop-package-workflow.test.ts` 1/1、`npx tsx --test apps/desktop/electron/update-rollback.test.ts` 4/4、`node --check scripts/package-install-smoke.mjs` 通过。

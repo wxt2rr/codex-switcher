@@ -5,6 +5,7 @@ import test from "node:test";
 
 test("desktop packaging workflow builds native installers for version tags and manual runs", async () => {
   const workflow = await readFile(join(process.cwd(), ".github", "workflows", "desktop-package.yml"), "utf8");
+  const installSmoke = await readFile(join(process.cwd(), "scripts", "package-install-smoke.mjs"), "utf8");
   const requiredContent = [
     "workflow_dispatch:",
     'tags: ["desktop-v*"]',
@@ -111,6 +112,8 @@ test("desktop packaging workflow builds native installers for version tags and m
   for (const content of requiredContent) {
     assert.ok(workflow.includes(content), `desktop package workflow should include: ${content}`);
   }
+  assert.ok(installSmoke.includes("package-install-recovery.ts"));
+  assert.ok(installSmoke.includes("rollbackSmoke"));
   assert.equal(workflow.match(/actions\/checkout@v7/g)?.length, 4);
   assert.equal(workflow.match(/actions\/setup-node@v6/g)?.length, 3);
   assert.equal(workflow.match(/actions\/upload-artifact@v7/g)?.length, 3);
