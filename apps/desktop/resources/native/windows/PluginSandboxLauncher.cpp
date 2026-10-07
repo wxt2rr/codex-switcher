@@ -332,6 +332,11 @@ int wmain(int argc, wchar_t** argv) {
   if (profileName.empty() || cwd.empty() || node.empty() || entry.empty()) return fail(L"missing AppContainer launcher arguments");
   DWORD timeoutMilliseconds = 15000;
   if (!readTimeoutMilliseconds(argc, argv, timeoutMilliseconds)) return fail(L"invalid AppContainer child timeout");
+  const bool debug = hasFlag(argc, argv, L"--debug");
+  const auto trace = [debug](const wchar_t* message) {
+    if (debug) std::wcerr << L"[sandbox] " << message << std::endl;
+  };
+  trace(L"starting");
 
   CapabilityBuffer capabilities;
   if (hasFlag(argc, argv, L"--network") && !deriveInternetCapability(capabilities)) return fail(L"cannot derive internetClient capability", HRESULT_FROM_WIN32(GetLastError()));
@@ -348,6 +353,9 @@ int wmain(int argc, wchar_t** argv) {
   );
   if (profileResult == HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS)) {
     profileResult = deriveExistingAppContainerSid(profileName, &appContainerSid);
+    trace(L"reused AppContainer profile");
+  } else {
+    trace(L"created AppContainer profile");
   }
   if (FAILED(profileResult) || !appContainerSid) return fail(L"cannot create AppContainer profile", profileResult);
 
@@ -361,12 +369,14 @@ int wmain(int argc, wchar_t** argv) {
     FreeSid(appContainerSid);
     return fail(L"cannot grant AppContainer access to Node runtime directory", HRESULT_FROM_WIN32(GetLastError()));
   }
+  trace(L"granted Node and ancestor ACLs");
 
   AclGrant cwdGrant;
   if (!grantDirectoryAccess(cwd, appContainerSid, hasFlag(argc, argv, L"--filesystem"), cwdGrant)) {
     FreeSid(appContainerSid);
     return fail(L"cannot grant AppContainer access to plugin directory", HRESULT_FROM_WIN32(GetLastError()));
   }
+  trace(L"granted plugin directory ACL");
 
   SIZE_T attributeSize = 0;
   InitializeProcThreadAttributeList(nullptr, 1, 0, &attributeSize);
@@ -429,9 +439,11 @@ int wmain(int argc, wchar_t** argv) {
     FreeSid(appContainerSid);
     return fail(L"cannot launch plugin inside AppContainer", HRESULT_FROM_WIN32(GetLastError()));
   }
+  trace(L"created AppContainer process");
 
   CloseHandle(process.hThread);
   const DWORD waitResult = WaitForSingleObject(process.hProcess, timeoutMilliseconds);
+  trace(waitResult == WAIT_OBJECT_0 ? L"AppContainer process exited" : L"AppContainer process wait did not complete");
   if (waitResult == WAIT_TIMEOUT) {
     TerminateProcess(process.hProcess, 124);
     WaitForSingleObject(process.hProcess, 2000);

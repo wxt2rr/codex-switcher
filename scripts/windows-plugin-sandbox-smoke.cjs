@@ -112,8 +112,12 @@ function buildSmokePlugin({ marker, expectWriteDenied }) {
 }
 
 function runLauncher({ profile, entry, extraArgs }) {
-  const result = spawnSync(launcher, ["--profile", profile, "--cwd", root, "--node", node, "--entry", entry, "--timeout-ms", "7000", ...extraArgs], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15000 });
-  if (result.error) throw new Error(`sandbox launcher failed for ${profile}: ${result.error.message}`);
+  const result = spawnSync(launcher, ["--profile", profile, "--cwd", root, "--node", node, "--entry", entry, "--timeout-ms", "7000", "--debug", ...extraArgs], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15000 });
+  if (result.error) {
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    throw new Error(`sandbox launcher failed for ${profile}: ${result.error.message}`);
+  }
   process.stdout.write(result.stdout || "");
   if (result.stderr) process.stderr.write(result.stderr);
   const output = (result.stdout || "").trim();
