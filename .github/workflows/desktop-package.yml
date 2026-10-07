@@ -285,18 +285,33 @@ jobs:
           merge-multiple: true
           path: release-assets
 
+      - name: Flatten release assets
+        shell: bash
+        run: |
+          mkdir -p release-assets-flat
+          while IFS= read -r -d '' artifact; do
+            cp "$artifact" release-assets-flat/
+          done < <(find release-assets -type f \( \
+            -name '*.dmg' -o \
+            -name '*.zip' -o \
+            -name '*.exe' -o \
+            -name '*.AppImage' -o \
+            -name '*.deb' -o \
+            -name '*.blockmap' \
+          \) -print0)
+
       - name: Validate release assets
         shell: bash
         run: |
-          test -n "$(find release-assets -maxdepth 1 -name '*-arm64.dmg' -print -quit)"
-          test -n "$(find release-assets -maxdepth 1 -name '*-arm64-mac.zip' -print -quit)"
-          test -n "$(find release-assets -maxdepth 1 -name '*.dmg' ! -name '*-arm64.dmg' -print -quit)"
-          test -n "$(find release-assets -maxdepth 1 -name '*.zip' ! -name '*-arm64-mac.zip' -print -quit)"
-          test -n "$(find release-assets -maxdepth 1 -name '*.exe' -print -quit)"
-          test -n "$(find release-assets -maxdepth 1 -name '*.AppImage' -print -quit)"
-          test -n "$(find release-assets -maxdepth 1 -name '*.deb' -print -quit)"
-          test -n "$(find release-assets -maxdepth 1 -name '*.blockmap' -print -quit)"
-          find release-assets -maxdepth 1 -type f -print
+          test -n "$(find release-assets-flat -maxdepth 1 -name '*-arm64.dmg' -print -quit)"
+          test -n "$(find release-assets-flat -maxdepth 1 -name '*-arm64-mac.zip' -print -quit)"
+          test -n "$(find release-assets-flat -maxdepth 1 -name '*.dmg' ! -name '*-arm64.dmg' -print -quit)"
+          test -n "$(find release-assets-flat -maxdepth 1 -name '*.zip' ! -name '*-arm64-mac.zip' -print -quit)"
+          test -n "$(find release-assets-flat -maxdepth 1 -name '*.exe' -print -quit)"
+          test -n "$(find release-assets-flat -maxdepth 1 -name '*.AppImage' -print -quit)"
+          test -n "$(find release-assets-flat -maxdepth 1 -name '*.deb' -print -quit)"
+          test -n "$(find release-assets-flat -maxdepth 1 -name '*.blockmap' -print -quit)"
+          find release-assets-flat -maxdepth 1 -type f -print
 
       - name: Generate optional update manifests
         shell: bash
@@ -320,7 +335,7 @@ jobs:
           writeFileSync(process.argv[3], publicKey, { mode: 0o600 });
           NODE
           shopt -s nullglob
-          for artifact in release-assets/*; do
+          for artifact in release-assets-flat/*; do
             case "$artifact" in
               *.exe) platform="win32-x64" ;;
               *.AppImage|*.deb) platform="linux-x64" ;;
@@ -336,9 +351,9 @@ jobs:
               --channel stable \
               --platform "$platform" \
               --url "https://github.com/${GH_REPO}/releases/download/${GITHUB_REF_NAME}/${base}" \
-              --out "release-assets/${base}.manifest.json"
+              --out "release-assets-flat/${base}.manifest.json"
             node scripts/verify-update-manifest.mjs \
-              --manifest "release-assets/${base}.manifest.json" \
+              --manifest "release-assets-flat/${base}.manifest.json" \
               --artifact "$artifact" \
               --trusted-public-key-file "$trusted_key_file"
           done
@@ -348,16 +363,16 @@ jobs:
         run: |
           NOTES_FILE=".github/release-notes/${GITHUB_REF_NAME}.md"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
+            gh release upload "$GITHUB_REF_NAME" release-assets-flat/* --clobber
           else
             if test -f "$NOTES_FILE"; then
-              gh release create "$GITHUB_REF_NAME" release-assets/* \
+              gh release create "$GITHUB_REF_NAME" release-assets-flat/* \
                 --verify-tag \
                 --notes-file "$NOTES_FILE" \
                 --prerelease \
                 --title "$GITHUB_REF_NAME"
             else
-              gh release create "$GITHUB_REF_NAME" release-assets/* \
+              gh release create "$GITHUB_REF_NAME" release-assets-flat/* \
                 --verify-tag \
                 --generate-notes \
                 --prerelease \

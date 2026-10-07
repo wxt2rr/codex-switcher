@@ -83,6 +83,8 @@ test("desktop packaging workflow builds native installers for version tags and m
     "pattern: codex-switcher-*",
     "merge-multiple: true",
     "path: release-assets",
+    "Flatten release assets",
+    "release-assets-flat",
     "Generate optional update manifests",
     "CODEX_SWITCHER_UPDATE_SIGNING_KEY",
     "create-update-manifest.mjs",
