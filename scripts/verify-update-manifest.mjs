@@ -5,6 +5,10 @@ import { existsSync, readFileSync } from "node:fs";
 const args = parseArgs(process.argv.slice(2));
 const manifestPath = required(args.manifest, "--manifest");
 const artifactPath = required(args.artifact, "--artifact");
+const trustedPublicKeyPath = typeof args["trusted-public-key-file"] === "string" ? args["trusted-public-key-file"] : undefined;
+const trustedPublicKeyPem = trustedPublicKeyPath
+  ? readFileSync(trustedPublicKeyPath, "utf8")
+  : process.env.CODEX_SWITCHER_UPDATE_TRUSTED_PUBLIC_KEY;
 if (!existsSync(manifestPath)) throw new Error(`manifest not found: ${manifestPath}`);
 if (!existsSync(artifactPath)) throw new Error(`artifact not found: ${artifactPath}`);
 
@@ -15,10 +19,22 @@ const actualHash = createHash("sha256").update(readFileSync(artifactPath)).diges
 if (actualHash !== manifest.sha256.toLowerCase()) throw new Error(`artifact hash mismatch: expected ${manifest.sha256}, got ${actualHash}`);
 
 const unsigned = Object.fromEntries(Object.entries(manifest).filter(([key]) => key !== "signature"));
+let verificationKey;
+try {
+  const declaredKey = createPublicKey(manifest.publicKey);
+  verificationKey = trustedPublicKeyPem ? createPublicKey(trustedPublicKeyPem) : declaredKey;
+  if (trustedPublicKeyPem && !Buffer.from(declaredKey.export({ type: "spki", format: "der" })).equals(Buffer.from(verificationKey.export({ type: "spki", format: "der" })))) {
+    throw new Error("manifest public key does not match the trusted release key");
+  }
+} catch (error) {
+  throw new Error(error instanceof Error && error.message.includes("does not match")
+    ? error.message
+    : "manifest public key is invalid");
+}
 const validSignature = verify(
   null,
   Buffer.from(canonicalize(unsigned)),
-  createPublicKey(manifest.publicKey),
+  verificationKey,
   Buffer.from(manifest.signature, "base64url"),
 );
 if (!validSignature) throw new Error("manifest signature verification failed");

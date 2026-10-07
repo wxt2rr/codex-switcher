@@ -325,9 +325,17 @@ jobs:
         run: |
           test -n "$RELEASE_SIGNING_KEY"
           key_file="$(mktemp)"
-          trap 'rm -f "$key_file"' EXIT
+          trusted_key_file="$(mktemp)"
+          trap 'rm -f "$key_file" "$trusted_key_file"' EXIT
           umask 077
           printf '%s' "$RELEASE_SIGNING_KEY" > "$key_file"
+          node - "$key_file" "$trusted_key_file" <<'NODE'
+          const { createPrivateKey, createPublicKey } = require("node:crypto");
+          const { readFileSync, writeFileSync } = require("node:fs");
+          const privateKey = createPrivateKey(readFileSync(process.argv[2], "utf8"));
+          const publicKey = createPublicKey(privateKey).export({ type: "spki", format: "pem" }).toString();
+          writeFileSync(process.argv[3], publicKey, { mode: 0o600 });
+          NODE
           shopt -s nullglob
           for artifact in release-assets/*; do
             case "$artifact" in
@@ -348,7 +356,8 @@ jobs:
               --out "release-assets/${base}.manifest.json"
             node scripts/verify-update-manifest.mjs \
               --manifest "release-assets/${base}.manifest.json" \
-              --artifact "$artifact"
+              --artifact "$artifact" \
+              --trusted-public-key-file "$trusted_key_file"
           done
 
       - name: Create or update GitHub Pre-release

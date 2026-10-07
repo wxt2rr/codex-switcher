@@ -16,11 +16,20 @@ test("release manifest contains an artifact hash and verifiable Ed25519 signatur
     const keyFile = join(root, "release-key.pem");
     const output = join(root, "manifest.json");
     const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const trustedPublicKeyFile = join(root, "trusted-release-key.pem");
     await writeFile(artifact, "release-bytes");
     await writeFile(keyFile, privateKey.export({ type: "pkcs8", format: "pem" }));
+    await writeFile(trustedPublicKeyFile, publicKey.export({ type: "spki", format: "pem" }));
     await execFileAsync("node", ["scripts/create-update-manifest.mjs", "--artifact", artifact, "--key-file", keyFile, "--version", "2.0.0", "--channel", "stable", "--platform", "darwin-arm64", "--url", "https://updates.example.test/codex.dmg", "--publishedAt", "1", "--out", output], { cwd: process.cwd() });
-    const verification = await execFileAsync("node", ["scripts/verify-update-manifest.mjs", "--manifest", output, "--artifact", artifact], { cwd: process.cwd() });
+    const verification = await execFileAsync("node", ["scripts/verify-update-manifest.mjs", "--manifest", output, "--artifact", artifact, "--trusted-public-key-file", trustedPublicKeyFile], { cwd: process.cwd() });
     assert.match(verification.stdout, /Verified update manifest/);
+    const { publicKey: wrongPublicKey } = generateKeyPairSync("ed25519");
+    const wrongPublicKeyFile = join(root, "wrong-release-key.pem");
+    await writeFile(wrongPublicKeyFile, wrongPublicKey.export({ type: "spki", format: "pem" }));
+    await assert.rejects(
+      execFileAsync("node", ["scripts/verify-update-manifest.mjs", "--manifest", output, "--artifact", artifact, "--trusted-public-key-file", wrongPublicKeyFile], { cwd: process.cwd() }),
+      /does not match the trusted release key/,
+    );
     await writeFile(artifact, "tampered-release-bytes");
     await assert.rejects(
       execFileAsync("node", ["scripts/verify-update-manifest.mjs", "--manifest", output, "--artifact", artifact], { cwd: process.cwd() }),

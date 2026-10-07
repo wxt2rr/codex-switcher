@@ -46,6 +46,7 @@
 - Current P1 slice: make the Node Agent filesystem write configuration and snapshot files with same-directory atomic replacement and no temporary-file residue; this slice does not add Prompt analysis or intent routing.
 - Current P9 slice: encode Agent snapshot filenames for Windows-safe environment/agent binding IDs while retaining legacy snapshot lookup for migration compatibility; this slice does not add Prompt analysis or intent routing.
 - Current P9 slice: make manual unsigned macOS/Windows packaging omit empty signing inputs and make Linux artifact verification resolve paths from the workspace package cwd; tag builds retain mandatory signing credential gates.
+- Current P8/P9 slice: pin the update-manifest verifier to the release public key so a manifest cannot replace its own trust root; tag release verification must pass the trusted public key explicitly.
 - Current P10 slice: add a Gateway lifecycle regression for simultaneous requests from multiple explicit Agent IDs, including fallback dispatch and per-Agent usage records; this slice does not add Prompt analysis or intent routing.
 - Current P6 slice: expose the existing signed/fail-closed Provider Plugin Market through the desktop bridge and Operations UI, including cached entries, explicit refresh, and market-entry installation; this slice does not add Prompt analysis or intent routing.
 - Current P8/P9 slice: make update rollback staging names collision-safe under concurrent checks and preserve the existing fail-closed manifest/hash verification; this slice does not add Prompt analysis or intent routing.
@@ -357,3 +358,9 @@
 - 本次结果确认跨平台测试发现、Windows 原生隔离证据和 Linux bubblewrap 证据均已在当前 `main` 提交上闭环；不再使用旧提交的运行结果替代当前代码证据。
 - 三平台非标签打包运行 `37565196259` 保持成功，macOS/Windows/Linux 安装包和沙箱 evidence 均已上传并通过产物校验。
 - 正式签名、公证、AuthentiCode、真实安装升级回滚和真实第三方账号验证仍需要外部证书、账号或设备；仓库当前没有发布签名密钥，未将这些外部条件伪装成已完成。
+
+## 2026-10-07 更新清单信任根固定
+
+- `scripts/verify-update-manifest.mjs` 新增受信公钥文件/环境变量校验；当调用方提供受信公钥时，清单内声明的公钥必须与受信公钥的 DER 表示一致，并使用受信公钥验证签名。
+- 标签发布工作流从发布私钥派生临时受信公钥，并将其显式传给每个产物的清单校验步骤；手动非标签打包路径保持不需要发布密钥。
+- 正确公钥、错误公钥、产物篡改和非法元数据测试均通过；`npm run test:cross-platform` 通过 Core 157/157、Gateway 79/79、脚本/工作流 33/33；`node --check scripts/verify-update-manifest.mjs`、`git diff --check` 通过。
