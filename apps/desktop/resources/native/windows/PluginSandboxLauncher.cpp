@@ -21,6 +21,8 @@
 
 namespace {
 
+bool gDebug = false;
+
 struct CapabilityBuffer {
   std::vector<PSID> sids;
   std::vector<SID_AND_ATTRIBUTES> attributes;
@@ -37,6 +39,7 @@ struct AclGrant {
 
   ~AclGrant() {
     if (changed && !path.empty() && sid) {
+      if (gDebug) std::wcerr << L"[sandbox] restoring ACL: " << path << std::endl;
       PSECURITY_DESCRIPTOR descriptor = nullptr;
       PACL currentDacl = nullptr;
       if (GetNamedSecurityInfoW(
@@ -70,6 +73,7 @@ struct AclGrant {
       if (descriptor) LocalFree(descriptor);
     }
     if (sid) LocalFree(sid);
+    if (gDebug && !path.empty()) std::wcerr << L"[sandbox] restored ACL: " << path << std::endl;
   }
 };
 
@@ -335,6 +339,7 @@ int wmain(int argc, wchar_t** argv) {
   DWORD timeoutMilliseconds = 15000;
   if (!readTimeoutMilliseconds(argc, argv, timeoutMilliseconds)) return fail(L"invalid AppContainer child timeout");
   const bool debug = hasFlag(argc, argv, L"--debug");
+  gDebug = debug;
   const auto trace = [debug](const wchar_t* message) {
     if (debug) std::wcerr << L"[sandbox] " << message << std::endl;
   };
