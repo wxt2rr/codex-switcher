@@ -350,3 +350,10 @@
 - 修复 Linux package verify 的 workspace cwd 路径拼接，校验现在针对 `apps/desktop/release` 中实际生成的 AppImage 和 deb。
 - `desktop-package` 运行 `37565196259` 全部通过：macOS 5m04s、Ubuntu 3m29s、Windows 3m52s；三端沙箱证据、桌面测试、安装包构建和产物校验均成功。非标签运行不产生正式签名/公证结论。
 - 运行产物已上传为 `codex-switcher-macos`、`codex-switcher-windows-x64`、`codex-switcher-linux-x64` 及三端 sandbox evidence；仓库当前没有配置发布签名密钥，因此未触发标签发布路径。
+
+## 2026-10-07 最新远端验收回收
+
+- CI 运行 `37565843947` 已完成且为成功：macOS legacy、macOS Desktop、macOS/Ubuntu/Windows cross-platform、Ubuntu Desktop、Windows Desktop 及 Windows AppContainer evidence 全部通过。
+- 本次结果确认跨平台测试发现、Windows 原生隔离证据和 Linux bubblewrap 证据均已在当前 `main` 提交上闭环；不再使用旧提交的运行结果替代当前代码证据。
+- 三平台非标签打包运行 `37565196259` 保持成功，macOS/Windows/Linux 安装包和沙箱 evidence 均已上传并通过产物校验。
+- 正式签名、公证、AuthentiCode、真实安装升级回滚和真实第三方账号验证仍需要外部证书、账号或设备；仓库当前没有发布签名密钥，未将这些外部条件伪装成已完成。
