@@ -74,19 +74,27 @@ function buildSmokePlugin({ marker, expectWriteDenied }) {
     const net = require("node:net");
     let writeDenied = false;
     let readDenied = false;
+    let finished = false;
+    let networkTimer;
     try { fs.writeFileSync(${JSON.stringify(marker)}, "unexpected"); } catch { writeDenied = true; }
     try { fs.readFileSync(${JSON.stringify(homeSecret)}, "utf8"); } catch { readDenied = true; }
-    const finish = (networkDenied) => process.stdout.write(JSON.stringify({ writeDenied, readDenied, networkDenied }), () => process.exit(writeDenied === ${JSON.stringify(expectWriteDenied)} && readDenied && networkDenied ? 0 : 1));
+    const finish = (networkDenied) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(networkTimer);
+      process.stdout.write(JSON.stringify({ writeDenied, readDenied, networkDenied }), () => process.exit(writeDenied === ${JSON.stringify(expectWriteDenied)} && readDenied && networkDenied ? 0 : 1));
+    };
     const socket = net.createConnection({ host: "1.1.1.1", port: 80 });
     socket.setTimeout(1500);
     socket.once("connect", () => { socket.destroy(); finish(false); });
     socket.once("timeout", () => { socket.destroy(); finish(true); });
     socket.once("error", () => { finish(true); });
+    networkTimer = setTimeout(() => { socket.destroy(); finish(true); }, 3000);
   `;
 }
 
 function runLauncher({ profile, entry, extraArgs }) {
-  const result = spawnSync(launcher, ["--profile", profile, "--cwd", root, "--node", node, "--entry", entry, ...extraArgs], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const result = spawnSync(launcher, ["--profile", profile, "--cwd", root, "--node", node, "--entry", entry, ...extraArgs], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15000 });
   if (result.error) throw result.error;
   process.stdout.write(result.stdout || "");
   if (result.stderr) process.stderr.write(result.stderr);
