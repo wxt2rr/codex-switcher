@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join, posix, relative, resolve, win32 } from "node:path";
+import { dirname, isAbsolute as nativeIsAbsolute, posix, relative, resolve, sep as nativeSep, win32 } from "node:path";
 import { applyEdits, modify } from "jsonc-parser";
 import { parseDocument } from "yaml";
 
@@ -61,13 +61,15 @@ export function resolveAgentPath(root: string, requestedPath: string, options: N
   const paths = pathModule(style);
   const rootResolve = paths?.resolve ?? resolve;
   const pathRelative = paths?.relative ?? relative;
+  const separator = paths?.sep ?? nativeSep;
+  const isAbsolute = paths?.isAbsolute ?? nativeIsAbsolute;
   const roots = [root, ...(options.additionalRoots ?? [])].map((item) => rootResolve(item));
   const requestedIsAbsolute = isAbsoluteAgentPath(requestedPath);
   if (!requestedIsAbsolute) {
     const normalized = normalizeAgentRelativePath(requestedPath);
     const candidate = rootResolve(roots[0]!, normalized);
     const escaped = pathRelative(roots[0]!, candidate);
-    if (escaped === ".." || escaped.startsWith(`..${paths?.sep ?? "/"}`) || (paths?.isAbsolute?.(escaped) ?? false)) {
+    if (escaped === ".." || escaped.startsWith(`..${separator}`) || isAbsolute(escaped)) {
       throw new Error(`Agent path escapes its configured root: '${requestedPath}'`);
     }
     return candidate;
@@ -76,7 +78,7 @@ export function resolveAgentPath(root: string, requestedPath: string, options: N
   const candidate = rootResolve(requestedPath);
   const allowed = roots.some((allowedRoot) => {
     const escaped = pathRelative(allowedRoot, candidate);
-    return escaped === "" || (escaped !== ".." && !escaped.startsWith(`..${paths?.sep ?? "/"}`) && !(paths?.isAbsolute?.(escaped) ?? false));
+    return escaped === "" || (escaped !== ".." && !escaped.startsWith(`..${separator}`) && !isAbsolute(escaped));
   });
   if (!allowed) throw new Error(`Absolute Agent path is outside the configured roots: '${requestedPath}'`);
   return candidate;
@@ -141,11 +143,11 @@ function snapshotPath(stateDir: string, bindingId: string): string {
   // Environment-scoped bindings use IDs such as "work:codex". Encode the
   // filename so the same snapshot layout is valid on Windows, while the
   // legacy path remains available for migration reads/removal.
-  return join(stateDir, "agents", `${encodeURIComponent(bindingId)}.json`);
+  return posix.join(stateDir.replaceAll("\\", "/"), "agents", `${encodeURIComponent(bindingId)}.json`);
 }
 
 function legacySnapshotPath(stateDir: string, bindingId: string): string {
-  return join(stateDir, "agents", `${bindingId}.json`);
+  return posix.join(stateDir.replaceAll("\\", "/"), "agents", `${bindingId}.json`);
 }
 
 function snapshotPaths(stateDir: string, bindingId: string): string[] {
@@ -394,10 +396,11 @@ export function createAgentAdapter(profile: AgentAdapterProfile, options: AgentA
 }
 
 async function readSnapshotFiles(options: AgentAdapterOptions): Promise<AgentConfigSnapshot[]> {
-  const names = await options.fs.list?.(join(options.stateDir, "agents")) ?? [];
+  const agentsDirectory = posix.join(options.stateDir.replaceAll("\\", "/"), "agents");
+  const names = await options.fs.list?.(agentsDirectory) ?? [];
   const snapshots: AgentConfigSnapshot[] = [];
   for (const name of names.filter((item) => item.endsWith(".json"))) {
-    const raw = await options.fs.read(join(options.stateDir, "agents", name));
+    const raw = await options.fs.read(posix.join(agentsDirectory, name));
     if (!raw) continue;
     try {
       const parsed = JSON.parse(raw) as unknown;

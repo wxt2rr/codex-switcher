@@ -99,6 +99,10 @@ test("agent filesystem keeps local, WSL and Windows roots isolated", async () =>
       resolveAgentPath("C:\\Users\\demo", ".codex/config.toml", { pathStyle: "windows" }),
       "C:\\Users\\demo\\.codex\\config.toml",
     );
+    assert.throws(
+      () => resolveAgentPath("C:\\Users\\demo", "C:\\tmp\\outside.txt", { pathStyle: "windows" }),
+      /outside the configured roots/,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

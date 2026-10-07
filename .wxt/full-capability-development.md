@@ -288,3 +288,9 @@
 - 提交后的远端 CI 继续暴露了宿主平台差异：Windows/macOS 测试不能依赖 runner 自带 PATH，Unix 启动断言不能假设 Windows 命令包装方式，路径断言也不能写死 POSIX 分隔符；相关测试已改为显式平台与隔离 PATH，并按宿主路径规则生成期望值。
 - Windows AppContainer smoke 的失败原因已定位为 Node 目录和工作目录的父目录缺少仅遍历权限。原生 helper 现在沿父级目录授予 `FILE_TRAVERSE`、只读属性和同步权限，同时仍只给 Node 目录与工作目录授予实际读取/执行或写入权限，不扩大文件内容可读范围；无 JSON 输出时 smoke 脚本也会保留子进程状态和 stderr。
 - 本地修复后回归：`npm test` 通过 Core 157/157、Gateway 79/79、脚本/工作流 33/33、legacy-bash 1/1；`npm run desktop:test` 通过；builder contract 1/1、`npm run lint` 和 `git diff --check` 通过。下一次远端 CI 用于确认 Windows AppContainer 真机 smoke 和跨平台测试闭环。
+
+## 2026-10-07 Windows Agent 路径兼容修复
+
+- Windows CI 的 Gateway 测试进一步暴露了 Agent 文件系统路径校验和远程快照路径拼接的宿主差异：native Windows 的父目录判断使用了错误的分隔符，远程 POSIX 文件系统却收到了 native `join` 生成的反斜杠路径。
+- `packages/gateway/src/agent/adapter.ts` 现在按显式 path style 选择分隔符和绝对路径判断；Agent 快照及快照目录枚举统一使用可移植的正斜杠内部路径，再交由目标文件系统归一化，兼容本地 Windows、POSIX/WSL 和 SSH 远程 Agent。
+- 定向回归：Agent adapter、remote filesystem 共 10/10 通过；此前 Windows CI 失败的 `adapter.test.ts` 和 `remote.test.ts` 场景已在本地复现并通过。下一次远端 CI 继续确认 Windows 原生测试和 AppContainer smoke。
