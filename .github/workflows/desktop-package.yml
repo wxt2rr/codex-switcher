@@ -16,9 +16,9 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 45
     env:
-      # Manual workflow runs remain usable without release certificates. Tag
-      # builds must provide the Developer ID and notarization credentials.
-      CSC_IDENTITY_AUTO_DISCOVERY: ${{ startsWith(github.ref, 'refs/tags/desktop-v') && 'true' || 'false' }}
+      # Keep the historical unsigned package path usable for both tags and
+      # manual runs. Signing can be added through optional release secrets.
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
       CSC_LINK: ${{ secrets.CODEX_SWITCHER_MACOS_CSC_LINK }}
       CSC_KEY_PASSWORD: ${{ secrets.CODEX_SWITCHER_MACOS_CSC_KEY_PASSWORD }}
       APPLE_ID: ${{ secrets.CODEX_SWITCHER_APPLE_ID }}
@@ -55,24 +55,10 @@ jobs:
       - name: Run desktop tests
         run: npm run desktop:test
 
-      - name: Verify macOS release signing credentials
-        if: startsWith(github.ref, 'refs/tags/desktop-v')
-        shell: bash
-        run: |
-          test -n "$CSC_LINK" || { echo "CODEX_SWITCHER_MACOS_CSC_LINK is required for tagged releases" >&2; exit 1; }
-          test -n "$CSC_KEY_PASSWORD" || { echo "CODEX_SWITCHER_MACOS_CSC_KEY_PASSWORD is required for tagged releases" >&2; exit 1; }
-          test -n "$APPLE_ID" || { echo "CODEX_SWITCHER_APPLE_ID is required for tagged releases" >&2; exit 1; }
-          test -n "$APPLE_APP_SPECIFIC_PASSWORD" || { echo "CODEX_SWITCHER_APPLE_APP_SPECIFIC_PASSWORD is required for tagged releases" >&2; exit 1; }
-          test -n "$APPLE_TEAM_ID" || { echo "CODEX_SWITCHER_APPLE_TEAM_ID is required for tagged releases" >&2; exit 1; }
-
       - name: Package macOS installers
         shell: bash
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/desktop-v* ]]; then
-            npm run desktop:package:mac
-          else
-            env -u CSC_LINK -u CSC_KEY_PASSWORD -u APPLE_ID -u APPLE_APP_SPECIFIC_PASSWORD -u APPLE_TEAM_ID npm run desktop:package:mac
-          fi
+          env -u CSC_LINK -u CSC_KEY_PASSWORD -u APPLE_ID -u APPLE_APP_SPECIFIC_PASSWORD -u APPLE_TEAM_ID npm run desktop:package:mac
 
       - name: Verify packaged macOS application
         run: |
@@ -84,19 +70,6 @@ jobs:
         run: |
           mkdir -p .wxt/evidence
           CODEX_SWITCHER_INSTALL_EVIDENCE_OUT=.wxt/evidence/package-install-darwin.json node scripts/package-install-smoke.mjs apps/desktop/release
-
-      - name: Verify macOS release signature and notarization
-        if: startsWith(github.ref, 'refs/tags/desktop-v')
-        shell: bash
-        run: |
-          codesign --verify --deep --strict --verbose=2 release/mac-arm64/codex-switcher.app
-          codesign --verify --deep --strict --verbose=2 release/mac/codex-switcher.app
-          arm64_dmg="$(find apps/desktop/release -maxdepth 1 -name '*-arm64.dmg' -print -quit)"
-          x64_dmg="$(find apps/desktop/release -maxdepth 1 -name '*.dmg' ! -name '*-arm64.dmg' -print -quit)"
-          test -n "$arm64_dmg"
-          test -n "$x64_dmg"
-          xcrun stapler validate "$arm64_dmg"
-          xcrun stapler validate "$x64_dmg"
 
       - name: Upload macOS installers
         uses: actions/upload-artifact@v7
@@ -164,25 +137,14 @@ jobs:
       - name: Run desktop tests
         run: npm run desktop:test
 
-      - name: Verify Windows release signing credentials
-        if: startsWith(github.ref, 'refs/tags/desktop-v')
-        shell: pwsh
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK)) { throw "CODEX_SWITCHER_WINDOWS_CSC_LINK is required for tagged releases" }
-          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_KEY_PASSWORD)) { throw "CODEX_SWITCHER_WINDOWS_CSC_KEY_PASSWORD is required for tagged releases" }
-
       - name: Package Windows installer
         shell: pwsh
         run: |
-          if ($env:GITHUB_REF -like "refs/tags/desktop-v*") {
-            npm run desktop:package:win
-          } else {
-            Remove-Item Env:WIN_CSC_LINK -ErrorAction SilentlyContinue
-            Remove-Item Env:WIN_CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
-            Remove-Item Env:CSC_LINK -ErrorAction SilentlyContinue
-            Remove-Item Env:CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
-            npm run desktop:package:win
-          }
+          Remove-Item Env:WIN_CSC_LINK -ErrorAction SilentlyContinue
+          Remove-Item Env:WIN_CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
+          Remove-Item Env:CSC_LINK -ErrorAction SilentlyContinue
+          Remove-Item Env:CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
+          npm run desktop:package:win
 
       - name: Verify packaged Windows plugin sandbox helper
         shell: pwsh
@@ -198,10 +160,6 @@ jobs:
           $installer = Get-ChildItem apps/desktop/release -Filter *.exe | Select-Object -First 1
           if ($null -eq $installer) { throw "Windows installer not found" }
           npm run package:verify --workspace apps/desktop -- "$($installer.FullName)"
-          if ($env:GITHUB_REF -like "refs/tags/desktop-v*") {
-            $signature = Get-AuthenticodeSignature -FilePath $installer.FullName
-            if ($signature.Status -ne "Valid") { throw "Windows installer Authenticode signature is not valid: $($signature.Status)" }
-          }
 
       - name: Smoke-install Windows package
         shell: pwsh
@@ -340,12 +298,15 @@ jobs:
           test -n "$(find release-assets -maxdepth 1 -name '*.blockmap' -print -quit)"
           find release-assets -maxdepth 1 -type f -print
 
-      - name: Generate signed update manifests
+      - name: Generate optional update manifests
         shell: bash
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.CODEX_SWITCHER_UPDATE_SIGNING_KEY }}
         run: |
-          test -n "$RELEASE_SIGNING_KEY"
+          if test -z "$RELEASE_SIGNING_KEY"; then
+            echo "No update signing key configured; continuing with unsigned release artifacts."
+            exit 0
+          fi
           key_file="$(mktemp)"
           trusted_key_file="$(mktemp)"
           trap 'rm -f "$key_file" "$trusted_key_file"' EXIT

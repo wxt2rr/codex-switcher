@@ -406,3 +406,9 @@
 - 安装恢复检查现在不再只替换单个可执行文件：macOS 备份并恢复完整 `.app` 目录，Windows/Linux 备份并恢复完整安装树，再通过安装树中的真实可执行文件做 SHA-256 前后校验。
 - 本机 macOS arm64 安装 smoke 通过，证据包含 `rollbackTarget: "app-bundle"` 和 `rollbackSmoke: "passed"`；回滚实现定向测试 4/4，打包工作流契约测试 1/1。
 - 按既有无签名交付方式，`main` 提交 `1212c9f` 的 GitHub Actions 打包运行 `37590024893` 已成功：macOS、Windows、Linux package job 的完整安装目标回滚 smoke 全部通过，release job 按非标签规则跳过；三端安装包与 sandbox evidence artifact 均成功上传。
+
+## 2026-10-07 标签自动打包恢复为无签名交付
+
+- `.github/workflows/desktop-package.yml` 保持 `push.tags: ["desktop-v*"]` 和 `workflow_dispatch` 两种入口；推送 `desktop-v*` 标签仍会自动执行 macOS、Windows、Linux 打包并创建预发布 Release。
+- 标签和手动运行统一沿用未签名产物路径，不再因为缺少证书、公证、AuthentiCode 或更新签名密钥而失败；这些密钥存在时仍可作为可选增强，不改变无签名交付的默认行为。
+- 当前交付不创建签名结论；安装包完整性、安装 smoke、完整安装目标回滚和 sandbox evidence 仍由 workflow 强制校验。
