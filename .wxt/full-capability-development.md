@@ -324,3 +324,9 @@
 - 远端阶段诊断确认 ACL 已完成、AppContainer 子进程已创建并退出；失败点是 Node 解析绝对入口文件时尝试读取盘符根目录，最小 ACL 策略会拒绝该访问。
 - 原生 helper 启动 Node 时加入 `--preserve-symlinks-main`，避免为主入口做盘符根 realpath 探测；smoke 继续在本地受控目录内复制 Node runtime，避免修改共享工具缓存目录的 ACL。
 - 该修复已通过本地 builder contract、sandbox 证据测试、Node 语法检查、lint 和 diff check；下一次远端 CI 将验证文件/网络隔离探针是否可以完整运行。
+
+## 2026-10-07 Windows ACL 回滚范围收窄
+
+- 远端日志确认 Node 启动探针已经输出并正常退出；剩余超时发生在 helper 回滚工作区上层目录 ACL 时，属于过宽父级授权的清理问题。
+- ACL 现在只修改目标目录的直接父级遍历权限和目标目录自身权限，不再沿工作区/盘符继续修改共享父目录；保留句柄清理、有限等待和回滚逻辑。
+- 本地 builder contract、sandbox 证据测试、lint 和 diff check 继续通过；下一次远端运行用于确认完整 Windows 文件/网络隔离探针和证据校验。

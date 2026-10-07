@@ -310,13 +310,11 @@ bool grantDirectoryTraversal(const std::wstring& path, PSID appContainerSid, Acl
 
 bool grantDirectoryAncestors(const std::wstring& path, PSID appContainerSid, std::vector<std::unique_ptr<AclGrant>>& grants, bool debug) {
   std::filesystem::path current = std::filesystem::path(path).parent_path();
-  const std::filesystem::path root = current.root_path();
-  while (!current.empty() && current != current.parent_path() && current != root) {
+  if (!current.empty() && current != current.parent_path() && current != current.root_path()) {
     if (debug) std::wcerr << L"[sandbox] granting traversal: " << current.wstring() << std::endl;
     auto grant = std::make_unique<AclGrant>();
     if (!grantDirectoryTraversal(current.wstring(), appContainerSid, *grant)) return false;
     grants.push_back(std::move(grant));
-    current = current.parent_path();
   }
   return true;
 }
