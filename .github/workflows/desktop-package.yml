@@ -66,7 +66,13 @@ jobs:
           test -n "$APPLE_TEAM_ID" || { echo "CODEX_SWITCHER_APPLE_TEAM_ID is required for tagged releases" >&2; exit 1; }
 
       - name: Package macOS installers
-        run: npm run desktop:package:mac
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/desktop-v* ]]; then
+            npm run desktop:package:mac
+          else
+            env -u CSC_LINK -u CSC_KEY_PASSWORD -u APPLE_ID -u APPLE_APP_SPECIFIC_PASSWORD -u APPLE_TEAM_ID npm run desktop:package:mac
+          fi
 
       - name: Verify packaged macOS application
         run: |
@@ -159,7 +165,17 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_KEY_PASSWORD)) { throw "CODEX_SWITCHER_WINDOWS_CSC_KEY_PASSWORD is required for tagged releases" }
 
       - name: Package Windows installer
-        run: npm run desktop:package:win
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like "refs/tags/desktop-v*") {
+            npm run desktop:package:win
+          } else {
+            Remove-Item Env:WIN_CSC_LINK -ErrorAction SilentlyContinue
+            Remove-Item Env:WIN_CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
+            Remove-Item Env:CSC_LINK -ErrorAction SilentlyContinue
+            Remove-Item Env:CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
+            npm run desktop:package:win
+          }
 
       - name: Verify packaged Windows plugin sandbox helper
         shell: pwsh
@@ -256,8 +272,8 @@ jobs:
           deb="$(find apps/desktop/release -maxdepth 1 -name '*.deb' -print -quit)"
           test -n "$appimage"
           test -n "$deb"
-          npm run package:verify --workspace apps/desktop -- "$appimage"
-          npm run package:verify --workspace apps/desktop -- "$deb"
+          npm run package:verify --workspace apps/desktop -- "release/$(basename "$appimage")"
+          npm run package:verify --workspace apps/desktop -- "release/$(basename "$deb")"
 
       - name: Upload Linux installers
         uses: actions/upload-artifact@v7
