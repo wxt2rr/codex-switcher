@@ -21,6 +21,7 @@ export interface DesktopOperationsServiceOptions {
     }>;
     setManualProxy(value: string): Promise<string>;
     clearManualProxy(): Promise<void>;
+    disableProxy(): Promise<void>;
     runProxyCheck(): Promise<ExternalCommandResult>;
     getTokenRefreshStatus(): Promise<string>;
     startTokenRefreshGuard(): Promise<string>;
@@ -49,6 +50,7 @@ export interface DesktopOperationsService {
     setProxy(input: {
         value: string;
     }): Promise<DesktopActionResult>;
+    restoreProxyAutoDetect(): Promise<DesktopActionResult>;
     disableProxy(): Promise<DesktopActionResult>;
     testProxy(): Promise<DesktopActionResult & {
         taskId: string;

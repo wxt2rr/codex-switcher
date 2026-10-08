@@ -33,6 +33,7 @@ test("desktop bridge deleteAccount delegates to the core desktop operations serv
     logoutAccount: async () => ({ message: "ok" }),
     getProxyStatus: async () => ({ message: "ok" }),
     setProxy: async () => ({ message: "ok" }),
+    restoreProxyAutoDetect: async () => ({ message: "ok" }),
     disableProxy: async () => ({ message: "ok" }),
     testProxy: async () => ({ message: "ok" }),
     getTokenRefreshStatus: async () => ({ message: "ok" }),
@@ -70,6 +71,10 @@ test("desktop bridge proxy operations delegate to the core desktop operations se
       calls.push(`set-proxy:${value}`);
       return { message: "Updated proxy", output: `${value}\n` };
     },
+    restoreProxyAutoDetect: async () => {
+      calls.push("restore-proxy-auto");
+      return { message: "Restored automatic proxy detection" };
+    },
     disableProxy: async () => {
       calls.push("disable-proxy");
       return { message: "Disabled proxy" };
@@ -93,12 +98,14 @@ test("desktop bridge proxy operations delegate to the core desktop operations se
   try {
     await bridge.showProxy();
     await bridge.setProxy("http://127.0.0.1:7890");
+    await bridge.restoreProxyAutoDetect();
     await bridge.disableProxy();
     await bridge.testProxy();
 
     assert.deepEqual(calls, [
       "show-proxy",
       "set-proxy:http://127.0.0.1:7890",
+      "restore-proxy-auto",
       "disable-proxy",
       "test-proxy",
     ]);

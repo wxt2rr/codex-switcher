@@ -11,6 +11,19 @@ const Socks5ProxyAgent = (undici as typeof undici & {
 
 const agents = new Map<string, CloseableProxyAgent>();
 
+const UPSTREAM_HOP_BY_HOP_HEADERS = [
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "proxy-connection",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "http2-settings",
+];
+
 export type UpstreamProxySource = "route" | "global" | "direct";
 
 export interface UpstreamProxySelection {
@@ -89,8 +102,15 @@ export function fetchWithOptionalProxy(
     agents.set(normalized, created);
     agent = created;
   }
+  // undici calculates the request length from string/Buffer bodies. Keeping a
+  // caller-supplied Content-Length here is unsafe: after a proxy dispatcher is
+  // attached, undici validates it against its internal body framing and may
+  // reject the request before it reaches the upstream.
+  const headers = new Headers(init.headers);
+  for (const name of ["content-length", ...UPSTREAM_HOP_BY_HOP_HEADERS]) headers.delete(name);
   return fetchImpl(url, {
     ...init,
+    headers,
     dispatcher: agent,
   } as ProxyAwareRequestInit);
 }

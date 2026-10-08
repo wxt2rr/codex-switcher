@@ -53,6 +53,7 @@ test("normalizer preserves advanced JSON fields and creates stable defaults", ()
   assert.equal(normalized.slug, "custom-model");
   assert.deepEqual(normalized.vendor_extension, { enabled: true });
   assert.equal(normalized.default_reasoning_level, "medium");
+  assert.equal(normalized.prefer_websockets, false);
   assert.ok(normalized.truncation_policy);
 });
 

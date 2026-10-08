@@ -984,12 +984,17 @@ export function App() {
     }
   }
 
-  async function handleProxy(action: "auto-detect" | "set") {
+  async function handleProxy(action: "auto-detect" | "set" | "disable") {
     setBusy(true);
     try {
       if (action === "auto-detect") {
+        await bridge.restoreProxyAutoDetect();
         await loadProxyDraft(true);
         setTranslatedSuccessMessage(copy.message.proxyLoaded);
+      } else if (action === "disable") {
+        await bridge.disableProxy();
+        await loadProxyDraft(true);
+        setTranslatedSuccessMessage(copy.message.proxyDisabled);
       } else {
         await bridge.setProxy(proxyDraft.trim());
         proxyDraftDirtyRef.current = false;
@@ -1297,6 +1302,7 @@ export function App() {
           onLogKindChange={setSelectedLogKind}
           onProxyAutoDetect={() => void handleProxy("auto-detect")}
           onProxySet={() => void handleProxy("set")}
+          onProxyDisable={() => void handleProxy("disable")}
           onReadLog={() => void handleReadLog()}
           toolStatuses={toolStatuses}
           toolDrafts={toolDrafts}

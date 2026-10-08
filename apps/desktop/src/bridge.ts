@@ -380,6 +380,7 @@ export interface DesktopElectronApi {
   copyAccount(sourceEnvName: string, sourceAccountName: string, targetEnvName: string): Promise<DesktopActionResult>;
   showProxy(): Promise<DesktopActionResult>;
   setProxy(value: string): Promise<DesktopActionResult>;
+  restoreProxyAutoDetect(): Promise<DesktopActionResult>;
   disableProxy(): Promise<DesktopActionResult>;
   testProxy(): Promise<DesktopActionResult>;
   startTokenRefresh(): Promise<DesktopActionResult>;
@@ -496,6 +497,7 @@ export interface DesktopBridge {
   copyAccount(sourceEnvName: string, sourceAccountName: string, targetEnvName: string): Promise<DesktopActionResult>;
   showProxy(): Promise<DesktopActionResult>;
   setProxy(value: string): Promise<DesktopActionResult>;
+  restoreProxyAutoDetect(): Promise<DesktopActionResult>;
   disableProxy(): Promise<DesktopActionResult>;
   testProxy(): Promise<DesktopActionResult>;
   startTokenRefresh(): Promise<DesktopActionResult>;
@@ -608,6 +610,7 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       copyAccount: unavailable,
       showProxy: unavailable,
       setProxy: unavailable,
+      restoreProxyAutoDetect: unavailable,
       disableProxy: unavailable,
       testProxy: unavailable,
       startTokenRefresh: unavailable,
@@ -817,6 +820,7 @@ function createBrowserPreviewBridge(): DesktopBridge {
     copyAccount: () => browserPreviewAction(),
     showProxy: () => browserPreviewAction(),
     setProxy: () => browserPreviewAction(),
+    restoreProxyAutoDetect: () => browserPreviewAction(),
     disableProxy: () => browserPreviewAction(),
     testProxy: () => browserPreviewAction(),
     startTokenRefresh: () => browserPreviewAction(),

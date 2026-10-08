@@ -8,6 +8,9 @@ const execFileAsync = promisify(execFile);
 export function usageProxyFilePath(stateDir) {
     return join(stateDir, "usage_proxy");
 }
+export function usageProxyDisabledFilePath(stateDir) {
+    return join(stateDir, "usage_proxy_disabled");
+}
 export function normalizeUsageProxyValue(raw) {
     const value = raw.trim();
     if (!value || /\s/.test(value)) {
@@ -21,6 +24,12 @@ export function normalizeUsageProxyValue(raw) {
     return `http://${value}`;
 }
 export async function readUsageProxyState(stateDir, env = process.env, platform = process.platform) {
+    if (await readDisabledUsageProxy(stateDir)) {
+        return {
+            source: "off",
+            value: "",
+        };
+    }
     const manual = await readManualUsageProxy(stateDir);
     if (manual) {
         return {
@@ -72,6 +81,7 @@ export async function readUsageProxyState(stateDir, env = process.env, platform 
 }
 export async function setManualUsageProxy(stateDir, value) {
     const normalized = normalizeUsageProxyValue(value);
+    await rm(usageProxyDisabledFilePath(stateDir), { force: true });
     const file = usageProxyFilePath(stateDir);
     await mkdir(dirname(file), { recursive: true });
     await writeFileAtomically(file, `${normalized}\n`, { encoding: "utf8" });
@@ -79,6 +89,22 @@ export async function setManualUsageProxy(stateDir, value) {
 }
 export async function clearManualUsageProxy(stateDir) {
     await rm(usageProxyFilePath(stateDir), { force: true });
+    await rm(usageProxyDisabledFilePath(stateDir), { force: true });
+}
+export async function disableUsageProxy(stateDir) {
+    await rm(usageProxyFilePath(stateDir), { force: true });
+    const file = usageProxyDisabledFilePath(stateDir);
+    await mkdir(dirname(file), { recursive: true });
+    await writeFileAtomically(file, "1\n", { encoding: "utf8" });
+}
+async function readDisabledUsageProxy(stateDir) {
+    try {
+        await readFile(usageProxyDisabledFilePath(stateDir), "utf8");
+        return true;
+    }
+    catch {
+        return false;
+    }
 }
 async function readManualUsageProxy(stateDir) {
     try {

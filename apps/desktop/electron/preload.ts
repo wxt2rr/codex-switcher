@@ -115,6 +115,7 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     ipcRenderer.invoke("desktop:copyAccount", sourceEnvName, sourceAccountName, targetEnvName),
   showProxy: () => ipcRenderer.invoke("desktop:showProxy"),
   setProxy: (value: string) => ipcRenderer.invoke("desktop:setProxy", value),
+  restoreProxyAutoDetect: () => ipcRenderer.invoke("desktop:restoreProxyAutoDetect"),
   disableProxy: () => ipcRenderer.invoke("desktop:disableProxy"),
   testProxy: () => ipcRenderer.invoke("desktop:testProxy"),
   startTokenRefresh: () => ipcRenderer.invoke("desktop:startTokenRefresh"),

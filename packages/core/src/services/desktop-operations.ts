@@ -20,6 +20,7 @@ export interface DesktopOperationsServiceOptions {
   }>;
   setManualProxy(value: string): Promise<string>;
   clearManualProxy(): Promise<void>;
+  disableProxy(): Promise<void>;
   runProxyCheck(): Promise<ExternalCommandResult>;
   getTokenRefreshStatus(): Promise<string>;
   startTokenRefreshGuard(): Promise<string>;
@@ -45,6 +46,7 @@ export interface DesktopOperationsService {
   }): Promise<DesktopActionResult>;
   getProxyStatus(): Promise<DesktopActionResult>;
   setProxy(input: { value: string }): Promise<DesktopActionResult>;
+  restoreProxyAutoDetect(): Promise<DesktopActionResult>;
   disableProxy(): Promise<DesktopActionResult>;
   testProxy(): Promise<DesktopActionResult & { taskId: string }>;
   getTokenRefreshStatus(): Promise<DesktopActionResult>;
@@ -98,8 +100,16 @@ export function createDesktopOperationsService(
       };
     },
 
-    async disableProxy() {
+    async restoreProxyAutoDetect() {
       await options.clearManualProxy();
+      return {
+        message: "Restored automatic proxy detection",
+        output: "auto\n",
+      };
+    },
+
+    async disableProxy() {
+      await options.disableProxy();
       return {
         message: "Disabled proxy",
         output: "off\n",

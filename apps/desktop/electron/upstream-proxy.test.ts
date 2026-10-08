@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  closeUpstreamProxyAgents,
+  fetchWithOptionalProxy,
   normalizeUpstreamProxyUrl,
   resolveUpstreamProxy,
   shouldBypassUpstreamProxy,
@@ -30,4 +32,32 @@ test("HTTP, HTTPS, and SOCKS5 proxy URLs are normalized without embedded credent
   assert.equal(normalizeUpstreamProxyUrl("http://127.0.0.1:8000/"), "http://127.0.0.1:8000");
   assert.equal(normalizeUpstreamProxyUrl("socks5://127.0.0.1:1080/"), "socks5://127.0.0.1:1080");
   assert.throws(() => normalizeUpstreamProxyUrl("http://user:pass@127.0.0.1:8000"), /without embedded credentials/);
+});
+
+test("proxy dispatch removes a caller-supplied content length", async () => {
+  let received: RequestInit | undefined;
+  try {
+    const response = await fetchWithOptionalProxy(
+      "https://api.example.com/v1/responses",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json", "content-length": "999", connection: "Upgrade", upgrade: "h2c",
+          "http2-settings": "AAMAAABkAAQCAAAAAA==",
+        },
+        body: JSON.stringify({ model: "demo", input: [] }),
+      },
+      "http://127.0.0.1:7899",
+      async (_url, init) => {
+        received = init;
+        return new Response("ok", { status: 200 });
+      },
+    );
+    assert.equal(response.status, 200);
+    assert.equal(new Headers(received?.headers).has("content-length"), false);
+    assert.equal(new Headers(received?.headers).has("upgrade"), false);
+    assert.equal(new Headers(received?.headers).has("http2-settings"), false);
+  } finally {
+    await closeUpstreamProxyAgents();
+  }
 });

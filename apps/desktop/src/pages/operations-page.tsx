@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   Activity,
   FileSearch,
+  PowerOff,
   RefreshCw,
   RotateCcw,
   Save,
@@ -67,6 +68,7 @@ export function OperationsPage({
   onLogKindChange,
   onProxyAutoDetect,
   onProxySet,
+  onProxyDisable,
   onReadLog,
   toolStatuses,
   toolDrafts,
@@ -114,6 +116,7 @@ export function OperationsPage({
   onLogKindChange: (value: string) => void;
   onProxyAutoDetect: () => void;
   onProxySet: () => void;
+  onProxyDisable: () => void;
   onReadLog: () => void;
   toolStatuses: CodexToolStatus[];
   toolDrafts: Record<"cli" | "app", string>;
@@ -438,8 +441,9 @@ export function OperationsPage({
               className="h-9 rounded-lg border-neutral-200 bg-white text-[13px] shadow-none dark:border-white/[0.08] dark:bg-[#161c24]"
             />
             <div className="responsive-actions">
-              <IconActionButton icon={<Activity className="size-4" />} label={language === "zh" ? "自动检测" : "Auto Detect"} onClick={onProxyAutoDetect} disabled={busy} />
+              <IconActionButton icon={<Activity className="size-4" />} label={pageCopy.operations.proxyAuto} onClick={onProxyAutoDetect} disabled={busy} />
               <IconActionButton icon={<Wrench className="size-4" />} label={pageCopy.operations.proxySet} onClick={onProxySet} disabled={busy} />
+              <IconActionButton icon={<PowerOff className="size-4" />} label={pageCopy.operations.proxyOff} onClick={onProxyDisable} disabled={busy} />
             </div>
           </div>
         </OperationCard>

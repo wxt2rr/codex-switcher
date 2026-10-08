@@ -25,7 +25,7 @@ import type {
   GatewayEnvironmentState,
   GatewayRouteGroupDefinition,
 } from "../../../packages/core/dist/gateway/model.js";
-import { isLocalRouterBaseUrl, resolveRouteDisplayBaseUrl, selectCompatibilityUpstreamBaseUrl, type PricingProfile, type UsageFilter, type UsageRequestQuery, type UsageTraceQuery } from "./usage-routing-model.js";
+import { isLocalRouterBaseUrl, resolveRouteDisplayBaseUrl, selectCompatibilityUpstreamBaseUrl, type PricingProfile, type RouteProtocol, type UsageFilter, type UsageRequestQuery, type UsageTraceQuery } from "./usage-routing-model.js";
 import {
   buildEffectiveCodexEnv,
   getCodexToolStatus,
@@ -80,7 +80,10 @@ import {
   createModelCatalogStore,
   accountModelBindingKey,
   filterModelCatalogBindings,
+  normalizeCustomModelInput,
   type ModelBindingOptions,
+  type ModelCatalogEntry,
+  type ModelCatalogSnapshot,
   type SaveCustomModelInput,
 } from "./model-catalog-store.js";
 import {
@@ -356,7 +359,10 @@ function getEnvironmentRouteAccounts(
  * There is deliberately no prompt, classifier, or intent selector here.
  */
 function buildGatewayRouteBindings(
-  environment: { name: string; accounts: Record<string, { name: string; authMode: string }> },
+  environment: {
+    name: string;
+    accounts: Record<string, { name: string; authMode: string; runtime?: { apiProtocol?: string } }>;
+  },
   gateway: GatewayEnvironmentState,
 ): GatewayRouteBinding[] {
   const accountNamesByCredential = new Map<string, string>();
@@ -399,6 +405,12 @@ function buildGatewayRouteBindings(
   };
 
   const result: GatewayRouteBinding[] = [];
+  const protocolForAccount = (accountName: string): RouteProtocol => {
+    const account = environment.accounts[accountName];
+    return account?.authMode === "auth" || account?.runtime?.apiProtocol !== "chat_completions"
+      ? "responses"
+      : "chat_completions";
+  };
   const addBinding = (
     group: GatewayRouteGroupDefinition | undefined,
     member: GatewayRouteGroupDefinition["members"][number],
@@ -416,14 +428,18 @@ function buildGatewayRouteBindings(
     if (!accounts.length) return;
     const requestHeadersByAccount = headersByCredentialAccount(credentials, member.providerId);
     const proxyUrlByAccount = proxyByCredentialAccount(credentials, member.providerId);
+    const uniqueAccounts = [...new Set(accounts)];
+    const protocolByAccount = Object.fromEntries(uniqueAccounts.map((accountName) => [accountName, protocolForAccount(accountName)]));
+    const protocols = [...new Set([...(model.protocols ?? []), ...Object.values(protocolByAccount)])];
     result.push({
       providerId: member.providerId,
       modelId: model.id,
       upstreamModel: model.upstreamModelId,
       exposedModelId: group?.exposedModelId ?? model.id,
       ...(group ? { routeGroupId: group.id } : {}),
-      accountNames: [...new Set(accounts)],
-      protocols: model.protocols,
+      accountNames: uniqueAccounts,
+      protocols,
+      protocolByAccount,
       capabilities: model.capabilities,
       ...(Object.keys(requestHeadersByAccount).length ? { requestHeadersByAccount } : {}),
       ...(Object.keys(proxyUrlByAccount).length ? { proxyUrlByAccount } : {}),
@@ -455,13 +471,17 @@ function buildGatewayRouteBindings(
         .map((credential) => credential.id),
       model.providerId,
     );
+    const uniqueAccounts = [...new Set(credentials)];
+    const protocolByAccount = Object.fromEntries(uniqueAccounts.map((accountName) => [accountName, protocolForAccount(accountName)]));
+    const protocols = [...new Set([...(model.protocols ?? []), ...Object.values(protocolByAccount)])];
     result.push({
       providerId: model.providerId,
       modelId: model.id,
       upstreamModel: model.upstreamModelId,
       exposedModelId: model.id,
-      accountNames: [...new Set(credentials)],
-      protocols: model.protocols,
+      accountNames: uniqueAccounts,
+      protocols,
+      protocolByAccount,
       capabilities: model.capabilities,
       ...(Object.keys(requestHeadersByAccount).length ? { requestHeadersByAccount } : {}),
       ...(Object.keys(proxyUrlByAccount).length ? { proxyUrlByAccount } : {}),
@@ -752,6 +772,7 @@ async function restoreEnabledRoutes(): Promise<void> {
       gateway.routeGroups,
       buildGatewayRouteBindings(initialState.envs[environment.name]!, gateway),
       gateway.routeRules ?? [],
+      gateway.defaultRouteGroupId,
     );
     const cliStatus = await getCodexToolStatus("cli", getCodexToolPathOptions());
     await synchronizeEnvironmentGatewayModelCatalog({
@@ -799,6 +820,7 @@ export async function toggleEnvironmentGateway(envName: string, enabled: boolean
     generated.routeGroups,
     buildGatewayRouteBindings(env, generated),
     generated.routeRules ?? [],
+    generated.defaultRouteGroupId,
   );
   const gateway = {
     ...generated,
@@ -824,7 +846,40 @@ async function buildEnvironmentGatewayState(
 ): Promise<GatewayEnvironmentState> {
   const base = environment.gateway ?? runtime.buildLegacyGatewayEnvironmentState(environment);
   const snapshot = await getModelCatalogStore().load();
-  return applyModelCatalogBindings(environment, base, snapshot);
+  const bundledModels = await loadGatewayBundledModels(environment, snapshot);
+  return applyModelCatalogBindings(environment, base, snapshot, bundledModels);
+}
+
+async function loadGatewayBundledModels(
+  environment: { name: string; path: string },
+  snapshot: ModelCatalogSnapshot,
+): Promise<ModelCatalogEntry[]> {
+  const cliStatus = await getCodexToolStatus("cli", getCodexToolPathOptions());
+  if (cliStatus.available) {
+    try {
+      return (await loadBundledModelCatalog(cliStatus.path)).models;
+    } catch {
+      // A stale or partially installed CLI should not prevent the gateway
+      // from starting. Fall back to the last synchronized catalog below.
+    }
+  }
+
+  try {
+    const catalogPath = join(environment.path, "home", "model-catalogs", "codex-switcher-gateway-models.json");
+    const parsed = JSON.parse(await readFile(catalogPath, "utf8")) as unknown;
+    const rawModels = isRecord(parsed) && Array.isArray(parsed.models) ? parsed.models : [];
+    const customSlugs = new Set(snapshot.models.map((model) => model.entry.slug));
+    return rawModels
+      .filter(isRecord)
+      .filter((model) => typeof model.slug === "string" && !customSlugs.has(model.slug))
+      .map((model) => normalizeCustomModelInput(model));
+  } catch {
+    return [];
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function reapplyEnvironmentTargetHomes(
@@ -1011,6 +1066,7 @@ export async function discoverGatewayAdminModels(input: { envName: string; provi
       Object.fromEntries(Object.values(nextGateway.routeGroups).map((group) => [group.id, group])),
       buildGatewayRouteBindings(environment, nextGateway),
       nextGateway.routeRules ?? [],
+      nextGateway.defaultRouteGroupId,
     );
   }
   return {
@@ -1213,6 +1269,7 @@ export async function saveGatewayAdminConfiguration(input: SaveGatewayAdminConfi
         Object.fromEntries(Object.values(gateway.routeGroups).map((group) => [group.id, group])),
         buildGatewayRouteBindings(latest.envs[input.envName]!, gateway),
         gateway.routeRules ?? [],
+        gateway.defaultRouteGroupId,
       );
     }
   }
@@ -1257,6 +1314,7 @@ interface DesktopOperationsServiceLike {
   }): Promise<DesktopActionResult>;
   getProxyStatus(): Promise<DesktopActionResult>;
   setProxy(input: { value: string }): Promise<DesktopActionResult>;
+  restoreProxyAutoDetect(): Promise<DesktopActionResult>;
   disableProxy(): Promise<DesktopActionResult>;
   testProxy(): Promise<DesktopActionResult>;
   getTokenRefreshStatus(): Promise<DesktopActionResult>;
@@ -2394,6 +2452,7 @@ async function resynchronizeActiveEnvironmentGateways(
       gateway.routeGroups,
       buildGatewayRouteBindings(state.envs[environment.name]!, gateway),
       gateway.routeRules ?? [],
+      gateway.defaultRouteGroupId,
     );
     const cliStatus = await getCodexToolStatus("cli", getCodexToolPathOptions());
     await synchronizeEnvironmentGatewayModelCatalog({
@@ -2560,6 +2619,10 @@ export async function showProxy(): Promise<DesktopActionResult> {
 
 export async function setProxy(value: string): Promise<DesktopActionResult> {
   return (await loadDesktopOperationsService()).setProxy({ value });
+}
+
+export async function restoreProxyAutoDetect(): Promise<DesktopActionResult> {
+  return (await loadDesktopOperationsService()).restoreProxyAutoDetect();
 }
 
 export async function disableProxy(): Promise<DesktopActionResult> {
@@ -4162,6 +4225,10 @@ async function loadDesktopOperationsService(): Promise<DesktopOperationsServiceL
       const result = await support.clearManualUsageProxy(getStateDir());
       await getUsageRouterManager().refreshDefaultProxy();
       return result;
+    },
+    disableProxy: async () => {
+      await support.disableUsageProxy(getStateDir());
+      await getUsageRouterManager().refreshDefaultProxy();
     },
     runProxyCheck: async () => runProxyCheckDirect(),
     getTokenRefreshStatus: async () => readTokenRefreshStatusDirect(),

@@ -158,6 +158,7 @@ type DesktopCopy = {
     appProcess: string;
     proxyTitle: string;
     proxySubtitle: string;
+    proxyAuto: string;
     proxyAddress: string;
     proxyPlaceholder: string;
     proxyShow: string;
@@ -351,6 +352,7 @@ const copy: Record<UiLanguage, DesktopCopy> = {
       appProcess: "App 进程",
       proxyTitle: "代理",
       proxySubtitle: "",
+      proxyAuto: "自动检测",
       proxyAddress: "代理地址",
       proxyPlaceholder: "host:port 或 scheme://host:port",
       proxyShow: "查看",
@@ -542,6 +544,7 @@ const copy: Record<UiLanguage, DesktopCopy> = {
       appProcess: "App Process",
       proxyTitle: "Proxy",
       proxySubtitle: "",
+      proxyAuto: "Auto Detect",
       proxyAddress: "Proxy Address",
       proxyPlaceholder: "host:port or scheme://host:port",
       proxyShow: "Show",
@@ -733,6 +736,7 @@ const copy: Record<UiLanguage, DesktopCopy> = {
       appProcess: "App プロセス",
       proxyTitle: "プロキシ",
       proxySubtitle: "",
+      proxyAuto: "自動検出",
       proxyAddress: "プロキシアドレス",
       proxyPlaceholder: "host:port または scheme://host:port",
       proxyShow: "表示",

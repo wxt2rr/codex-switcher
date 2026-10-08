@@ -42,6 +42,7 @@ test("gateway model catalog namespaces provider models without slash-based slugs
     ["low", "medium", "high"],
   );
   assert.equal(entries[0]?.shell_type, "shell_command");
+  assert.equal(entries[0]?.prefer_websockets, false);
   assert.deepEqual(entries[0]?.truncation_policy, { mode: "bytes", limit: 10000 });
 });
 
@@ -110,4 +111,45 @@ test("gateway model entries use the complete Codex model catalog shape", () => {
   ]) {
     assert.ok(field in entry, `missing ${field}`);
   }
+});
+
+test("bundled Codex route groups do not duplicate the bundled model catalog", () => {
+  const entries = buildGatewayModelCatalog({
+    schemaVersion: 1,
+    mode: "gateway",
+    gatewayId: "gateway-work",
+    providers: {},
+    credentials: {},
+    models: {
+      builtin: {
+        id: "builtin-model:work:gpt-5.6-luna:chatgpt",
+        providerId: "chatgpt",
+        upstreamModelId: "gpt-5.6-luna",
+        displayName: "GPT-5.6 Luna",
+        protocols: ["responses"],
+        capabilities: { reasoning: true, tools: true, vision: true, streaming: true },
+        enabled: true,
+      },
+    },
+    routeGroups: {
+      builtin: {
+        id: "builtin-route-group:work:gpt-5.6-luna",
+        displayName: "GPT-5.6 Luna",
+        exposedModelId: "gpt-5.6-luna",
+        members: [{
+          providerId: "chatgpt",
+          modelId: "builtin-model:work:gpt-5.6-luna:chatgpt",
+          credentialSelector: { credentialIds: ["credential"] },
+          priority: 0,
+          weight: 1,
+        }],
+        strategy: "smart",
+        sessionPolicy: "auto",
+        fallbackEnabled: true,
+      },
+    },
+    catalogVersion: 1,
+  });
+
+  assert.deepEqual(entries, []);
 });

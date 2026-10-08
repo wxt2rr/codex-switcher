@@ -68,6 +68,7 @@ export interface CoreSupportModules {
   resolveCodexAppPath: CommandDiscoveryModule["resolveCodexAppPath"];
   resolveCommandPath: CommandDiscoveryModule["resolveCommandPath"];
   clearManualUsageProxy: ProxyModule["clearManualUsageProxy"];
+  disableUsageProxy: ProxyModule["disableUsageProxy"];
   readUsageProxyState: ProxyModule["readUsageProxyState"];
   setManualUsageProxy: ProxyModule["setManualUsageProxy"];
   createTaskRunner: TaskRunnerModule["createTaskRunner"];
@@ -258,6 +259,7 @@ async function loadCoreSupportModulesImpl(): Promise<CoreSupportModules> {
     resolveCodexAppPath: commandDiscoveryModule.resolveCodexAppPath,
     resolveCommandPath: commandDiscoveryModule.resolveCommandPath,
     clearManualUsageProxy: proxyModule.clearManualUsageProxy,
+    disableUsageProxy: proxyModule.disableUsageProxy,
     readUsageProxyState: proxyModule.readUsageProxyState,
     setManualUsageProxy: proxyModule.setManualUsageProxy,
     createTaskRunner: taskRunnerModule.createTaskRunner,

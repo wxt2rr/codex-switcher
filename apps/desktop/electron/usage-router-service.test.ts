@@ -2,16 +2,26 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { connect as connectSocket } from "node:net";
-import { mkdtemp, readdir } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { extractSafeErrorMessage, sanitizeRouterErrorMessage, startUsageRouterService } from "./usage-router-service.js";
+import { extractRouterErrorDiagnostics, extractSafeErrorMessage, sanitizeRouterErrorMessage, startUsageRouterService } from "./usage-router-service.js";
 import type { RouteTarget } from "./usage-routing-model.js";
 
 test("router diagnostics extract useful errors while redacting credentials", () => {
   assert.equal(extractSafeErrorMessage(JSON.stringify({ error: { message: "rate limited for sk-secretvalue" } })), "rate limited for sk-[REDACTED]");
   assert.equal(sanitizeRouterErrorMessage("Authorization=Bearer abc.def.ghi socket closed"), "Authorization=[REDACTED] socket closed");
+  assert.deepEqual(extractRouterErrorDiagnostics({
+    name: "TypeError",
+    message: "fetch failed",
+    cause: { name: "InvalidArgumentError", code: "UND_ERR_INVALID_ARG", message: "invalid content-length header" },
+  }), {
+    name: "TypeError",
+    message: "fetch failed",
+    code: null,
+    cause: "InvalidArgumentError: UND_ERR_INVALID_ARG: invalid content-length header",
+  });
 });
 
 test("account pool keeps session affinity and fails over once before relaying output", async () => {
@@ -315,10 +325,13 @@ test("native Responses routes preserve payload bytes, suffix and headers while r
 test("native Responses routes inject hydrated AUTH credentials and account identity", async () => {
   let upstreamAuthorization = "";
   let upstreamAccountId = "";
+  let upstreamStore: unknown;
   const upstream = createServer(async (request, response) => {
     upstreamAuthorization = String(request.headers.authorization ?? "");
     upstreamAccountId = String(request.headers["chatgpt-account-id"] ?? "");
-    for await (const _chunk of request) { /* drain */ }
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    upstreamStore = (JSON.parse(Buffer.concat(chunks).toString("utf8")) as { store?: unknown }).store;
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({ model: "gpt-auth", usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } }));
   });
@@ -348,6 +361,7 @@ test("native Responses routes inject hydrated AUTH credentials and account ident
   await routed.arrayBuffer();
   assert.equal(upstreamAuthorization, "Bearer auth-token");
   assert.equal(upstreamAccountId, "chat-account");
+  assert.equal(upstreamStore, false);
 
   await service.close();
   await new Promise<void>((resolve) => upstream.close(() => resolve()));
@@ -356,9 +370,13 @@ test("native Responses routes inject hydrated AUTH credentials and account ident
 test("native routes forward configured non-secret headers while protecting router-controlled headers", async () => {
   let providerScope = "";
   let authorization = "";
+  let upgrade = "";
+  let http2Settings = "";
   const upstream = createServer(async (request, response) => {
     providerScope = String(request.headers["x-provider-scope"] ?? "");
     authorization = String(request.headers.authorization ?? "");
+    upgrade = String(request.headers.upgrade ?? "");
+    http2Settings = String(request.headers["http2-settings"] ?? "");
     for await (const _chunk of request) { /* drain */ }
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({ id: "header-route", model: "header-model", usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } }));
@@ -369,7 +387,9 @@ test("native routes forward configured non-secret headers while protecting route
   const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
   const route = {
     routeId: "route-headers", envName: "work", accountName: "key", upstreamBaseUrl: `http://127.0.0.1:${address.port}/v1`, originalBaseUrl: "default",
-    protocol: "responses" as const, requestHeaders: { "x-provider-scope": "shared", authorization: "must-not-override" },
+    protocol: "responses" as const, requestHeaders: {
+      "x-provider-scope": "shared", authorization: "must-not-override", upgrade: "h2c", "http2-settings": "AAMAAABkAAQCAAAAAA==",
+    },
     reasoningProfile: "auto" as const, enabled: true, createdAt: 1, updatedAt: 1,
   };
   const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
@@ -386,6 +406,8 @@ test("native routes forward configured non-secret headers while protecting route
     await response.arrayBuffer();
     assert.equal(providerScope, "shared");
     assert.equal(authorization, "Bearer route-secret");
+    assert.equal(upgrade, "");
+    assert.equal(http2Settings, "");
     const [persisted] = await (await fetch(`${service.origin}/admin/routes`, { headers: adminHeaders })).json() as Array<{ requestHeaders?: Record<string, string> }>;
     assert.deepEqual(persisted?.requestHeaders, route.requestHeaders);
   } finally {
@@ -549,21 +571,104 @@ test("environment gateway persists, selects an account route, and survives route
   assert.equal((await routed.json()).id, "gateway-response-1");
   assert.equal(upstreamModel, "gpt-upstream");
   await new Promise((resolve) => setTimeout(resolve, 20));
-  const trace = await (await fetch(`${first.origin}/admin/trace?envName=work&gatewayId=${gateway.gatewayId}&limit=10`, { headers: adminHeaders })).json() as Array<{ event: string; routeId?: string; requestedModel?: string; reason?: string }>;
+  const trace = await (await fetch(`${first.origin}/admin/trace?envName=work&gatewayId=${gateway.gatewayId}&event=gateway_route_selected&limit=10`, { headers: adminHeaders })).json() as Array<{ event: string; routeId?: string; requestedModel?: string; reason?: string }>;
   assert.equal(trace[0]?.event, "gateway_route_selected");
   assert.equal(trace[0]?.routeId, route.routeId);
   assert.equal(trace[0]?.requestedModel, "gpt-shared");
   assert.equal(trace[0]?.reason, "route_group");
+  const withoutModel = await fetch(`${first.origin}/gateways/${gateway.gatewayId}/responses`, {
+    method: "POST",
+    headers: { authorization: "Bearer local-route", "content-type": "application/json" },
+    body: JSON.stringify({ input: "hello without an explicit model" }),
+  });
+  assert.equal(withoutModel.status, 200);
+  await withoutModel.arrayBuffer();
+  assert.equal(upstreamModel, "gpt-upstream");
   await first.close();
 
   const second = await startUsageRouterService({ stateDir, adminToken: "secret" });
   assert.deepEqual(await (await fetch(`${second.origin}/admin/gateways`, { headers: adminHeaders })).json(), [gateway]);
   const restarted = await call(second.origin);
   assert.equal(restarted.status, 200);
-  assert.equal((await restarted.json()).id, "gateway-response-2");
+  assert.equal((await restarted.json()).id, "gateway-response-3");
   assert.equal(upstreamModel, "gpt-upstream");
   await second.close();
   await new Promise<void>((resolve) => upstream.close(() => resolve()));
+});
+
+test("environment gateway records route diagnostics when no compatible route exists", async (testContext) => {
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-gateway-route-diagnostics-"));
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+  testContext.after(() => service.close());
+  const now = Date.now();
+  const route = {
+    routeId: "route-diagnostics",
+    envName: "other",
+    accountName: "account-a",
+    upstreamBaseUrl: "https://example.test/v1",
+    originalBaseUrl: "https://example.test/v1",
+    protocol: "responses" as const,
+    exposedModelId: "diagnostic-model",
+    reasoningProfile: "auto" as const,
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const gateway = {
+    gatewayId: "gateway-diagnostics",
+    envName: "work",
+    routeIds: [route.routeId],
+    defaultRouteId: route.routeId,
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, {
+    method: "PUT", headers: adminHeaders, body: JSON.stringify(route),
+  })).status, 204);
+  assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}/secret`, {
+    method: "PUT", headers: adminHeaders,
+    body: JSON.stringify({ upstreamApiKey: "route-key", localRouteToken: "local-route" }),
+  })).status, 204);
+  assert.equal((await fetch(`${service.origin}/admin/gateways`, {
+    method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway),
+  })).status, 204);
+
+  const response = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
+    method: "POST",
+    headers: { authorization: "Bearer local-route", "content-type": "application/json" },
+    body: JSON.stringify({ model: "diagnostic-model", input: "hello" }),
+  });
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), {
+    error: `Gateway '${gateway.gatewayId}' has no compatible route`,
+    code: "NO_ROUTE",
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const trace = await (await fetch(`${service.origin}/admin/trace?gatewayId=${gateway.gatewayId}&event=gateway_route_resolution_failed`, {
+    headers: { authorization: "Bearer secret" },
+  })).json() as Array<{
+    failureStage?: string;
+    environmentMismatchRouteIds?: string[];
+    loadedRouteIds?: string[];
+    availableRouteIds?: string[];
+    resolverCandidateRouteIds?: string[];
+    routeDiagnostics?: Array<{ routeId: string; envName: string | null; loaded: boolean; available: boolean }>;
+  }>;
+  assert.equal(trace.length, 1);
+  assert.equal(trace[0]?.failureStage, "route_filter");
+  assert.deepEqual(trace[0]?.environmentMismatchRouteIds, [route.routeId]);
+  assert.deepEqual(trace[0]?.loadedRouteIds, [route.routeId]);
+  assert.deepEqual(trace[0]?.availableRouteIds, [route.routeId]);
+  assert.deepEqual(trace[0]?.resolverCandidateRouteIds, []);
+  assert.deepEqual(trace[0]?.routeDiagnostics?.map(({ routeId, envName, loaded, available }) => ({ routeId, envName, loaded, available })), [{
+    routeId: route.routeId,
+    envName: route.envName,
+    loaded: true,
+    available: true,
+  }]);
 });
 
 test("environment gateway fails over a route group before the response starts", async () => {
@@ -614,6 +719,40 @@ test("environment gateway fails over a route group before the response starts", 
   assert.equal((await routed.json()).id, "group-fallback-success");
   assert.equal(firstCalls, 1);
   assert.equal(secondCalls, 1);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const attempts = await (await fetch(`${service.origin}/admin/trace?gatewayId=${gateway.gatewayId}&event=gateway_route_attempt`, { headers: adminHeaders })).json() as Array<{
+    requestId?: string;
+    routeId?: string;
+    accountName?: string;
+    attemptIndex?: number;
+    attemptCount?: number;
+    status?: number | null;
+    outcome?: string;
+    failureReason?: string | null;
+    errorMessage?: string | null;
+    proxySource?: string;
+    cooldownUntil?: number | null;
+  }>;
+  assert.equal(attempts.length, 2);
+  assert.equal(attempts[0]?.requestId, attempts[1]?.requestId);
+  const firstAttempt = attempts.find((attempt) => attempt.routeId === firstRoute.routeId);
+  const secondAttempt = attempts.find((attempt) => attempt.routeId === secondRoute.routeId);
+  assert.deepEqual({
+    accountName: firstAttempt?.accountName, attemptIndex: firstAttempt?.attemptIndex, attemptCount: firstAttempt?.attemptCount,
+    status: firstAttempt?.status, outcome: firstAttempt?.outcome, failureReason: firstAttempt?.failureReason,
+    errorMessage: firstAttempt?.errorMessage, proxySource: firstAttempt?.proxySource,
+  }, {
+    accountName: "first", attemptIndex: 1, attemptCount: 2, status: 429, outcome: "retry",
+    failureReason: "rate_limit", errorMessage: "rate limited", proxySource: "direct",
+  });
+  assert.deepEqual({
+    accountName: secondAttempt?.accountName, attemptIndex: secondAttempt?.attemptIndex, attemptCount: secondAttempt?.attemptCount,
+    status: secondAttempt?.status, outcome: secondAttempt?.outcome, failureReason: secondAttempt?.failureReason,
+    errorMessage: secondAttempt?.errorMessage, proxySource: secondAttempt?.proxySource,
+  }, {
+    accountName: "second", attemptIndex: 2, attemptCount: 2, status: 200, outcome: "success",
+    failureReason: null, errorMessage: null, proxySource: "direct",
+  });
   const health = await (await fetch(`${service.origin}/admin/gateways/${gateway.gatewayId}/health`, { headers: adminHeaders })).json() as Array<{ routeId: string; state: string }>;
   assert.equal(health.find((item) => item.routeId === firstRoute.routeId)?.state, "cooldown");
   assert.equal(health.find((item) => item.routeId === secondRoute.routeId)?.state, "healthy");
@@ -635,6 +774,54 @@ test("environment gateway fails over a route group before the response starts", 
     new Promise<void>((resolve) => firstUpstream.close(() => resolve())),
     new Promise<void>((resolve) => secondUpstream.close(() => resolve())),
   ]);
+});
+
+test("changing the global proxy clears gateway route cooldowns", async () => {
+  const upstream = createServer(async (request, response) => {
+    for await (const _chunk of request) { /* drain */ }
+    response.statusCode = 429;
+    response.end(JSON.stringify({ error: { message: "rate limited" } }));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const upstreamAddress = upstream.address();
+  assert(upstreamAddress && typeof upstreamAddress !== "string");
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-gateway-proxy-reset-"));
+  const route = {
+    routeId: "route-proxy-reset", envName: "work", accountName: "account", providerId: "provider-a",
+    exposedModelId: "provider-a:model", upstreamModel: "model-a", upstreamBaseUrl: `http://127.0.0.1:${upstreamAddress.port}/v1`,
+    originalBaseUrl: "default", protocol: "responses" as const, routeGroupId: "proxy-reset", reasoningProfile: "auto" as const,
+    enabled: true, createdAt: 1, updatedAt: 1,
+  };
+  const gateway = {
+    gatewayId: "gateway-proxy-reset", envName: "work", routeIds: [route.routeId],
+    routeGroups: { "proxy-reset": { id: "proxy-reset", exposedModelId: "proxy-reset", routeIds: [route.routeId], strategy: "order", sessionPolicy: "off", fallbackEnabled: false } },
+    defaultRouteId: route.routeId, enabled: true, createdAt: 1, updatedAt: 1,
+  };
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  try {
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(route) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}/secret`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ upstreamApiKey: "account-token", localRouteToken: "local-route" }) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway) })).status, 204);
+
+    const failed = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
+      method: "POST", headers: { authorization: "Bearer local-route", "content-type": "application/json" },
+      body: JSON.stringify({ model: "proxy-reset", input: "hello" }),
+    });
+    assert.equal(failed.status, 429);
+    const before = await (await fetch(`${service.origin}/admin/gateways/${gateway.gatewayId}/health`, { headers: adminHeaders })).json() as Array<{ routeId: string; state: string }>;
+    assert.equal(before.find((item) => item.routeId === route.routeId)?.state, "cooldown");
+
+    assert.equal((await fetch(`${service.origin}/admin/proxy`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ proxyUrl: "http://127.0.0.1:7899" }) })).status, 204);
+    const after = await (await fetch(`${service.origin}/admin/gateways/${gateway.gatewayId}/health`, { headers: adminHeaders })).json() as Array<{ routeId: string; state: string; cooldownUntil: number | null }>;
+    const reset = after.find((item) => item.routeId === route.routeId);
+    assert.equal(reset?.state, "healthy");
+    assert.equal(reset?.cooldownUntil, null);
+  } finally {
+    await service.close();
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    await rm(stateDir, { recursive: true, force: true });
+  }
 });
 
 test("environment gateway dispatches through its credential pool while keeping model groups explicit", async () => {

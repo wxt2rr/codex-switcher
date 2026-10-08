@@ -20,6 +20,9 @@ function createService() {
         clearManualProxy: async () => {
             calls.push("clear-proxy");
         },
+        disableProxy: async () => {
+            calls.push("disable-proxy");
+        },
         runProxyCheck: async () => ({
             stdout: "usage_api_proxy_test: ok\n",
             stderr: "",
@@ -74,5 +77,13 @@ test("desktop operations service returns off proxy status from adapter state", a
     const result = await service.getProxyStatus();
     assert.equal(result.message, "Loaded proxy status");
     assert.equal(result.output, "usage_api_proxy: off\n");
+});
+test("desktop operations separates restoring auto detection from disabling proxy", async () => {
+    const { calls, service } = createService();
+    const restored = await service.restoreProxyAutoDetect();
+    const disabled = await service.disableProxy();
+    assert.equal(restored.output, "auto\n");
+    assert.equal(disabled.output, "off\n");
+    assert.deepEqual(calls, ["clear-proxy", "disable-proxy"]);
 });
 //# sourceMappingURL=desktop-operations.test.js.map

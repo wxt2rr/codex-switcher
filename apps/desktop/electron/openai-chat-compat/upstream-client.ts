@@ -4,7 +4,10 @@ import { fetchWithOptionalProxy } from "../upstream-proxy.js";
 export const DEFAULT_TIMEOUTS = { connectMs: 10_000, firstByteMs: 30_000, idleMs: 120_000, totalMs: 600_000 };
 const retryableStatuses = new Set([408, 429, 502, 503, 504]);
 const allowedHeaders = new Set(["accept", "content-type", "user-agent", "x-request-id", "openai-organization", "openai-project"]);
-const blockedForwardHeaders = new Set(["authorization", "cookie", "set-cookie", "proxy-authorization", "host", "content-length", "connection", "transfer-encoding"]);
+const blockedForwardHeaders = new Set([
+  "authorization", "cookie", "set-cookie", "proxy-authorization", "host", "content-length", "connection",
+  "keep-alive", "proxy-authenticate", "proxy-connection", "te", "trailer", "transfer-encoding", "upgrade", "http2-settings",
+]);
 
 export interface ChatUpstreamClientOptions {
   fetchImpl?: typeof fetch;

@@ -191,6 +191,10 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       calls.push(`setProxy:${value}`);
       return { message: "ok" };
     },
+    restoreProxyAutoDetect: async () => {
+      calls.push("restoreProxyAutoDetect");
+      return { message: "ok" };
+    },
     disableProxy: async () => {
       calls.push("disableProxy");
       return { message: "ok" };
@@ -368,6 +372,7 @@ test("desktop bridge forwards calls to injected electron api", async () => {
   await bridge.copyAccount("project", "personal", "sandbox");
   await bridge.showProxy();
   await bridge.setProxy("http://127.0.0.1:7890");
+  await bridge.restoreProxyAutoDetect();
   await bridge.disableProxy();
   await bridge.testProxy();
   await bridge.startTokenRefresh();
@@ -418,6 +423,7 @@ test("desktop bridge forwards calls to injected electron api", async () => {
     "copyAccount:project:personal:sandbox",
     "showProxy",
     "setProxy:http://127.0.0.1:7890",
+    "restoreProxyAutoDetect",
     "disableProxy",
     "testProxy",
     "startTokenRefresh",

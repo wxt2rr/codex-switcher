@@ -142,6 +142,39 @@ test("environment gateway materializes explicit catalog models without intent ro
   }
 });
 
+test("gateway model routes use each bound account protocol and default to a model route", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-manager-gateway-protocols-"));
+  let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
+  const manager = new UsageRouterManager({
+    stateDir, serviceEntryPath: "unused",
+    launchService: async () => { service = await startUsageRouterService({ stateDir: join(stateDir, "usage-router") }); },
+  });
+  const update = async () => undefined;
+  const accounts = [
+    { envName: "work", accountName: "responses", authMode: "apikey", baseUrl: "https://responses.example/v1", apiKey: "sk-responses", providerId: "custom", protocol: "responses" as const },
+    { envName: "work", accountName: "chat", authMode: "apikey", baseUrl: "https://chat.example/v1", apiKey: "sk-chat", providerId: "custom", protocol: "chat_completions" as const },
+  ];
+  try {
+    await manager.enableEnvironmentGateway("work", accounts, update, {
+      shared: { id: "shared", exposedModelId: "shared-model", strategy: "order", sessionPolicy: "off", fallbackEnabled: true },
+    }, [{
+      providerId: "custom", modelId: "custom/shared", upstreamModel: "provider-shared", exposedModelId: "shared-model",
+      routeGroupId: "shared", accountNames: ["responses", "chat"], protocols: ["responses", "chat_completions"],
+      protocolByAccount: { responses: "responses", chat: "chat_completions" },
+    }], [], "shared");
+
+    const routes = await manager.listRoutes();
+    assert.equal(routes.find((route) => route.accountName === "responses" && route.exposedModelId === "shared-model")?.protocol, "responses");
+    assert.equal(routes.find((route) => route.accountName === "chat" && route.exposedModelId === "shared-model")?.protocol, "chat_completions");
+    assert.equal(routes.find((route) => route.accountName === "chat" && !route.exposedModelId)?.protocol, "chat_completions");
+    const gateway = (await manager.listEnvironmentGateways())[0];
+    const defaultRoute = routes.find((route) => route.routeId === gateway?.defaultRouteId);
+    assert.equal(defaultRoute?.exposedModelId, "shared-model");
+  } finally {
+    await service?.close();
+  }
+});
+
 test("environment gateway can sit on top of a credential pool and restore the pool URL", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-manager-gateway-pool-"));
   let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;

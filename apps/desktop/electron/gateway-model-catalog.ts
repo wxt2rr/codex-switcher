@@ -27,6 +27,10 @@ export function buildGatewayModelCatalog(gateway: GatewayEnvironmentState): Mode
     );
   }
   for (const group of Object.values(gateway.routeGroups)) {
+    // Official Codex models are already supplied by the bundled catalog. The
+    // gateway still needs their route groups, but must not emit duplicate
+    // catalog entries that collide with the bundled model definitions.
+    if (group.id.startsWith("builtin-route-group:")) continue;
     if (!group.members.length || !group.members.some((member) => gateway.models[member.modelId]?.enabled !== false)) continue;
     add(
       normalizeGatewayModelSlug(group.exposedModelId),

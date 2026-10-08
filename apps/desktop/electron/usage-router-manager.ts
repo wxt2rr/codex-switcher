@@ -98,6 +98,8 @@ export interface GatewayRouteBinding {
   routeGroupId?: string;
   accountNames: string[];
   protocols?: RouteTarget["protocol"][];
+  /** The protocol configured by each concrete account bound to this model. */
+  protocolByAccount?: Record<string, RouteTarget["protocol"]>;
   capabilities?: RouteCapabilities;
   requestHeadersByAccount?: Record<string, Record<string, string>>;
   proxyUrlByAccount?: Record<string, string>;
@@ -551,6 +553,7 @@ export class UsageRouterManager {
     }> = {},
     routeBindings: GatewayRouteBinding[] = [],
     routeRules: GatewayRouteRule[] = [],
+    defaultRouteGroupId?: string,
   ): Promise<EnvironmentRouteStatus> {
     const routeStatus = await this.enableEnvironment(envName, accounts, updateBaseUrl);
     const state = await this.ensureService();
@@ -572,7 +575,8 @@ export class UsageRouterManager {
       for (const accountName of binding.accountNames) {
         const account = accountByName.get(accountName);
         const baseRoute = baseRouteByAccount.get(accountName);
-        if (!account || !baseRoute || binding.protocols?.length && !binding.protocols.includes(baseRoute.protocol)) continue;
+        const protocol = binding.protocolByAccount?.[accountName] ?? account?.protocol ?? baseRoute?.protocol;
+        if (!account || !baseRoute || !protocol || binding.protocols?.length && !binding.protocols.includes(protocol)) continue;
         const routeId = createGatewayModelRouteId(envName, accountName, baseRoute.upstreamBaseUrl, binding.providerId, binding.modelId);
         modelRouteIds.add(routeId);
         const previousRoute = routes.find((route) => route.routeId === routeId);
@@ -583,7 +587,7 @@ export class UsageRouterManager {
           accountName,
           upstreamBaseUrl: baseRoute.upstreamBaseUrl,
           originalBaseUrl: baseRoute.originalBaseUrl,
-          protocol: baseRoute.protocol,
+          protocol,
           providerId: binding.providerId,
           exposedModelId: binding.exposedModelId,
           routeGroupId: binding.routeGroupId,
@@ -652,13 +656,24 @@ export class UsageRouterManager {
       ...(group.nestedGroupIds?.length ? { nestedGroupIds: group.nestedGroupIds } : {}),
       capabilities: group.capabilities,
     })).filter((group) => group.routeIds.length > 0 || Boolean(group.nestedGroupIds?.length));
+    const preferredGroup = defaultRouteGroupId
+      ? routeGroups.find((group) => group.id === defaultRouteGroupId)
+      : routeGroups[0];
+    const modelRoute = modelRouteIds.size
+      ? routes.find((route) => route.routeId === previous?.defaultRouteId && modelRouteIds.has(route.routeId))
+        ?? routes.find((route) => route.routeGroupId === preferredGroup?.id && modelRouteIds.has(route.routeId))
+        ?? routes.find((route) => modelRouteIds.has(route.routeId))
+      : undefined;
+    const defaultRoute = modelRoute ?? (previous?.defaultRouteId
+      ? routes.find((route) => route.routeId === previous.defaultRouteId)
+      : undefined) ?? routes[0];
     const gateway: EnvironmentGateway = {
       gatewayId: previous?.gatewayId ?? createEnvironmentGatewayId(envName),
       envName,
       routeIds: routes.map((route) => route.routeId),
       routeGroups: Object.fromEntries(routeGroups.map((group) => [group.id, group])),
       ...(routeRules.length ? { routeRules } : {}),
-      defaultRouteId: previous?.defaultRouteId ?? routes[0]?.routeId,
+      defaultRouteId: defaultRoute?.routeId,
       ...(pool ? { poolId: pool.poolId } : {}),
       enabled: true,
       createdAt: previous?.createdAt ?? now,
@@ -864,7 +879,7 @@ export class UsageRouterManager {
         const now = Date.now();
         const route: RouteTarget = {
           routeId, envName, accountName: account.accountName, upstreamBaseUrl,
-          originalBaseUrl, protocol: prior?.protocol ?? "responses",
+          originalBaseUrl, protocol: account.protocol ?? prior?.protocol ?? "responses",
           providerId: account.providerId ?? prior?.providerId ?? (account.authMode === "auth" ? "chatgpt" : "openai"),
           exposedModelId: account.upstreamModel
             ? `${account.providerId ?? prior?.providerId ?? (account.authMode === "auth" ? "chatgpt" : "openai")}:${account.upstreamModel}`

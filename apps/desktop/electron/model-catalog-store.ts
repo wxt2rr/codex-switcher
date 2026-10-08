@@ -188,6 +188,11 @@ export function normalizeCustomModelInput(value: Record<string, unknown>): Model
     input_modalities: ["text", "image"],
     supports_search_tool: false,
     ...value,
+    // The local route service exposes HTTP Responses endpoints.  Always
+    // disable the App's WebSocket transport for models managed by this
+    // catalog; otherwise a missing or user-provided value can make the App
+    // send a websocket handshake to the HTTP gateway.
+    prefer_websockets: false,
     slug,
     display_name: displayName,
   };

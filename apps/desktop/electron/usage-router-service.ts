@@ -86,6 +86,17 @@ interface RuntimePluginManager {
 interface RouteOutcomeTelemetry {
   latencyMs: number;
   estimatedTokens: number;
+  attemptIndex: number;
+  attemptCount: number;
+  outcome: "success" | "retry" | "returned" | "failed";
+  failureReason: PoolFailureReason | null;
+  errorMessage: string | null;
+  errorName?: string | null;
+  errorCode?: string | null;
+  errorCause?: string | null;
+  retryAfterMs: number | null;
+  proxySource: UpstreamProxySource;
+  upstreamProtocol: RouteProtocol;
 }
 
 /** Explicit request metadata used for observability; never contains prompt text or intent. */
@@ -155,6 +166,23 @@ function rewriteGatewayModel(body: Buffer | undefined, upstreamModel: string | u
     const record = parsed as Record<string, unknown>;
     if (record.model === upstreamModel) return body;
     return Buffer.from(JSON.stringify({ ...record, model: upstreamModel }));
+  } catch {
+    return body;
+  }
+}
+
+function normalizeAuthResponsesRequest(
+  body: Buffer | undefined,
+  route: RouteTarget,
+  secret: RouteRuntimeSecret | undefined,
+): Buffer | undefined {
+  if (!body?.length || route.protocol !== "responses" || secret?.authMode !== "auth") return body;
+  try {
+    const parsed = JSON.parse(body.toString("utf8")) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return body;
+    const record = parsed as Record<string, unknown>;
+    if (record.store === false) return body;
+    return Buffer.from(JSON.stringify({ ...record, store: false }));
   } catch {
     return body;
   }
@@ -269,7 +297,7 @@ async function readJson(request: IncomingMessage, maxBytes = 1024 * 1024): Promi
 async function relayResponse(source: Response, target: ServerResponse, tap?: { push(chunk: Uint8Array): void }): Promise<void> {
   target.statusCode = source.status;
   source.headers.forEach((value, name) => {
-    if (!["content-length", "transfer-encoding", "connection"].includes(name.toLowerCase())) target.setHeader(name, value);
+    if (!HOP_BY_HOP_HEADERS.has(name.toLowerCase()) && name.toLowerCase() !== "content-length") target.setHeader(name, value);
   });
   if (source.body) {
     const reader = source.body.getReader();
@@ -282,6 +310,23 @@ async function relayResponse(source: Response, target: ServerResponse, tap?: { p
   }
   target.end();
 }
+
+// These headers describe the client-to-next-hop connection. Forwarding them
+// to an upstream through undici/ProxyAgent can trigger protocol validation
+// errors (notably `invalid upgrade header`) and they are not meaningful to the
+// provider connection created by the router.
+const HOP_BY_HOP_HEADERS = new Set([
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "proxy-connection",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "http2-settings",
+]);
 
 function isAuthorized(request: IncomingMessage, token: string): boolean {
   return request.headers.authorization === `Bearer ${token}`;
@@ -319,7 +364,7 @@ function requestQueryFromUrl(url: URL): UsageRequestQuery {
 
 function forwardedHeaders(headers: IncomingHttpHeaders): Headers {
   const result = new Headers();
-  const blocked = new Set(["host", "content-length", "connection", "transfer-encoding"]);
+  const blocked = new Set(["host", "content-length", ...HOP_BY_HOP_HEADERS]);
   for (const [name, value] of Object.entries(headers)) {
     if (blocked.has(name.toLowerCase()) || value === undefined) continue;
     if (Array.isArray(value)) value.forEach((item) => result.append(name, item));
@@ -333,8 +378,7 @@ const BLOCKED_CONFIGURED_HEADERS = new Set([
   "cookie",
   "host",
   "content-length",
-  "connection",
-  "transfer-encoding",
+  ...HOP_BY_HOP_HEADERS,
 ]);
 
 function applyConfiguredRouteHeaders(headers: Headers, configured: Record<string, string> | undefined): void {
@@ -450,6 +494,57 @@ export function sanitizeRouterErrorMessage(value: unknown): string | null {
   return normalized ? normalized.slice(0, 600) : null;
 }
 
+export interface RouterErrorDiagnostics {
+  name: string | null;
+  message: string | null;
+  code: string | null;
+  cause: string | null;
+}
+
+function errorRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" ? value as Record<string, unknown> : undefined;
+}
+
+function errorField(value: unknown, field: string): string | null {
+  const record = errorRecord(value);
+  const fieldValue = record?.[field];
+  return typeof fieldValue === "string" && fieldValue.trim() ? fieldValue.trim() : null;
+}
+
+/**
+ * Keep the complete transport chain useful without persisting request content
+ * or credentials. This is intentionally shallow because causes can be cyclic
+ * in third-party errors.
+ */
+export function extractRouterErrorDiagnostics(value: unknown): RouterErrorDiagnostics {
+  let current: unknown = value;
+  let name: string | null = null;
+  let message: string | null = null;
+  let code: string | null = null;
+  const causes: string[] = [];
+  const visited = new Set<unknown>();
+  for (let depth = 0; current !== undefined && current !== null && depth < 4; depth += 1) {
+    if (typeof current === "object" && visited.has(current)) break;
+    if (typeof current === "object") visited.add(current);
+    const currentName = errorField(current, "name");
+    const currentMessage = current instanceof Error ? current.message : errorField(current, "message")
+      ?? (typeof current === "string" ? current : null);
+    const currentCode = errorField(current, "code") ?? errorField(current, "errno");
+    if (depth === 0) {
+      name = currentName;
+      message = sanitizeRouterErrorMessage(currentMessage);
+      code = sanitizeRouterErrorMessage(currentCode);
+    } else {
+      const summary = [currentName, currentCode, sanitizeRouterErrorMessage(currentMessage)].filter(Boolean).join(": ");
+      if (summary) causes.push(summary);
+    }
+    const next = errorRecord(current)?.cause;
+    if (next === undefined || next === null) break;
+    current = next;
+  }
+  return { name, message, code, cause: causes.length ? sanitizeRouterErrorMessage(causes.join(" <- ")) : null };
+}
+
 function proxySourceLabel(source: UpstreamProxySource): string {
   if (source === "route") return "explicit proxy";
   if (source === "global") return "global proxy";
@@ -457,7 +552,10 @@ function proxySourceLabel(source: UpstreamProxySource): string {
 }
 
 function safeUpstreamFailureMessage(error: unknown, source: UpstreamProxySource, fallback: string): string {
-  return `${sanitizeRouterErrorMessage(error) ?? fallback} (${proxySourceLabel(source)})`;
+  const diagnostics = extractRouterErrorDiagnostics(error);
+  const detail = [diagnostics.message ?? fallback, diagnostics.code ? `code=${diagnostics.code}` : null,
+    diagnostics.cause ? `cause=${diagnostics.cause}` : null].filter(Boolean).join("; ");
+  return `${detail} (${proxySourceLabel(source)})`;
 }
 
 export function extractSafeErrorMessage(value: string, fallback?: string): string | null {
@@ -483,6 +581,15 @@ export function extractSafeErrorMessage(value: string, fallback?: string): strin
     return sanitizeRouterErrorMessage(trimmed);
   }
   return sanitizeRouterErrorMessage(fallback);
+}
+
+async function extractSafeUpstreamResponseError(response: Response, fallback: string): Promise<string | null> {
+  if (response.ok) return null;
+  try {
+    return extractSafeErrorMessage((await response.clone().text()).slice(0, 64 * 1024), fallback);
+  } catch {
+    return extractSafeErrorMessage("", fallback);
+  }
 }
 
 async function proxyAccountPoolRequest(
@@ -579,7 +686,6 @@ async function proxyAccountPoolRequest(
     const upstream = `${effectiveRoute.upstreamBaseUrl.replace(/\/+$/, "")}/${routeSuffix.replace(/^\/+/, "")}`;
     const headers = forwardedHeaders(request.headers);
     applyConfiguredRouteHeaders(headers, effectiveRoute.requestHeaders);
-    if (candidateBody.length) headers.set("content-length", String(candidateBody.byteLength));
     headers.set("authorization", `Bearer ${secret.upstreamBearerToken}`);
     headers.delete("chatgpt-account-id");
     if (secret.authMode === "auth" && secret.accountId) headers.set("chatgpt-account-id", secret.accountId);
@@ -726,9 +832,19 @@ async function proxyRequest(
   let lastRetryableRoute: RouteTarget | undefined;
   let lastError: unknown;
   const attempts: UsageRequestAttempt[] = [];
+  const requiresAuthResponsesBody = candidates.some((candidate) => {
+    if (candidate.protocol !== "responses") return false;
+    const candidateSecret = resolveSecret?.(candidate) ?? (candidate.routeId === route.routeId ? secret : undefined);
+    return candidateSecret?.authMode === "auth";
+  });
+  const requestBody = bodyOverride ?? (requiresAuthResponsesBody && request.method !== "GET" && request.method !== "HEAD"
+    ? await readRequestBodyBuffer(request)
+    : undefined);
   for (const [index, candidate] of candidates.entries()) {
     selectedRoute = candidate;
-    let candidateBody = rewriteGatewayModel(bodyOverride, candidate.upstreamModel);
+    const candidateSecret = resolveSecret?.(candidate) ?? (candidate.routeId === route.routeId ? secret : undefined);
+    let candidateBody = rewriteGatewayModel(requestBody, candidate.upstreamModel);
+    candidateBody = normalizeAuthResponsesRequest(candidateBody, candidate, candidateSecret);
     if (candidateBody && incomingProtocol && candidate.protocol !== incomingProtocol) {
       const parsed = parseRequestBody(candidateBody);
       if (parsed) {
@@ -744,8 +860,6 @@ async function proxyRequest(
     try {
       const headers = forwardedHeaders(request.headers);
       applyConfiguredRouteHeaders(headers, candidate.requestHeaders);
-      if (candidateBody) headers.set("content-length", String(candidateBody.byteLength));
-      const candidateSecret = resolveSecret?.(candidate) ?? (candidate.routeId === route.routeId ? secret : undefined);
       const providerAdapter = resolveProviderAdapter?.(candidate.providerId);
       if (providerAdapter && candidateSecret) {
         const account = {
@@ -771,43 +885,66 @@ async function proxyRequest(
       const convertedResponse = incomingProtocol && candidate.protocol !== incomingProtocol
         ? await convertUpstreamResponse(response, candidate.protocol, incomingProtocol)
         : response;
+      const responseReason = classifyPoolFailure(convertedResponse.status);
+      const responseRetryAfterMs = retryAfterMs(convertedResponse) ?? null;
       if (!convertedResponse.ok && index < candidates.length - 1
-        && isPoolRetryableFailure(classifyPoolFailure(convertedResponse.status), convertedResponse.status)) {
-        onOutcome?.(candidate, false, convertedResponse.status, { latencyMs: Date.now() - attemptStartedAt, estimatedTokens });
-        const retryAfter = retryAfterMs(convertedResponse) ?? null;
+        && isPoolRetryableFailure(responseReason, convertedResponse.status)) {
         const body = Buffer.from(await convertedResponse.arrayBuffer());
+        const errorMessage = extractSafeErrorMessage(body.toString("utf8"), `Upstream returned HTTP ${convertedResponse.status}`);
+        onOutcome?.(candidate, false, convertedResponse.status, {
+          latencyMs: Date.now() - attemptStartedAt, estimatedTokens,
+          attemptIndex: index + 1, attemptCount: candidates.length, outcome: "retry",
+          failureReason: responseReason, errorMessage, retryAfterMs: responseRetryAfterMs,
+          proxySource: proxy.source, upstreamProtocol: candidate.protocol,
+        });
         attempts.push({
           accountName: candidate.accountName, startedAt: attemptStartedAt, completedAt: Date.now(),
-          httpStatus: convertedResponse.status, reason: sanitizePoolFailureReason(classifyPoolFailure(convertedResponse.status)),
-          errorMessage: extractSafeErrorMessage(body.toString("utf8"), `Upstream returned HTTP ${convertedResponse.status}`),
-          retryAfterMs: retryAfter, outcome: "retry",
+          httpStatus: convertedResponse.status, reason: responseReason, errorMessage,
+          retryAfterMs: responseRetryAfterMs, outcome: "retry",
         });
         lastRetryableResponse = {
           status: convertedResponse.status,
           headers: new Headers(convertedResponse.headers),
           body,
-          retryAfterMs: retryAfter,
+          retryAfterMs: responseRetryAfterMs,
         };
         lastRetryableRoute = candidate;
         continue;
       }
-      onOutcome?.(candidate, convertedResponse.ok, convertedResponse.status, { latencyMs: Date.now() - attemptStartedAt, estimatedTokens });
+      const errorMessage = await extractSafeUpstreamResponseError(convertedResponse, `Upstream returned HTTP ${convertedResponse.status}`);
+      onOutcome?.(candidate, convertedResponse.ok, convertedResponse.status, {
+        latencyMs: Date.now() - attemptStartedAt, estimatedTokens,
+        attemptIndex: index + 1, attemptCount: candidates.length,
+        outcome: convertedResponse.ok ? "success" : "returned",
+        failureReason: convertedResponse.ok ? null : responseReason,
+        errorMessage, retryAfterMs: responseRetryAfterMs,
+        proxySource: proxy.source, upstreamProtocol: candidate.protocol,
+      });
       upstreamResponse = convertedResponse;
       attempts.push({
         accountName: candidate.accountName, startedAt: attemptStartedAt, completedAt: Date.now(),
-        httpStatus: convertedResponse.status, reason: convertedResponse.ok ? null : sanitizePoolFailureReason(classifyPoolFailure(convertedResponse.status)),
-        errorMessage: convertedResponse.ok ? null : `Upstream returned HTTP ${convertedResponse.status}`,
-        retryAfterMs: retryAfterMs(convertedResponse) ?? null,
+        httpStatus: convertedResponse.status, reason: convertedResponse.ok ? null : responseReason,
+        errorMessage, retryAfterMs: responseRetryAfterMs,
         outcome: convertedResponse.ok ? "success" : "returned",
       });
       break;
     } catch (error) {
-      onOutcome?.(candidate, false, null, { latencyMs: Date.now() - attemptStartedAt, estimatedTokens });
+      const failureReason = classifyPoolFailure(null, error);
+      const errorMessage = safeUpstreamFailureMessage(error, proxy.source, "Unable to connect to upstream");
+      const diagnostics = extractRouterErrorDiagnostics(error);
+      onOutcome?.(candidate, false, null, {
+        latencyMs: Date.now() - attemptStartedAt, estimatedTokens,
+        attemptIndex: index + 1, attemptCount: candidates.length,
+        outcome: index < candidates.length - 1 ? "retry" : "failed",
+        failureReason, errorMessage, retryAfterMs: null,
+        errorName: diagnostics.name, errorCode: diagnostics.code, errorCause: diagnostics.cause,
+        proxySource: proxy.source, upstreamProtocol: candidate.protocol,
+      });
       lastError = error;
       attempts.push({
         accountName: candidate.accountName, startedAt: attemptStartedAt, completedAt: Date.now(),
-        httpStatus: null, reason: sanitizePoolFailureReason(classifyPoolFailure(null, error)),
-        errorMessage: safeUpstreamFailureMessage(error, proxy.source, "Unable to connect to upstream"), retryAfterMs: null,
+        httpStatus: null, reason: failureReason,
+        errorMessage, retryAfterMs: null,
         outcome: index < candidates.length - 1 ? "retry" : "failed",
       });
       if (index < candidates.length - 1) continue;
@@ -1108,6 +1245,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
         if (!isAuthorized(request, adminToken)) return sendJson(response, 401, { error: "Unauthorized" });
         if (url.pathname === "/admin/proxy" && request.method === "PUT") {
           const payload = await readJson(request) as { proxyUrl?: unknown };
+          const previousProxyUrl = defaultProxyUrl;
           if (payload.proxyUrl === undefined || payload.proxyUrl === null || payload.proxyUrl === "") {
             defaultProxyUrl = undefined;
           } else if (typeof payload.proxyUrl !== "string") {
@@ -1118,6 +1256,10 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
             } catch (error) {
               return sendJson(response, 400, { error: error instanceof Error ? error.message : "Invalid default proxy URL" });
             }
+          }
+          if (previousProxyUrl !== defaultProxyUrl) {
+            await closeUpstreamProxyAgents();
+            gatewayHealth.clear();
           }
           response.statusCode = 204;
           return response.end();
@@ -1345,8 +1487,14 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
         const gatewayProtocol = detectGatewayProtocol(gatewayRouteSuffix);
         const parsedGatewayBody = bodyOverride?.length ? parseRequestBody(bodyOverride) : undefined;
         const requestedModel = extractProtocolModel(gatewayProtocol, gatewayRouteSuffix, parsedGatewayBody);
+        const gatewayRequestId = randomUUID();
+        const gatewayRoutes = gateway.routeIds
+          .map((routeId) => routes.get(routeId))
+          .filter((route): route is RouteTarget => route !== undefined);
+        const availableGatewayRoutes = gatewayRoutes.filter((route) => gatewayRouteAvailable(gateway, route));
+        const resolverCandidateRoutes = availableGatewayRoutes.filter((route) => route.enabled && route.envName === gateway.envName);
         const routeResult = resolveModelRoute(
-          gateway.routeIds.map((routeId) => routes.get(routeId)).filter((route): route is RouteTarget => route !== undefined && gatewayRouteAvailable(gateway, route)),
+          availableGatewayRoutes,
           {
             gatewayId,
             envName: gateway.envName,
@@ -1363,7 +1511,51 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           gateway.defaultRouteId,
           gateway.routeGroups,
         );
-        if ("code" in routeResult) return sendJson(response, routeResult.code === "NO_ROUTE" ? 503 : 404, { error: routeResult.message, code: routeResult.code });
+        if ("code" in routeResult) {
+          const persistedRoutes = await store.listRoutes().catch(() => [] as RouteTarget[]);
+          const persistedRoutesById = new Map(persistedRoutes.map((route) => [route.routeId, route]));
+          const routeDiagnostics = gateway.routeIds.map((routeId) => {
+            const loadedRoute = routes.get(routeId);
+            const persistedRoute = persistedRoutesById.get(routeId);
+            const health = gatewayHealth.get(gatewayRouteMetricKey(gateway, routeId));
+            return {
+              routeId,
+              accountName: persistedRoute?.accountName ?? loadedRoute?.accountName ?? null,
+              envName: persistedRoute?.envName ?? loadedRoute?.envName ?? null,
+              protocol: persistedRoute?.protocol ?? loadedRoute?.protocol ?? null,
+              enabled: persistedRoute?.enabled ?? loadedRoute?.enabled ?? false,
+              loaded: Boolean(loadedRoute),
+              available: Boolean(loadedRoute && gatewayRouteAvailable(gateway, loadedRoute)),
+              cooldownUntil: health?.cooldownUntil ?? null,
+            };
+          });
+          void recordPoolEvent({
+            event: "gateway_route_resolution_failed",
+            at: Date.now(),
+            requestId: gatewayRequestId,
+            gatewayId,
+            envName: gateway.envName,
+            protocol: gatewayProtocol,
+            requestedModel: requestedModel ?? null,
+            requestedAccountName: request.headers["x-codex-account"]?.toString().trim() || null,
+            requiredCapabilities: inferGatewayCapabilities(parsedGatewayBody),
+            failureCode: routeResult.code,
+            failureMessage: routeResult.message,
+            failureStage: resolverCandidateRoutes.length === 0 ? "route_filter" : "model_or_capability_filter",
+            configuredRouteIds: gateway.routeIds,
+            loadedRouteIds: gatewayRoutes.map((route) => route.routeId),
+            availableRouteIds: availableGatewayRoutes.map((route) => route.routeId),
+            resolverCandidateRouteIds: resolverCandidateRoutes.map((route) => route.routeId),
+            missingRouteIds: gateway.routeIds.filter((routeId) => !persistedRoutesById.has(routeId)),
+            disabledRouteIds: routeDiagnostics.filter((route) => route.enabled === false && persistedRoutesById.has(route.routeId)).map((route) => route.routeId),
+            environmentMismatchRouteIds: routeDiagnostics.filter((route) => route.envName !== null && route.envName !== gateway.envName).map((route) => route.routeId),
+            protocolMismatchRouteIds: routeDiagnostics.filter((route) => route.protocol !== null && route.protocol !== gatewayProtocol).map((route) => route.routeId),
+            cooldownRouteIds: routeDiagnostics.filter((route) => route.loaded && !route.available).map((route) => route.routeId),
+            routeGroupIds: Object.keys(gateway.routeGroups ?? {}),
+            routeDiagnostics,
+          });
+          return sendJson(response, routeResult.code === "NO_ROUTE" ? 503 : 404, { error: routeResult.message, code: routeResult.code });
+        }
         const route = routeResult.route;
         const gatewayUsageContext: UsageTelemetryContext = {
           logicalModel: requestedModel ?? null,
@@ -1378,6 +1570,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
         void recordPoolEvent({
           event: "gateway_route_selected",
           at: Date.now(),
+          requestId: gatewayRequestId,
           gatewayId,
           envName: gateway.envName,
           requestedModel: requestedModel ?? null,
@@ -1437,6 +1630,33 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           : [];
         const onGatewayRouteOutcome = (candidate: RouteTarget, success: boolean, status: number | null, telemetry: RouteOutcomeTelemetry): void => {
           recordGatewayRouteOutcome(gateway, candidate, success, status, telemetry);
+          void recordPoolEvent({
+            event: "gateway_route_attempt",
+            at: Date.now(),
+            requestId: gatewayRequestId,
+            gatewayId,
+            envName: gateway.envName,
+            requestedModel: requestedModel ?? null,
+            routeId: candidate.routeId,
+            accountName: candidate.accountName,
+            providerId: candidate.providerId ?? null,
+            ingressProtocol: gatewayProtocol,
+            upstreamProtocol: telemetry.upstreamProtocol,
+            attemptIndex: telemetry.attemptIndex,
+            attemptCount: telemetry.attemptCount,
+            status,
+            success,
+            outcome: telemetry.outcome,
+            failureReason: telemetry.failureReason,
+            errorMessage: telemetry.errorMessage,
+            errorName: telemetry.errorName ?? null,
+            errorCode: telemetry.errorCode ?? null,
+            errorCause: telemetry.errorCause ?? null,
+            retryAfterMs: telemetry.retryAfterMs,
+            latencyMs: telemetry.latencyMs,
+            proxySource: telemetry.proxySource,
+            cooldownUntil: gatewayHealth.get(gatewayRouteMetricKey(gateway, candidate.routeId))?.cooldownUntil ?? null,
+          });
         };
         return await proxyRequest(
           request,

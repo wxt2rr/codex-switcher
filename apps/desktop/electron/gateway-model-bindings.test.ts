@@ -33,6 +33,17 @@ function environment(): EnvState {
           apiProtocol: "responses",
         },
       },
+      codex: {
+        name: "codex",
+        authMode: "auth",
+        runtime: {
+          preferredAuthMethod: "chatgpt",
+          openaiBaseUrlMode: "custom",
+          openaiBaseUrl: "https://chatgpt.example/backend-api/codex",
+          providerId: "chatgpt",
+          apiProtocol: "responses",
+        },
+      },
     },
   };
 }
@@ -43,7 +54,14 @@ function snapshot(): ModelCatalogSnapshot {
     models: [
       {
         id: "model-shared",
-        entry: { slug: "shared-model", display_name: "Shared Model" },
+        entry: {
+          slug: "shared-model",
+          display_name: "Shared Model",
+          supports_parallel_tool_calls: false,
+          tool_mode: null,
+          apply_patch_tool_type: "freeform",
+          shell_type: "shell_command",
+        },
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
       },
@@ -86,7 +104,67 @@ test("model page bindings compile into an environment-scoped route group", () =>
     Object.values(result.models).map((model) => model.upstreamModelId).sort(),
     ["alpha-shared", "beta-shared"],
   );
+  assert.equal(group.capabilities?.tools, true);
   assert.equal(Object.values(result.routeGroups).some((candidate) => candidate.exposedModelId === "other-env-model"), false);
+});
+
+test("explicitly disabled tool models remain incompatible with tool requests", () => {
+  const env = environment();
+  const disabled: ModelCatalogSnapshot = {
+    version: 1,
+    models: [{
+      id: "model-disabled-tools",
+      entry: {
+        slug: "disabled-tools",
+        display_name: "Disabled Tools",
+        tools: false,
+        tool_mode: "disabled",
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }],
+    accountBindings: { "wangxt/alpha": ["model-disabled-tools"] },
+    accountBindingOptions: {
+      "wangxt/alpha": { "model-disabled-tools": { upstreamModelId: "disabled-tools" } },
+    },
+  };
+
+  const result = applyModelCatalogBindings(
+    env,
+    buildLegacyGatewayEnvironmentState(env),
+    disabled,
+  );
+  const group = Object.values(result.routeGroups).find((candidate) => candidate.exposedModelId === "disabled-tools");
+  assert.ok(group);
+  assert.equal(group.capabilities?.tools, false);
+});
+
+test("bundled Codex models compile into route groups for AUTH accounts", () => {
+  const env = environment();
+  const result = applyModelCatalogBindings(
+    env,
+    buildLegacyGatewayEnvironmentState(env),
+    snapshot(),
+    [{
+      slug: "gpt-5.6-luna",
+      display_name: "GPT-5.6 Luna",
+      supported_in_api: true,
+      supported_reasoning_levels: [{ effort: "medium", description: "Balanced" }],
+      shell_type: "shell_command",
+      input_modalities: ["text", "image"],
+      supports_parallel_tool_calls: true,
+      tool_mode: null,
+    }],
+  );
+
+  const group = Object.values(result.routeGroups).find((candidate) => candidate.exposedModelId === "gpt-5.6-luna");
+  assert.ok(group);
+  assert.equal(group.id, "builtin-route-group:wangxt:gpt-5.6-luna");
+  assert.deepEqual(group.members.map((member) => member.credentialSelector.credentialIds), [["credential:wangxt:codex"]]);
+  const model = Object.values(result.models).find((candidate) => candidate.upstreamModelId === "gpt-5.6-luna");
+  assert.ok(model);
+  assert.equal(model.providerId, "chatgpt");
+  assert.equal(model.capabilities.vision, true);
 });
 
 test("recompiling removes stale generated bindings without removing legacy routes", () => {
@@ -97,4 +175,21 @@ test("recompiling removes stale generated bindings without removing legacy route
 
   assert.equal(Object.values(result.models).some((model) => model.id.startsWith("catalog-model:")), false);
   assert.equal(Object.values(result.routeGroups).some((group) => group.id.startsWith("catalog-route-group:")), false);
+});
+
+test("one catalog model keeps the union of protocols from all bound accounts", () => {
+  const env = environment();
+  env.accounts.beta.runtime.apiProtocol = "chat_completions";
+  env.accounts.beta.runtime.providerId = "openai";
+  const mixed = snapshot();
+  mixed.accountBindingOptions!["wangxt/beta"]!["model-shared"]!.upstreamModelId = "alpha-shared";
+
+  const result = applyModelCatalogBindings(
+    env,
+    buildLegacyGatewayEnvironmentState(env),
+    mixed,
+  );
+  const model = Object.values(result.models).find((candidate) => candidate.upstreamModelId === "alpha-shared");
+  assert.ok(model);
+  assert.deepEqual([...model.protocols].sort(), ["chat_completions", "responses"]);
 });

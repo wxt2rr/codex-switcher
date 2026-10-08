@@ -30,8 +30,15 @@ export function createDesktopOperationsService(options) {
                 output: `${value}\n`,
             };
         },
-        async disableProxy() {
+        async restoreProxyAutoDetect() {
             await options.clearManualProxy();
+            return {
+                message: "Restored automatic proxy detection",
+                output: "auto\n",
+            };
+        },
+        async disableProxy() {
+            await options.disableProxy();
             return {
                 message: "Disabled proxy",
                 output: "off\n",

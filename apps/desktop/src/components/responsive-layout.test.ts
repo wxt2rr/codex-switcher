@@ -457,6 +457,8 @@ test("system tools use clear navigation and page naming", () => {
   assert.doesNotMatch(operations, /重新检测全部/);
   assert.doesNotMatch(operations, /border-t border-neutral-200\/70/);
   assert.match(operations, /data-settings-row="proxy"/);
+  assert.match(operations, /onProxyDisable/);
+  assert.match(operations, /proxyOff/);
   assert.match(operations, /data-settings-row="logs"/);
   assert.match(operations, /grid-cols-\[minmax\(180px,0\.62fr\)_minmax\(0,1\.55fr\)\]/);
   assert.match(desktopShell, /usage: <Gauge/);

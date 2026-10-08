@@ -30,6 +30,7 @@ import {
   runDoctor,
   runRecover,
   runTokenRefreshOnce,
+  restoreProxyAutoDetect,
   setProxy,
   setLanguage,
   showProxy,
@@ -469,6 +470,7 @@ function registerHandlers() {
   );
   ipcMain.handle("desktop:showProxy", () => showProxy());
   ipcMain.handle("desktop:setProxy", (_event: IpcMainInvokeEvent, value: string) => setProxy(value));
+  ipcMain.handle("desktop:restoreProxyAutoDetect", () => restoreProxyAutoDetect());
   ipcMain.handle("desktop:disableProxy", () => disableProxy());
   ipcMain.handle("desktop:testProxy", () => testProxy());
   ipcMain.handle("desktop:startTokenRefresh", () => startTokenRefresh());
