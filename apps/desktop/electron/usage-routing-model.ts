@@ -29,7 +29,7 @@ export interface RouteTarget {
   requestOverrides?: Record<string, unknown>;
   /** Non-secret configured headers; auth and hop-by-hop headers are always controlled by the router. */
   requestHeaders?: Record<string, string>;
-  /** Explicit HTTP(S) proxy endpoint for this route; credentials are never embedded. */
+  /** Explicit HTTP(S)/SOCKS5 proxy endpoint for this route; credentials are never embedded. */
   proxyUrl?: string;
   enabled: boolean;
   createdAt: number;
@@ -150,7 +150,7 @@ export function isSafeRouteProxyUrl(value: unknown): value is string {
   if (typeof value !== "string" || !value.trim()) return false;
   try {
     const parsed = new URL(value.trim());
-    return (parsed.protocol === "http:" || parsed.protocol === "https:")
+    return (["http:", "https:", "socks5:"].includes(parsed.protocol))
       && !parsed.username && !parsed.password && Boolean(parsed.hostname)
       && (!parsed.port || Number(parsed.port) > 0 && Number(parsed.port) <= 65535);
   } catch {

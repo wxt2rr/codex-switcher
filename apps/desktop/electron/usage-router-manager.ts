@@ -40,7 +40,7 @@ import { createUsageStore } from "./usage-store.js";
 import { runCompatibilityCheck, type StagedCompatibilityResult } from "./openai-chat-compat/compatibility-check.js";
 import { resolveCredentialCandidates } from "./credential-resolver.js";
 
-const REQUIRED_ROUTER_API_VERSION = 9;
+const REQUIRED_ROUTER_API_VERSION = 10;
 
 export function isCompatibleRouterHealth(value: unknown): boolean {
   return Boolean(value && typeof value === "object" &&
@@ -144,6 +144,7 @@ export interface UsageRouterManagerOptions {
   executablePath?: string;
   preferredPort?: () => number | Promise<number>;
   launchService?: (preferredPort?: number) => Promise<void>;
+  defaultProxyUrl?: () => string | undefined | Promise<string | undefined>;
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -194,7 +195,10 @@ export class UsageRouterManager {
 
   async ensureService(): Promise<RouterStateFile> {
     const existing = await this.readState();
-    if (existing && await this.isHealthy(existing)) return existing;
+    if (existing && await this.isHealthy(existing)) {
+      await this.syncDefaultProxy(existing);
+      return existing;
+    }
     if (existing?.pid && existing.pid !== process.pid) {
       try { process.kill(existing.pid); } catch { /* stale process already exited */ }
     }
@@ -216,7 +220,10 @@ export class UsageRouterManager {
     for (let attempt = 0; attempt < 50; attempt += 1) {
       await delay(100);
       const state = await this.readState();
-      if (state && await this.isHealthy(state)) return state;
+      if (state && await this.isHealthy(state)) {
+        await this.syncDefaultProxy(state);
+        return state;
+      }
     }
     throw new Error("Local usage router did not start within 5 seconds");
   }
@@ -234,6 +241,23 @@ export class UsageRouterManager {
 
   private async admin<T>(path: string, init: RequestInit = {}): Promise<T> {
     return this.adminWithState<T>(await this.ensureService(), path, init);
+  }
+
+  private async syncDefaultProxy(state: RouterStateFile): Promise<void> {
+    if (!this.options.defaultProxyUrl) return;
+    const proxyUrl = await this.options.defaultProxyUrl();
+    await this.adminWithState<void>(state, "/admin/proxy", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ proxyUrl: proxyUrl || null }),
+    });
+  }
+
+  async refreshDefaultProxy(): Promise<boolean> {
+    const state = await this.readState();
+    if (!state || !await this.isHealthy(state)) return false;
+    await this.syncDefaultProxy(state);
+    return true;
   }
 
   private async deleteRoutes(routes: RouteTarget[]): Promise<void> {
@@ -349,7 +373,7 @@ export class UsageRouterManager {
         accountName: account.accountName,
         routeId: createRouteId(input.envName, account.accountName, upstreamBaseUrl),
         protocol: input.protocol, upstreamBaseUrl,
-        originalBaseUrl: account.baseUrl, upstreamModel: account.upstreamModel,
+        originalBaseUrl: account.baseUrl, upstreamModel: account.upstreamModel, proxyUrl: account.proxyUrl,
         enabled: true, weight: normalizePoolWeight(input.weights?.[account.accountName]), priority: index,
       }; }),
     };

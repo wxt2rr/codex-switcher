@@ -24,6 +24,7 @@ export interface AccountPoolMember {
   upstreamBaseUrl: string;
   originalBaseUrl: string;
   upstreamModel?: string;
+  proxyUrl?: string;
   enabled: boolean;
   weight: number;
   priority: number;

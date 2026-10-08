@@ -248,7 +248,7 @@ export function isGatewayProxyUrl(value: unknown): value is string {
   if (typeof value !== "string" || !value.trim()) return false;
   try {
     const parsed = new URL(value.trim());
-    return (parsed.protocol === "http:" || parsed.protocol === "https:")
+    return (["http:", "https:", "socks5:"].includes(parsed.protocol))
       && !parsed.username && !parsed.password && Boolean(parsed.hostname)
       && (!parsed.port || Number(parsed.port) > 0 && Number(parsed.port) <= 65535);
   } catch {

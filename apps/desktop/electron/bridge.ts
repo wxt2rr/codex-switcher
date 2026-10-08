@@ -300,6 +300,10 @@ function getUsageRouterManager(): UsageRouterManager {
       stateDir,
       serviceEntryPath: join(currentDir, "usage-router-service-main.cjs"),
       preferredPort: async () => (await readRouterPortSettings(getCodexToolPathOptions().settingsPath)).preferredPort,
+      defaultProxyUrl: async () => {
+        const proxy = await resolveUsageProxy();
+        return proxy || undefined;
+      },
     });
     usageRouterManagerStateDir = stateDir;
   }
@@ -4149,8 +4153,16 @@ async function loadDesktopOperationsService(): Promise<DesktopOperationsServiceL
     }) => logoutAccountDirect(runtime, input),
     readProxyState: async () =>
       support.readUsageProxyState(getStateDir(), process.env, process.platform),
-    setManualProxy: async (value: string) => support.setManualUsageProxy(getStateDir(), value),
-    clearManualProxy: async () => support.clearManualUsageProxy(getStateDir()),
+    setManualProxy: async (value: string) => {
+      const result = await support.setManualUsageProxy(getStateDir(), value);
+      await getUsageRouterManager().refreshDefaultProxy();
+      return result;
+    },
+    clearManualProxy: async () => {
+      const result = await support.clearManualUsageProxy(getStateDir());
+      await getUsageRouterManager().refreshDefaultProxy();
+      return result;
+    },
     runProxyCheck: async () => runProxyCheckDirect(),
     getTokenRefreshStatus: async () => readTokenRefreshStatusDirect(),
     startTokenRefreshGuard: async () => tokenRefreshCommandDirect("start"),

@@ -155,6 +155,9 @@ function ensurePoolMemberColumns(db: Database): void {
   if (!columns.has("original_base_url")) {
     db.run("ALTER TABLE account_pool_members ADD COLUMN original_base_url TEXT NOT NULL DEFAULT 'default'");
   }
+  if (!columns.has("proxy_url")) {
+    db.run("ALTER TABLE account_pool_members ADD COLUMN proxy_url TEXT");
+  }
 }
 
 function ensurePoolColumns(db: Database): void {
@@ -431,6 +434,7 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
       upstream_base_url TEXT NOT NULL,
       original_base_url TEXT NOT NULL,
       upstream_model TEXT,
+      proxy_url TEXT,
       enabled INTEGER NOT NULL,
       weight INTEGER NOT NULL,
       priority INTEGER NOT NULL,
@@ -610,10 +614,10 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
           db.run(
             `INSERT INTO account_pool_members (
                pool_id, account_name, route_id, protocol, upstream_base_url, original_base_url,
-               upstream_model, enabled, weight, priority
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               upstream_model, proxy_url, enabled, weight, priority
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [pool.poolId, member.accountName, member.routeId, member.protocol, member.upstreamBaseUrl, member.originalBaseUrl,
-              member.upstreamModel ?? null, member.enabled ? 1 : 0, member.weight, member.priority],
+              member.upstreamModel ?? null, member.proxyUrl ?? null, member.enabled ? 1 : 0, member.weight, member.priority],
           );
           const existing = runRows(db,
             "SELECT 1 AS present FROM account_pool_health WHERE pool_id = ? AND account_name = ?",
@@ -654,6 +658,7 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
           upstreamBaseUrl: String(member.upstream_base_url),
           originalBaseUrl: String(member.original_base_url),
           upstreamModel: member.upstream_model ? String(member.upstream_model) : undefined,
+          proxyUrl: member.proxy_url ? String(member.proxy_url) : undefined,
           enabled: Boolean(member.enabled), weight: asNumber(member.weight), priority: asNumber(member.priority),
         }));
         return {

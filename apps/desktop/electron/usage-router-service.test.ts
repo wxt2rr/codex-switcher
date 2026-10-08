@@ -449,6 +449,61 @@ test("native routes use the explicit per-route HTTP proxy without proxying the l
   }
 });
 
+test("native routes use the runtime global proxy when no explicit proxy is configured", async () => {
+  let upstreamCalls = 0;
+  let proxyConnects = 0;
+  const upstream = createServer(async (request, response) => {
+    upstreamCalls += 1;
+    for await (const _chunk of request) { /* drain */ }
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ id: "global-proxy-route", model: "proxy-model", usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } }));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const upstreamAddress = upstream.address(); assert(upstreamAddress && typeof upstreamAddress !== "string");
+  const proxy = createServer();
+  proxy.on("connect", (request, clientSocket, head) => {
+    proxyConnects += 1;
+    const [host, portValue] = String(request.url ?? "").split(":");
+    const targetHost = host === "proxy-target.test" ? "127.0.0.1" : host;
+    const upstreamSocket = connectSocket(Number(portValue), targetHost, () => {
+      clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+      if (head.length) upstreamSocket.write(head);
+      clientSocket.pipe(upstreamSocket).pipe(clientSocket);
+    });
+    upstreamSocket.on("error", () => clientSocket.destroy());
+  });
+  await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+  const proxyAddress = proxy.address(); assert(proxyAddress && typeof proxyAddress !== "string");
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-global-proxy-route-"));
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+  const route = {
+    routeId: "route-global-proxy", envName: "work", accountName: "key",
+    upstreamBaseUrl: `http://proxy-target.test:${upstreamAddress.port}/v1`, originalBaseUrl: "default",
+    protocol: "responses" as const, reasoningProfile: "auto" as const, enabled: true, createdAt: 1, updatedAt: 1,
+  };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  try {
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(route) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}/secret`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify({ upstreamApiKey: "route-secret", localRouteToken: "local-route" }),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/proxy`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify({ proxyUrl: `http://127.0.0.1:${proxyAddress.port}` }),
+    })).status, 204);
+    const response = await fetch(`${service.origin}/routes/${route.routeId}/responses`, {
+      method: "POST", headers: { authorization: "Bearer local-route", "content-type": "application/json" }, body: JSON.stringify({ model: "proxy-model", input: "hello" }),
+    });
+    assert.equal(response.status, 200);
+    await response.arrayBuffer();
+    assert.equal(upstreamCalls, 1);
+    assert.equal(proxyConnects, 1);
+  } finally {
+    await service.close();
+    await new Promise<void>((resolve) => proxy.close(() => resolve()));
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
+});
+
 test("environment gateway persists, selects an account route, and survives router restart", async () => {
   let calls = 0;
   let upstreamModel = "";

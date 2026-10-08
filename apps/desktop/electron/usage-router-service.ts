@@ -37,13 +37,14 @@ import { ConversationHistoryStore } from "./openai-chat-compat/history-store.js"
 import { FileHistoryPersistence } from "./openai-chat-compat/history-persistence.js";
 import { handleChatCompatibilityRequest } from "./openai-chat-compat/compatibility-handler.js";
 import { loadGatewayPluginRuntime } from "./core-runtime.js";
-import { closeUpstreamProxyAgents, fetchWithOptionalProxy } from "./upstream-proxy.js";
+import { closeUpstreamProxyAgents, fetchWithOptionalProxy, normalizeUpstreamProxyUrl, resolveUpstreamProxy, type UpstreamProxySource } from "./upstream-proxy.js";
 
 export interface UsageRouterServiceOptions {
   stateDir: string;
   adminToken?: string;
   port?: number;
   preferredPort?: number;
+  defaultProxyUrl?: string;
 }
 
 export interface RunningUsageRouterService {
@@ -103,7 +104,7 @@ interface GatewayRouteMetricState extends GatewayRouteRuntimeMetrics {
   latencyMs: number;
 }
 
-export const USAGE_ROUTER_API_VERSION = 9;
+export const USAGE_ROUTER_API_VERSION = 10;
 
 function isValidPort(value: unknown): value is number {
   return Number.isInteger(value) && Number(value) >= 1024 && Number(value) <= 65535;
@@ -449,6 +450,16 @@ export function sanitizeRouterErrorMessage(value: unknown): string | null {
   return normalized ? normalized.slice(0, 600) : null;
 }
 
+function proxySourceLabel(source: UpstreamProxySource): string {
+  if (source === "route") return "explicit proxy";
+  if (source === "global") return "global proxy";
+  return "direct connection";
+}
+
+function safeUpstreamFailureMessage(error: unknown, source: UpstreamProxySource, fallback: string): string {
+  return `${sanitizeRouterErrorMessage(error) ?? fallback} (${proxySourceLabel(source)})`;
+}
+
 export function extractSafeErrorMessage(value: string, fallback?: string): string | null {
   const trimmed = value.trim();
   if (trimmed) {
@@ -490,6 +501,7 @@ async function proxyAccountPoolRequest(
   modelOverrides?: ReadonlyMap<string, string>,
   bodyOverride?: Buffer,
   usageContext?: UsageTelemetryContext,
+  defaultProxyUrl?: string,
 ): Promise<void> {
   const startedAt = Date.now();
   const body = bodyOverride ?? (request.method === "GET" || request.method === "HEAD" ? Buffer.alloc(0) : await readRequestBodyBuffer(request));
@@ -540,7 +552,7 @@ async function proxyAccountPoolRequest(
     const route = routes.get(member.routeId) ?? {
       routeId: member.routeId, envName: pool.envName, accountName: member.accountName,
       upstreamBaseUrl: member.upstreamBaseUrl, originalBaseUrl: member.originalBaseUrl,
-      protocol: member.protocol, upstreamModel: member.upstreamModel, reasoningProfile: "auto" as const,
+      protocol: member.protocol, upstreamModel: member.upstreamModel, proxyUrl: member.proxyUrl, reasoningProfile: "auto" as const,
       enabled: true, createdAt: pool.createdAt, updatedAt: pool.updatedAt,
     };
     const secret = secrets.get(member.accountName);
@@ -571,18 +583,19 @@ async function proxyAccountPoolRequest(
     headers.set("authorization", `Bearer ${secret.upstreamBearerToken}`);
     headers.delete("chatgpt-account-id");
     if (secret.authMode === "auth" && secret.accountId) headers.set("chatgpt-account-id", secret.accountId);
+    const proxy = resolveUpstreamProxy(upstream, effectiveRoute.proxyUrl ?? member.proxyUrl, defaultProxyUrl);
     let upstreamResponse: Response;
     try {
       upstreamResponse = pool.protocol === "chat_completions"
         ? await handleChatCompatibilityRequest({
-          route: effectiveRoute, secret: { routeId: effectiveRoute.routeId, upstreamApiKey: secret.upstreamBearerToken, localRouteToken, hydratedAt: secret.hydratedAt },
+          route: { ...effectiveRoute, proxyUrl: proxy.url }, secret: { routeId: effectiveRoute.routeId, upstreamApiKey: secret.upstreamBearerToken, localRouteToken, hydratedAt: secret.hydratedAt },
           authorization: `Bearer ${localRouteToken}`, request: candidateParsedBody ?? {}, headers,
           history, signal: AbortSignal.timeout(120_000),
         })
         : await fetchWithOptionalProxy(upstream, {
           method: request.method, headers, body: candidateBody.length ? candidateBody as unknown as BodyInit : undefined, redirect: "manual",
           ...(candidateBody.length ? { duplex: "half" } as RequestInit : {}), signal: AbortSignal.timeout(120_000),
-        }, effectiveRoute.proxyUrl);
+        }, proxy.url);
     } catch (error) {
       const reason = classifyPoolFailure(null, error);
       const sameAccountLimitReached = (memberAttempts.get(member.accountName) ?? 0) >= maxSameAccountFailures;
@@ -593,7 +606,7 @@ async function proxyAccountPoolRequest(
         retryAccountName = member.accountName;
       }
       finalReason = sanitizePoolFailureReason(reason);
-      finalErrorMessage = sanitizeRouterErrorMessage(error) ?? "Unable to connect to the selected upstream account";
+      finalErrorMessage = safeUpstreamFailureMessage(error, proxy.source, "Unable to connect to the selected upstream account");
       const willRetry = attempt + 1 < maxAttempts && isPoolRetryableFailure(reason, null);
       attempts.push({ accountName: member.accountName, startedAt: attemptStartedAt, completedAt: Date.now(),
         httpStatus: null, reason: finalReason, errorMessage: finalErrorMessage, retryAfterMs: null,
@@ -703,6 +716,7 @@ async function proxyRequest(
   incomingModel?: string,
   resolveProviderAdapter?: (providerId: string | undefined) => RuntimeProviderAdapter | undefined,
   usageContext?: UsageTelemetryContext,
+  defaultProxyUrl?: string,
 ): Promise<void> {
   const startedAt = Date.now();
   const candidates = [route, ...fallbackRoutes.filter((candidate) => candidate.routeId !== route.routeId)];
@@ -726,6 +740,7 @@ async function proxyRequest(
     const attemptStartedAt = Date.now();
     const upstreamSuffix = incomingProtocol ? mapGatewaySuffix(routeSuffix, incomingProtocol, candidate.protocol, candidate.upstreamModel ?? incomingModel) : routeSuffix;
     const upstream = `${candidate.upstreamBaseUrl.replace(/\/+$/, "")}/${upstreamSuffix.replace(/^\/+/, "")}`;
+    const proxy = resolveUpstreamProxy(upstream, candidate.proxyUrl, defaultProxyUrl);
     try {
       const headers = forwardedHeaders(request.headers);
       applyConfiguredRouteHeaders(headers, candidate.requestHeaders);
@@ -752,7 +767,7 @@ async function proxyRequest(
           : undefined,
         redirect: "manual",
         ...(hasBody ? { duplex: "half" } as RequestInit : {}),
-      }, candidate.proxyUrl);
+      }, proxy.url);
       const convertedResponse = incomingProtocol && candidate.protocol !== incomingProtocol
         ? await convertUpstreamResponse(response, candidate.protocol, incomingProtocol)
         : response;
@@ -792,7 +807,7 @@ async function proxyRequest(
       attempts.push({
         accountName: candidate.accountName, startedAt: attemptStartedAt, completedAt: Date.now(),
         httpStatus: null, reason: sanitizePoolFailureReason(classifyPoolFailure(null, error)),
-        errorMessage: sanitizeRouterErrorMessage(error), retryAfterMs: null,
+        errorMessage: safeUpstreamFailureMessage(error, proxy.source, "Unable to connect to upstream"), retryAfterMs: null,
         outcome: index < candidates.length - 1 ? "retry" : "failed",
       });
       if (index < candidates.length - 1) continue;
@@ -808,7 +823,11 @@ async function proxyRequest(
     if (finalAttempt && finalAttempt.httpStatus === lastRetryableResponse.status) finalAttempt.outcome = "returned";
   }
   if (!upstreamResponse) {
-    const errorMessage = sanitizeRouterErrorMessage(lastError) ?? "Unable to connect to upstream";
+    const errorMessage = safeUpstreamFailureMessage(lastError, resolveUpstreamProxy(
+      `${selectedRoute.upstreamBaseUrl.replace(/\/+$/, "")}/${routeSuffix.replace(/^\/+/, "")}`,
+      selectedRoute.proxyUrl,
+      defaultProxyUrl,
+    ).source, "Unable to connect to upstream");
     sendJson(response, 502, { error: errorMessage });
     const completedAt = Date.now();
     await store.recordUsage({
@@ -901,6 +920,7 @@ async function proxyCompatibilityRequest(
   store: UsageStore,
   history: ConversationHistoryStore,
   usageContext?: UsageTelemetryContext,
+  defaultProxyUrl?: string,
 ): Promise<void> {
   const startedAt = Date.now();
   let status = 500;
@@ -911,15 +931,19 @@ async function proxyCompatibilityRequest(
     requestBody = await readJson(request, 32 * 1024 * 1024) as Record<string, unknown>;
     const headers = forwardedHeaders(request.headers);
     applyConfiguredRouteHeaders(headers, route.requestHeaders);
+    const upstream = `${route.upstreamBaseUrl.replace(/\/+$/, "")}/responses`;
+    const proxy = resolveUpstreamProxy(upstream, route.proxyUrl, defaultProxyUrl);
     const result = await handleChatCompatibilityRequest({
-      route, secret, authorization: request.headers.authorization, request: requestBody,
+      route: { ...route, proxyUrl: proxy.url }, secret, authorization: request.headers.authorization, request: requestBody,
       headers, history,
     });
     status = result.status;
     await relayResponse(result, response, tap);
   } catch (error) {
     status = typeof (error as { status?: unknown }).status === "number" ? Number((error as { status: number }).status) : 500;
-    errorMessage = sanitizeRouterErrorMessage(error) ?? "Compatibility routing failed";
+    errorMessage = safeUpstreamFailureMessage(error, resolveUpstreamProxy(
+      `${route.upstreamBaseUrl.replace(/\/+$/, "")}/responses`, route.proxyUrl, defaultProxyUrl,
+    ).source, "Compatibility routing failed");
     sendJson(response, status, { error: { message: errorMessage } });
   }
   const completedAt = Date.now();
@@ -1054,6 +1078,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
   const poolSecrets = new Map<string, Map<string, PoolRuntimeSecret>>();
   const poolTokens = new Map<string, string>();
   const routeSecrets = new RouteSecretStore();
+  let defaultProxyUrl = options.defaultProxyUrl ? normalizeUpstreamProxyUrl(options.defaultProxyUrl) : undefined;
   const history = new ConversationHistoryStore({
     persistence: new FileHistoryPersistence(join(options.stateDir, "chat-history")),
   });
@@ -1081,6 +1106,22 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
       if (url.pathname === "/health") return sendJson(response, 200, { ok: true, pid: process.pid, apiVersion: USAGE_ROUTER_API_VERSION });
       if (url.pathname.startsWith("/admin/")) {
         if (!isAuthorized(request, adminToken)) return sendJson(response, 401, { error: "Unauthorized" });
+        if (url.pathname === "/admin/proxy" && request.method === "PUT") {
+          const payload = await readJson(request) as { proxyUrl?: unknown };
+          if (payload.proxyUrl === undefined || payload.proxyUrl === null || payload.proxyUrl === "") {
+            defaultProxyUrl = undefined;
+          } else if (typeof payload.proxyUrl !== "string") {
+            return sendJson(response, 400, { error: "Invalid default proxy URL" });
+          } else {
+            try {
+              defaultProxyUrl = normalizeUpstreamProxyUrl(payload.proxyUrl);
+            } catch (error) {
+              return sendJson(response, 400, { error: error instanceof Error ? error.message : "Invalid default proxy URL" });
+            }
+          }
+          response.statusCode = 204;
+          return response.end();
+        }
         if (url.pathname === "/admin/trace" && request.method === "GET") {
           const fromValue = url.searchParams.get("from");
           const toValue = url.searchParams.get("to");
@@ -1161,6 +1202,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
               && typeof member.accountName === "string" && member.accountName.trim()
               && /^https?:\/\//.test(member.upstreamBaseUrl)
               && typeof member.originalBaseUrl === "string" && member.originalBaseUrl.trim()
+              && (member.proxyUrl === undefined || isSafeRouteProxyUrl(member.proxyUrl))
               && Number.isFinite(member.weight) && member.weight >= 1 && member.weight <= 100);
           if (!pool || typeof pool.poolId !== "string" || !pool.poolId.trim()
             || typeof pool.envName !== "string" || !pool.envName.trim()
@@ -1386,6 +1428,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
             poolModelOverrides,
             bodyOverride,
             gatewayUsageContext,
+            defaultProxyUrl,
           );
         }
         const legacyFallbackRoutes = gateway.routeGroups
@@ -1410,6 +1453,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           requestedModel,
           (providerId) => providerId && pluginManager?.registry.has(providerId) ? pluginManager.registry.get(providerId) : undefined,
           gatewayUsageContext,
+          defaultProxyUrl,
         );
       }
       const poolMatch = url.pathname.match(/^\/pools\/([^/]+)\/?(.*)$/);
@@ -1430,7 +1474,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
         ), token ?? "", store, history, routeSuffix, matchedMember, recordPoolEvent, undefined, undefined, undefined, {
           agentId: request.headers["x-codex-agent"]?.toString().trim() || null,
           ingressProtocol: pool!.protocol,
-        });
+        }, defaultProxyUrl);
       }
       const match = url.pathname.match(/^\/routes\/([^/]+)\/?(.*)$/);
       if (!match) return sendJson(response, 404, { error: "Not found" });
@@ -1442,13 +1486,13 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
         return await proxyCompatibilityRequest(request, response, route, secret, store, history, {
           agentId: request.headers["x-codex-agent"]?.toString().trim() || null,
           ingressProtocol: route.protocol,
-        });
+        }, defaultProxyUrl);
       }
       await proxyRequest(request, response, route, `${match[2]}${url.search}`, store, routeSecrets.get(route.routeId), undefined, [], undefined, undefined, undefined, undefined,
         (providerId) => providerId && pluginManager?.registry.has(providerId) ? pluginManager.registry.get(providerId) : undefined, {
           agentId: request.headers["x-codex-agent"]?.toString().trim() || null,
           ingressProtocol: route.protocol,
-        });
+        }, defaultProxyUrl);
     } catch (error) {
       if (!response.headersSent) sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) });
       else response.destroy(error instanceof Error ? error : undefined);

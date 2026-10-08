@@ -16,7 +16,8 @@ test("router manager rejects stale health responses without the compatibility AP
   assert.equal(isCompatibleRouterHealth({ ok: true, pid: 1, apiVersion: 6 }), false);
   assert.equal(isCompatibleRouterHealth({ ok: true, pid: 1, apiVersion: 7 }), false);
   assert.equal(isCompatibleRouterHealth({ ok: true, pid: 1, apiVersion: 8 }), false);
-  assert.equal(isCompatibleRouterHealth({ ok: true, pid: 1, apiVersion: 9 }), true);
+  assert.equal(isCompatibleRouterHealth({ ok: true, pid: 1, apiVersion: 9 }), false);
+  assert.equal(isCompatibleRouterHealth({ ok: true, pid: 1, apiVersion: 10 }), true);
 });
 
 test("router manager passes the configured preferred port to the service launcher", async () => {
