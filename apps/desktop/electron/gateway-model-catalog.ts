@@ -1,5 +1,5 @@
 import type { GatewayEnvironmentState, GatewayModelDefinition, GatewayRouteGroupDefinition } from "../../../packages/core/dist/gateway/model.js";
-import type { ModelCatalogEntry } from "./model-catalog-store.js";
+import { normalizeCustomModelInput, type ModelCatalogEntry } from "./model-catalog-store.js";
 
 export function normalizeGatewayModelSlug(value: string): string {
   const normalized = value.trim().replaceAll("/", ":");
@@ -15,18 +15,7 @@ export function buildGatewayModelCatalog(gateway: GatewayEnvironmentState): Mode
   const add = (slug: string, displayName: string, description: string) => {
     if (seen.has(slug)) return;
     seen.add(slug);
-    entries.push({
-      slug,
-      display_name: displayName,
-      description,
-      visibility: "list",
-      supported_in_api: true,
-      supports_reasoning_summaries: false,
-      supports_parallel_tool_calls: true,
-      context_window: 128000,
-      max_context_window: 128000,
-      input_modalities: ["text", "image"],
-    });
+    entries.push(createGatewayModelCatalogEntry(slug, displayName, description));
   };
 
   for (const model of Object.values(gateway.models)) {
@@ -52,25 +41,27 @@ export function buildGatewayModelEntry(
   model: GatewayModelDefinition | GatewayRouteGroupDefinition,
 ): ModelCatalogEntry {
   if ("upstreamModelId" in model) {
-    return {
-      slug: normalizeGatewayModelSlug(model.id),
-      display_name: model.displayName,
-      description: `${model.providerId} · ${model.upstreamModelId}`,
-      visibility: "list",
-      supported_in_api: true,
-      context_window: 128000,
-      max_context_window: 128000,
-      input_modalities: ["text", "image"],
-    };
+    return createGatewayModelCatalogEntry(
+      normalizeGatewayModelSlug(model.id),
+      model.displayName,
+      `${model.providerId} · ${model.upstreamModelId}`,
+    );
   }
-  return {
-    slug: normalizeGatewayModelSlug(model.exposedModelId),
-    display_name: model.displayName,
-    description: `Gateway route group · ${model.strategy}`,
-    visibility: "list",
-    supported_in_api: true,
-    context_window: 128000,
-    max_context_window: 128000,
-    input_modalities: ["text", "image"],
-  };
+  return createGatewayModelCatalogEntry(
+    normalizeGatewayModelSlug(model.exposedModelId),
+    model.displayName,
+    `Gateway route group · ${model.strategy}`,
+  );
+}
+
+function createGatewayModelCatalogEntry(
+  slug: string,
+  displayName: string,
+  description: string,
+): ModelCatalogEntry {
+  return normalizeCustomModelInput({
+    slug,
+    display_name: displayName,
+    description,
+  });
 }
