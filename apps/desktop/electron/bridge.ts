@@ -11,6 +11,7 @@ import {
   loadCoreSupportModules,
   loadDesktopOperationsModule,
   loadGatewayAgentRuntime,
+  loadGatewayProviderRuntime,
   type CoreRuntime,
 } from "./core-runtime.js";
 import {
@@ -25,8 +26,23 @@ import { UsageRouterManager, type GatewayRouteBinding } from "./usage-router-man
 import type {
   GatewayEnvironmentState,
   GatewayRouteGroupDefinition,
+  GatewayProtocol,
 } from "../../../packages/core/dist/gateway/model.js";
-import { isLocalRouterBaseUrl, resolveRouteDisplayBaseUrl, selectCompatibilityUpstreamBaseUrl, type PricingProfile, type RouteProtocol, type UsageFilter, type UsageRequestQuery, type UsageTraceQuery } from "./usage-routing-model.js";
+import {
+  gatewayCredentialSupportsProtocol,
+  gatewayProviderSupportsProtocol,
+} from "./gateway-protocol-support.js";
+import {
+  isLocalRouterBaseUrl,
+  resolveRouteDisplayBaseUrl,
+  selectCompatibilityUpstreamBaseUrl,
+  type PricingProfile,
+  type RouteCapabilities,
+  type RouteProtocol,
+  type UsageFilter,
+  type UsageRequestQuery,
+  type UsageTraceQuery,
+} from "./usage-routing-model.js";
 import {
   buildEffectiveCodexEnv,
   getCodexToolStatus,
@@ -85,6 +101,7 @@ import {
   accountModelBindingKey,
   filterModelCatalogBindings,
   normalizeCustomModelInput,
+  type AccountDiscoveredModel,
   type ModelBindingOptions,
   type ModelCatalogEntry,
   type ModelCatalogSnapshot,
@@ -95,7 +112,7 @@ import {
   synchronizeAccountModelCatalog,
   synchronizeEnvironmentGatewayModelCatalog,
 } from "./account-model-catalog.js";
-import { applyModelCatalogBindings } from "./gateway-model-bindings.js";
+import { applyModelCatalogBindings, inspectGatewayModelBindings } from "./gateway-model-bindings.js";
 import {
   DEEPSEEK_DEFAULT_MODEL_SLUG,
   DEEPSEEK_DEFAULT_MODEL_SLUGS,
@@ -135,7 +152,13 @@ import type { DesktopAutoUpdateStatus } from "./auto-update.js";
 import type { GatewayAdminConfiguration, LaunchAtLoginStatus, SaveGatewayAdminConfigurationRequest } from "../src/bridge.js";
 import { stripExcludedGatewayFields } from "./gateway-admin-configuration.js";
 import { MacDockBadgeAdapter, WindowsTaskbarBadgeAdapter } from "./app-environment-badge-adapters.js";
-import { discoverGatewayProviderModels } from "./gateway-model-discovery.js";
+import { discoverGatewayAccountModels, discoverGatewayProviderModels } from "./gateway-model-discovery.js";
+import { fetchWithOptionalProxy } from "./upstream-proxy.js";
+import type {
+  ProviderAuthMethod,
+  ProviderAccountRef,
+  ProviderHttpClient,
+} from "../../../packages/gateway/dist/provider/adapters.js";
 import {
   deactivateProviderPlugin as deactivateProviderPluginRuntime,
   installProviderPlugin as installProviderPluginRuntime,
@@ -145,6 +168,7 @@ import {
   refreshProviderPluginMarket as refreshProviderPluginMarketRuntime,
   rollbackProviderPlugin as rollbackProviderPluginRuntime,
   installProviderPluginFromMarket as installProviderPluginFromMarketRuntime,
+  getProviderPluginAdapter,
   getProviderPluginDescriptor,
   type ProviderPluginInstallRequest,
   type ProviderPluginMarketInstallRequest,
@@ -358,7 +382,7 @@ function getEnvironmentRouteAccounts(
       providerId,
       apiKey: account.authMode === "auth"
         ? extractAccessTokenFromAuthData(account.authData)
-        : readAuthStringField(account.authData, "OPENAI_API_KEY"),
+        : extractProviderAccessTokenFromAuthData(account.authData),
       authAccountId: extractAccountIdFromAuthData(account.authData),
       protocol: account.authMode === "auth"
         ? "responses" as const
@@ -367,9 +391,34 @@ function getEnvironmentRouteAccounts(
       baseUrl: account.runtime.openaiBaseUrlMode === "custom" && account.runtime.openaiBaseUrl
         ? account.runtime.openaiBaseUrl
         : "default",
+      ...(account.runtime.providerRequestHeaders && Object.keys(account.runtime.providerRequestHeaders).length
+        ? { requestHeaders: account.runtime.providerRequestHeaders }
+        : {}),
       ...(proxyUrl ? { proxyUrl } : {}),
     };
   });
+}
+
+function sanitizeProviderRequestHeaders(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const blocked = new Set([
+    "authorization",
+    "cookie",
+    "set-cookie",
+    "proxy-authorization",
+    "host",
+    "content-length",
+    "transfer-encoding",
+  ]);
+  const result: Record<string, string> = {};
+  for (const [rawName, rawValue] of Object.entries(value)) {
+    const name = rawName.trim();
+    if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name)) continue;
+    if (blocked.has(name.toLowerCase()) || typeof rawValue !== "string") continue;
+    if (rawValue.includes("\r") || rawValue.includes("\n") || rawValue.length > 4096) continue;
+    result[name] = rawValue;
+  }
+  return Object.keys(result).length ? result : undefined;
 }
 
 /**
@@ -381,7 +430,11 @@ function getEnvironmentRouteAccounts(
 function buildGatewayRouteBindings(
   environment: {
     name: string;
-    accounts: Record<string, { name: string; authMode: string; runtime?: { apiProtocol?: string } }>;
+    accounts: Record<string, {
+      name: string;
+      authMode: string;
+      runtime?: { apiProtocol?: string; providerRequestHeaders?: Record<string, string> };
+    }>;
   },
   gateway: GatewayEnvironmentState,
 ): GatewayRouteBinding[] {
@@ -406,7 +459,8 @@ function buildGatewayRouteBindings(
       const accountName = accountNamesByCredential.get(credentialId);
       if (!accountName) continue;
       const credentialHeaders = gateway.credentials[credentialId]?.requestHeaders ?? {};
-      const headers = { ...providerHeaders, ...credentialHeaders };
+      const runtimeHeaders = environment.accounts[accountName]?.runtime?.providerRequestHeaders ?? {};
+      const headers = { ...runtimeHeaders, ...providerHeaders, ...credentialHeaders };
       if (Object.keys(headers).length) result[accountName] = { ...(result[accountName] ?? {}), ...headers };
     }
     return result;
@@ -431,6 +485,27 @@ function buildGatewayRouteBindings(
       ? "responses"
       : "chat_completions";
   };
+  const protocolForBinding = (
+    model: GatewayEnvironmentState["models"][string],
+    providerId: string,
+    credentialId: string,
+    accountName: string,
+  ): RouteProtocol | undefined => {
+    const provider = gateway.providers[providerId];
+    const credential = gateway.credentials[credentialId];
+    if (!provider || !credential || credential.providerId !== providerId) return undefined;
+    const candidates = model.protocols.filter((protocol): protocol is GatewayProtocol => (
+      gatewayProviderSupportsProtocol(provider, protocol)
+        && gatewayCredentialSupportsProtocol(credential, protocol)
+    ));
+    if (!candidates.length) return undefined;
+    // OpenAI-compatible providers can expose both Responses and Chat
+    // Completions. Preserve the account's configured wire API in that case;
+    // Anthropic/Gemini accounts naturally fall through to their only upstream
+    // protocol while the gateway converts the Responses ingress.
+    const configured = protocolForAccount(accountName);
+    return candidates.includes(configured) ? configured : candidates[0];
+  };
   const addBinding = (
     group: GatewayRouteGroupDefinition | undefined,
     member: GatewayRouteGroupDefinition["members"][number],
@@ -442,15 +517,26 @@ function buildGatewayRouteBindings(
       : Object.values(gateway.credentials)
         .filter((credential) => credential.providerId === member.providerId && credential.status !== "disabled")
         .map((credential) => credential.id);
-    const accounts = credentials
-      .map((credentialId) => accountNamesByCredential.get(credentialId))
-      .filter((accountName): accountName is string => Boolean(accountName));
+    const accountByCredential = new Map(
+      credentials
+        .map((credentialId) => [credentialId, accountNamesByCredential.get(credentialId)] as const)
+        .filter((entry): entry is readonly [string, string] => Boolean(entry[1])),
+    );
+    if (!accountByCredential.size) return;
+    const upstreamProtocolByAccount: Record<string, RouteProtocol> = {};
+    for (const credentialId of credentials) {
+      const accountName = accountByCredential.get(credentialId);
+      if (!accountName) continue;
+      const upstreamProtocol = protocolForBinding(model, member.providerId, credentialId, accountName);
+      if (upstreamProtocol) upstreamProtocolByAccount[accountName] = upstreamProtocol;
+    }
+    const accounts = [...new Set(Object.keys(upstreamProtocolByAccount))];
     if (!accounts.length) return;
     const requestHeadersByAccount = headersByCredentialAccount(credentials, member.providerId);
     const proxyUrlByAccount = proxyByCredentialAccount(credentials, member.providerId);
     const uniqueAccounts = [...new Set(accounts)];
     const protocolByAccount = Object.fromEntries(uniqueAccounts.map((accountName) => [accountName, protocolForAccount(accountName)]));
-    const protocols = [...new Set([...(model.protocols ?? []), ...Object.values(protocolByAccount)])];
+    const protocols = [...new Set(Object.values(upstreamProtocolByAccount))];
     result.push({
       providerId: member.providerId,
       modelId: model.id,
@@ -460,7 +546,13 @@ function buildGatewayRouteBindings(
       accountNames: uniqueAccounts,
       protocols,
       protocolByAccount,
-      capabilities: model.capabilities,
+      upstreamProtocolByAccount,
+      capabilities: {
+        reasoning: model.capabilities.reasoning === true,
+        tools: model.capabilities.tools === true,
+        vision: model.capabilities.vision === true,
+        streaming: model.capabilities.streaming !== false,
+      },
       ...(Object.keys(requestHeadersByAccount).length ? { requestHeadersByAccount } : {}),
       ...(Object.keys(proxyUrlByAccount).length ? { proxyUrlByAccount } : {}),
     });
@@ -474,10 +566,17 @@ function buildGatewayRouteBindings(
   const groupedModelIds = new Set(Object.values(gateway.routeGroups).flatMap((group) => group.members.map((member) => member.modelId)));
   for (const model of Object.values(gateway.models)) {
     if (!model.enabled || groupedModelIds.has(model.id)) continue;
-    const credentials = Object.values(gateway.credentials)
+    const credentialIds = Object.values(gateway.credentials)
       .filter((credential) => credential.providerId === model.providerId && credential.status !== "disabled")
-      .map((credential) => accountNamesByCredential.get(credential.id))
-      .filter((accountName): accountName is string => Boolean(accountName));
+      .map((credential) => credential.id);
+    const upstreamProtocolByAccount: Record<string, RouteProtocol> = {};
+    for (const credentialId of credentialIds) {
+      const accountName = accountNamesByCredential.get(credentialId);
+      if (!accountName) continue;
+      const upstreamProtocol = protocolForBinding(model, model.providerId, credentialId, accountName);
+      if (upstreamProtocol) upstreamProtocolByAccount[accountName] = upstreamProtocol;
+    }
+    const credentials = Object.keys(upstreamProtocolByAccount);
     if (!credentials.length) continue;
     const requestHeadersByAccount = headersByCredentialAccount(
       Object.values(gateway.credentials)
@@ -493,7 +592,7 @@ function buildGatewayRouteBindings(
     );
     const uniqueAccounts = [...new Set(credentials)];
     const protocolByAccount = Object.fromEntries(uniqueAccounts.map((accountName) => [accountName, protocolForAccount(accountName)]));
-    const protocols = [...new Set([...(model.protocols ?? []), ...Object.values(protocolByAccount)])];
+    const protocols = [...new Set(Object.values(upstreamProtocolByAccount))];
     result.push({
       providerId: model.providerId,
       modelId: model.id,
@@ -502,6 +601,7 @@ function buildGatewayRouteBindings(
       accountNames: uniqueAccounts,
       protocols,
       protocolByAccount,
+      upstreamProtocolByAccount,
       capabilities: model.capabilities,
       ...(Object.keys(requestHeadersByAccount).length ? { requestHeadersByAccount } : {}),
       ...(Object.keys(proxyUrlByAccount).length ? { proxyUrlByAccount } : {}),
@@ -816,6 +916,8 @@ async function restoreEnabledRoutes(): Promise<void> {
     await synchronizeEnvironmentGatewayModelCatalog({
       homePath: environment.path,
       gateway,
+      environmentName: environment.name,
+      diagnosticLogPath: resolveLogPath("switcher"),
       loadBundledCatalog: cliStatus.available
         ? () => loadBundledModelCatalog(cliStatus.path)
         : undefined,
@@ -1091,6 +1193,8 @@ export async function discoverGatewayAdminModels(input: { envName: string; provi
   await synchronizeEnvironmentGatewayModelCatalog({
     homePath: environment.path,
     gateway: nextGateway,
+    environmentName: input.envName,
+    diagnosticLogPath: resolveLogPath("switcher"),
     loadBundledCatalog: cliStatus.available ? () => loadBundledModelCatalog(cliStatus.path) : undefined,
   });
   const activeGateway = (await getUsageRouterManager().listPersistedEnvironmentGateways()).find((item) => item.envName === input.envName && item.enabled);
@@ -2244,6 +2348,190 @@ export async function nativeLogin(request: {
   }
 }
 
+export interface ProviderCredentialImportRequest {
+  providerId: string;
+  account: string;
+  envName: string;
+  target: "cli" | "app" | "both" | "none";
+  authMethod?: ProviderAuthMethod;
+  accessToken?: string;
+  refreshToken?: string;
+  accountId?: string;
+  expiresAt?: number;
+  baseUrl?: string;
+  apiProtocol?: "responses" | "chat_completions";
+  requestHeaders?: Record<string, string>;
+}
+
+/**
+ * Imports a Provider credential into the same account store used by manual
+ * account switching.  The Codex-compatible account files keep only the
+ * credential material required by the local route; provider metadata remains
+ * in runtime.json so discovery and refresh can use the correct adapter.
+ */
+export async function importProviderCredential(
+  request: ProviderCredentialImportRequest,
+): Promise<DesktopActionResult> {
+  const providerId = normalizeProviderId(request.providerId);
+  if (!providerId) throw new Error("Provider ID is required");
+  if (!request.account.trim()) throw new Error("Account name is required");
+  const providerRuntime = await loadGatewayProviderRuntime();
+  const definition = providerRuntime.providerDefinitions().find((item) => item.id === providerId);
+  const pluginAdapter = definition ? undefined : await getProviderPluginAdapter(getStateDir(), providerId);
+  const adapter = definition
+    ? providerRuntime.createConfiguredProviderAdapter?.(definition, definition.endpoints)
+      ?? providerRuntime.createProviderAdapter(definition)
+    : pluginAdapter;
+  if (!adapter) throw new Error(`Provider '${providerId}' is not installed`);
+
+  const authMethod = request.authMethod ?? (definition?.category === "subscription" ? "subscription" : "api_key");
+  if (!adapter.authMethods.includes(authMethod)) {
+    throw new Error(`Provider '${providerId}' does not support credential type '${authMethod}'`);
+  }
+  const accessToken = request.accessToken?.trim() || undefined;
+  const refreshToken = request.refreshToken?.trim() || undefined;
+  const providerRequestHeaders = sanitizeProviderRequestHeaders(request.requestHeaders);
+  if (authMethod !== "none" && !accessToken) throw new Error("Access token or API key is required");
+  if (request.expiresAt !== undefined && (!Number.isFinite(request.expiresAt) || request.expiresAt <= 0)) {
+    throw new Error("Credential expiry must be a positive timestamp");
+  }
+
+  const endpoint = definition?.endpoints.find((item) => item.protocol === (request.apiProtocol ?? "responses"))
+    ?? definition?.endpoints[0];
+  const baseUrl = request.baseUrl?.trim() || endpoint?.baseUrl;
+  const apiProtocol = request.apiProtocol
+    ?? (endpoint?.protocol === "chat_completions" ? "chat_completions" : "responses");
+  const authJson: Record<string, unknown> = {
+    provider_id: providerId,
+    provider_auth_method: authMethod,
+    ...(request.accountId?.trim() ? { account_id: request.accountId.trim() } : {}),
+    ...(accessToken ? { OPENAI_API_KEY: accessToken } : {}),
+    ...(accessToken || refreshToken || request.expiresAt
+      ? {
+          tokens: {
+            ...(accessToken ? { access_token: accessToken } : {}),
+            ...(refreshToken ? { refresh_token: refreshToken } : {}),
+            ...(request.expiresAt ? { expires_at: request.expiresAt } : {}),
+          },
+        }
+      : {}),
+  };
+
+  const state = await (await loadCoreRuntime()).readLegacyState(getLegacyOptions());
+  if (!state.envs[request.envName]) throw new Error(`Env '${request.envName}' not found`);
+  await saveAccountArtifacts({
+    envName: request.envName,
+    account: request.account.trim(),
+    runtime: {
+      providerId,
+      providerAuthMethod: authMethod,
+      ...(providerRequestHeaders ? { providerRequestHeaders } : {}),
+      preferredAuthMethod: "apikey",
+      openaiBaseUrlMode: baseUrl ? "custom" : "default",
+      openaiBaseUrl: baseUrl,
+      apiProtocol,
+      compatibilityRouteEnabled: false,
+    },
+    authJsonContent: `${JSON.stringify(authJson, null, 2)}\n`,
+    target: request.target,
+  });
+  await ensureProviderDefaultModels(getModelCatalogStore(), providerId);
+  await discoverAccountModels(request.envName, request.account.trim());
+  return {
+    message: `Imported ${providerId} credential for ${request.envName}/${request.account.trim()}`,
+    output: `Provider credential imported: ${request.envName}/${request.account.trim()}`,
+  };
+}
+
+export async function refreshProviderCredential(input: {
+  envName: string;
+  account: string;
+}): Promise<DesktopActionResult> {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const environment = state.envs[input.envName];
+  const account = environment?.accounts[input.account];
+  const providerId = account?.runtime.providerId;
+  if (!environment || !account || !providerId) throw new Error(`Provider account '${input.envName}/${input.account}' not found`);
+  const rawTokens = account.authData?.tokens;
+  const tokens = parseTokenRecord(rawTokens);
+  const refreshToken = typeof tokens?.refresh_token === "string" ? tokens.refresh_token.trim() : "";
+  if (!refreshToken) throw new Error(`Provider account '${input.envName}/${input.account}' has no refresh token`);
+  const providerRuntime = await loadGatewayProviderRuntime();
+  const definition = providerRuntime.providerDefinitions().find((item) => item.id === providerId);
+  const adapter = definition
+    ? providerRuntime.createConfiguredProviderAdapter?.(definition, definition.endpoints)
+      ?? providerRuntime.createProviderAdapter(definition)
+    : await getProviderPluginAdapter(getStateDir(), providerId);
+  if (!adapter) throw new Error(`Provider '${providerId}' is not installed`);
+  const providerAuthMethod = account.runtime.providerAuthMethod ?? (account.authMode === "auth" ? "subscription" : "api_key");
+  const providerAccount: ProviderAccountRef = {
+    accountId: extractAccountIdFromAuthData(account.authData) ?? input.account,
+    displayName: input.account,
+    authMethod: providerAuthMethod,
+    secretRef: `account:${encodeURIComponent(input.envName)}:${encodeURIComponent(input.account)}`,
+    status: "active",
+    ...(tokens?.expires_at && typeof tokens.expires_at === "number" ? { expiresAt: tokens.expires_at } : {}),
+  };
+  const refreshed = await adapter.refresh(await createProviderHttpClient(), providerAccount, refreshToken);
+  const nextTokens = {
+    ...(tokens ?? {}),
+    ...(refreshed.accessToken ? { access_token: refreshed.accessToken } : {}),
+    ...(refreshed.refreshToken ? { refresh_token: refreshed.refreshToken } : {}),
+    ...(refreshed.account.expiresAt ? { expires_at: refreshed.account.expiresAt } : {}),
+  };
+  const nextAuthData = {
+    ...(account.authData ?? {}),
+    ...(refreshed.accessToken ? { OPENAI_API_KEY: refreshed.accessToken } : {}),
+    tokens: nextTokens,
+  };
+  const authPath = join(getStateDir(), "env-accounts", input.envName, input.account, "auth.json");
+  await writeFileAtomically(authPath, `${JSON.stringify(nextAuthData, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  await runtime.writeLegacyRuntime({
+    stateDir: getStateDir(),
+    envName: input.envName,
+    accountName: input.account,
+    runtime: { ...account.runtime, providerAuthMethod },
+  });
+  await discoverAccountModels(input.envName, input.account);
+  await resynchronizeActiveModelCatalogs(accountModelBindingKey(input.envName, input.account));
+  await syncEnvironmentRouteIfEnabled(input.envName).catch(() => undefined);
+  return {
+    message: `Refreshed ${providerId} credential for ${input.envName}/${input.account}`,
+    output: `Provider credential refreshed: ${input.envName}/${input.account}`,
+  };
+}
+
+async function createProviderHttpClient(): Promise<ProviderHttpClient> {
+  const globalProxy = await resolveUsageProxy();
+  return {
+    async request(url, init, context) {
+      const response = await fetchWithOptionalProxy(
+        url,
+        { method: init.method, headers: init.headers, body: init.body },
+        context?.proxyUrl ?? globalProxy,
+      );
+      let payload: unknown = {};
+      try { payload = await response.json(); } catch { /* provider may return an empty error body */ }
+      return {
+        status: response.status,
+        headers: response.headers,
+        json: async () => (isRecord(payload) ? payload : {}) as import("../../../packages/gateway/dist/protocol.js").JsonObject,
+      };
+    },
+  };
+}
+
+function parseTokenRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) : value;
+    return isRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function getCodexToolPathOptions() {
   return { settingsPath: join(getStateDir(), "desktop-settings.json"), env: process.env, platform: process.platform };
 }
@@ -2428,6 +2716,163 @@ export async function listCustomModels() {
   );
 }
 
+/** Discovers and persists the models visible to one environment account. */
+export async function discoverAccountModels(envName: string, accountName: string): Promise<ModelCatalogSnapshot> {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const environment = state.envs[envName];
+  const account = environment?.accounts[accountName];
+  if (!environment || !account) throw new Error(`Account '${envName}/${accountName}' not found`);
+
+  const providerId = account.runtime.providerId ?? (account.authMode === "auth" ? "chatgpt" : "openai");
+  const accountKey = accountModelBindingKey(envName, accountName);
+  const store = getModelCatalogStore();
+  await store.saveAccountModelDiscovery({ accountKey, providerId, state: "discovering" });
+  await appendModelDiscoveryLog({ envName, accountName, accountKey, providerId, state: "discovering" });
+
+  let gateway: GatewayEnvironmentState;
+  try {
+    gateway = environment.gateway ?? await buildEnvironmentGatewayState(runtime, environment);
+    const result = await discoverGatewayAccountModels({
+      environment,
+      envName,
+      accountName,
+      gateway,
+      providerId,
+      stateDir: getStateDir(),
+    });
+    const models: Array<Omit<AccountDiscoveredModel, "firstSeenAt" | "lastSeenAt" | "status"> & { status?: AccountDiscoveredModel["status"] }> = result.models.map((model) => ({
+      providerModelKey: `${model.providerId}:${model.upstreamModelId}`,
+      providerId: model.providerId,
+      upstreamModelId: model.upstreamModelId,
+      displayName: model.displayName,
+      iconKey: providerId,
+      protocols: model.protocols,
+      capabilities: {
+        reasoning: model.capabilities.reasoning === true,
+        tools: model.capabilities.tools === true,
+        vision: model.capabilities.vision === true,
+        streaming: model.capabilities.streaming !== false,
+      },
+      source: "discovery",
+      status: "available",
+    }));
+    await store.saveAccountModelDiscovery({
+      accountKey,
+      providerId,
+      state: "ready",
+      models,
+      discoveredAt: new Date().toISOString(),
+    });
+    await appendModelDiscoveryLog({
+      envName,
+      accountName,
+      accountKey,
+      providerId,
+      state: "ready",
+      modelCount: models.length,
+      modelIds: models.map((model) => model.upstreamModelId),
+    });
+  } catch (error) {
+    const message = sanitizeModelDiscoveryError(error);
+    await store.saveAccountModelDiscovery({
+      accountKey,
+      providerId,
+      state: "failed",
+      lastError: message,
+    });
+    await appendModelDiscoveryLog({
+      envName,
+      accountName,
+      accountKey,
+      providerId,
+      state: "failed",
+      modelCount: 0,
+      error: message,
+    });
+  }
+
+  await resynchronizeActiveModelCatalogs(accountKey).catch(() => undefined);
+  return listCustomModels();
+}
+
+/** Refreshes every known account without changing its existing exposure picks. */
+export async function refreshAllAccountModels(): Promise<ModelCatalogSnapshot> {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const accounts = Object.values(state.envs).flatMap((environment) =>
+    Object.keys(environment.accounts).map((accountName) => ({ envName: environment.name, accountName })),
+  );
+  // The catalog is an atomic file store without a database transaction. Keep
+  // writes ordered so two accounts cannot overwrite one another's snapshot.
+  for (const { envName, accountName } of accounts) {
+    await discoverAccountModels(envName, accountName);
+  }
+  return listCustomModels();
+}
+
+function sanitizeModelDiscoveryError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/\b(?:sk|key|token)-[A-Za-z0-9._~-]+\b/gi, "[redacted]")
+    .slice(0, 500);
+}
+
+async function appendModelDiscoveryLog(details: {
+  envName: string;
+  accountName: string;
+  accountKey: string;
+  providerId: string;
+  state: "discovering" | "ready" | "failed";
+  modelCount?: number;
+  modelIds?: string[];
+  error?: string;
+}): Promise<void> {
+  const safeModelIds = details.modelIds?.map((value) => value.replace(/[\r\n]/g, "").slice(0, 160)).slice(0, 200);
+  await appendFile(resolveLogPath("switcher"), `${JSON.stringify({
+    at: new Date().toISOString(),
+    event: "account_model_discovery",
+    envName: details.envName,
+    accountName: details.accountName,
+    accountKey: details.accountKey,
+    providerId: details.providerId,
+    state: details.state,
+    ...(details.modelCount !== undefined ? { modelCount: details.modelCount } : {}),
+    ...(safeModelIds?.length ? { modelIds: safeModelIds } : {}),
+    ...(details.error ? { error: details.error } : {}),
+  })}\n`, "utf8").catch(() => undefined);
+}
+
+export async function listProviderCatalog() {
+  const runtime = await loadGatewayProviderRuntime();
+  return runtime.canonicalProviderDefinitions().map((definition) => {
+    const protocols = [...new Set(definition.endpoints.map((endpoint) => endpoint.protocol))];
+    return {
+      id: definition.id,
+      displayName: definition.displayName,
+      category: definition.category ?? "custom",
+      iconKey: definition.iconKey ?? "custom",
+      ...(definition.endpoints[0]?.baseUrl ? { defaultBaseUrl: definition.endpoints[0].baseUrl } : {}),
+      ...(definition.aliasOf ? { aliasOf: definition.aliasOf } : {}),
+      authMethods: [...definition.authMethods],
+      protocols,
+      discoveryMode: definition.endpoints.some((endpoint) => endpoint.modelsPath)
+        ? (definition.category === "local" ? "local" : "remote")
+        : "manual",
+      capabilities: {
+        modelDiscovery: definition.endpoints.some((endpoint) => Boolean(endpoint.modelsPath)),
+        quota: definition.endpoints.some((endpoint) => Boolean(endpoint.quotaPath)),
+        tokenRefresh: definition.authMethods.includes("oauth") || definition.authMethods.includes("subscription"),
+        accountPool: true,
+        // The Gateway ingress is Responses. Every supported non-Responses
+        // upstream protocol is converted by the shared protocol adapter.
+        protocolConversion: protocols.some((protocol) => protocol !== "responses"),
+      },
+    };
+  });
+}
+
 export async function saveCustomModel(input: SaveCustomModelInput) {
   await getModelCatalogStore().saveModel(input);
   await resynchronizeActiveModelCatalogs();
@@ -2518,6 +2963,8 @@ async function resynchronizeActiveEnvironmentGateways(
     await synchronizeEnvironmentGatewayModelCatalog({
       homePath: environment.path,
       gateway,
+      environmentName: environment.name,
+      diagnosticLogPath: resolveLogPath("switcher"),
       loadBundledCatalog: cliStatus.available
         ? () => loadBundledModelCatalog(cliStatus.path)
         : undefined,
@@ -3177,6 +3624,8 @@ async function applyTargetHomeStateWithHistory(
       await synchronizeEnvironmentGatewayModelCatalog({
         homePath: env.path,
         gateway: env.gateway,
+        environmentName: env.name,
+        diagnosticLogPath: resolveLogPath("switcher"),
         loadBundledCatalog: cliStatus.available
           ? () => loadBundledModelCatalog(cliStatus.path)
           : undefined,
@@ -3194,6 +3643,8 @@ async function applyTargetHomeStateWithHistory(
           ?? (refreshedAccount?.runtime.independentModelEnabled
             ? getProviderDefaultModelSlug(refreshedAccount.runtime.independentModelProviderId) ?? DEEPSEEK_DEFAULT_MODEL_SLUG
             : undefined),
+        environmentName: pointer.env,
+        diagnosticLogPath: resolveLogPath("switcher"),
         loadBundledCatalog: cliStatus.available
           ? () => loadBundledModelCatalog(cliStatus.path)
           : undefined,
@@ -3437,6 +3888,7 @@ async function nativeAuthLogin(request: {
     authJsonContent: authRaw,
     target: request.target,
   });
+  await discoverAccountModels(request.envName, request.account);
 
   return {
     message: `Logged in ${request.envName}/${request.account}`,
@@ -3496,6 +3948,7 @@ async function nativeApiKeyLogin(request: {
     account: request.account,
     runtime: {
       providerId,
+      providerAuthMethod: "api_key",
       preferredAuthMethod: "apikey",
       openaiBaseUrlMode: hasCustomBaseUrl ? "custom" : "default",
       openaiBaseUrl: hasCustomBaseUrl ? effectiveBaseUrl : undefined,
@@ -3511,7 +3964,7 @@ async function nativeApiKeyLogin(request: {
     target: request.target,
   });
 
-  await ensureProviderDefaultModelBindings(request.envName, request.account, providerId);
+  await ensureProviderDefaultModels(getModelCatalogStore(), providerId);
 
   if (
     (providerProtocol === "chat_completions"
@@ -3527,6 +3980,8 @@ async function nativeApiKeyLogin(request: {
       requestOverrides: request.requestOverrides,
     });
   }
+
+  await discoverAccountModels(request.envName, request.account);
 
   return {
     message: `Saved API key for ${request.envName}/${request.account}`,
@@ -3563,6 +4018,10 @@ async function nativeExternalCredentialLogin(request: {
       authJsonContent: authJsonDocuments[index]!,
       target: request.target,
     });
+    // Imported batches are independent environment accounts.  Discover each
+    // credential separately so one account never inherits another account's
+    // model list or routing metadata.
+    await discoverAccountModels(request.envName, account);
   }
 
   return {
@@ -3576,6 +4035,8 @@ async function saveAccountArtifacts(options: {
   account: string;
   runtime: {
     providerId?: string;
+    providerAuthMethod?: ProviderAuthMethod;
+    providerRequestHeaders?: Record<string, string>;
     preferredAuthMethod: "chatgpt" | "apikey";
     openaiBaseUrlMode: "default" | "custom";
     openaiBaseUrl?: string;
@@ -3637,17 +4098,6 @@ async function saveAccountArtifacts(options: {
   ).catch(() => undefined);
 }
 
-async function ensureProviderDefaultModelBindings(
-  envName: string,
-  accountName: string,
-  providerId?: string,
-): Promise<void> {
-  const store = getModelCatalogStore();
-  const modelIds = await ensureProviderDefaultModels(store, providerId);
-  if (modelIds.length === 0) return;
-  await store.setAccountBindings(`${envName}/${accountName}`, modelIds);
-}
-
 async function ensureProviderDefaultModels(
   store: ReturnType<typeof getModelCatalogStore>,
   providerId?: string,
@@ -3655,10 +4105,19 @@ async function ensureProviderDefaultModels(
   const providerIds = providerId ? [providerId] : ["deepseek", "mimo", "kimi", "zai"];
   const snapshot = await store.load();
   const modelIds: string[] = [];
+  const providerRuntime = providerId ? await loadGatewayProviderRuntime() : undefined;
 
   for (const currentProviderId of providerIds) {
-    const entries = getProviderDefaultModelEntries(currentProviderId);
-    if (!entries?.length) continue;
+    const presetEntries = getProviderDefaultModelEntries(currentProviderId);
+    const definition = providerRuntime?.providerDefinitions().find((item) => item.id === currentProviderId);
+    const entries = presetEntries?.length
+      ? presetEntries
+      : (definition?.presets ?? []).map((slug) => normalizeCustomModelInput({
+          slug,
+          display_name: `${definition?.displayName ?? currentProviderId} · ${slug}`,
+          description: `Provider preset model for ${definition?.displayName ?? currentProviderId}`,
+        }));
+    if (!entries.length) continue;
     for (const entry of entries) {
       const existing = snapshot.models.find((model) => model.entry.slug === entry.slug);
       if (existing) {
@@ -4326,6 +4785,10 @@ async function removeAccountDirect(
 
   await getUsageRouterManager().removeAccountRoutes(input.envName, input.accountName);
 
+  await getModelCatalogStore().removeAccountModelDiscovery(
+    accountModelBindingKey(input.envName, input.accountName),
+  );
+
   await rm(join(getStateDir(), "env-accounts", input.envName, input.accountName), {
     recursive: true,
     force: true,
@@ -4353,6 +4816,13 @@ async function removeEnvDirect(runtime: CoreRuntime, envName: string): Promise<v
 
   await getUsageRouterManager().removeAccountPoolConfiguration(envName);
   await getUsageRouterManager().removeEnvironmentRoutes(envName);
+
+  const catalog = await getModelCatalogStore().load();
+  for (const accountKey of Object.keys(catalog.accountModelDiscoveries ?? {})) {
+    if (accountKey.startsWith(`${envName}/`)) {
+      await getModelCatalogStore().removeAccountModelDiscovery(accountKey);
+    }
+  }
 
   await rm(join(getEnvsDir(), envName), { recursive: true, force: true });
   await rm(join(getStateDir(), "env-accounts", envName), {
@@ -4421,6 +4891,8 @@ async function logoutAccountDirect(
   runtime: CoreRuntime,
   input: { envName: string; accountName: string; target: "cli" | "app" | "both" },
 ): Promise<void> {
+  const stateBeforeLogout = await runtime.readLegacyState(getLegacyOptions());
+  const accountBeforeLogout = stateBeforeLogout.envs[input.envName]?.accounts[input.accountName];
   await rm(join(getStateDir(), "env-accounts", input.envName, input.accountName, "auth.json"), {
     force: true,
   });
@@ -4429,7 +4901,14 @@ async function logoutAccountDirect(
     { force: true },
   );
 
-  const state = await runtime.readLegacyState(getLegacyOptions());
+  await getModelCatalogStore().saveAccountModelDiscovery({
+    accountKey: accountModelBindingKey(input.envName, input.accountName),
+    providerId: accountBeforeLogout?.runtime.providerId ?? (accountBeforeLogout?.authMode === "auth" ? "chatgpt" : "openai"),
+    state: "stale",
+    lastError: "Account credentials are not available; reauthorize to refresh models",
+  });
+
+  const state = stateBeforeLogout;
   for (const target of expandTargets(input.target)) {
     if (
       state.targets[target].env === input.envName &&
@@ -4532,6 +5011,22 @@ function extractAccessTokenFromAuthData(authData: Record<string, unknown> | unde
       typeof rawTokens === "string"
         ? (JSON.parse(rawTokens) as { access_token?: string })
         : (rawTokens as { access_token?: string });
+    return parsed.access_token?.trim() || "";
+  } catch {
+    return "";
+  }
+}
+
+function extractProviderAccessTokenFromAuthData(authData: Record<string, unknown> | undefined): string {
+  const direct = readAuthStringField(authData, "OPENAI_API_KEY")
+    ?? readAuthStringField(authData, "access_token");
+  if (direct) return direct;
+  const rawTokens = authData?.tokens;
+  if (!rawTokens) return "";
+  try {
+    const parsed = typeof rawTokens === "string"
+      ? JSON.parse(rawTokens) as { access_token?: string }
+      : rawTokens as { access_token?: string };
     return parsed.access_token?.trim() || "";
   } catch {
     return "";

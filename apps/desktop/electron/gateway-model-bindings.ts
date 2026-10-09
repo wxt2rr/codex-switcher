@@ -3,13 +3,21 @@ import type {
   GatewayModelDefinition,
   GatewayRouteGroupDefinition,
 } from "../../../packages/core/dist/gateway/model.js";
+import type { GatewayProtocol, GatewayRouteCompatibilityIssue } from "../../../packages/core/dist/gateway/model.js";
 import type { EnvState } from "../../../packages/core/dist/state/store.js";
 import {
   resolveModelBinding,
+  isModelAvailableForAccount,
   type ModelCatalogEntry,
   type CustomModelRecord,
   type ModelCatalogSnapshot,
 } from "./model-catalog-store.js";
+import { loadGatewayModelRuntime } from "./core-runtime.js";
+import {
+  gatewayCredentialSupportsProtocol,
+  gatewayProviderProtocols,
+  gatewayProviderSupportsProtocol,
+} from "./gateway-protocol-support.js";
 
 /**
  * Compiles the model page's environment/account bindings into the gateway
@@ -44,6 +52,7 @@ export function applyModelCatalogBindings(
     for (const modelId of modelIds) {
       const model = modelsById.get(modelId);
       if (!model) continue;
+      if (!isModelAvailableForAccount(snapshot, model, accountKey)) continue;
       const binding = resolveModelBinding(snapshot, model, accountKey);
       if (!binding.enabled) continue;
       addModelBinding(next, environment, accountName, credentialId, model, binding);
@@ -53,6 +62,14 @@ export function applyModelCatalogBindings(
   addBundledModelBindings(next, environment, credentialsByAccount, bundledModels);
 
   return next;
+}
+
+/** Returns route compiler diagnostics without throwing away a readable legacy document. */
+export async function inspectGatewayModelBindings(
+  gateway: GatewayEnvironmentState,
+): Promise<GatewayRouteCompatibilityIssue[]> {
+  const runtime = await loadGatewayModelRuntime();
+  return runtime.validateGatewayRouteCompatibility(gateway);
 }
 
 function addBundledModelBindings(
@@ -90,6 +107,10 @@ function addBundledModelBindings(
       if (!credentialId || !credential || credential.status === "disabled") continue;
 
       const providerId = credential.providerId;
+      ensureProviderProtocol(gateway, providerId, "responses", account);
+      if (!gatewayCredentialSupportsProtocol(credential, "responses")) {
+        credential.supportedProtocols = Array.from(new Set([...credential.supportedProtocols, "responses"]));
+      }
       const internalModelId = createBuiltinModelId(environment.name, model.slug, providerId);
       const existing = gateway.models[internalModelId];
       gateway.models[internalModelId] = existing
@@ -140,18 +161,36 @@ function addModelBinding(
 
   const providerId = credential.providerId;
   const internalModelId = createCatalogModelId(model.id, providerId, binding.upstreamModelId);
-  const protocol = account.authMode === "auth" ? "responses" : account.runtime.apiProtocol ?? "responses";
+  const configuredProtocol: GatewayProtocol = account.authMode === "auth" ? "responses" : account.runtime.apiProtocol ?? "responses";
+  const existingProvider = gateway.providers[providerId];
+  const hasNativeOnlyProtocol = Boolean(existingProvider
+    && gatewayProviderProtocols(existingProvider).some((protocol) => protocol === "anthropic" || protocol === "gemini"));
+  if (existingProvider && !gatewayProviderSupportsProtocol(existingProvider, configuredProtocol) && !hasNativeOnlyProtocol) {
+    ensureProviderProtocol(gateway, providerId, configuredProtocol, account);
+  }
+  const protocols = resolveBindingProtocols(model.entry, gateway.providers[providerId], configuredProtocol);
+  if (!protocols.length) return;
+  for (const protocol of protocols) ensureProviderProtocol(gateway, providerId, protocol, account);
+  const provider = gateway.providers[providerId];
+  if (!provider) return;
+  const supportedProtocols = protocols.filter((protocol) => gatewayProviderSupportsProtocol(provider, protocol));
+  if (!supportedProtocols.length) return;
+  for (const protocol of supportedProtocols) {
+    if (!gatewayCredentialSupportsProtocol(credential, protocol)) {
+      credential.supportedProtocols = Array.from(new Set([...credential.supportedProtocols, protocol]));
+    }
+  }
   const existing = gateway.models[internalModelId];
-  const protocols = Array.from(new Set([...(existing?.protocols ?? []), protocol]));
+  const modelProtocols = Array.from(new Set([...(existing?.protocols ?? []), ...supportedProtocols]));
   const modelDefinition: GatewayModelDefinition = existing ? {
     ...existing,
-    protocols,
+    protocols: modelProtocols,
   } : {
     id: internalModelId,
     providerId,
     upstreamModelId: binding.upstreamModelId,
     displayName: model.entry.display_name,
-    protocols,
+    protocols: modelProtocols,
     capabilities: {
       reasoning: Array.isArray(model.entry.supported_reasoning_levels)
         || model.entry.supports_reasoning_summaries === true,
@@ -193,6 +232,61 @@ function addModelBinding(
   }
   group.members.sort((left, right) => left.priority - right.priority || left.modelId.localeCompare(right.modelId));
   gateway.routeGroups[group.id] = group;
+}
+
+/**
+ * Resolves the upstream wire protocols for a model binding. The account's
+ * Responses/Chat setting is an ingress preference, not a license to send an
+ * Anthropic or Gemini provider a Responses payload. Explicit model metadata
+ * wins; otherwise a single-provider protocol is selected, and ambiguous
+ * OpenAI-compatible providers follow the account's configured wire API.
+ */
+function resolveBindingProtocols(
+  entry: ModelCatalogEntry,
+  provider: GatewayEnvironmentState["providers"][string] | undefined,
+  configuredProtocol: GatewayProtocol,
+): GatewayProtocol[] {
+  if (!provider) return [];
+  const providerProtocols = gatewayProviderProtocols(provider);
+  const declared = [entry.protocol, entry.wire_api, entry.api_protocol, ...(Array.isArray(entry.supported_protocols) ? entry.supported_protocols : [])]
+    .flatMap((value) => typeof value === "string" ? [normalizeGatewayProtocol(value)] : [])
+    .filter((value): value is GatewayProtocol => Boolean(value));
+  const declaredSet = new Set(declared);
+  const explicit = providerProtocols.filter((protocol) => declaredSet.has(protocol));
+  if (explicit.length) return explicit;
+  if (providerProtocols.includes(configuredProtocol)) return [configuredProtocol];
+  if (providerProtocols.length === 1) return [...providerProtocols];
+  return providerProtocols.filter((protocol) => protocol === "responses" || protocol === "chat_completions");
+}
+
+function normalizeGatewayProtocol(value: string): GatewayProtocol | undefined {
+  const normalized = value.trim().toLowerCase().replaceAll("-", "_");
+  if (normalized === "responses" || normalized === "response") return "responses";
+  if (normalized === "chat_completions" || normalized === "chat" || normalized === "chatcompletion") return "chat_completions";
+  if (normalized === "anthropic" || normalized === "messages" || normalized === "anthropic_messages") return "anthropic";
+  if (normalized === "gemini" || normalized === "generate_content") return "gemini";
+  return undefined;
+}
+
+function ensureProviderProtocol(
+  gateway: GatewayEnvironmentState,
+  providerId: string,
+  protocol: GatewayProtocol,
+  account: { authMode: string; runtime: { openaiBaseUrlMode: string; openaiBaseUrl?: string } },
+): void {
+  const provider = gateway.providers[providerId];
+  if (!provider || gatewayProviderSupportsProtocol(provider, protocol)) return;
+  const baseUrl = account.runtime.openaiBaseUrlMode === "custom" && account.runtime.openaiBaseUrl?.trim()
+    ? account.runtime.openaiBaseUrl.trim()
+    : account.authMode === "auth"
+      ? "https://chatgpt.com/backend-api/codex"
+      : "https://api.openai.com/v1";
+  const endpoints = { ...provider.endpoints };
+  if (protocol === "responses") endpoints.responses ??= baseUrl;
+  if (protocol === "chat_completions") endpoints.chatCompletions ??= baseUrl;
+  if (protocol === "anthropic") endpoints.anthropicMessages ??= baseUrl;
+  if (protocol === "gemini") endpoints.gemini ??= baseUrl;
+  gateway.providers[providerId] = { ...provider, endpoints };
 }
 
 function modelSupportsTools(entry: ModelCatalogEntry): boolean {

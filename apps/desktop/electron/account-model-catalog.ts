@@ -1,11 +1,13 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import {
   accountModelBindingKey,
+  isModelAvailableForAccount,
+  normalizeCustomModelInput,
   type ModelCatalogEntry,
   type ModelCatalogStore,
 } from "./model-catalog-store.js";
@@ -45,7 +47,7 @@ export async function loadBundledModelCatalog(codexBin: string): Promise<Bundled
       ? parsed.models
       : undefined;
   if (!models) throw new Error("Codex returned an invalid bundled model catalog");
-  return { models: models.map(validateCatalogEntry) };
+  return { models: models.map(normalizeCodexCatalogEntry) };
 }
 
 export async function synchronizeAccountModelCatalog(options: {
@@ -57,6 +59,8 @@ export async function synchronizeAccountModelCatalog(options: {
   providerId?: string;
   baseUrl?: string;
   model?: string;
+  diagnosticLogPath?: string;
+  environmentName?: string;
 }): Promise<{ enabled: boolean; catalogPath?: string; preset?: string }> {
   const snapshot = await options.store.load();
   const bindingIds = snapshot.accountBindings[
@@ -65,27 +69,39 @@ export async function synchronizeAccountModelCatalog(options: {
   const configPath = join(options.homePath, "config.toml");
   const catalogPath = join(options.homePath, "model-catalogs", "codex-switcher-models.json");
   const configuredModel = options.model ?? await readConfiguredModel(configPath);
+  const accountKey = accountModelBindingKey(options.envName, options.accountName);
+  const hasDiscoverySnapshot = Boolean(snapshot.accountModelDiscoveries?.[accountKey]);
   const preset = resolveProviderModelPreset({
     providerId: options.providerId,
     baseUrl: options.baseUrl,
     model: configuredModel,
   });
 
-  if (preset) {
+  // Keep the legacy preset path for accounts created before account-scoped
+  // discovery existed. Once a discovery snapshot exists, the explicit
+  // exposure selection is authoritative and must never be bypassed by a
+  // provider preset.
+  if (preset && !hasDiscoverySnapshot) {
     await writePresetModelCatalog(join(options.homePath, preset.catalogPath), preset.entries);
     await setModelCatalogConfig(configPath, join(options.homePath, preset.catalogPath));
     await rm(catalogPath, { force: true });
-    return { enabled: true, catalogPath: join(options.homePath, preset.catalogPath), preset: preset.providerId };
+    const result = { enabled: true, catalogPath: join(options.homePath, preset.catalogPath), preset: preset.providerId };
+    await appendCatalogDiagnostic(options.diagnosticLogPath, { environmentName: options.environmentName, mode: "account", status: "synchronized", catalogPath: result.catalogPath, modelCount: preset.entries.length, preset: preset.providerId });
+    return result;
   }
 
   if (bindingIds.length === 0) {
     await removeModelCatalogConfig(configPath);
     await rm(catalogPath, { force: true });
+    await appendCatalogDiagnostic(options.diagnosticLogPath, { environmentName: options.environmentName, mode: "account", status: "disabled", reason: "no_model_binding" });
     return { enabled: false };
   }
 
   const byId = new Map(snapshot.models.map((model) => [model.id, model]));
-  const customEntries = bindingIds.map((id) => {
+  const customEntries = bindingIds.filter((id) => {
+    const model = byId.get(id);
+    return model ? isModelAvailableForAccount(snapshot, model, accountModelBindingKey(options.envName, options.accountName)) : false;
+  }).map((id) => {
     const model = byId.get(id);
     if (!model) throw new Error(`Bound custom model '${id}' no longer exists`);
     return model.entry;
@@ -93,13 +109,20 @@ export async function synchronizeAccountModelCatalog(options: {
   const bundled = options.loadBundledCatalog
     ? await options.loadBundledCatalog()
     : { models: [] };
-  const catalogEntries = bundled.models;
+  const catalogEntries = bundled.models.map(normalizeCodexCatalogEntry);
+  if (customEntries.length === 0 && catalogEntries.length === 0) {
+    await removeModelCatalogConfig(configPath);
+    await rm(catalogPath, { force: true });
+    await appendCatalogDiagnostic(options.diagnosticLogPath, { environmentName: options.environmentName, mode: "account", status: "disabled", reason: "no_available_model_binding" });
+    return { enabled: false };
+  }
   const bundledSlugs = new Set(catalogEntries.map((model) => model.slug));
   const collision = customEntries.find((model) => bundledSlugs.has(model.slug));
   if (collision) throw new Error(`Custom model '${collision.slug}' conflicts with a bundled model`);
 
   await atomicWriteJson(catalogPath, { models: [...catalogEntries, ...customEntries] });
   await setModelCatalogConfig(configPath, catalogPath);
+  await appendCatalogDiagnostic(options.diagnosticLogPath, { environmentName: options.environmentName, mode: "account", status: "synchronized", catalogPath, modelCount: catalogEntries.length + customEntries.length });
   return { enabled: true, catalogPath };
 }
 
@@ -107,6 +130,8 @@ export async function synchronizeEnvironmentGatewayModelCatalog(options: {
   homePath: string;
   gateway: GatewayEnvironmentState;
   loadBundledCatalog?: () => Promise<BundledModelCatalog>;
+  diagnosticLogPath?: string;
+  environmentName?: string;
 }): Promise<{ enabled: boolean; catalogPath?: string }> {
   const configPath = join(options.homePath, "config.toml");
   const catalogPath = join(options.homePath, "model-catalogs", "codex-switcher-gateway-models.json");
@@ -114,18 +139,38 @@ export async function synchronizeEnvironmentGatewayModelCatalog(options: {
   if (gatewayEntries.length === 0) {
     await removeModelCatalogConfig(configPath);
     await rm(catalogPath, { force: true });
+    await appendCatalogDiagnostic(options.diagnosticLogPath, { environmentName: options.environmentName, mode: "gateway", status: "disabled", reason: "no_routable_model" });
     return { enabled: false };
   }
 
   const bundled = options.loadBundledCatalog ? await options.loadBundledCatalog() : { models: [] };
-  const bundledSlugs = new Set(bundled.models.map((model) => model.slug));
+  const bundledModels = bundled.models.map(normalizeCodexCatalogEntry);
+  const bundledSlugs = new Set(bundledModels.map((model) => model.slug));
   const collisions = gatewayEntries.filter((entry) => bundledSlugs.has(entry.slug));
   if (collisions.length) {
     throw new Error(`Gateway model catalog conflicts with bundled models: ${collisions.map((entry) => entry.slug).join(", ")}`);
   }
-  await atomicWriteJson(catalogPath, { models: [...bundled.models, ...gatewayEntries] });
-  await setModelCatalogConfig(configPath, catalogPath);
+  try {
+    await atomicWriteJson(catalogPath, { models: [...bundledModels, ...gatewayEntries] });
+    await setModelCatalogConfig(configPath, catalogPath);
+  } catch (error) {
+    await appendCatalogDiagnostic(options.diagnosticLogPath, {
+      environmentName: options.environmentName,
+      mode: "gateway",
+      status: "failed",
+      reason: "write_failed",
+      error: error instanceof Error ? error.message : String(error),
+      catalogPath,
+    });
+    throw error;
+  }
+  await appendCatalogDiagnostic(options.diagnosticLogPath, { environmentName: options.environmentName, mode: "gateway", status: "synchronized", catalogPath, modelCount: bundledModels.length + gatewayEntries.length, gatewayModelCount: gatewayEntries.length });
   return { enabled: true, catalogPath };
+}
+
+async function appendCatalogDiagnostic(path: string | undefined, details: Record<string, unknown>): Promise<void> {
+  if (!path) return;
+  await appendFile(path, `${JSON.stringify({ at: new Date().toISOString(), event: "model_catalog_sync", ...details })}\n`, { encoding: "utf8", mode: 0o600 }).catch(() => undefined);
 }
 
 async function mergeModelCatalogFile(path: string, entries: ModelCatalogEntry[]): Promise<void> {
@@ -216,6 +261,15 @@ function validateCatalogEntry(value: unknown): ModelCatalogEntry {
     throw new Error("Codex bundled model catalog contains an invalid entry");
   }
   return value as ModelCatalogEntry;
+}
+
+/**
+ * Codex rejects a catalog as a whole when one entry misses a required field.
+ * Normalize every source at the last write boundary so old cached catalogs,
+ * provider presets, and newly discovered models share the same complete shape.
+ */
+function normalizeCodexCatalogEntry(value: unknown): ModelCatalogEntry {
+  return normalizeCustomModelInput(validateCatalogEntry(value));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

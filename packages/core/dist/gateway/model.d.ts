@@ -12,6 +12,19 @@ export interface GatewayProviderEndpoints {
     anthropicMessages?: string;
     gemini?: string;
 }
+/** Returns the upstream wire protocols declared by a Provider. */
+export declare function gatewayProviderProtocols(provider: Pick<GatewayProviderDefinition, "endpoints">): GatewayProtocol[];
+export declare function gatewayProviderSupportsProtocol(provider: Pick<GatewayProviderDefinition, "endpoints">, protocol: GatewayProtocol): boolean;
+export declare function gatewayCredentialSupportsProtocol(credential: Pick<GatewayCredentialDefinition, "supportedProtocols">, protocol: GatewayProtocol): boolean;
+export declare function gatewayModelSupportsProtocol(model: Pick<GatewayModelDefinition, "protocols">, protocol: GatewayProtocol): boolean;
+export interface GatewayRouteCompatibilityIssue {
+    code: "PROVIDER_NOT_FOUND" | "CREDENTIAL_NOT_FOUND" | "MODEL_NOT_FOUND" | "PROVIDER_MODEL_MISMATCH" | "NO_PROTOCOL_INTERSECTION" | "NESTED_GROUP_NOT_FOUND";
+    routeGroupId?: string;
+    modelId?: string;
+    providerId?: string;
+    credentialId?: string;
+    message: string;
+}
 export interface GatewayProviderDefinition {
     id: string;
     displayName: string;
@@ -137,4 +150,10 @@ export interface GatewayEnvironmentState {
 /** Returns true when a Gateway document contains the permanently unsupported prompt/intent surface. */
 export declare function containsExcludedGatewayRoutingFields(value: unknown): boolean;
 export declare function isGatewayEnvironmentState(value: unknown): value is GatewayEnvironmentState;
+/**
+ * Validates compiled route members without rejecting otherwise readable legacy
+ * documents. This is deliberately separate from the shape guard above so an
+ * old document can still be migrated and then repaired with diagnostics.
+ */
+export declare function validateGatewayRouteCompatibility(gateway: Pick<GatewayEnvironmentState, "providers" | "credentials" | "models" | "routeGroups">): GatewayRouteCompatibilityIssue[];
 export declare function isGatewayProxyUrl(value: unknown): value is string;

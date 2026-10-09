@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -57,6 +57,11 @@ test("normalizer preserves advanced JSON fields and creates stable defaults", ()
   assert.ok(normalized.truncation_policy);
 });
 
+test("normalizer rejects unsupported protocols and invalid context windows", () => {
+  assert.throws(() => normalizeCustomModelInput({ slug: "bad-protocol", display_name: "Bad", protocol: "xml" }), /must be one of/);
+  assert.throws(() => normalizeCustomModelInput({ slug: "bad-context", display_name: "Bad", context_window: 0 }), /positive number/);
+});
+
 test("model bindings replace all account relations in one atomic update", async () => {
   const root = await mkdtemp(join(tmpdir(), "model-binding-store-"));
   const store = createModelCatalogStore(join(root, "models.json"));
@@ -99,4 +104,137 @@ test("model catalog binding filter hides stale account keys", () => {
     filterModelCatalogBindings(snapshot, new Set(["default/live"])).accountBindings,
     { "default/live": ["model-1"] },
   );
+});
+
+test("account model discovery persists a sanitized snapshot and creates a catalog model", async () => {
+  const root = await mkdtemp(join(tmpdir(), "model-discovery-store-"));
+  const path = join(root, "models.json");
+  const store = createModelCatalogStore(path);
+
+  const discovered = {
+    providerModelKey: "kimi:kimi-k3",
+    providerId: "kimi",
+    upstreamModelId: "kimi-k3",
+    displayName: "Kimi K3",
+    iconKey: "kimi",
+    protocols: ["chat_completions"],
+    capabilities: { reasoning: true, tools: true, vision: false, streaming: true },
+    source: "discovery",
+    status: "available",
+    secret: "sk-should-not-be-written",
+  } as never;
+  await store.saveAccountModelDiscovery({
+    accountKey: "work/kimi",
+    providerId: "kimi",
+    state: "ready",
+    models: [discovered],
+  });
+
+  const snapshot = await store.load();
+  assert.equal(snapshot.accountModelDiscoveries?.["work/kimi"]?.models[0]?.upstreamModelId, "kimi-k3");
+  assert.equal(snapshot.models[0]?.entry.slug, "kimi:kimi-k3");
+  assert.equal(snapshot.models[0]?.entry.provider_model_key, "kimi:kimi-k3");
+  const raw = await readFile(path, "utf8");
+  assert.equal(raw.includes("sk-should-not-be-written"), false);
+  assert.equal(raw.includes("OPENAI_API_KEY"), false);
+});
+
+test("account discovery reuses a matching provider preset instead of duplicating it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "model-discovery-preset-"));
+  const store = createModelCatalogStore(join(root, "models.json"));
+  const preset = await store.saveModel({ entry: { slug: "kimi-k3", display_name: "Kimi K3" } });
+  await store.saveAccountModelDiscovery({
+    accountKey: "work/kimi",
+    providerId: "kimi",
+    state: "ready",
+    models: [{
+      providerModelKey: "kimi:kimi-k3",
+      providerId: "kimi",
+      upstreamModelId: "kimi-k3",
+      displayName: "Kimi K3",
+      protocols: ["chat_completions"],
+      capabilities: { reasoning: true, tools: true, vision: false, streaming: true },
+      source: "discovery",
+    }],
+  });
+  const snapshot = await store.load();
+  assert.equal(snapshot.models.length, 1);
+  assert.equal(snapshot.models[0]?.id, preset.id);
+  assert.equal(snapshot.models[0]?.entry.provider_model_key, "kimi:kimi-k3");
+});
+
+test("account model discovery preserves selected history and marks missing models unavailable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "model-discovery-lifecycle-"));
+  const store = createModelCatalogStore(join(root, "models.json"));
+  const model = {
+    providerModelKey: "deepseek:deepseek-chat",
+    providerId: "deepseek",
+    upstreamModelId: "deepseek-chat",
+    displayName: "DeepSeek Chat",
+    protocols: ["responses"],
+    capabilities: { reasoning: false, tools: true, vision: false, streaming: true },
+    source: "discovery" as const,
+  };
+
+  await store.saveAccountModelDiscovery({ accountKey: "default/deepseek", providerId: "deepseek", state: "ready", models: [model] });
+  const catalogModel = (await store.load()).models[0]!;
+  await store.setAccountBindings("default/deepseek", [catalogModel.id]);
+  await store.saveAccountModelDiscovery({
+    accountKey: "default/deepseek",
+    providerId: "deepseek",
+    state: "ready",
+    models: [],
+  });
+
+  const snapshot = await store.load();
+  assert.deepEqual(snapshot.accountBindings["default/deepseek"], [catalogModel.id]);
+  assert.equal(snapshot.accountModelDiscoveries?.["default/deepseek"]?.models[0]?.status, "unavailable");
+});
+
+test("failed discovery preserves the previous models as stale", async () => {
+  const root = await mkdtemp(join(tmpdir(), "model-discovery-failure-"));
+  const store = createModelCatalogStore(join(root, "models.json"));
+  await store.saveAccountModelDiscovery({
+    accountKey: "default/account",
+    providerId: "openai",
+    state: "ready",
+    models: [{
+      providerModelKey: "openai:gpt-5",
+      providerId: "openai",
+      upstreamModelId: "gpt-5",
+      displayName: "GPT-5",
+      protocols: ["responses"],
+      capabilities: { reasoning: true, tools: true, vision: true, streaming: true },
+      source: "discovery",
+    }],
+  });
+  await store.saveAccountModelDiscovery({
+    accountKey: "default/account",
+    providerId: "openai",
+    state: "failed",
+    lastError: "upstream unavailable",
+  });
+
+  const snapshot = await store.load();
+  const accountSnapshot = snapshot.accountModelDiscoveries?.["default/account"];
+  assert.equal(accountSnapshot?.state, "failed");
+  assert.equal(accountSnapshot?.models[0]?.status, "stale");
+  assert.equal(accountSnapshot?.lastError, "upstream unavailable");
+});
+
+test("removing an account clears its discovery and binding relations", async () => {
+  const root = await mkdtemp(join(tmpdir(), "model-discovery-remove-"));
+  const store = createModelCatalogStore(join(root, "models.json"));
+  const model = await store.saveModel({ entry: { slug: "remove-me", display_name: "Remove Me" } });
+  await store.setAccountBindings("work/remove", [model.id]);
+  await store.saveAccountModelDiscovery({
+    accountKey: "work/remove",
+    providerId: "openai",
+    state: "ready",
+    models: [],
+  });
+  const snapshot = await store.removeAccountModelDiscovery("work/remove");
+  assert.equal(snapshot.accountBindings["work/remove"], undefined);
+  assert.equal(snapshot.accountModelDiscoveries?.["work/remove"], undefined);
+  assert.equal(snapshot.models.length, 1);
 });

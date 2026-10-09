@@ -1,5 +1,13 @@
-import type { GatewayEnvironmentState, GatewayModelDefinition, GatewayRouteGroupDefinition } from "../../../packages/core/dist/gateway/model.js";
+import type {
+  GatewayEnvironmentState,
+  GatewayModelDefinition,
+  GatewayRouteGroupDefinition,
+} from "../../../packages/core/dist/gateway/model.js";
 import { normalizeCustomModelInput, type ModelCatalogEntry } from "./model-catalog-store.js";
+import {
+  gatewayCredentialSupportsProtocol,
+  gatewayProviderSupportsProtocol,
+} from "./gateway-protocol-support.js";
 
 export function normalizeGatewayModelSlug(value: string): string {
   const normalized = value.trim().replaceAll("/", ":");
@@ -19,7 +27,7 @@ export function buildGatewayModelCatalog(gateway: GatewayEnvironmentState): Mode
   };
 
   for (const model of Object.values(gateway.models)) {
-    if (!model.enabled || groupedModelIds.has(model.id)) continue;
+    if (!model.enabled || groupedModelIds.has(model.id) || !hasCompatibleCredential(gateway, model)) continue;
     add(
       normalizeGatewayModelSlug(model.id),
       model.displayName,
@@ -31,7 +39,7 @@ export function buildGatewayModelCatalog(gateway: GatewayEnvironmentState): Mode
     // gateway still needs their route groups, but must not emit duplicate
     // catalog entries that collide with the bundled model definitions.
     if (group.id.startsWith("builtin-route-group:")) continue;
-    if (!group.members.length || !group.members.some((member) => gateway.models[member.modelId]?.enabled !== false)) continue;
+    if (!group.members.length || !hasRoutableGroupMember(gateway, group)) continue;
     add(
       normalizeGatewayModelSlug(group.exposedModelId),
       group.displayName,
@@ -39,6 +47,58 @@ export function buildGatewayModelCatalog(gateway: GatewayEnvironmentState): Mode
     );
   }
   return entries;
+}
+
+function hasCompatibleCredential(
+  gateway: GatewayEnvironmentState,
+  model: GatewayModelDefinition,
+): boolean {
+  const provider = gateway.providers[model.providerId];
+  if (!provider || !provider.enabled) return false;
+  return Object.values(gateway.credentials).some((credential) => (
+    credential.providerId === model.providerId
+      && credential.status !== "disabled"
+      && (!credential.modelIds?.length || credential.modelIds.includes(model.upstreamModelId))
+      && model.protocols.some((protocol) => (
+        gatewayProviderSupportsProtocol(provider, protocol)
+          && gatewayCredentialSupportsProtocol(credential, protocol)
+      ))
+  ));
+}
+
+function hasRoutableGroupMember(
+  gateway: GatewayEnvironmentState,
+  group: GatewayRouteGroupDefinition,
+  visited = new Set<string>(),
+): boolean {
+  if (visited.has(group.id)) return false;
+  visited.add(group.id);
+  if (group.members.some((member) => {
+    const model = gateway.models[member.modelId];
+    if (!model || !model.enabled || model.providerId !== member.providerId) return false;
+    const provider = gateway.providers[member.providerId];
+    if (!provider || !provider.enabled) return false;
+    const selectedIds = member.credentialSelector.credentialIds?.length
+      ? member.credentialSelector.credentialIds
+      : Object.values(gateway.credentials)
+        .filter((credential) => credential.providerId === member.providerId)
+        .map((credential) => credential.id);
+    return selectedIds.some((credentialId) => {
+      const credential = gateway.credentials[credentialId];
+      return Boolean(credential
+        && credential.providerId === member.providerId
+        && credential.status !== "disabled"
+        && (!credential.modelIds?.length || credential.modelIds.includes(model.upstreamModelId))
+        && model.protocols.some((protocol) => (
+          gatewayProviderSupportsProtocol(provider, protocol)
+            && gatewayCredentialSupportsProtocol(credential, protocol)
+        )));
+    });
+  })) return true;
+  return (group.nestedGroupIds ?? []).some((nestedId) => {
+    const nested = gateway.routeGroups[nestedId];
+    return nested ? hasRoutableGroupMember(gateway, nested, visited) : false;
+  });
 }
 
 export function buildGatewayModelEntry(

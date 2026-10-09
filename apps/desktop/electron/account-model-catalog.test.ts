@@ -31,6 +31,8 @@ test("account catalog merges bundled models with the account's bound custom mode
   assert.equal(result.enabled, true);
   const generated = JSON.parse(await readFile(result.catalogPath!, "utf8"));
   assert.deepEqual(generated.models.map((entry: { slug: string }) => entry.slug), ["gpt-official", "custom-one"]);
+  assert.ok(Array.isArray(generated.models[0].supported_reasoning_levels));
+  assert.equal(generated.models[0].supported_in_api, true);
   assert.match(await readFile(configPath, "utf8"), /model_catalog_json = /);
 });
 
@@ -65,12 +67,14 @@ test("environment gateway catalog writes aggregated models for Codex App", async
     await writeFile(configPath, 'model = "gpt-5"\n', "utf8");
     const result = await synchronizeEnvironmentGatewayModelCatalog({
       homePath,
+      environmentName: "work",
+      diagnosticLogPath: join(root, "switcher.log"),
       gateway: {
         schemaVersion: 1,
         mode: "gateway",
         gatewayId: "gateway-work",
-        providers: {},
-        credentials: {},
+        providers: { deepseek: { id: "deepseek", displayName: "DeepSeek", kind: "custom", endpoints: { responses: "https://api.deepseek.com/v1" }, modelDiscovery: "preset", enabled: true } },
+        credentials: { deepseek: { id: "deepseek", providerId: "deepseek", displayName: "deepseek", kind: "api_key", secretRef: "account:default:deepseek", supportedProtocols: ["responses"], status: "active" } },
         models: {
           deepseek: {
             id: "deepseek/deepseek-chat",
@@ -85,11 +89,14 @@ test("environment gateway catalog writes aggregated models for Codex App", async
         routeGroups: {},
         catalogVersion: 1,
       },
+      loadBundledCatalog: async () => ({ models: [{ slug: "gpt-official", display_name: "Official" }] }),
     });
     assert.equal(result.enabled, true);
     const catalog = JSON.parse(await readFile(result.catalogPath!, "utf8")) as { models: Array<{ slug: string }> };
-    assert.deepEqual(catalog.models.map((model) => model.slug), ["deepseek:deepseek-chat"]);
+    assert.deepEqual(catalog.models.map((model) => model.slug), ["gpt-official", "deepseek:deepseek-chat"]);
+    assert.ok(Array.isArray((catalog.models[0] as Record<string, unknown>).supported_reasoning_levels));
     assert.match(await readFile(configPath, "utf8"), /model_catalog_json = .*codex-switcher-gateway-models\.json/);
+    assert.match(await readFile(join(root, "switcher.log"), "utf8"), /"event":"model_catalog_sync"/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -111,6 +118,37 @@ test("account catalog keeps custom models when Codex CLI is unavailable", async 
   assert.equal(result.enabled, true);
   const generated = JSON.parse(await readFile(result.catalogPath!, "utf8"));
   assert.deepEqual(generated.models.map((entry: { slug: string }) => entry.slug), ["custom-only"]);
+});
+
+test("account catalog does not publish a discovered model after it becomes unavailable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "account-model-catalog-unavailable-"));
+  const store = createModelCatalogStore(join(root, "custom-models.json"));
+  await store.saveAccountModelDiscovery({
+    accountKey: "work/alice",
+    providerId: "openai",
+    state: "ready",
+    models: [{
+      providerModelKey: "openai:retired-model",
+      providerId: "openai",
+      upstreamModelId: "retired-model",
+      displayName: "Retired Model",
+      protocols: ["responses"],
+      capabilities: { reasoning: false, tools: true, vision: false, streaming: true },
+      source: "discovery",
+    }],
+  });
+  const model = (await store.load()).models[0]!;
+  await store.setAccountBindings("work/alice", [model.id]);
+  await store.saveAccountModelDiscovery({ accountKey: "work/alice", providerId: "openai", state: "ready", models: [] });
+
+  const result = await synchronizeAccountModelCatalog({
+    envName: "work",
+    accountName: "alice",
+    homePath: join(root, "home"),
+    store,
+    loadBundledCatalog: async () => ({ models: [] }),
+  });
+  assert.equal(result.enabled, false);
 });
 
 test("account catalog rejects custom slugs that collide with bundled models", async () => {
@@ -230,4 +268,49 @@ test("MiMo official model preset replaces models.json with the two MiMo models",
     "You are MiMo, an AI assistant developed by Xiaomi. Today's date: {date} {week}. Your knowledge cutoff date is December 2024.",
   );
   assert.match(await readFile(join(homePath, "config.toml"), "utf8"), /model_catalog_json = .*models\.json/);
+});
+
+test("a discovered account catalog follows explicit model exposure instead of the legacy provider preset", async () => {
+  const root = await mkdtemp(join(tmpdir(), "account-model-catalog-explicit-exposure-"));
+  const homePath = join(root, "home");
+  await mkdir(homePath, { recursive: true });
+  await writeFile(join(homePath, "config.toml"), 'model = "deepseek-v4-flash"\n');
+  const store = createModelCatalogStore(join(root, "custom-models.json"));
+  await store.saveAccountModelDiscovery({
+    accountKey: "work/alice",
+    providerId: "deepseek",
+    state: "ready",
+    models: [{
+      providerModelKey: "deepseek:deepseek-v4-flash",
+      providerId: "deepseek",
+      upstreamModelId: "deepseek-v4-flash",
+      displayName: "DeepSeek V4 Flash",
+      protocols: ["chat_completions"],
+      capabilities: { reasoning: false, tools: true, vision: false, streaming: true },
+      source: "discovery",
+    }, {
+      providerModelKey: "deepseek:deepseek-v4-pro",
+      providerId: "deepseek",
+      upstreamModelId: "deepseek-v4-pro",
+      displayName: "DeepSeek V4 Pro",
+      protocols: ["chat_completions"],
+      capabilities: { reasoning: true, tools: true, vision: false, streaming: true },
+      source: "discovery",
+    }],
+  });
+  const snapshot = await store.load();
+  const flash = snapshot.models.find((model) => model.entry.provider_model_key === "deepseek:deepseek-v4-flash")!;
+  await store.setAccountBindings("work/alice", [flash.id]);
+
+  const result = await synchronizeAccountModelCatalog({
+    envName: "work",
+    accountName: "alice",
+    homePath,
+    providerId: "deepseek",
+    baseUrl: "https://api.deepseek.com",
+    store,
+    loadBundledCatalog: async () => ({ models: [] }),
+  });
+  const generated = JSON.parse(await readFile(result.catalogPath!, "utf8")) as { models: Array<{ slug: string }> };
+  assert.deepEqual(generated.models.map((model) => model.slug), ["deepseek:deepseek-v4-flash"]);
 });

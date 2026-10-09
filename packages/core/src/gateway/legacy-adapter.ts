@@ -94,7 +94,7 @@ function buildLegacyProvider(
   account: AccountState,
 ): GatewayProviderDefinition {
   const baseUrl = resolveLegacyBaseUrl(account);
-  const protocol = account.runtime.apiProtocol ?? "responses";
+  const protocol = resolveLegacyProviderProtocol(providerId, account);
 
   return {
     id: providerId,
@@ -103,7 +103,11 @@ function buildLegacyProvider(
     endpoints:
       protocol === "chat_completions"
         ? { chatCompletions: baseUrl }
-        : { responses: baseUrl },
+        : protocol === "anthropic"
+          ? { anthropicMessages: baseUrl }
+          : protocol === "gemini"
+            ? { gemini: baseUrl }
+            : { responses: baseUrl },
     modelDiscovery: "manual",
     enabled: true,
   };
@@ -115,6 +119,7 @@ function buildLegacyCredential(
   accountName: string,
   account: AccountState,
 ): GatewayCredentialDefinition {
+  const protocol = resolveLegacyProviderProtocol(resolveLegacyProviderId(account), account);
   return {
     id: credentialId,
     providerId: resolveLegacyProviderId(account),
@@ -126,7 +131,7 @@ function buildLegacyCredential(
           ? "api_key"
           : "plugin",
     secretRef: createLegacyId("account", environmentName, accountName),
-    supportedProtocols: [account.runtime.apiProtocol ?? "responses"],
+    supportedProtocols: [protocol],
     status: "active",
     weight: 1,
     priority: 0,
@@ -139,15 +144,26 @@ function buildLegacyModel(
   account: AccountState,
 ): GatewayModelDefinition {
   const upstreamModelId = modelId.slice(providerId.length + 1);
+  const protocol = resolveLegacyProviderProtocol(providerId, account);
   return {
     id: modelId,
     providerId,
     upstreamModelId,
     displayName: upstreamModelId,
-    protocols: [account.runtime.apiProtocol ?? "responses"],
+    protocols: [protocol],
     capabilities: {},
     enabled: true,
   };
+}
+
+function resolveLegacyProviderProtocol(
+  providerId: string,
+  account: AccountState,
+): "responses" | "chat_completions" | "anthropic" | "gemini" {
+  const normalized = providerId.trim().toLowerCase();
+  if (normalized === "anthropic" || normalized === "claude-subscription" || normalized === "custom-anthropic") return "anthropic";
+  if (normalized === "gemini" || normalized === "gemini-subscription") return "gemini";
+  return account.runtime.apiProtocol ?? "responses";
 }
 
 function resolveLegacyBaseUrl(account: AccountState): string {

@@ -25,6 +25,17 @@ export interface CoreRuntime {
 
 export interface GatewayProviderRuntime {
   createBuiltInProviderAdapters: typeof import("../../../packages/gateway/dist/provider/adapters.js").createBuiltInProviderAdapters;
+  createProviderAdapter: typeof import("../../../packages/gateway/dist/provider/adapters.js").createProviderAdapter;
+  createConfiguredProviderAdapter?: typeof import("../../../packages/gateway/dist/provider/adapters.js").createConfiguredProviderAdapter;
+  providerDefinitions: typeof import("../../../packages/gateway/dist/provider/adapters.js").providerDefinitions;
+  canonicalProviderDefinitions: typeof import("../../../packages/gateway/dist/provider/adapters.js").canonicalProviderDefinitions;
+}
+
+export interface GatewayModelRuntime {
+  gatewayCredentialSupportsProtocol: typeof import("../../../packages/core/dist/gateway/model.js").gatewayCredentialSupportsProtocol;
+  gatewayProviderProtocols: typeof import("../../../packages/core/dist/gateway/model.js").gatewayProviderProtocols;
+  gatewayProviderSupportsProtocol: typeof import("../../../packages/core/dist/gateway/model.js").gatewayProviderSupportsProtocol;
+  validateGatewayRouteCompatibility: typeof import("../../../packages/core/dist/gateway/model.js").validateGatewayRouteCompatibility;
 }
 
 export interface GatewayPluginRuntime {
@@ -42,6 +53,7 @@ export interface GatewayAgentRuntime {
 type CoreApiModule = typeof import("../../../packages/core/dist/api/core-api.js");
 type LegacyModule = typeof import("../../../packages/core/dist/state/legacy.js");
 type GatewayLegacyAdapterModule = typeof import("../../../packages/core/dist/gateway/legacy-adapter.js");
+type GatewayModelModule = typeof import("../../../packages/core/dist/gateway/model.js");
 type GatewayPluginRuntimeModule = typeof import("../../../packages/gateway/dist/plugin/manager.js");
 type GatewayPluginMarketModule = typeof import("../../../packages/gateway/dist/plugin/market.js");
 type GatewayPluginSigningModule = typeof import("../../../packages/gateway/dist/plugin/signing.js");
@@ -127,7 +139,28 @@ export async function loadGatewayProviderRuntime(): Promise<GatewayProviderRunti
   });
   const sourcePath = join(getSourceRepoRoot(), "packages", "gateway", "src", "provider", "adapters.ts");
   const module = await importFirstExisting<typeof import("../../../packages/gateway/dist/provider/adapters.js")>([runtimePath, sourcePath]);
-  return { createBuiltInProviderAdapters: module.createBuiltInProviderAdapters };
+  return {
+    createBuiltInProviderAdapters: module.createBuiltInProviderAdapters,
+    createProviderAdapter: module.createProviderAdapter,
+    createConfiguredProviderAdapter: module.createConfiguredProviderAdapter,
+    providerDefinitions: module.providerDefinitions,
+    canonicalProviderDefinitions: module.canonicalProviderDefinitions,
+  };
+}
+
+export async function loadGatewayModelRuntime(): Promise<GatewayModelRuntime> {
+  const runtimePath = resolveRuntimeResource(join("packages", "core", "dist", "gateway", "model.js"), {
+    currentFile: resolveCurrentFile(),
+    resourcesPath: getConfiguredResourcesPath(),
+  });
+  const sourcePath = join(getSourceRepoRoot(), "packages", "core", "src", "gateway", "model.ts");
+  const module = await importFirstExisting<GatewayModelModule>([runtimePath, sourcePath]);
+  return {
+    gatewayCredentialSupportsProtocol: module.gatewayCredentialSupportsProtocol,
+    gatewayProviderProtocols: module.gatewayProviderProtocols,
+    gatewayProviderSupportsProtocol: module.gatewayProviderSupportsProtocol,
+    validateGatewayRouteCompatibility: module.validateGatewayRouteCompatibility,
+  };
 }
 
 export async function loadGatewayPluginRuntime(): Promise<GatewayPluginRuntime> {

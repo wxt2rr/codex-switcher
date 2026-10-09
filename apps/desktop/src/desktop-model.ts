@@ -1,4 +1,4 @@
-export type NavView = "overview" | "environments" | "accounts" | "models" | "skills" | "usage" | "operations";
+export type NavView = "overview" | "environments" | "accounts" | "providers" | "models" | "skills" | "usage" | "operations";
 
 export interface EnvironmentRouteStatus {
   envName: string;
@@ -209,6 +209,8 @@ export interface AccountSummary {
     openaiBaseUrlMode: string;
     openaiBaseUrl?: string;
     providerId?: string;
+    providerAuthMethod?: "api_key" | "oauth" | "subscription" | "plugin" | "none";
+    providerRequestHeaders?: Record<string, string>;
     independentModelEnabled?: boolean;
     independentModelProviderId?: string;
     independentModelApiKey?: string;

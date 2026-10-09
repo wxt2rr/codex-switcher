@@ -282,8 +282,13 @@ test("target-home writer pins the DeepSeek model for DeepSeek api key accounts",
         assert.match(config, /preferred_auth_method = "apikey"/);
         assert.match(config, /model = "deepseek-v4-flash"/);
         assert.match(config, /model_catalog_json = ".*models\.json"/);
+        assert.match(config, /model_provider = "codex_switcher_router"/);
+        assert.match(config, /base_url = "http:\/\/127\.0\.0\.1:17832\/routes\/deepseek"/);
+        assert.match(config, /wire_api = "responses"/);
+        assert.match(config, /supports_websockets = false/);
+        assert.match(config, /env_key = "OPENAI_API_KEY"/);
         assert.doesNotMatch(config, /model = "gpt-5\.5"/);
-        assert.doesNotMatch(config, /requires_openai_auth = false/);
+        assert.match(config, /requires_openai_auth = false/);
         assert.doesNotMatch(config, /http_headers = \{ "x-openai-actor-authorization" = "codex-sw\.app" \}/);
     }
     finally {
@@ -367,14 +372,65 @@ test("target-home writer materializes an enabled Chat compatibility route withou
         const auth = JSON.parse(await readFile(join(homePath, "auth.json"), "utf8"));
         assert.deepEqual(auth, { OPENAI_API_KEY: "local-route-token" });
         const config = await readFile(join(homePath, "config.toml"), "utf8");
-        assert.match(config, /openai_base_url = "http:\/\/127\.0\.0\.1:17899\/routes\/route-a\/v1"/);
-        assert.doesNotMatch(config, /model_provider/);
-        assert.doesNotMatch(config, /\[model_providers\./);
-        assert.doesNotMatch(config, /wire_api/);
-        assert.doesNotMatch(config, /env_key/);
-        assert.doesNotMatch(config, /requires_openai_auth = false/);
+        assert.doesNotMatch(config, /openai_base_url = "http:\/\/127\.0\.0\.1:17899\/routes\/route-a\/v1"/);
+        assert.match(config, /model_provider = "codex_switcher_router"/);
+        assert.match(config, /\[model_providers\.codex_switcher_router\]/);
+        assert.match(config, /base_url = "http:\/\/127\.0\.0\.1:17899\/routes\/route-a\/v1"/);
+        assert.match(config, /wire_api = "responses"/);
+        assert.match(config, /supports_websockets = false/);
+        assert.match(config, /env_key = "OPENAI_API_KEY"/);
+        assert.match(config, /requires_openai_auth = false/);
         assert.doesNotMatch(config, /http_headers = \{ "x-openai-actor-authorization" = "codex-sw\.app" \}/);
         assert.doesNotMatch(config, /sk-upstream-secret/);
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+test("target-home writer keeps ChatGPT auth upstream-only for local gateway providers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-gateway-chatgpt-auth-"));
+    const homePath = join(root, "home");
+    const state = {
+        schemaVersion: DEFAULT_SCHEMA_VERSION,
+        generatedAt: "2026-10-09T10:00:00.000Z",
+        targets: { cli: { env: "test", account: "chatgpt" }, app: { env: "test", account: "chatgpt" } },
+        envs: {
+            test: {
+                name: "test",
+                path: homePath,
+                accounts: {
+                    chatgpt: {
+                        name: "chatgpt",
+                        authMode: "auth",
+                        runtime: {
+                            preferredAuthMethod: "chatgpt",
+                            openaiBaseUrlMode: "custom",
+                            openaiBaseUrl: "http://127.0.0.1:17832/gateways/gateway-test",
+                            apiProtocol: "responses",
+                        },
+                        authData: {
+                            tokens: { access_token: "chatgpt-access-token" },
+                            OPENAI_API_KEY: null,
+                        },
+                    },
+                },
+            },
+        },
+        tasks: { recent: [] },
+    };
+    try {
+        await applyTargetHomeState({ state, target: "cli" });
+        const auth = JSON.parse(await readFile(join(homePath, "auth.json"), "utf8"));
+        assert.equal(auth.tokens?.access_token, "chatgpt-access-token");
+        assert.equal(auth.OPENAI_API_KEY, null);
+        const config = await readFile(join(homePath, "config.toml"), "utf8");
+        assert.match(config, /preferred_auth_method = "chatgpt"/);
+        assert.match(config, /model_provider = "codex_switcher_router"/);
+        assert.match(config, /base_url = "http:\/\/127\.0\.0\.1:17832\/gateways\/gateway-test"/);
+        assert.match(config, /wire_api = "responses"/);
+        assert.match(config, /requires_openai_auth = false/);
+        assert.doesNotMatch(config, /requires_openai_auth = true/);
+        assert.doesNotMatch(config, /env_key = "OPENAI_API_KEY"/);
     }
     finally {
         await rm(root, { recursive: true, force: true });
@@ -429,9 +485,10 @@ test("target-home writer migrates a legacy compatibility provider to the built-i
         ].join("\n"), "utf8");
         await applyTargetHomeState({ state, target: "cli" });
         const config = await readFile(join(homePath, "config.toml"), "utf8");
-        assert.match(config, /openai_base_url = "http:\/\/127\.0\.0\.1:17899\/routes\/route-a"/);
+        assert.doesNotMatch(config, /openai_base_url = "http:\/\/127\.0\.0\.1:17899\/routes\/route-a"/);
+        assert.match(config, /model_provider = "codex_switcher_router"/);
+        assert.match(config, /supports_websockets = false/);
         assert.doesNotMatch(config, /codex_switcher_route_a/);
-        assert.doesNotMatch(config, /model_provider/);
         assert.match(config, /\[history\]/);
         assert.match(config, /persistence = "save-all"/);
     }
@@ -659,8 +716,13 @@ test("AUTH account keeps ChatGPT credentials while using a custom local Response
         assert.equal(auth.tokens.access_token, "access");
         const config = await readFile(join(homePath, "config.toml"), "utf8");
         assert.match(config, /preferred_auth_method = "chatgpt"/);
-        assert.match(config, /openai_base_url = "http:\/\/127\.0\.0\.1:17832\/pools\/work"/);
-        assert.doesNotMatch(config, /requires_openai_auth = false/);
+        assert.doesNotMatch(config, /openai_base_url = "http:\/\/127\.0\.0\.1:17832\/pools\/work"/);
+        assert.match(config, /model_provider = "codex_switcher_router"/);
+        assert.match(config, /base_url = "http:\/\/127\.0\.0\.1:17832\/pools\/work"/);
+        assert.match(config, /wire_api = "responses"/);
+        assert.match(config, /supports_websockets = false/);
+        assert.match(config, /requires_openai_auth = false/);
+        assert.doesNotMatch(config, /requires_openai_auth = true/);
     }
     finally {
         await rm(root, { recursive: true, force: true });

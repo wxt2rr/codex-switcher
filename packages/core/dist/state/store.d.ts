@@ -5,6 +5,7 @@ export type AuthMode = "auth" | "apikey" | "provider-profile";
 export type PreferredAuthMethod = "chatgpt" | "apikey";
 export type OpenAIBaseUrlMode = "default" | "custom";
 export type AccountApiProtocol = "responses" | "chat_completions";
+export type ProviderCredentialAuthMethod = "api_key" | "oauth" | "subscription" | "plugin" | "none";
 export type ReasoningProfile = "auto" | "standard" | "reasoning_content" | "think_tags";
 export type LongConversationStrategy = "safe" | "continuity";
 export type CompatibilityInstructionRole = "auto" | "system" | "developer";
@@ -20,6 +21,8 @@ export interface AccountRuntimeSettings {
     openaiBaseUrlMode: OpenAIBaseUrlMode;
     openaiBaseUrl?: string;
     providerId?: string;
+    providerAuthMethod?: ProviderCredentialAuthMethod;
+    providerRequestHeaders?: Record<string, string>;
     model?: string;
     independentModelEnabled?: boolean;
     independentModelProviderId?: string;

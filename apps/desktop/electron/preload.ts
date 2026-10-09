@@ -59,6 +59,22 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     instructionRole?: "auto" | "system" | "developer";
     requestOverrides?: Record<string, unknown>;
   }) => ipcRenderer.invoke("desktop:nativeLogin", request),
+  importProviderCredential: (request: {
+    providerId: string;
+    account: string;
+    envName: string;
+    target: "cli" | "app" | "both" | "none";
+    authMethod?: "api_key" | "oauth" | "subscription" | "plugin" | "none";
+    accessToken?: string;
+    refreshToken?: string;
+    accountId?: string;
+    expiresAt?: number;
+    baseUrl?: string;
+    apiProtocol?: "responses" | "chat_completions";
+    requestHeaders?: Record<string, string>;
+  }) => ipcRenderer.invoke("desktop:importProviderCredential", request),
+  refreshProviderCredential: (envName: string, account: string) =>
+    ipcRenderer.invoke("desktop:refreshProviderCredential", envName, account),
   switchEnv: (target: "cli" | "app", envName: string) =>
     ipcRenderer.invoke("desktop:switchEnv", target, envName),
   switchAccount: (
@@ -103,6 +119,10 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     baseUrl?: string;
   }) => ipcRenderer.invoke("desktop:updateIndependentModel", request),
   listCustomModels: () => ipcRenderer.invoke("desktop:listCustomModels"),
+  discoverAccountModels: (envName: string, accountName: string) =>
+    ipcRenderer.invoke("desktop:discoverAccountModels", envName, accountName),
+  refreshAllAccountModels: () => ipcRenderer.invoke("desktop:refreshAllAccountModels"),
+  listProviderCatalog: () => ipcRenderer.invoke("desktop:listProviderCatalog"),
   saveCustomModel: (request: { id?: string; entry: Record<string, unknown> }) =>
     ipcRenderer.invoke("desktop:saveCustomModel", request),
   deleteCustomModel: (id: string) => ipcRenderer.invoke("desktop:deleteCustomModel", id),

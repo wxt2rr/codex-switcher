@@ -100,6 +100,9 @@ export interface GatewayRouteBinding {
   protocols?: RouteTarget["protocol"][];
   /** The protocol configured by each concrete account bound to this model. */
   protocolByAccount?: Record<string, RouteTarget["protocol"]>;
+  /** The protocol used on the provider side for each account.  This may differ
+   * from the Codex ingress protocol when the gateway performs conversion. */
+  upstreamProtocolByAccount?: Record<string, RouteTarget["protocol"]>;
   capabilities?: RouteCapabilities;
   requestHeadersByAccount?: Record<string, Record<string, string>>;
   proxyUrlByAccount?: Record<string, string>;
@@ -575,7 +578,10 @@ export class UsageRouterManager {
       for (const accountName of binding.accountNames) {
         const account = accountByName.get(accountName);
         const baseRoute = baseRouteByAccount.get(accountName);
-        const protocol = binding.protocolByAccount?.[accountName] ?? account?.protocol ?? baseRoute?.protocol;
+        const protocol = binding.upstreamProtocolByAccount?.[accountName]
+          ?? binding.protocolByAccount?.[accountName]
+          ?? account?.protocol
+          ?? baseRoute?.protocol;
         if (!account || !baseRoute || !protocol || binding.protocols?.length && !binding.protocols.includes(protocol)) continue;
         const routeId = createGatewayModelRouteId(envName, accountName, baseRoute.upstreamBaseUrl, binding.providerId, binding.modelId);
         modelRouteIds.add(routeId);

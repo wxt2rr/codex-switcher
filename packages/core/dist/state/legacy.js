@@ -44,6 +44,8 @@ export async function writeLegacyRuntime(options) {
         openai_base_url_mode: options.runtime.openaiBaseUrlMode,
         openai_base_url: options.runtime.openaiBaseUrl ?? "",
         provider_id: options.runtime.providerId ?? "",
+        provider_auth_method: options.runtime.providerAuthMethod ?? "",
+        provider_request_headers: options.runtime.providerRequestHeaders ?? {},
         independent_model_enabled: options.runtime.independentModelEnabled ?? false,
         independent_model_provider_id: options.runtime.independentModelProviderId ?? "custom",
         independent_model_api_key: options.runtime.independentModelApiKey ?? "",
@@ -216,6 +218,10 @@ async function readLegacyAccountState(accountRoot, accountName) {
             openaiBaseUrlMode: normalizeOpenAIBaseUrlMode(runtimeRecord.openai_base_url_mode),
             openaiBaseUrl: runtimeRecord.openai_base_url || undefined,
             providerId: runtimeRecord.provider_id || undefined,
+            providerAuthMethod: isProviderCredentialAuthMethod(runtimeRecord.provider_auth_method)
+                ? runtimeRecord.provider_auth_method
+                : undefined,
+            providerRequestHeaders: runtimeRecord.provider_request_headers,
             independentModelEnabled: runtimeRecord.independent_model_enabled === true,
             independentModelProviderId: runtimeRecord.independent_model_provider_id || "custom",
             independentModelApiKey: runtimeRecord.independent_model_api_key || undefined,
@@ -408,5 +414,8 @@ function normalizePreferredAuthMethod(value) {
 }
 function normalizeOpenAIBaseUrlMode(value) {
     return value === "custom" ? "custom" : "default";
+}
+function isProviderCredentialAuthMethod(value) {
+    return value === "api_key" || value === "oauth" || value === "subscription" || value === "plugin" || value === "none";
 }
 //# sourceMappingURL=legacy.js.map

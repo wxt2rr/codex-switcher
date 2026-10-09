@@ -169,6 +169,11 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       return { message: "ok" };
     },
     listCustomModels: async () => ({ version: 1, models: [], accountBindings: {} }),
+    discoverAccountModels: async () => ({ version: 1, models: [], accountBindings: {} }),
+    refreshAllAccountModels: async () => ({ version: 1, models: [], accountBindings: {} }),
+    listProviderCatalog: async () => [],
+    importProviderCredential: async () => ({ message: "ok" }),
+    refreshProviderCredential: async () => ({ message: "ok" }),
     saveCustomModel: async () => ({ version: 1, models: [], accountBindings: {} }),
     deleteCustomModel: async () => ({ version: 1, models: [], accountBindings: {} }),
     setAccountModelBindings: async () => ({ version: 1, models: [], accountBindings: {} }),

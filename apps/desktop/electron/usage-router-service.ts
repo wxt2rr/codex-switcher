@@ -282,6 +282,14 @@ function sendJson(response: ServerResponse, status: number, payload: unknown): v
   response.end(JSON.stringify(payload));
 }
 
+function hasUpgradeIntent(headers: IncomingHttpHeaders): boolean {
+  const upgrade = String(headers.upgrade ?? "").trim().toLowerCase();
+  if (upgrade === "websocket") return true;
+  return String(headers.connection ?? "")
+    .split(",")
+    .some((value) => value.trim().toLowerCase() === "upgrade");
+}
+
 async function readJson(request: IncomingMessage, maxBytes = 1024 * 1024): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -606,6 +614,7 @@ async function proxyAccountPoolRequest(
   recordEvent?: (event: Record<string, unknown>) => Promise<void>,
   allowedRouteIds?: readonly string[],
   modelOverrides?: ReadonlyMap<string, string>,
+  protocolOverrides?: ReadonlyMap<string, RouteProtocol>,
   bodyOverride?: Buffer,
   usageContext?: UsageTelemetryContext,
   defaultProxyUrl?: string,
@@ -678,21 +687,31 @@ async function proxyAccountPoolRequest(
     }
     attempted.push(member.accountName); finalAccount = member.accountName; finalBaseUrl = route.upstreamBaseUrl;
     const effectiveUpstreamModel = modelOverrides?.get(member.accountName) || route.upstreamModel;
-    const effectiveRoute = effectiveUpstreamModel && effectiveUpstreamModel !== route.upstreamModel
-      ? { ...route, upstreamModel: effectiveUpstreamModel }
+    const effectiveProtocol = protocolOverrides?.get(member.accountName) ?? route.protocol;
+    const effectiveRoute = effectiveUpstreamModel && effectiveUpstreamModel !== route.upstreamModel || effectiveProtocol !== route.protocol
+      ? { ...route, upstreamModel: effectiveUpstreamModel, protocol: effectiveProtocol }
       : route;
-    const candidateBody = rewriteGatewayModel(body, effectiveUpstreamModel) ?? body;
+    let candidateBody = rewriteGatewayModel(body, effectiveUpstreamModel) ?? body;
     const candidateParsedBody = candidateBody.length ? parseRequestBody(candidateBody) : parsedBody;
-    const upstream = `${effectiveRoute.upstreamBaseUrl.replace(/\/+$/, "")}/${routeSuffix.replace(/^\/+/, "")}`;
+    if (candidateParsedBody && pool.protocol !== effectiveRoute.protocol) {
+      candidateBody = Buffer.from(JSON.stringify(adaptProtocolRequest(pool.protocol, effectiveRoute.protocol, candidateParsedBody, effectiveUpstreamModel)));
+    }
+    const upstreamSuffix = pool.protocol !== effectiveRoute.protocol
+      ? mapGatewaySuffix(routeSuffix, pool.protocol, effectiveRoute.protocol, effectiveUpstreamModel)
+      : routeSuffix;
+    const upstream = `${effectiveRoute.upstreamBaseUrl.replace(/\/+$/, "")}/${upstreamSuffix.replace(/^\/+/, "")}`;
     const headers = forwardedHeaders(request.headers);
     applyConfiguredRouteHeaders(headers, effectiveRoute.requestHeaders);
-    headers.set("authorization", `Bearer ${secret.upstreamBearerToken}`);
-    headers.delete("chatgpt-account-id");
-    if (secret.authMode === "auth" && secret.accountId) headers.set("chatgpt-account-id", secret.accountId);
+    applyProtocolCredentialHeaders(headers, effectiveRoute.protocol, {
+      upstreamApiKey: secret.upstreamBearerToken,
+      authMode: secret.authMode,
+      accountId: secret.accountId,
+    });
     const proxy = resolveUpstreamProxy(upstream, effectiveRoute.proxyUrl ?? member.proxyUrl, defaultProxyUrl);
     let upstreamResponse: Response;
     try {
       upstreamResponse = pool.protocol === "chat_completions"
+        && (effectiveRoute.protocol === "responses" || effectiveRoute.protocol === "chat_completions")
         ? await handleChatCompatibilityRequest({
           route: { ...effectiveRoute, proxyUrl: proxy.url }, secret: { routeId: effectiveRoute.routeId, upstreamApiKey: secret.upstreamBearerToken, localRouteToken, hydratedAt: secret.hydratedAt },
           authorization: `Bearer ${localRouteToken}`, request: candidateParsedBody ?? {}, headers,
@@ -702,6 +721,9 @@ async function proxyAccountPoolRequest(
           method: request.method, headers, body: candidateBody.length ? candidateBody as unknown as BodyInit : undefined, redirect: "manual",
           ...(candidateBody.length ? { duplex: "half" } as RequestInit : {}), signal: AbortSignal.timeout(120_000),
         }, proxy.url);
+      if (pool.protocol !== effectiveRoute.protocol && upstreamResponse.body) {
+        upstreamResponse = await convertUpstreamResponse(upstreamResponse, effectiveRoute.protocol, pool.protocol);
+      }
     } catch (error) {
       const reason = classifyPoolFailure(null, error);
       const sameAccountLimitReached = (memberAttempts.get(member.accountName) ?? 0) >= maxSameAccountFailures;
@@ -1479,15 +1501,44 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
         const gatewayId = decodeURIComponent(gatewayMatch[1]);
         const gateway = gateways.get(gatewayId);
         if (!gateway) return sendJson(response, 404, { error: "Gateway is disabled or missing" });
-        let bodyOverride: Buffer | undefined;
-        if (request.method !== "GET" && request.method !== "HEAD") {
-          bodyOverride = await readRequestBodyBuffer(request);
-        }
         const gatewayRouteSuffix = gatewayMatch[2] || "responses";
         const gatewayProtocol = detectGatewayProtocol(gatewayRouteSuffix);
+        const gatewayRequestId = randomUUID();
+        const upgradeRequested = hasUpgradeIntent(request.headers);
+        const requestMethod = (request.method ?? "GET").toUpperCase();
+        if (gatewayProtocol === "responses" && (requestMethod !== "POST" || upgradeRequested)) {
+          const rejectionCode = upgradeRequested ? "GATEWAY_WEBSOCKET_UNSUPPORTED" : "GATEWAY_HTTP_ONLY";
+          void recordPoolEvent({
+            event: "gateway_request_rejected",
+            at: Date.now(),
+            requestId: gatewayRequestId,
+            gatewayId,
+            envName: gateway.envName,
+            protocol: gatewayProtocol,
+            method: requestMethod,
+            requestedModel: null,
+            hasUpgrade: upgradeRequested,
+            rejectionCode,
+            failureReason: "protocol_mismatch",
+            errorMessage: upgradeRequested
+              ? "Gateway Responses endpoint does not support WebSocket transport"
+              : "Gateway Responses endpoint only accepts HTTP POST requests",
+          });
+          response.setHeader("allow", "POST");
+          return sendJson(response, 405, {
+            error: upgradeRequested
+              ? "Gateway Responses endpoint only supports HTTP POST/SSE; WebSocket transport is disabled"
+              : "Gateway Responses endpoint only accepts HTTP POST requests",
+            code: rejectionCode,
+            requestId: gatewayRequestId,
+          });
+        }
+        let bodyOverride: Buffer | undefined;
+        if (requestMethod !== "GET" && requestMethod !== "HEAD") {
+          bodyOverride = await readRequestBodyBuffer(request);
+        }
         const parsedGatewayBody = bodyOverride?.length ? parseRequestBody(bodyOverride) : undefined;
         const requestedModel = extractProtocolModel(gatewayProtocol, gatewayRouteSuffix, parsedGatewayBody);
-        const gatewayRequestId = randomUUID();
         const gatewayRoutes = gateway.routeIds
           .map((routeId) => routes.get(routeId))
           .filter((route): route is RouteTarget => route !== undefined);
@@ -1605,6 +1656,10 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
               .filter((candidate) => candidate.upstreamModel)
               .map((candidate) => [candidate.accountName, candidate.upstreamModel!] as const),
           );
+          const poolProtocolOverrides = new Map(
+            selectedGatewayRoutes
+              .map((candidate) => [candidate.accountName, candidate.protocol] as const),
+          );
           return await proxyAccountPoolRequest(
             request,
             response,
@@ -1619,6 +1674,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
             recordPoolEvent,
             allowedRouteIds,
             poolModelOverrides,
+            poolProtocolOverrides,
             bodyOverride,
             gatewayUsageContext,
             defaultProxyUrl,
@@ -1691,7 +1747,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
         const routeSuffix = poolMatch[2] || "responses";
         return await proxyAccountPoolRequest(request, response, pool!, routes, new Map(
           Array.from(memberSecrets.entries()).map(([accountName, value]) => [accountName, value]),
-        ), token ?? "", store, history, routeSuffix, matchedMember, recordPoolEvent, undefined, undefined, undefined, {
+        ), token ?? "", store, history, routeSuffix, matchedMember, recordPoolEvent, undefined, undefined, undefined, undefined, {
           agentId: request.headers["x-codex-agent"]?.toString().trim() || null,
           ingressProtocol: pool!.protocol,
         }, defaultProxyUrl);
@@ -1716,6 +1772,54 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
     } catch (error) {
       if (!response.headersSent) sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) });
       else response.destroy(error instanceof Error ? error : undefined);
+    }
+  });
+  server.on("upgrade", (request, socket) => {
+    try {
+      const url = new URL(request.url ?? "/", "http://127.0.0.1");
+      const gatewayMatch = url.pathname.match(/^\/gateways\/([^/]+)\/?(.*)$/);
+      const gatewayId = gatewayMatch ? decodeURIComponent(gatewayMatch[1]) : undefined;
+      const gateway = gatewayId ? gateways.get(gatewayId) : undefined;
+      const gatewayRouteSuffix = gatewayMatch?.[2] || "responses";
+      const gatewayProtocol = detectGatewayProtocol(gatewayRouteSuffix);
+      if (!gateway || gatewayProtocol !== "responses") {
+        socket.destroy();
+        return;
+      }
+      const requestId = randomUUID();
+      const body = JSON.stringify({
+        error: "Gateway Responses endpoint only supports HTTP POST/SSE; WebSocket transport is disabled",
+        code: "GATEWAY_WEBSOCKET_UNSUPPORTED",
+        requestId,
+      });
+      void recordPoolEvent({
+        event: "gateway_request_rejected",
+        at: Date.now(),
+        requestId,
+        gatewayId,
+        envName: gateway.envName,
+        protocol: gatewayProtocol,
+        method: request.method ?? "GET",
+        requestedModel: null,
+        hasUpgrade: true,
+        rejectionCode: "GATEWAY_WEBSOCKET_UNSUPPORTED",
+        failureReason: "protocol_mismatch",
+        errorMessage: "Gateway Responses endpoint does not support WebSocket transport",
+      }).finally(() => {
+        if (socket.destroyed) return;
+        socket.write([
+          "HTTP/1.1 405 Method Not Allowed",
+          "Content-Type: application/json; charset=utf-8",
+          "Allow: POST",
+          "Connection: close",
+          `Content-Length: ${Buffer.byteLength(body)}`,
+          "",
+          body,
+        ].join("\r\n"));
+        socket.end();
+      });
+    } catch {
+      socket.destroy();
     }
   });
   if (options.port !== undefined) {

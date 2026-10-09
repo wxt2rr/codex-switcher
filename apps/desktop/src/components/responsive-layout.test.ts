@@ -71,7 +71,7 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.doesNotMatch(accounts, /当前激活目标/);
   assert.doesNotMatch(environments, /环境总数/);
   assert.doesNotMatch(environments, /当前激活环境/);
-  assert.match(environments, /mt-1\.5 flex flex-wrap gap-1\.5/);
+  assert.match(environments, /mt-2 flex flex-wrap items-center gap-2 text-\[11px\]/);
   assert.match(environments, /className="h-5 px-2 text-\[10px\]"/);
   assert.doesNotMatch(accounts, /function StatCard\(/);
   assert.match(accounts, /className="page-scroll-gutter h-full min-h-0"/);
@@ -113,7 +113,7 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.doesNotMatch(accounts, /Past → now/);
   assert.match(accounts, /account\.authMode === "apikey"/);
   assert.match(accounts, /Boolean\(account\.hasApiKey\)/);
-  assert.match(accounts, /Boolean\(account\.runtime\.independentModelApiKey\?\.trim\(\)\)/);
+  assert.match(accounts, /providerCatalog/);
   assert.match(accounts, /repeat\(\$\{REQUEST_HEALTH_SAMPLE_SIZE\}, minmax\(1px, 1fr\)\)/);
   assert.match(css, /\.account-runtime-cell\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)\s+auto/s);
   assert.match(css, /\.account-runtime-line\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)\s+1\.5rem/s);
@@ -134,18 +134,15 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.match(css, /\.responsive-record-row\s*\{[^}]*align-items:\s*center;/s);
   assert.match(css, /\.account-runtime-line\s*\{[^}]*align-items:\s*center;/s);
   assert.match(css, /\.account-runtime-line\s*\{[^}]*column-gap:\s*0\.375rem;/s);
-  assert.match(accounts, /account-model-actions/);
-  assert.match(accounts, /const authCustomApiKey = account\.runtime\.independentModelApiKey/);
-  assert.match(accounts, /authCustomApiKey && authCustomBaseUrl \? authCustomBaseUrl : ""/);
-  assert.match(accounts, /\) : !isAuth \? \(/);
-  assert.doesNotMatch(accounts, /<TooltipHint text=\{getModelConfigHint\(language\)\}/);
-  assert.match(accounts, /<Tooltip content=\{getModelConfigHint\(language\)\}>/);
-  assert.match(accounts, /<Settings2 className="size-4"/);
-  assert.match(accounts, /pageCopy\.accounts\.independentModelNotSet/);
+  assert.doesNotMatch(accounts, /account-model-actions/);
+  assert.doesNotMatch(accounts, /independentModelProviderIdDraft|independentModelApiKeyDraft|independentModelBaseUrlDraft/);
+  assert.doesNotMatch(accounts, /getModelProviderHint/);
+  assert.match(accounts, /onImportProviderCredential/);
+  assert.match(accounts, /服务商凭据|Provider credential/);
   assert.match(desktopCopy, /independentModelNotSet: "未设置独立模型"/);
   assert.doesNotMatch(accounts, /CircleHelp/);
   assert.doesNotMatch(accounts, /function TooltipHint/);
-  assert.match(accounts, /hint=\{getModelProviderHint\(language\)\}/);
+  assert.doesNotMatch(accounts, /getModelProviderHint/);
   assert.match(accounts, /bg-\[#afc8b4\]/);
   assert.match(accounts, /bg-\[#e6b3a9\]/);
   assert.match(css, /\.account-model-actions\s*\{[^}]*width:\s*2rem;/s);
@@ -165,10 +162,8 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.match(accounts, /保存 API Key/);
   assert.doesNotMatch(accounts, /保存设置/);
   assert.match(accounts, /compatibilityEnabled:\s*apiProtocolDraft === "chat_completions" && compatibilityEnabled/);
-  assert.match(
-    reactApp,
-    /const isPresetApiKeyProvider = accountProviderDraft === "deepseek"[\s\S]*accountProviderDraft === "kimi"[\s\S]*accountProviderDraft === "zai"/,
-  );
+  assert.match(reactApp, /const selectedProvider = providerCatalog\.find/);
+  assert.match(reactApp, /const isPresetApiKeyProvider = accountModeDraft === "apikey"/);
   assert.match(reactApp, /compatibilityEnabled:\s*isPresetApiKeyProvider && presetProtocol === "chat_completions"/);
   assert.match(reactApp, /account\.route\?\.originalBaseUrl \?\? account\.runtime\.openaiBaseUrl/);
   assert.match(accounts, /导入 Sub2API/);
@@ -234,7 +229,9 @@ test("credential-pool editor explains retry and failover thresholds", () => {
 });
 
 test("all management record cards opt into the single-row responsive contract", () => {
-  assert.match(environments, /responsive-environment-row/);
+  assert.match(environments, /environment-card/);
+  assert.match(environments, /EnvironmentActionMenu/);
+  assert.match(environments, /getRouteRuntimeSummary/);
   assert.match(environments, /ListStack/);
   assert.match(environments, /<ListStack>/);
   assert.match(environments, /title=\{env\.path\}/);
@@ -245,7 +242,7 @@ test("all management record cards opt into the single-row responsive contract", 
   assert.doesNotMatch(environments, /min-h-0 flex-1 overflow-auto rounded-\[14px\] border border-black\/\[0\.05\] bg-white/);
   assert.match(overview, /responsive-overview-row/);
   assert.match(operations, /grid-cols-\[minmax\(180px,0\.62fr\)_minmax\(0,1\.55fr\)\]/);
-  assert.match(environments, /responsive-actions/);
+  assert.match(environments, /environment-card-actions/);
   assert.match(overview, /responsive-actions/);
   assert.match(operations, /responsive-actions/);
   assert.doesNotMatch(operations, /<AvatarTile/);
@@ -258,7 +255,10 @@ test("all management record cards opt into the single-row responsive contract", 
   assert.match(reactApp, /proxyDraftDirtyRef/);
   assert.doesNotMatch(environments, />CODEX_HOME</);
   assert.doesNotMatch(environments, /language === "zh" \? "当前目标" : "Targets"/);
-  assert.match(environments, /已开启路由 · 127\.0\.0\.1:/);
+  assert.match(environments, /网关运行中/);
+  assert.match(environments, /网关已配置，服务未运行/);
+  assert.match(environments, /本地网关/);
+  assert.doesNotMatch(environments, /已开启路由 · 127\.0\.0\.1:/);
   assert.match(usage, /buildUsageFilter/);
   assert.match(usage, /REFRESH_INTERVAL_PRESETS/);
   assert.match(usage, /customRefreshEditing/);
@@ -329,7 +329,7 @@ test("desktop motion is restrained and respects reduced-motion preferences", () 
 });
 
 test("tooltips use a portal with delayed hover intent and collision handling", () => {
-  assert.match(accounts, /<Tooltip content=\{getModelConfigHint\(language\)\}>/);
+  assert.doesNotMatch(accounts, /<Tooltip/);
   assert.match(desktopShell, /<TooltipProvider>/);
   assert.match(tooltip, /TooltipPrimitive\.Portal/);
   assert.match(tooltip, /delayDuration=\{420\}/);
@@ -353,7 +353,7 @@ test("shared selects open on hover without button press scaling", () => {
 
 test("account side panel selects require a manual click", () => {
   const clickOnlySelects = accounts.match(/openOnHover=\{false\}/g) ?? [];
-  assert.equal(clickOnlySelects.length, 10);
+  assert.equal(clickOnlySelects.length, 11);
   assert.match(accounts, /API protocol/);
   assert.match(accounts, /长会话处理/);
   assert.match(accounts, /安全压缩（推荐）/);
@@ -497,8 +497,14 @@ test("usage visualizations draw in once without replaying on background refresh"
   assert.match(css, /@starting-style\s*\{[^}]*clip-path: inset\(0 100% 0 0\)/s);
 });
 
-test("environment route hints match account status typography", () => {
-  assert.match(environments, /tone="success"\s+className="h-5 px-2 text-\[10px\]"/);
+test("environment route status uses a compact semantic indicator", () => {
+  assert.match(environments, /runtime\.tone === "success" \? "bg-emerald-500"/);
+  assert.match(environments, /runtime\.tone === "warn" \? "bg-amber-500"/);
+  assert.match(environments, /网关已配置，服务未运行/);
+  assert.match(environments, /gatewayIsRunning/);
+  assert.match(environments, /border-emerald-200 bg-emerald-50 text-emerald-700/);
+  assert.match(environments, /账号池 · \$\{poolStatus\.readyMembers\}\/\$\{poolStatus\.members\.length\}/);
+  assert.match(environments, /aria-pressed=\{isGatewayEnabled\}/);
   assert.match(accounts, /truncate text-\[10px\] font-medium text-emerald-700/);
 });
 

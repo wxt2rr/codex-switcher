@@ -42,6 +42,54 @@ export interface GatewayProviderEndpoints {
   gemini?: string;
 }
 
+/** Returns the upstream wire protocols declared by a Provider. */
+export function gatewayProviderProtocols(
+  provider: Pick<GatewayProviderDefinition, "endpoints">,
+): GatewayProtocol[] {
+  return [
+    provider.endpoints.responses ? "responses" : undefined,
+    provider.endpoints.chatCompletions ? "chat_completions" : undefined,
+    provider.endpoints.anthropicMessages ? "anthropic" : undefined,
+    provider.endpoints.gemini ? "gemini" : undefined,
+  ].filter((protocol): protocol is GatewayProtocol => protocol !== undefined);
+}
+
+export function gatewayProviderSupportsProtocol(
+  provider: Pick<GatewayProviderDefinition, "endpoints">,
+  protocol: GatewayProtocol,
+): boolean {
+  return gatewayProviderProtocols(provider).includes(protocol);
+}
+
+export function gatewayCredentialSupportsProtocol(
+  credential: Pick<GatewayCredentialDefinition, "supportedProtocols">,
+  protocol: GatewayProtocol,
+): boolean {
+  return credential.supportedProtocols.includes(protocol);
+}
+
+export function gatewayModelSupportsProtocol(
+  model: Pick<GatewayModelDefinition, "protocols">,
+  protocol: GatewayProtocol,
+): boolean {
+  return model.protocols.includes(protocol);
+}
+
+export interface GatewayRouteCompatibilityIssue {
+  code:
+    | "PROVIDER_NOT_FOUND"
+    | "CREDENTIAL_NOT_FOUND"
+    | "MODEL_NOT_FOUND"
+    | "PROVIDER_MODEL_MISMATCH"
+    | "NO_PROTOCOL_INTERSECTION"
+    | "NESTED_GROUP_NOT_FOUND";
+  routeGroupId?: string;
+  modelId?: string;
+  providerId?: string;
+  credentialId?: string;
+  message: string;
+}
+
 export interface GatewayProviderDefinition {
   id: string;
   displayName: string;
@@ -214,6 +262,84 @@ export function isGatewayEnvironmentState(
     Number.isInteger(value.catalogVersion) &&
     value.catalogVersion >= 0
   );
+}
+
+/**
+ * Validates compiled route members without rejecting otherwise readable legacy
+ * documents. This is deliberately separate from the shape guard above so an
+ * old document can still be migrated and then repaired with diagnostics.
+ */
+export function validateGatewayRouteCompatibility(
+  gateway: Pick<GatewayEnvironmentState, "providers" | "credentials" | "models" | "routeGroups">,
+): GatewayRouteCompatibilityIssue[] {
+  const issues: GatewayRouteCompatibilityIssue[] = [];
+  for (const [groupId, group] of Object.entries(gateway.routeGroups)) {
+    for (const nestedGroupId of group.nestedGroupIds ?? []) {
+      if (!gateway.routeGroups[nestedGroupId]) {
+        issues.push({
+          code: "NESTED_GROUP_NOT_FOUND",
+          routeGroupId: groupId,
+          message: `Route group '${groupId}' references missing group '${nestedGroupId}'`,
+        });
+      }
+    }
+    for (const member of group.members) {
+      const model = gateway.models[member.modelId];
+      const provider = gateway.providers[member.providerId];
+      if (!provider) {
+        issues.push({
+          code: "PROVIDER_NOT_FOUND",
+          routeGroupId: groupId,
+          modelId: member.modelId,
+          providerId: member.providerId,
+          message: `Route group '${groupId}' references missing provider '${member.providerId}'`,
+        });
+        continue;
+      }
+      if (!model) {
+        issues.push({
+          code: "MODEL_NOT_FOUND",
+          routeGroupId: groupId,
+          modelId: member.modelId,
+          providerId: member.providerId,
+          message: `Route group '${groupId}' references missing model '${member.modelId}'`,
+        });
+        continue;
+      }
+      if (model.providerId !== member.providerId) {
+        issues.push({
+          code: "PROVIDER_MODEL_MISMATCH",
+          routeGroupId: groupId,
+          modelId: member.modelId,
+          providerId: member.providerId,
+          message: `Model '${member.modelId}' belongs to provider '${model.providerId}', not '${member.providerId}'`,
+        });
+        continue;
+      }
+      const credentialIds = member.credentialSelector.credentialIds ?? Object.values(gateway.credentials)
+        .filter((credential) => credential.providerId === member.providerId)
+        .map((credential) => credential.id);
+      const compatibleCredentials = credentialIds.filter((credentialId) => {
+        const credential = gateway.credentials[credentialId];
+        if (!credential || credential.providerId !== member.providerId) return false;
+        return model.protocols.some((protocol) => (
+          gatewayProviderSupportsProtocol(provider, protocol)
+          && gatewayCredentialSupportsProtocol(credential, protocol)
+        ));
+      });
+      if (!compatibleCredentials.length) {
+        issues.push({
+          code: "NO_PROTOCOL_INTERSECTION",
+          routeGroupId: groupId,
+          modelId: member.modelId,
+          providerId: member.providerId,
+          credentialId: credentialIds[0],
+          message: `Model '${model.displayName}' has no shared protocol with provider '${provider.displayName}' and its selected credentials`,
+        });
+      }
+    }
+  }
+  return issues;
 }
 
 function isGatewayRouteRule(value: unknown): value is GatewayRouteRule {

@@ -1,8 +1,9 @@
 import type { GatewayProtocol, JsonObject } from "../protocol.js";
-export declare const BUILT_IN_PROVIDER_IDS: readonly ["openai", "anthropic", "gemini", "deepseek", "kimi", "glm", "qwen", "minimax", "mistral", "groq", "xai", "openrouter", "ollama", "lmstudio", "custom", "chatgpt", "codex-subscription", "claude-subscription", "copilot-subscription", "cursor-subscription", "grok-subscription", "devin-subscription"];
+export declare const BUILT_IN_PROVIDER_IDS: readonly ["openai", "anthropic", "gemini", "deepseek", "kimi", "moonshot", "glm", "zai", "zhipu", "qwen", "minimax", "stepfun", "qianfan", "tencent-cloud", "huawei-maas", "volcengine-ark", "mistral", "groq", "xai", "openrouter", "together", "fireworks", "siliconflow", "nvidia-nim", "modelscope", "ollama", "lmstudio", "custom", "custom-openai", "custom-anthropic", "mimo", "chatgpt", "codex-subscription", "chatgpt-subscription", "claude-subscription", "copilot-subscription", "gemini-subscription", "cursor-subscription", "grok-subscription", "devin-subscription"];
 export type BuiltInProviderId = (typeof BUILT_IN_PROVIDER_IDS)[number];
-export type ProviderAuthMethod = "api_key" | "oauth" | "subscription" | "none";
+export type ProviderAuthMethod = "api_key" | "oauth" | "subscription" | "plugin" | "none";
 export type ProviderHealth = "active" | "cooldown" | "invalid" | "expired" | "disabled";
+export type ProviderCategory = "api" | "subscription" | "local" | "custom";
 export interface ProviderEndpoint {
     protocol: GatewayProtocol;
     baseUrl: string;
@@ -51,6 +52,7 @@ export interface ProviderModel {
     id: string;
     displayName: string;
     providerId: string;
+    iconKey?: string;
     protocols: GatewayProtocol[];
     capabilities: {
         reasoning: boolean;
@@ -101,6 +103,8 @@ export interface ProviderCredentialResult {
 export interface ProviderAdapter {
     readonly id: string;
     readonly displayName: string;
+    readonly category?: ProviderCategory;
+    readonly iconKey?: string;
     readonly authMethods: readonly ProviderAuthMethod[];
     readonly endpoints: readonly ProviderEndpoint[];
     beginLogin(redirectUri: string, now?: number): ProviderLoginStart;
@@ -123,12 +127,22 @@ export interface ProviderAdapter {
 export interface ProviderDefinition {
     id: BuiltInProviderId;
     displayName: string;
+    category?: ProviderCategory;
+    iconKey?: string;
+    aliasOf?: BuiltInProviderId;
     authMethods: readonly ProviderAuthMethod[];
     endpoints: readonly ProviderEndpoint[];
     presets: readonly string[];
     refreshPath?: string;
     revokePath?: string;
 }
-export declare function createProviderAdapter(definition: ProviderDefinition, random?: () => string): ProviderAdapter;
+export declare function createProviderAdapter(definition: ProviderDefinition, random?: () => string, configuredEndpoints?: readonly ProviderEndpoint[]): ProviderAdapter;
 export declare function createBuiltInProviderAdapters(random?: () => string): ReadonlyMap<BuiltInProviderId, ProviderAdapter>;
+/** Creates the same adapter contract with environment-specific endpoint URLs. */
+export declare function createConfiguredProviderAdapter(definition: ProviderDefinition, endpoints: readonly ProviderEndpoint[], random?: () => string): ProviderAdapter;
+/** Returns the complete built-in catalog, including legacy aliases for migration. */
 export declare function providerDefinitions(): readonly ProviderDefinition[];
+/** Returns only canonical entries suitable for a user-facing Provider picker. */
+export declare function canonicalProviderDefinitions(): readonly ProviderDefinition[];
+/** Normalizes an old or alternate Provider ID without changing persisted data. */
+export declare function normalizeBuiltInProviderId(id: string): BuiltInProviderId;

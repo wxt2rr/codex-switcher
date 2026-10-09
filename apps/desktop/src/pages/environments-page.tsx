@@ -1,11 +1,13 @@
-import { useMemo, useState } from "react";
-import { ArrowDownToLine, FilePenLine, FileText, FolderPlus, History, Network, Search, Shuffle, RotateCcw, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDownToLine, Ellipsis, FolderPlus, Network, Search, Shuffle, RotateCcw, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { useAdaptiveMenuLayout } from "../components/adaptive-menu-placement";
+import { useDelayedUnmount } from "../components/use-delayed-unmount";
+import { cn } from "../lib/utils";
 import type { AccountPoolInput, AccountPoolStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry } from "../bridge";
 import {
   EmptyList,
-  IconActionButton,
   ListCard,
   ListPageFrame,
   ListStack,
@@ -88,6 +90,138 @@ function buildHistorySnapshotGroups(entries: DesktopEnvFileHistoryEntry[]): Hist
   return Array.from(groups.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+function getRouteRuntimeSummary(routeStatus: EnvironmentRouteStatus | undefined, language: UiLanguage) {
+  if (!routeStatus) {
+    return {
+      tone: "neutral" as const,
+      label: language === "zh" ? "状态未加载" : language === "ja" ? "状態未取得" : "Status unavailable",
+      detail: "",
+    };
+  }
+
+  const accountDetail = routeStatus.routedAccounts > 0
+    ? language === "zh"
+      ? `${routeStatus.routedAccounts} 个账号已接入`
+      : language === "ja"
+        ? `${routeStatus.routedAccounts} アカウント接続`
+        : `${routeStatus.routedAccounts} accounts connected`
+    : "";
+  const endpointDetail = routeStatus.port ? `127.0.0.1:${routeStatus.port}` : "";
+
+  if (routeStatus.gatewayEnabled && routeStatus.enabled) {
+    return {
+      tone: "success" as const,
+      label: language === "zh" ? "网关运行中" : language === "ja" ? "ゲートウェイ稼働中" : "Gateway running",
+      detail: [endpointDetail, accountDetail].filter(Boolean).join(" · "),
+    };
+  }
+  if (routeStatus.gatewayEnabled) {
+    return {
+      tone: "warn" as const,
+      label: language === "zh" ? "网关已配置，服务未运行" : language === "ja" ? "ゲートウェイ設定済み・停止中" : "Gateway configured, service stopped",
+      detail: "",
+    };
+  }
+  if (routeStatus.enabled) {
+    return {
+      tone: "success" as const,
+      label: language === "zh" ? "本地路由运行中" : language === "ja" ? "ローカルルート稼働中" : "Local routing running",
+      detail: [endpointDetail, accountDetail].filter(Boolean).join(" · "),
+    };
+  }
+  return {
+    tone: "neutral" as const,
+    label: language === "zh" ? "服务未运行" : language === "ja" ? "サービス停止中" : "Service stopped",
+    detail: "",
+  };
+}
+
+function EnvironmentActionMenu({
+  language,
+  busy,
+  onEdit,
+  onConfig,
+  onHistory,
+  onDelete,
+}: {
+  language: UiLanguage;
+  busy: boolean;
+  onEdit: () => void;
+  onConfig: () => void;
+  onHistory: () => void;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuMounted = useDelayedUnmount(open, 140);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const { placement, availableHeight } = useAdaptiveMenuLayout(menuMounted, rootRef, menuRef);
+
+  useEffect(() => {
+    if (!open) return;
+    function handlePointerDown(event: MouseEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [open]);
+
+  const items = [
+    { key: "edit", label: language === "zh" ? "编辑环境" : language === "ja" ? "環境を編集" : "Edit environment", onSelect: onEdit },
+    { key: "config", label: language === "zh" ? "修改环境文件" : language === "ja" ? "環境ファイルを変更" : "Edit environment files", onSelect: onConfig },
+    { key: "history", label: language === "zh" ? "查看修改历史" : language === "ja" ? "変更履歴を表示" : "View change history", onSelect: onHistory },
+    { key: "delete", label: language === "zh" ? "删除环境" : language === "ja" ? "環境を削除" : "Delete environment", onSelect: onDelete, tone: "danger" as const },
+  ];
+
+  return (
+    <div ref={rootRef} className="relative shrink-0">
+      <button
+        type="button"
+        className="motion-interactive-color flex size-9 items-center justify-center rounded-lg bg-[#f7f8fa] text-neutral-700 hover:bg-[#eef1f4] hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-55"
+        onClick={() => setOpen((value) => !value)}
+        disabled={busy}
+        aria-label={language === "zh" ? "更多操作" : language === "ja" ? "その他の操作" : "More actions"}
+        title={language === "zh" ? "更多操作" : language === "ja" ? "その他の操作" : "More actions"}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <Ellipsis className="size-4" />
+      </button>
+      {menuMounted ? (
+        <div
+          ref={menuRef}
+          data-state={open ? "open" : "closed"}
+          data-menu-placement={placement}
+          className={cn(
+            "motion-popover-enter absolute right-0 z-40 min-w-[172px] overflow-y-auto rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md",
+            placement === "up" ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]",
+          )}
+          style={{ transformOrigin: placement === "up" ? "bottom right" : "top right", maxHeight: availableHeight }}
+          role="menu"
+        >
+          {items.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={cn(
+                "motion-interactive-color flex w-full items-center rounded-lg px-3 py-2 text-left text-[12px] font-medium",
+                item.tone === "danger" ? "text-rose-600 hover:bg-rose-50" : "text-neutral-700 hover:bg-[#f6f7f9]",
+              )}
+              onClick={() => {
+                setOpen(false);
+                item.onSelect();
+              }}
+              role="menuitem"
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function EnvCard({
   env,
   language,
@@ -117,77 +251,90 @@ function EnvCard({
   poolStatus?: AccountPoolStatus;
   onOpenPool: () => void;
 }) {
+  const runtime = getRouteRuntimeSummary(routeStatus, language);
+  const isGatewayEnabled = Boolean(routeStatus?.gatewayEnabled);
+  const gatewayIsRunning = isGatewayEnabled && runtime.tone === "success";
+  const gatewayNeedsAttention = isGatewayEnabled && runtime.tone === "warn";
+  const currentTargetBadges = [
+    env.isCurrentCli ? "CLI" : null,
+    env.isCurrentApp ? "App" : null,
+  ].filter((value): value is string => Boolean(value));
+
   return (
-    <ListCard className="responsive-record-row responsive-environment-row grid min-h-[94px] items-center gap-5">
-      <div className="min-w-0">
-          <div className="flex min-w-0 items-center gap-3">
+    <ListCard className="environment-card flex flex-col gap-4 p-5">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <h3 className="truncate text-[15px] font-semibold tracking-[-0.02em] text-neutral-950">{env.name}</h3>
-          </div>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {env.isCurrentCli ? <SoftBadge tone="brand" label="CLI" className="h-5 px-2 text-[10px]" /> : null}
-            {env.isCurrentApp ? <SoftBadge tone="brand" label="App" className="h-5 px-2 text-[10px]" /> : null}
-            <SoftBadge tone="neutral" label={language === "zh" ? `${accountCount} 个账号` : `${accountCount} accounts`} className="h-5 px-2 text-[10px]" />
+            {currentTargetBadges.map((target) => <SoftBadge key={target} tone="brand" label={target} className="h-5 px-2 text-[10px]" />)}
             <SoftBadge
-              tone={routeStatus?.gatewayEnabled ? "brand" : "neutral"}
-              label={language === "zh" ? (routeStatus?.gatewayEnabled ? "网关模式" : "手动模式") : (routeStatus?.gatewayEnabled ? "Gateway mode" : "Manual mode")}
+              tone={isGatewayEnabled ? "brand" : "neutral"}
+              label={language === "zh" ? (isGatewayEnabled ? "网关模式" : "手动模式") : language === "ja" ? (isGatewayEnabled ? "ゲートウェイモード" : "手動モード") : (isGatewayEnabled ? "Gateway mode" : "Manual mode")}
               className="h-5 px-2 text-[10px]"
             />
-            {routeStatus?.enabled ? (
-              <SoftBadge
-                tone="success"
-                className="h-5 px-2 text-[10px]"
-                label={
-                  language === "zh"
-                    ? `已开启路由 · 127.0.0.1:${routeStatus.port} · ${routeStatus.routedAccounts} 个账号`
-                    : language === "ja"
-                      ? `ルート有効 · 127.0.0.1:${routeStatus.port} · ${routeStatus.routedAccounts} アカウント`
-                      : `Routing enabled · 127.0.0.1:${routeStatus.port} · ${routeStatus.routedAccounts} accounts`
-                }
-              />
-            ) : null}
-            {routeStatus?.gatewayEnabled ? (
-              <SoftBadge
-                tone="brand"
-                className="h-5 px-2 text-[10px]"
-                label={
-                  language === "zh"
-                    ? `网关模式 · ${routeStatus.localGatewayBaseUrl ?? "本地"}`
-                    : language === "ja"
-                      ? `ゲートウェイモード · ${routeStatus.localGatewayBaseUrl ?? "ローカル"}`
-                      : `Gateway mode · ${routeStatus.localGatewayBaseUrl ?? "local"}`
-                }
-              />
-            ) : null}
           </div>
-      </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+            <span className={cn(
+              "inline-flex h-6 items-center gap-1.5 rounded-md px-2 font-medium",
+              runtime.tone === "success" && "bg-emerald-50 text-emerald-700",
+              runtime.tone === "warn" && "bg-amber-50 text-amber-700",
+              runtime.tone === "neutral" && "bg-slate-100 text-slate-500",
+            )}>
+              <span className={cn("size-1.5 rounded-full", runtime.tone === "success" ? "bg-emerald-500" : runtime.tone === "warn" ? "bg-amber-500" : "bg-slate-300")} />
+              {runtime.label}
+            </span>
+            <span className="text-slate-500">{language === "zh" ? `${accountCount} 个账号` : language === "ja" ? `${accountCount} アカウント` : `${accountCount} accounts`}</span>
+          </div>
+          {runtime.detail ? <div className="mt-1 font-mono text-[11px] text-slate-400">{runtime.detail}</div> : null}
+        </div>
 
-      <div className="responsive-priority-tertiary flex min-w-0 items-center pl-5">
-        <div className="truncate font-mono text-[11px] text-slate-500" title={env.path}>{env.path}</div>
-      </div>
-
-      <div className="responsive-priority-secondary flex min-w-0 items-center pl-5">
-        <div className="flex gap-1.5">
-          <SoftBadge tone={env.isCurrentCli ? "brand" : "neutral"} label="CLI" className="h-5 px-2 text-[10px]" />
-          <SoftBadge tone={env.isCurrentApp ? "brand" : "neutral"} label="App" className="h-5 px-2 text-[10px]" />
+        <div className="environment-card-actions flex flex-wrap items-center gap-2 xl:justify-end">
+          <Button
+            size="sm"
+            variant="outline"
+            className={cn(
+              gatewayIsRunning && "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-800",
+              gatewayNeedsAttention && "border-amber-200 bg-amber-50 text-amber-800 hover:border-amber-300 hover:bg-amber-100",
+            )}
+            onClick={onToggleGateway}
+            disabled={busy || (!canRoute && !isGatewayEnabled)}
+            aria-pressed={isGatewayEnabled}
+          >
+            <Network className="size-4" />
+            {language === "zh" ? (isGatewayEnabled ? "关闭网关" : "开启网关") : language === "ja" ? (isGatewayEnabled ? "ゲートウェイを停止" : "ゲートウェイを有効化") : (isGatewayEnabled ? "Disable gateway" : "Enable gateway")}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className={cn(poolStatus?.enabled && "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-800")}
+            onClick={onOpenPool}
+            disabled={busy || !canRoute}
+            aria-pressed={Boolean(poolStatus?.enabled)}
+          >
+            <Shuffle className="size-4" />
+            {poolStatus?.enabled
+              ? language === "zh"
+                ? `账号池 · ${poolStatus.readyMembers}/${poolStatus.members.length}`
+                : language === "ja"
+                  ? `アカウントプール · ${poolStatus.readyMembers}/${poolStatus.members.length}`
+                  : `Account pool · ${poolStatus.readyMembers}/${poolStatus.members.length}`
+              : language === "zh" ? "账号池" : language === "ja" ? "アカウントプール" : "Account pool"}
+          </Button>
+          <EnvironmentActionMenu language={language} busy={busy} onEdit={onEdit} onConfig={onConfig} onHistory={onHistory} onDelete={onDelete} />
         </div>
       </div>
 
-      <div className="responsive-actions">
-        <IconActionButton icon={<Network className="size-4" />} label={language === "zh" ? (routeStatus?.gatewayEnabled ? "关闭网关" : "开启网关") : (routeStatus?.gatewayEnabled ? "Disable gateway" : "Enable gateway")} onClick={onToggleGateway} disabled={busy || (!canRoute && !routeStatus?.gatewayEnabled)} active={routeStatus?.gatewayEnabled} />
-        <IconActionButton icon={<Shuffle className="size-4" />} label={language === "zh" ? "凭证池" : "Credential pool"} onClick={onOpenPool} disabled={busy || !canRoute} active={Boolean(poolStatus?.enabled)} />
-        <IconActionButton icon={<FilePenLine className="size-4" />} label={language === "zh" ? "编辑" : "Edit"} onClick={onEdit} disabled={busy} />
-        <IconActionButton icon={<FileText className="size-4" />} label={language === "zh" ? "修改" : "Modify"} onClick={onConfig} disabled={busy} />
-        <IconActionButton icon={<History className="size-4" />} label={language === "zh" ? "历史" : "History"} onClick={onHistory} disabled={busy} />
-        <button
-          type="button"
-          className="motion-interactive-color flex size-9 items-center justify-center rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 hover:text-rose-700"
-          onClick={onDelete}
-          disabled={busy}
-          aria-label={language === "zh" ? "删除" : "Delete"}
-          title={language === "zh" ? "删除" : "Delete"}
-        >
-          <Trash2 className="size-4" />
-        </button>
+      <div className="grid gap-3 border-t border-black/[0.06] pt-3 dark:border-white/[0.07] sm:grid-cols-2">
+        <div className="min-w-0">
+          <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">{language === "zh" ? "环境路径" : language === "ja" ? "環境パス" : "Environment path"}</div>
+          <div className="mt-1 truncate font-mono text-[11px] text-slate-500" title={env.path}>{env.path}</div>
+        </div>
+        <div className="min-w-0">
+          <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">{language === "zh" ? "本地网关" : language === "ja" ? "ローカルゲートウェイ" : "Local gateway"}</div>
+          <div className={cn("mt-1 truncate font-mono text-[11px]", routeStatus?.localGatewayBaseUrl ? "text-slate-500" : "text-slate-400")} title={routeStatus?.localGatewayBaseUrl ?? undefined}>
+            {routeStatus?.localGatewayBaseUrl ?? (isGatewayEnabled ? (language === "zh" ? "等待服务启动" : language === "ja" ? "サービスの起動を待機中" : "Waiting for service") : (language === "zh" ? "未启用" : language === "ja" ? "未有効" : "Not enabled"))}
+          </div>
+        </div>
       </div>
     </ListCard>
   );

@@ -54,7 +54,7 @@ export interface DesktopCreateEnvRequest {
 }
 
 export interface DesktopNativeLoginRequest {
-  providerId?: "openai" | "deepseek" | "mimo" | "kimi" | "zai";
+  providerId?: string;
   mode: "auth" | "apikey" | "sub2api" | "cpa";
   account: string;
   envName: string;
@@ -73,6 +73,21 @@ export interface DesktopNativeLoginRequest {
   longConversationStrategy?: "safe" | "continuity";
   instructionRole?: "auto" | "system" | "developer";
   requestOverrides?: Record<string, unknown>;
+}
+
+export interface ProviderCredentialImportRequest {
+  providerId: string;
+  account: string;
+  envName: string;
+  target: "cli" | "app" | "both" | "none";
+  authMethod?: "api_key" | "oauth" | "subscription" | "plugin" | "none";
+  accessToken?: string;
+  refreshToken?: string;
+  accountId?: string;
+  expiresAt?: number;
+  baseUrl?: string;
+  apiProtocol?: "responses" | "chat_completions";
+  requestHeaders?: Record<string, string>;
 }
 
 export type DesktopLaunchStrategy = "replace-current" | "current-window" | "new-window" | "multi-window";
@@ -209,6 +224,25 @@ export interface ProviderPluginSnapshot {
   error?: string;
 }
 
+export interface ProviderCatalogItem {
+  id: string;
+  displayName: string;
+  category: "api" | "subscription" | "local" | "custom";
+  iconKey: string;
+  defaultBaseUrl?: string;
+  aliasOf?: string;
+  authMethods: string[];
+  protocols: string[];
+  discoveryMode: string;
+  capabilities: {
+    modelDiscovery: boolean;
+    quota: boolean;
+    tokenRefresh: boolean;
+    accountPool: boolean;
+    protocolConversion: boolean;
+  };
+}
+
 export interface ProviderPluginInstallRequest {
   manifest: {
     id: string;
@@ -268,11 +302,37 @@ export interface ModelBindingOptions {
   weight?: number;
 }
 
+export type AccountModelDiscoveryState = "idle" | "discovering" | "ready" | "stale" | "failed";
+export type AccountModelAvailability = "available" | "stale" | "unavailable" | "discovery_failed";
+export interface AccountDiscoveredModel {
+  providerModelKey: string;
+  providerId: string;
+  upstreamModelId: string;
+  displayName: string;
+  iconKey?: string;
+  protocols: string[];
+  capabilities: { reasoning: boolean; tools: boolean; vision: boolean; streaming: boolean };
+  contextWindow?: number;
+  source: "preset" | "discovery" | "manual" | "cached";
+  status: AccountModelAvailability;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  lastError?: string;
+}
+export interface AccountModelDiscoverySnapshot {
+  providerId: string;
+  state: AccountModelDiscoveryState;
+  models: AccountDiscoveredModel[];
+  discoveredAt?: string;
+  lastError?: string;
+}
+
 export interface ModelCatalogSnapshot {
   version: 1;
   models: CustomModelRecord[];
   accountBindings: Record<string, string[]>;
   accountBindingOptions?: Record<string, Record<string, ModelBindingOptions>>;
+  accountModelDiscoveries?: Record<string, AccountModelDiscoverySnapshot>;
 }
 export interface SaveCustomModelRequest { id?: string; entry: Record<string, unknown>; }
 
@@ -356,6 +416,8 @@ export interface DesktopElectronApi {
   setLanguage(language: "zh" | "en" | "ja"): Promise<"zh" | "en" | "ja">;
   writeClipboardText(value: string): Promise<void>;
   nativeLogin(request: DesktopNativeLoginRequest): Promise<DesktopActionResult>;
+  importProviderCredential(request: ProviderCredentialImportRequest): Promise<DesktopActionResult>;
+  refreshProviderCredential(envName: string, account: string): Promise<DesktopActionResult>;
   switchEnv(target: "cli" | "app", envName: string): Promise<DesktopActionResult>;
   switchAccount(
     target: "cli" | "app",
@@ -379,6 +441,9 @@ export interface DesktopElectronApi {
   updateRuntime(envName: string, accountName: string, baseUrl: string): Promise<DesktopActionResult>;
   updateIndependentModel(request: DesktopIndependentModelRequest): Promise<DesktopActionResult>;
   listCustomModels(): Promise<ModelCatalogSnapshot>;
+  discoverAccountModels(envName: string, accountName: string): Promise<ModelCatalogSnapshot>;
+  refreshAllAccountModels(): Promise<ModelCatalogSnapshot>;
+  listProviderCatalog(): Promise<ProviderCatalogItem[]>;
   saveCustomModel(request: SaveCustomModelRequest): Promise<ModelCatalogSnapshot>;
   deleteCustomModel(id: string): Promise<ModelCatalogSnapshot>;
   setAccountModelBindings(accountKey: string, modelIds: string[]): Promise<ModelCatalogSnapshot>;
@@ -475,6 +540,8 @@ export interface DesktopBridge {
   setLanguage(language: "zh" | "en" | "ja"): Promise<"zh" | "en" | "ja">;
   writeClipboardText(value: string): Promise<void>;
   nativeLogin(request: DesktopNativeLoginRequest): Promise<DesktopActionResult>;
+  importProviderCredential(request: ProviderCredentialImportRequest): Promise<DesktopActionResult>;
+  refreshProviderCredential(envName: string, account: string): Promise<DesktopActionResult>;
   switchEnv(target: "cli" | "app", envName: string): Promise<DesktopActionResult>;
   switchAccount(
     target: "cli" | "app",
@@ -498,6 +565,9 @@ export interface DesktopBridge {
   updateRuntime(envName: string, accountName: string, baseUrl: string): Promise<DesktopActionResult>;
   updateIndependentModel(request: DesktopIndependentModelRequest): Promise<DesktopActionResult>;
   listCustomModels(): Promise<ModelCatalogSnapshot>;
+  discoverAccountModels(envName: string, accountName: string): Promise<ModelCatalogSnapshot>;
+  refreshAllAccountModels(): Promise<ModelCatalogSnapshot>;
+  listProviderCatalog(): Promise<ProviderCatalogItem[]>;
   saveCustomModel(request: SaveCustomModelRequest): Promise<ModelCatalogSnapshot>;
   deleteCustomModel(id: string): Promise<ModelCatalogSnapshot>;
   setAccountModelBindings(accountKey: string, modelIds: string[]): Promise<ModelCatalogSnapshot>;
@@ -596,6 +666,8 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       setLanguage: unavailable,
       writeClipboardText: unavailable,
       nativeLogin: unavailable,
+      importProviderCredential: unavailable,
+      refreshProviderCredential: unavailable,
       switchEnv: unavailable,
       switchAccount: unavailable,
       listAccountProjects: unavailable,
@@ -613,6 +685,9 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       updateRuntime: unavailable,
       updateIndependentModel: unavailable,
       listCustomModels: unavailable,
+      discoverAccountModels: unavailable,
+      refreshAllAccountModels: unavailable,
+      listProviderCatalog: unavailable,
       saveCustomModel: unavailable,
       deleteCustomModel: unavailable,
       setAccountModelBindings: unavailable,
@@ -808,6 +883,8 @@ function createBrowserPreviewBridge(): DesktopBridge {
     setLanguage: browserPreviewSetLanguage,
     writeClipboardText: async () => undefined,
     nativeLogin: () => browserPreviewAction(),
+    importProviderCredential: () => browserPreviewAction(),
+    refreshProviderCredential: () => browserPreviewAction(),
     switchEnv: () => browserPreviewAction(),
     switchAccount: () => browserPreviewAction(),
     listAccountProjects: async () => [],
@@ -825,6 +902,9 @@ function createBrowserPreviewBridge(): DesktopBridge {
     updateRuntime: () => browserPreviewAction(),
     updateIndependentModel: () => browserPreviewAction(),
     listCustomModels: async () => ({ version: 1, models: [], accountBindings: {} }),
+    discoverAccountModels: async () => ({ version: 1, models: [], accountBindings: {} }),
+    refreshAllAccountModels: async () => ({ version: 1, models: [], accountBindings: {} }),
+    listProviderCatalog: async () => [],
     saveCustomModel: async () => ({ version: 1, models: [], accountBindings: {} }),
     deleteCustomModel: async () => ({ version: 1, models: [], accountBindings: {} }),
     setAccountModelBindings: async () => ({ version: 1, models: [], accountBindings: {} }),

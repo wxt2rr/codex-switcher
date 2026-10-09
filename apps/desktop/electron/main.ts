@@ -18,6 +18,8 @@ import {
   logoutAccount,
   logoutApp,
   importDefaultEnv,
+  importProviderCredential,
+  refreshProviderCredential,
   listOperations,
   listAccountProjects,
   nativeLogin,
@@ -105,6 +107,9 @@ import {
   scanCliTerminalSettings,
   setCliTerminalSelection,
   listCustomModels,
+  discoverAccountModels,
+  refreshAllAccountModels,
+  listProviderCatalog,
   saveCustomModel,
   deleteCustomModel,
   setAccountModelBindings,
@@ -427,6 +432,8 @@ function registerHandlers() {
     clipboard.writeText(value);
   });
   ipcMain.handle("desktop:nativeLogin", (_event: IpcMainInvokeEvent, request) => nativeLogin(request));
+  ipcMain.handle("desktop:importProviderCredential", (_event: IpcMainInvokeEvent, request) => importProviderCredential(request));
+  ipcMain.handle("desktop:refreshProviderCredential", (_event: IpcMainInvokeEvent, envName: string, account: string) => refreshProviderCredential({ envName, account }));
   ipcMain.handle("desktop:switchEnv", (_event: IpcMainInvokeEvent, target: "cli" | "app", envName: string) =>
     switchEnv(target, envName)
   );
@@ -485,6 +492,10 @@ function registerHandlers() {
     updateIndependentModel(request)
   );
   ipcMain.handle("desktop:listCustomModels", () => listCustomModels());
+  ipcMain.handle("desktop:discoverAccountModels", (_event: IpcMainInvokeEvent, envName: string, accountName: string) =>
+    discoverAccountModels(envName, accountName));
+  ipcMain.handle("desktop:refreshAllAccountModels", () => refreshAllAccountModels());
+  ipcMain.handle("desktop:listProviderCatalog", () => listProviderCatalog());
   ipcMain.handle("desktop:saveCustomModel", (_event: IpcMainInvokeEvent, request) =>
     saveCustomModel(request)
   );

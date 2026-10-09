@@ -175,6 +175,34 @@ test("gateway model routes use each bound account protocol and default to a mode
   }
 });
 
+test("gateway model routes keep the Codex ingress protocol separate from an Anthropic upstream", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-manager-gateway-upstream-protocol-"));
+  let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
+  const manager = new UsageRouterManager({
+    stateDir, serviceEntryPath: "unused",
+    launchService: async () => { service = await startUsageRouterService({ stateDir: join(stateDir, "usage-router") }); },
+  });
+  const update = async () => undefined;
+  try {
+    await manager.enableEnvironmentGateway("work", [{
+      envName: "work", accountName: "claude", authMode: "apikey",
+      baseUrl: "https://api.anthropic.com", apiKey: "sk-claude", providerId: "anthropic",
+      protocol: "responses",
+    }], update, {
+      claude: { id: "claude", exposedModelId: "claude-sonnet", strategy: "order", sessionPolicy: "off", fallbackEnabled: true },
+    }, [{
+      providerId: "anthropic", modelId: "anthropic/claude-sonnet", upstreamModel: "claude-sonnet",
+      exposedModelId: "claude-sonnet", routeGroupId: "claude", accountNames: ["claude"],
+      protocols: ["anthropic"], protocolByAccount: { claude: "responses" },
+      upstreamProtocolByAccount: { claude: "anthropic" },
+    }]);
+    const route = (await manager.listRoutes()).find((candidate) => candidate.exposedModelId === "claude-sonnet");
+    assert.equal(route?.protocol, "anthropic");
+  } finally {
+    await service?.close();
+  }
+});
+
 test("environment gateway can sit on top of a credential pool and restore the pool URL", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-manager-gateway-pool-"));
   let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;

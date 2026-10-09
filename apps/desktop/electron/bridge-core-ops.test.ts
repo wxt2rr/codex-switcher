@@ -280,7 +280,62 @@ test("desktop bridge saves an API key account without a Codex CLI or changing ta
   }
 });
 
-test("desktop bridge seeds DeepSeek default model bindings when creating an API key account", async () => {
+test("desktop bridge imports a subscription credential into the shared account and model stores", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-provider-credential-"));
+  const previousEnv = { ...process.env };
+  try {
+    process.env.HOME = root;
+    process.env.PATH = "";
+    delete process.env.CODEX_SWITCHER_CODEX_BIN;
+    delete process.env.CODEX_BIN;
+    delete process.env.CODEX_SWITCHER_DESKTOP_RESOURCES_PATH;
+    process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
+    process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
+    process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
+    await writeFileRecursive(join(root, "state", "current_cli_env"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_cli_account"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_app_env"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_app_account"), "default\n");
+
+    const result = await bridge.importProviderCredential({
+      providerId: "claude-subscription",
+      authMethod: "subscription",
+      account: "claude-subscription",
+      envName: "default",
+      target: "none",
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      accountId: "subscription-account",
+      expiresAt: 1_900_000_000_000,
+      requestHeaders: {
+        "x-provider-scope": "subscription",
+        authorization: "should-not-be-persisted",
+        "bad header": "should-not-be-persisted",
+      },
+    });
+
+    assert.equal(result.message, "Imported claude-subscription credential for default/claude-subscription");
+    const runtime = JSON.parse(await readFile(join(root, "state", "env-accounts", "default", "claude-subscription", "runtime.json"), "utf8")) as Record<string, unknown>;
+    assert.equal(runtime.provider_id, "claude-subscription");
+    assert.equal(runtime.provider_auth_method, "subscription");
+    assert.deepEqual(runtime.provider_request_headers, { "x-provider-scope": "subscription" });
+    assert.equal(runtime.preferred_auth_method, "apikey");
+    const auth = JSON.parse(await readFile(join(root, "state", "env-accounts", "default", "claude-subscription", "auth.json"), "utf8")) as Record<string, unknown>;
+    assert.equal(auth.OPENAI_API_KEY, "access-token");
+    assert.deepEqual(auth.tokens, { access_token: "access-token", refresh_token: "refresh-token", expires_at: 1_900_000_000_000 });
+    const catalog = JSON.parse(await readFile(join(root, "state", "custom-model-catalogs.json"), "utf8")) as {
+      models: Array<{ entry: { slug: string } }>;
+      accountBindings: Record<string, string[]>;
+    };
+    assert.ok(catalog.models.some((model) => model.entry.slug === "claude-sonnet"));
+    assert.equal(catalog.accountBindings["default/claude-subscription"], undefined);
+  } finally {
+    restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("desktop bridge discovers DeepSeek models without silently exposing them", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-deepseek-api-key-"));
   const previousEnv = { ...process.env };
   try {
@@ -324,15 +379,16 @@ test("desktop bridge seeds DeepSeek default model bindings when creating an API 
       models: Array<{ id: string; entry: { slug: string } }>;
       accountBindings: Record<string, string[]>;
     };
-    assert.deepEqual(catalog.models.map((model) => model.entry.slug), ["deepseek-v4-flash", "deepseek-v4-pro"]);
-    assert.equal(catalog.accountBindings["default/deepseek"]?.length, 2);
+    assert.ok(catalog.models.some((model) => model.entry.slug === "deepseek-v4-flash"));
+    assert.ok(catalog.models.some((model) => model.entry.slug === "deepseek-v4-pro"));
+    assert.equal(catalog.accountBindings["default/deepseek"], undefined);
   } finally {
     restoreEnv(previousEnv);
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("desktop bridge seeds MiMo default model bindings when creating an API key account", async () => {
+test("desktop bridge discovers MiMo models without silently exposing them", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-mimo-api-key-"));
   const previousEnv = { ...process.env };
 
@@ -367,8 +423,9 @@ test("desktop bridge seeds MiMo default model bindings when creating an API key 
       models: Array<{ entry: { slug: string } }>;
       accountBindings: Record<string, string[]>;
     };
-    assert.deepEqual(catalog.models.map((model) => model.entry.slug), ["mimo-v2.5-pro", "mimo-v2.5"]);
-    assert.equal(catalog.accountBindings["default/mimo"]?.length, 2);
+    assert.ok(catalog.models.some((model) => model.entry.slug === "mimo-v2.5-pro"));
+    assert.ok(catalog.models.some((model) => model.entry.slug === "mimo-v2.5"));
+    assert.equal(catalog.accountBindings["default/mimo"], undefined);
   } finally {
     restoreEnv(previousEnv);
     await rm(root, { recursive: true, force: true });

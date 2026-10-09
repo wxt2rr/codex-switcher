@@ -66,19 +66,24 @@ function resolveLegacyModelId(account, providerId) {
 }
 function buildLegacyProvider(providerId, account) {
     const baseUrl = resolveLegacyBaseUrl(account);
-    const protocol = account.runtime.apiProtocol ?? "responses";
+    const protocol = resolveLegacyProviderProtocol(providerId, account);
     return {
         id: providerId,
         displayName: providerId,
         kind: account.authMode === "auth" ? "chatgpt" : "openai",
         endpoints: protocol === "chat_completions"
             ? { chatCompletions: baseUrl }
-            : { responses: baseUrl },
+            : protocol === "anthropic"
+                ? { anthropicMessages: baseUrl }
+                : protocol === "gemini"
+                    ? { gemini: baseUrl }
+                    : { responses: baseUrl },
         modelDiscovery: "manual",
         enabled: true,
     };
 }
 function buildLegacyCredential(credentialId, environmentName, accountName, account) {
+    const protocol = resolveLegacyProviderProtocol(resolveLegacyProviderId(account), account);
     return {
         id: credentialId,
         providerId: resolveLegacyProviderId(account),
@@ -89,7 +94,7 @@ function buildLegacyCredential(credentialId, environmentName, accountName, accou
                 ? "api_key"
                 : "plugin",
         secretRef: createLegacyId("account", environmentName, accountName),
-        supportedProtocols: [account.runtime.apiProtocol ?? "responses"],
+        supportedProtocols: [protocol],
         status: "active",
         weight: 1,
         priority: 0,
@@ -97,15 +102,24 @@ function buildLegacyCredential(credentialId, environmentName, accountName, accou
 }
 function buildLegacyModel(modelId, providerId, account) {
     const upstreamModelId = modelId.slice(providerId.length + 1);
+    const protocol = resolveLegacyProviderProtocol(providerId, account);
     return {
         id: modelId,
         providerId,
         upstreamModelId,
         displayName: upstreamModelId,
-        protocols: [account.runtime.apiProtocol ?? "responses"],
+        protocols: [protocol],
         capabilities: {},
         enabled: true,
     };
+}
+function resolveLegacyProviderProtocol(providerId, account) {
+    const normalized = providerId.trim().toLowerCase();
+    if (normalized === "anthropic" || normalized === "claude-subscription" || normalized === "custom-anthropic")
+        return "anthropic";
+    if (normalized === "gemini" || normalized === "gemini-subscription")
+        return "gemini";
+    return account.runtime.apiProtocol ?? "responses";
 }
 function resolveLegacyBaseUrl(account) {
     if (account.runtime.openaiBaseUrlMode === "custom" &&

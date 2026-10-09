@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { buildLegacyGatewayEnvironmentState } from "../../../packages/core/dist/gateway/legacy-adapter.js";
 import type { EnvState } from "../../../packages/core/dist/state/store.js";
-import { applyModelCatalogBindings } from "./gateway-model-bindings.js";
+import { applyModelCatalogBindings, inspectGatewayModelBindings } from "./gateway-model-bindings.js";
 import type { ModelCatalogSnapshot } from "./model-catalog-store.js";
 
 function environment(): EnvState {
@@ -139,6 +139,45 @@ test("explicitly disabled tool models remain incompatible with tool requests", (
   assert.equal(group.capabilities?.tools, false);
 });
 
+test("unavailable discovered models are not compiled into gateway routes", () => {
+  const env = environment();
+  const unavailable: ModelCatalogSnapshot = {
+    version: 1,
+    models: [{
+      id: "model-retired",
+      entry: {
+        slug: "openai:retired-model",
+        display_name: "Retired Model",
+        provider_id: "openai",
+        provider_model_key: "openai:retired-model",
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }],
+    accountBindings: { "wangxt/alpha": ["model-retired"] },
+    accountModelDiscoveries: {
+      "wangxt/alpha": {
+        providerId: "openai",
+        state: "ready",
+        models: [{
+          providerModelKey: "openai:retired-model",
+          providerId: "openai",
+          upstreamModelId: "retired-model",
+          displayName: "Retired Model",
+          protocols: ["responses"],
+          capabilities: { reasoning: false, tools: true, vision: false, streaming: true },
+          source: "discovery",
+          status: "unavailable",
+          firstSeenAt: "2026-01-01T00:00:00.000Z",
+          lastSeenAt: "2026-01-02T00:00:00.000Z",
+        }],
+      },
+    },
+  };
+  const result = applyModelCatalogBindings(env, buildLegacyGatewayEnvironmentState(env), unavailable);
+  assert.equal(Object.values(result.routeGroups).some((group) => group.exposedModelId === "openai:retired-model"), false);
+});
+
 test("bundled Codex models compile into route groups for AUTH accounts", () => {
   const env = environment();
   const result = applyModelCatalogBindings(
@@ -177,7 +216,7 @@ test("recompiling removes stale generated bindings without removing legacy route
   assert.equal(Object.values(result.routeGroups).some((group) => group.id.startsWith("catalog-route-group:")), false);
 });
 
-test("one catalog model keeps the union of protocols from all bound accounts", () => {
+test("one catalog model keeps the union of protocols from all bound accounts", async () => {
   const env = environment();
   env.accounts.beta.runtime.apiProtocol = "chat_completions";
   env.accounts.beta.runtime.providerId = "openai";
@@ -192,4 +231,38 @@ test("one catalog model keeps the union of protocols from all bound accounts", (
   const model = Object.values(result.models).find((candidate) => candidate.upstreamModelId === "alpha-shared");
   assert.ok(model);
   assert.deepEqual([...model.protocols].sort(), ["chat_completions", "responses"]);
+  assert.equal(result.providers.openai?.endpoints.chatCompletions, "https://beta.example/v1");
+  assert.deepEqual(await inspectGatewayModelBindings(result), []);
+});
+
+test("provider-native protocols are compiled separately from the Codex ingress protocol", async () => {
+  const env = environment();
+  env.accounts.claude = {
+    name: "claude",
+    authMode: "apikey",
+    runtime: {
+      preferredAuthMethod: "apikey",
+      openaiBaseUrlMode: "custom",
+      openaiBaseUrl: "https://api.anthropic.com",
+      providerId: "anthropic",
+      // Codex still enters through the local Responses gateway.
+      apiProtocol: "responses",
+    },
+  };
+  const custom: ModelCatalogSnapshot = {
+    version: 1,
+    models: [{
+      id: "claude-model",
+      entry: { slug: "claude-sonnet", display_name: "Claude Sonnet", protocol: "anthropic" },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }],
+    accountBindings: { "wangxt/claude": ["claude-model"] },
+  };
+  const result = applyModelCatalogBindings(env, buildLegacyGatewayEnvironmentState(env), custom);
+  const model = Object.values(result.models).find((candidate) => candidate.upstreamModelId === "claude-sonnet");
+  const credential = Object.values(result.credentials).find((candidate) => candidate.displayName === "claude");
+  assert.deepEqual(model?.protocols, ["anthropic"]);
+  assert.equal(credential?.supportedProtocols.includes("anthropic"), true);
+  assert.equal((await inspectGatewayModelBindings(result)).length, 0);
 });

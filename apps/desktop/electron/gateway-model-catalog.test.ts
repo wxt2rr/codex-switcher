@@ -9,8 +9,8 @@ test("gateway model catalog namespaces provider models without slash-based slugs
     schemaVersion: 1,
     mode: "gateway",
     gatewayId: "gateway-work",
-    providers: {},
-    credentials: {},
+    providers: { deepseek: { id: "deepseek", displayName: "DeepSeek", kind: "custom", endpoints: { responses: "https://api.deepseek.com/v1" }, modelDiscovery: "preset", enabled: true } },
+    credentials: { deepseek: { id: "credential-deepseek", providerId: "deepseek", displayName: "DeepSeek", kind: "api_key", secretRef: "secure/deepseek", supportedProtocols: ["responses"], status: "active" } },
     models: {
       deepseek: {
         id: "deepseek/deepseek-chat",
@@ -51,10 +51,10 @@ test("gateway model catalog exposes a grouped model once instead of exposing int
     schemaVersion: 1,
     mode: "gateway",
     gatewayId: "gateway-work",
-    providers: {},
-    credentials: {},
+    providers: { openai: { id: "openai", displayName: "OpenAI", kind: "openai", endpoints: { responses: "https://api.openai.com/v1" }, modelDiscovery: "models_endpoint", enabled: true } },
+    credentials: { "credential-a": { id: "credential-a", providerId: "openai", displayName: "OpenAI", kind: "api_key", secretRef: "secure/openai", supportedProtocols: ["responses"], status: "active" } },
     models: {
-      internal: {
+      "catalog-model:internal": {
         id: "catalog-model:internal",
         providerId: "openai",
         upstreamModelId: "vendor-model",
@@ -118,8 +118,8 @@ test("bundled Codex route groups do not duplicate the bundled model catalog", ()
     schemaVersion: 1,
     mode: "gateway",
     gatewayId: "gateway-work",
-    providers: {},
-    credentials: {},
+    providers: { chatgpt: { id: "chatgpt", displayName: "ChatGPT", kind: "chatgpt", endpoints: { responses: "https://chatgpt.com/backend-api/codex" }, modelDiscovery: "preset", enabled: true } },
+    credentials: { credential: { id: "credential", providerId: "chatgpt", displayName: "ChatGPT", kind: "auth", secretRef: "secure/chatgpt", supportedProtocols: ["responses"], status: "active" } },
     models: {
       builtin: {
         id: "builtin-model:work:gpt-5.6-luna:chatgpt",

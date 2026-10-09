@@ -1,6 +1,7 @@
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { writeFileAtomically } from "./atomic-file.js";
+const LOCAL_ROUTER_PROVIDER_ID = "codex_switcher_router";
 export async function repairLegacyTargetHomeConfigs(options) {
     const result = {
         checked: 0,
@@ -89,10 +90,16 @@ async function writeManagedConfig(configPath, runtime) {
     const compatibilityRouteActive = runtime.apiProtocol === "chat_completions" &&
         runtime.compatibilityRouteEnabled &&
         Boolean(runtime.compatibilityRouteBaseUrl);
-    if (compatibilityRouteActive) {
+    const localRouterBaseUrl = compatibilityRouteActive
+        ? runtime.compatibilityRouteBaseUrl
+        : runtime.openaiBaseUrlMode === "custom"
+            ? runtime.openaiBaseUrl
+            : undefined;
+    const localRouterActive = isLocalRouterBaseUrl(localRouterBaseUrl);
+    if (compatibilityRouteActive && !localRouterActive) {
         managedLines.push(`openai_base_url = ${quoteTomlString(runtime.compatibilityRouteBaseUrl)}`);
     }
-    if (!compatibilityRouteActive && runtime.apiProtocol !== "chat_completions"
+    if (!localRouterActive && !compatibilityRouteActive && runtime.apiProtocol !== "chat_completions"
         && runtime.openaiBaseUrlMode === "custom" && runtime.openaiBaseUrl) {
         managedLines.push(`openai_base_url = "${runtime.openaiBaseUrl}"`);
     }
@@ -102,7 +109,28 @@ async function writeManagedConfig(configPath, runtime) {
     if (managedModelCatalogPath) {
         managedLines.push(`model_catalog_json = ${quoteTomlString(managedModelCatalogPath)}`);
     }
-    if (runtime.independentModelEnabled && runtime.preferredAuthMethod === "chatgpt") {
+    if (localRouterActive) {
+        managedLines.push("");
+        managedLines.push(`model_provider = ${quoteTomlString(LOCAL_ROUTER_PROVIDER_ID)}`);
+        managedLines.push("");
+        managedLines.push(`[model_providers.${LOCAL_ROUTER_PROVIDER_ID}]`);
+        managedLines.push('name = "codex-switcher local router"');
+        managedLines.push(`base_url = ${quoteTomlString(localRouterBaseUrl)}`);
+        managedLines.push('wire_api = "responses"');
+        managedLines.push("supports_websockets = false");
+        if (runtime.preferredAuthMethod === "chatgpt") {
+            // The local router owns upstream account authentication. Do not project
+            // the selected upstream account's ChatGPT auth method into Codex's local
+            // provider: requires_openai_auth=true makes Codex apply ChatGPT's native
+            // model entitlement check before the request can reach the gateway.
+            managedLines.push("requires_openai_auth = false");
+        }
+        else {
+            managedLines.push('env_key = "OPENAI_API_KEY"');
+            managedLines.push("requires_openai_auth = false");
+        }
+    }
+    else if (runtime.independentModelEnabled && runtime.preferredAuthMethod === "chatgpt") {
         const providerId = normalizeProviderId(runtime.independentModelProviderId);
         const independentModelSlug = resolveIndependentModelSlug(runtime.independentModelBaseUrl) ?? "gpt-5.4";
         managedLines.push("");
@@ -238,6 +266,7 @@ function removeManagedConfigLines(content, options) {
     const managedProviderIds = new Set(lines
         .map((line) => line.trim().match(/^model_provider\s*=\s*"([^"]+)"$/)?.[1] ?? "")
         .filter(Boolean));
+    managedProviderIds.add(LOCAL_ROUTER_PROVIDER_ID);
     let skipManagedProviderSection = false;
     let insideTomlSection = false;
     for (const line of lines) {
@@ -289,6 +318,22 @@ function removeManagedConfigLines(content, options) {
 }
 function quoteTomlString(value) {
     return JSON.stringify(value);
+}
+function isLocalRouterBaseUrl(value) {
+    if (!value?.trim())
+        return false;
+    try {
+        const url = new URL(value);
+        if (url.protocol !== "http:" && url.protocol !== "https:")
+            return false;
+        if (!["127.0.0.1", "localhost", "::1", "[::1]"].includes(url.hostname.toLowerCase())) {
+            return false;
+        }
+        return /^\/(?:routes|pools|gateways)(?:\/|$)/.test(url.pathname);
+    }
+    catch {
+        return false;
+    }
 }
 function resolveIndependentModelSlug(baseUrl) {
     const normalized = baseUrl?.trim().toLowerCase();

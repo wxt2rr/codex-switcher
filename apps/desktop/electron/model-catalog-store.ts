@@ -22,11 +22,55 @@ export interface ModelBindingOptions {
   weight?: number;
 }
 
+export type AccountModelDiscoveryState = "idle" | "discovering" | "ready" | "stale" | "failed";
+export type AccountModelAvailability = "available" | "stale" | "unavailable" | "discovery_failed";
+
+export interface AccountDiscoveredModel {
+  providerModelKey: string;
+  providerId: string;
+  upstreamModelId: string;
+  displayName: string;
+  iconKey?: string;
+  protocols: string[];
+  capabilities: {
+    reasoning: boolean;
+    tools: boolean;
+    vision: boolean;
+    streaming: boolean;
+  };
+  contextWindow?: number;
+  source: "preset" | "discovery" | "manual" | "cached";
+  status: AccountModelAvailability;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  lastError?: string;
+}
+
+export interface AccountModelDiscoverySnapshot {
+  providerId: string;
+  state: AccountModelDiscoveryState;
+  models: AccountDiscoveredModel[];
+  discoveredAt?: string;
+  lastError?: string;
+}
+
+export interface SaveAccountModelDiscoveryInput {
+  accountKey: string;
+  providerId: string;
+  state: AccountModelDiscoveryState;
+  models?: Array<Omit<AccountDiscoveredModel, "firstSeenAt" | "lastSeenAt" | "status"> & {
+    status?: AccountModelAvailability;
+  }>;
+  discoveredAt?: string;
+  lastError?: string;
+}
+
 export interface ModelCatalogSnapshot {
   version: 1;
   models: CustomModelRecord[];
   accountBindings: Record<string, string[]>;
   accountBindingOptions?: Record<string, Record<string, ModelBindingOptions>>;
+  accountModelDiscoveries?: Record<string, AccountModelDiscoverySnapshot>;
 }
 
 export interface SaveCustomModelInput {
@@ -48,6 +92,8 @@ export interface ModelCatalogStore {
     accountKeys: string[],
     optionsByAccount?: Record<string, ModelBindingOptions>,
   ): Promise<ModelCatalogSnapshot>;
+  saveAccountModelDiscovery(input: SaveAccountModelDiscoveryInput): Promise<ModelCatalogSnapshot>;
+  removeAccountModelDiscovery(accountKey: string): Promise<ModelCatalogSnapshot>;
 }
 
 const EMPTY_SNAPSHOT: ModelCatalogSnapshot = { version: 1, models: [], accountBindings: {} };
@@ -153,6 +199,92 @@ export function createModelCatalogStore(path: string): ModelCatalogStore {
       await writeSnapshot(path, snapshot);
       return snapshot;
     },
+    async saveAccountModelDiscovery(input) {
+      const snapshot = await readSnapshot(path);
+      const now = new Date().toISOString();
+      const previous = snapshot.accountModelDiscoveries?.[input.accountKey];
+      const previousByKey = new Map((previous?.models ?? []).map((model) => [model.providerModelKey, model]));
+      const incoming = new Map<string, AccountDiscoveredModel>();
+
+      for (const rawModel of input.models ?? []) {
+        const providerModelKey = rawModel.providerModelKey.trim();
+        const providerId = rawModel.providerId.trim();
+        const upstreamModelId = rawModel.upstreamModelId.trim();
+        const displayName = rawModel.displayName.trim() || upstreamModelId;
+        if (!providerModelKey || !providerId || !upstreamModelId) continue;
+        const previousModel = previousByKey.get(providerModelKey);
+        const model: AccountDiscoveredModel = {
+          providerModelKey,
+          providerId,
+          upstreamModelId,
+          displayName,
+          ...(rawModel.iconKey?.trim() ? { iconKey: rawModel.iconKey.trim() } : {}),
+          protocols: [...new Set(rawModel.protocols.map((protocol) => protocol.trim()).filter(Boolean))],
+          capabilities: normalizeModelCapabilities(rawModel.capabilities),
+          ...(Number.isFinite(rawModel.contextWindow) && rawModel.contextWindow && rawModel.contextWindow > 0
+            ? { contextWindow: Math.floor(rawModel.contextWindow) }
+            : {}),
+          source: rawModel.source,
+          status: rawModel.status ?? "available",
+          firstSeenAt: previousModel?.firstSeenAt ?? now,
+          lastSeenAt: input.discoveredAt ?? now,
+          ...(rawModel.lastError?.trim() ? { lastError: rawModel.lastError.trim() } : {}),
+        };
+        incoming.set(providerModelKey, model);
+        upsertDiscoveredCatalogModel(snapshot, model, now);
+      }
+
+      const models = incoming.size === 0
+        ? (previous?.models ?? []).map((model) => ({
+            ...model,
+            status: input.state === "discovering"
+              ? model.status
+              : input.state === "failed"
+              ? model.status === "available" ? "stale" as const : model.status
+              : model.status === "available" ? "unavailable" as const : model.status,
+            ...(input.lastError?.trim() ? { lastError: input.lastError.trim() } : {}),
+          }))
+        : [...incoming.values()];
+
+      if (previous && incoming.size > 0) {
+        for (const oldModel of previous.models) {
+          if (incoming.has(oldModel.providerModelKey)) continue;
+          models.push({
+            ...oldModel,
+            status: oldModel.status === "available" ? "unavailable" : oldModel.status,
+          });
+        }
+      }
+
+      snapshot.accountModelDiscoveries ??= {};
+      snapshot.accountModelDiscoveries[input.accountKey] = {
+        providerId: input.providerId.trim(),
+        state: input.state,
+        models: dedupeDiscoveredModels(models),
+        ...(input.discoveredAt || incoming.size ? { discoveredAt: input.discoveredAt ?? now } : previous?.discoveredAt ? { discoveredAt: previous.discoveredAt } : {}),
+        ...(input.lastError?.trim() ? { lastError: input.lastError.trim() } : {}),
+      };
+      await writeSnapshot(path, snapshot);
+      return snapshot;
+    },
+    async removeAccountModelDiscovery(accountKey) {
+      const snapshot = await readSnapshot(path);
+      delete snapshot.accountBindings[accountKey];
+      if (snapshot.accountBindingOptions) {
+        delete snapshot.accountBindingOptions[accountKey];
+        if (Object.keys(snapshot.accountBindingOptions).length === 0) {
+          delete snapshot.accountBindingOptions;
+        }
+      }
+      if (snapshot.accountModelDiscoveries) {
+        delete snapshot.accountModelDiscoveries[accountKey];
+        if (Object.keys(snapshot.accountModelDiscoveries).length === 0) {
+          delete snapshot.accountModelDiscoveries;
+        }
+      }
+      await writeSnapshot(path, snapshot);
+      return snapshot;
+    },
   };
 }
 
@@ -163,6 +295,24 @@ export function normalizeCustomModelInput(value: Record<string, unknown>): Model
     throw new Error("Model slug is required and may only contain letters, numbers, '.', '_', ':' or '-'");
   }
   if (!displayName) throw new Error("Model display_name is required");
+  for (const field of ["protocol", "wire_api", "api_protocol"]) {
+    const protocol = value[field];
+    if (protocol !== undefined && (typeof protocol !== "string" || !isSupportedModelProtocol(protocol))) {
+      throw new Error(`Model ${field} must be one of responses, chat_completions, anthropic, or gemini`);
+    }
+  }
+  if (value.supported_protocols !== undefined && (
+    !Array.isArray(value.supported_protocols)
+      || value.supported_protocols.some((protocol) => typeof protocol !== "string" || !isSupportedModelProtocol(protocol))
+  )) {
+    throw new Error("Model supported_protocols must contain supported gateway protocols");
+  }
+  for (const field of ["context_window", "max_context_window"]) {
+    const contextWindow = value[field];
+    if (contextWindow !== undefined && (typeof contextWindow !== "number" || !Number.isFinite(contextWindow) || contextWindow <= 0)) {
+      throw new Error(`Model ${field} must be a positive number`);
+    }
+  }
   return {
     default_reasoning_level: "medium",
     supported_reasoning_levels: [
@@ -198,6 +348,72 @@ export function normalizeCustomModelInput(value: Record<string, unknown>): Model
   };
 }
 
+function isSupportedModelProtocol(value: string): boolean {
+  const normalized = value.trim().toLowerCase().replaceAll("-", "_");
+  return normalized === "responses"
+    || normalized === "chat_completions"
+    || normalized === "anthropic"
+    || normalized === "anthropic_messages"
+    || normalized === "gemini";
+}
+
+function upsertDiscoveredCatalogModel(
+  snapshot: ModelCatalogSnapshot,
+  model: AccountDiscoveredModel,
+  now: string,
+): void {
+  const existing = snapshot.models.find((candidate) => (
+    candidate.entry.provider_model_key === model.providerModelKey
+      // Provider preset records created before discovery did not carry a
+      // provider key. Reuse the exact upstream slug so onboarding does not
+      // create a second visually identical model entry.
+      || (!candidate.entry.provider_model_key && candidate.entry.slug === model.upstreamModelId)
+  ));
+  const slug = existing?.entry.slug ?? createDiscoveredModelSlug(model.providerId, model.upstreamModelId);
+  const entry = normalizeCustomModelInput({
+    ...(existing?.entry ?? {}),
+    slug,
+    display_name: model.displayName,
+    description: existing?.entry.description ?? `Discovered from ${model.providerId}`,
+    provider_id: model.providerId,
+    provider_model_key: model.providerModelKey,
+    upstream_model_id: model.upstreamModelId,
+    model_source: "discovered",
+    protocol: model.protocols.length === 1 ? model.protocols[0] : undefined,
+    supported_protocols: model.protocols,
+    supports_reasoning_summaries: model.capabilities.reasoning,
+    supports_parallel_tool_calls: model.capabilities.tools,
+    input_modalities: model.capabilities.vision ? ["text", "image"] : ["text"],
+    ...(model.contextWindow ? { context_window: model.contextWindow, max_context_window: model.contextWindow } : {}),
+  });
+  if (existing) {
+    existing.entry = entry;
+    existing.updatedAt = now;
+    return;
+  }
+  snapshot.models.push({ id: randomUUID(), entry, createdAt: now, updatedAt: now });
+}
+
+function createDiscoveredModelSlug(providerId: string, upstreamModelId: string): string {
+  const provider = providerId.trim().replace(/[^A-Za-z0-9._:-]+/g, "-");
+  const model = upstreamModelId.trim().replace(/[^A-Za-z0-9._:-]+/g, "-");
+  return `${provider}:${model}`;
+}
+
+function normalizeModelCapabilities(value: AccountDiscoveredModel["capabilities"]): AccountDiscoveredModel["capabilities"] {
+  return {
+    reasoning: value?.reasoning === true,
+    tools: value?.tools === true,
+    vision: value?.vision === true,
+    streaming: value?.streaming !== false,
+  };
+}
+
+function dedupeDiscoveredModels(models: AccountDiscoveredModel[]): AccountDiscoveredModel[] {
+  return [...new Map(models.map((model) => [model.providerModelKey, model])).values()]
+    .sort((left, right) => left.providerModelKey.localeCompare(right.providerModelKey));
+}
+
 export function accountModelBindingKey(envName: string, accountName: string): string {
   return `${envName}/${accountName}`;
 }
@@ -220,6 +436,26 @@ export function resolveModelBinding(
   };
 }
 
+/**
+ * A successful refresh with an empty or changed provider list marks removed
+ * entries unavailable. Keep stale entries routeable for recovery, but never
+ * publish an explicitly unavailable model to Codex or the gateway.
+ */
+export function isModelAvailableForAccount(
+  snapshot: ModelCatalogSnapshot,
+  model: CustomModelRecord,
+  accountKey: string,
+): boolean {
+  const providerModelKey = typeof model.entry.provider_model_key === "string"
+    ? model.entry.provider_model_key.trim()
+    : "";
+  if (!providerModelKey) return true;
+  const discovery = snapshot.accountModelDiscoveries?.[accountKey];
+  if (!discovery) return true;
+  const discovered = discovery.models.find((candidate) => candidate.providerModelKey === providerModelKey);
+  return discovered?.status !== "unavailable";
+}
+
 export function filterModelCatalogBindings(
   snapshot: ModelCatalogSnapshot,
   accountKeys: ReadonlySet<string>,
@@ -236,6 +472,13 @@ export function filterModelCatalogBindings(
           ),
         }
       : {}),
+    ...(snapshot.accountModelDiscoveries
+      ? {
+          accountModelDiscoveries: Object.fromEntries(
+            Object.entries(snapshot.accountModelDiscoveries).filter(([accountKey]) => accountKeys.has(accountKey)),
+          ),
+        }
+      : {}),
   };
 }
 
@@ -247,7 +490,7 @@ async function readSnapshot(path: string): Promise<ModelCatalogSnapshot> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return structuredClone(EMPTY_SNAPSHOT);
     throw new Error(`Failed to read custom model catalog: ${error instanceof Error ? error.message : String(error)}`);
   }
-  if (!isRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.models) || !isRecord(parsed.accountBindings)) {
+  if (!isRecord(parsed) || (parsed.version !== undefined && parsed.version !== 1) || !Array.isArray(parsed.models) || !isRecord(parsed.accountBindings)) {
     throw new Error("Custom model catalog file is invalid");
   }
   const models = parsed.models.map(validateModelRecord);
@@ -263,7 +506,16 @@ async function readSnapshot(path: string): Promise<ModelCatalogSnapshot> {
   const accountBindingOptions = parsed.accountBindingOptions === undefined
     ? undefined
     : normalizeAccountBindingOptions(parsed.accountBindingOptions, ids);
-  return { version: 1, models, accountBindings, ...(accountBindingOptions ? { accountBindingOptions } : {}) };
+  const accountModelDiscoveries = parsed.accountModelDiscoveries === undefined
+    ? undefined
+    : normalizeAccountModelDiscoveries(parsed.accountModelDiscoveries);
+  return {
+    version: 1,
+    models,
+    accountBindings,
+    ...(accountBindingOptions ? { accountBindingOptions } : {}),
+    ...(accountModelDiscoveries ? { accountModelDiscoveries } : {}),
+  };
 }
 
 function validateModelRecord(value: unknown): CustomModelRecord {
@@ -320,6 +572,65 @@ function normalizeAccountBindingOptions(
       if (Object.keys(normalized).length) options[modelId] = normalized;
     }
     if (Object.keys(options).length) result[accountKey] = options;
+  }
+  return result;
+}
+
+function normalizeAccountModelDiscoveries(value: unknown): Record<string, AccountModelDiscoverySnapshot> {
+  if (!isRecord(value)) throw new Error("Account model discoveries are invalid");
+  const result: Record<string, AccountModelDiscoverySnapshot> = {};
+  for (const [accountKey, rawSnapshot] of Object.entries(value)) {
+    if (!isRecord(rawSnapshot) || typeof rawSnapshot.providerId !== "string" || !Array.isArray(rawSnapshot.models)) {
+      continue;
+    }
+    const models: AccountDiscoveredModel[] = [];
+    for (const rawModel of rawSnapshot.models) {
+      if (!isRecord(rawModel)) continue;
+      const providerModelKey = typeof rawModel.providerModelKey === "string" ? rawModel.providerModelKey.trim() : "";
+      const providerId = typeof rawModel.providerId === "string" ? rawModel.providerId.trim() : "";
+      const upstreamModelId = typeof rawModel.upstreamModelId === "string" ? rawModel.upstreamModelId.trim() : "";
+      const displayName = typeof rawModel.displayName === "string" ? rawModel.displayName.trim() : upstreamModelId;
+      if (!providerModelKey || !providerId || !upstreamModelId || !displayName) continue;
+      models.push({
+        providerModelKey,
+        providerId,
+        upstreamModelId,
+        displayName,
+        ...(typeof rawModel.iconKey === "string" && rawModel.iconKey.trim() ? { iconKey: rawModel.iconKey.trim() } : {}),
+        protocols: Array.isArray(rawModel.protocols)
+          ? rawModel.protocols.filter((protocol): protocol is string => typeof protocol === "string").map((protocol) => protocol.trim()).filter(Boolean)
+          : [],
+        capabilities: normalizeModelCapabilities(isRecord(rawModel.capabilities)
+          ? {
+              reasoning: rawModel.capabilities.reasoning === true,
+              tools: rawModel.capabilities.tools === true,
+              vision: rawModel.capabilities.vision === true,
+              streaming: rawModel.capabilities.streaming !== false,
+            }
+          : { reasoning: false, tools: false, vision: false, streaming: true }),
+        ...(typeof rawModel.contextWindow === "number" && Number.isFinite(rawModel.contextWindow) && rawModel.contextWindow > 0
+          ? { contextWindow: Math.floor(rawModel.contextWindow) }
+          : {}),
+        source: rawModel.source === "preset" || rawModel.source === "manual" || rawModel.source === "cached"
+          ? rawModel.source
+          : "discovery",
+        status: rawModel.status === "stale" || rawModel.status === "unavailable" || rawModel.status === "discovery_failed"
+          ? rawModel.status
+          : "available",
+        firstSeenAt: typeof rawModel.firstSeenAt === "string" ? rawModel.firstSeenAt : new Date(0).toISOString(),
+        lastSeenAt: typeof rawModel.lastSeenAt === "string" ? rawModel.lastSeenAt : new Date(0).toISOString(),
+        ...(typeof rawModel.lastError === "string" && rawModel.lastError.trim() ? { lastError: rawModel.lastError.trim() } : {}),
+      });
+    }
+    result[accountKey] = {
+      providerId: rawSnapshot.providerId.trim(),
+      state: rawSnapshot.state === "discovering" || rawSnapshot.state === "ready" || rawSnapshot.state === "stale" || rawSnapshot.state === "failed"
+        ? rawSnapshot.state
+        : "idle",
+      models: dedupeDiscoveredModels(models),
+      ...(typeof rawSnapshot.discoveredAt === "string" ? { discoveredAt: rawSnapshot.discoveredAt } : {}),
+      ...(typeof rawSnapshot.lastError === "string" && rawSnapshot.lastError.trim() ? { lastError: rawSnapshot.lastError.trim() } : {}),
+    };
   }
   return result;
 }

@@ -159,6 +159,13 @@ function validateRuntimeSettings(accountName, value) {
     if (typeof value.providerId === "string") {
         runtime.providerId = value.providerId;
     }
+    if (isProviderCredentialAuthMethod(value.providerAuthMethod)) {
+        runtime.providerAuthMethod = value.providerAuthMethod;
+    }
+    if (isRecord(value.providerRequestHeaders)
+        && Object.entries(value.providerRequestHeaders).every(([key, child]) => Boolean(key.trim()) && typeof child === "string")) {
+        runtime.providerRequestHeaders = Object.fromEntries(Object.entries(value.providerRequestHeaders).map(([key, child]) => [key.trim(), child]));
+    }
     if (typeof value.model === "string") {
         runtime.model = value.model;
     }
@@ -235,6 +242,9 @@ function isAuthMode(value) {
 }
 function isPreferredAuthMethod(value) {
     return value === "chatgpt" || value === "apikey";
+}
+function isProviderCredentialAuthMethod(value) {
+    return value === "api_key" || value === "oauth" || value === "subscription" || value === "plugin" || value === "none";
 }
 function isOpenAIBaseUrlMode(value) {
     return value === "default" || value === "custom";

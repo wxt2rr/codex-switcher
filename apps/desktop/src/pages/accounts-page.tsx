@@ -15,7 +15,7 @@ import {
   Search,
   RefreshCw,
   LoaderCircle,
-  Settings2,
+  ListChecks,
   Star,
   TerminalSquare,
 } from "lucide-react";
@@ -27,7 +27,6 @@ import {
   parseUsageMetric,
 } from "@/account-usage";
 import { Button } from "@/components/ui/button";
-import { Tooltip } from "@/components/ui/tooltip";
 import { useAdaptiveMenuLayout } from "@/components/adaptive-menu-placement";
 import { useDelayedUnmount } from "@/components/use-delayed-unmount";
 import { cn } from "@/lib/utils";
@@ -39,7 +38,10 @@ import {
 } from "../components/admin-primitives";
 import { Field, Input, Select, Textarea } from "../components/form-primitives";
 import type { AccountRequestHealth, AccountSummary, OverviewPayload } from "../desktop-model";
-import { resolveDesktopBridge, type AccountCompatibilityStatus, type CodexProject, type DesktopLaunchStrategy } from "../bridge";
+import { providerIconUrls } from "../components/provider-icon";
+import { AccountModelExposurePanel } from "../components/account-model-exposure-panel";
+import type { AccountCompatibilityStatus, CodexProject, DesktopBridge, DesktopLaunchStrategy, ProviderCatalogItem, ProviderCredentialImportRequest } from "../bridge";
+import { resolveDesktopBridge } from "../bridge";
 import { getDesktopCopy } from "../desktop-copy";
 import { localizeAuthMode } from "../desktop-utils";
 import { getTranslations, type UiLanguage } from "../i18n";
@@ -60,26 +62,6 @@ function formatAccountAuthLabel(mode: string) {
   return mode.toUpperCase();
 }
 
-function getModelConfigHint(language: UiLanguage) {
-  if (language === "zh") {
-    return "Codex 的授权和模型消耗彼此独立。你可以登录自己的 ChatGPT 账号使用远程、插件等能力，同时单独配置 API Key 作为模型调用与计费来源。";
-  }
-  if (language === "ja") {
-    return "Codex の認証とモデル課金は独立しています。ChatGPT アカウントでリモートやプラグインを使いながら、モデル消費だけ別の API Key に分けて設定できます。";
-  }
-  return "Codex auth and model billing are independent. You can sign in with your own ChatGPT account for remote and plugins, while routing model usage through a separate API key.";
-}
-
-function getModelProviderHint(language: UiLanguage) {
-  if (language === "zh") {
-    return "Codex 会按 Model Provider 隔离会话。想让不同账号共享同一组对话上下文，请配置相同的 provider；留空时默认使用 custom。";
-  }
-  if (language === "ja") {
-    return "Codex は Model Provider ごとに会話を分離します。アカウント間で同じ会話文脈を共有したい場合は同じ provider を設定してください。未設定時は custom になります。";
-  }
-  return "Codex isolates conversations by model provider. Use the same provider across accounts if you want them to share session context. When unset, it defaults to custom.";
-}
-
 function getApiUsageHint(language: UiLanguage) {
   if (language === "zh") return "由上游服务商计费，不展示远程用量。";
   if (language === "ja") return "上流プロバイダー課金のため、ここでは使用量を表示しません。";
@@ -92,18 +74,14 @@ const MIMO_OFFICIAL_BASE_URL = "https://api.xiaomimimo.com/v1";
 const KIMI_OFFICIAL_BASE_URL = "https://api.moonshot.ai/v1";
 const ZAI_OFFICIAL_BASE_URL = "https://open.bigmodel.cn/api/paas/v4";
 
-export type AccountProviderId = "openai" | "deepseek" | "mimo" | "kimi" | "zai";
+export type AccountProviderId = string;
 
-function getAccountProviderLabel(providerId: AccountProviderId, language: UiLanguage): string {
+function getAccountProviderLabel(providerId: AccountProviderId, language: UiLanguage, catalog: ProviderCatalogItem[]): string {
   void language;
-  if (providerId === "deepseek") return "DeepSeek";
-  if (providerId === "mimo") return "MiMo";
-  if (providerId === "kimi") return "Kimi";
-  if (providerId === "zai") return "Z.AI / GLM";
-  return "OpenAI";
+  return catalog.find((item) => item.id === providerId)?.displayName ?? (providerId || "OpenAI");
 }
 
-function getAccountProviderHint(providerId: AccountProviderId, language: UiLanguage): string {
+function getAccountProviderHint(providerId: AccountProviderId, language: UiLanguage, catalog: ProviderCatalogItem[]): string {
   if (providerId === "deepseek") {
     return language === "zh"
       ? "使用 DeepSeek 官方 Responses 配置，Base URL 会自动锁定。"
@@ -132,23 +110,35 @@ function getAccountProviderHint(providerId: AccountProviderId, language: UiLangu
         ? "Z.AI GLM の公式 Chat Completions 設定を使います。Base URL と互換ルートは自動設定されます。"
         : "Uses Z.AI GLM's official Chat Completions preset with automatic compatibility routing.";
   }
-  return language === "zh"
-    ? "保留现有的四种接入方式。"
-    : language === "ja"
-      ? "既存の 4 つの接続方式を利用します。"
-      : "Keeps the existing four connection modes.";
+  const provider = catalog.find((item) => item.id === providerId);
+  if (provider) {
+    return language === "zh"
+      ? `使用 ${provider.displayName} 的服务商配置；凭据属于当前环境账号。`
+      : language === "ja"
+        ? `${provider.displayName} の設定を使い、認証情報は環境アカウントに保存します。`
+        : `Uses ${provider.displayName}'s provider settings; credentials belong to this environment account.`;
+  }
+  return language === "zh" ? "选择服务商后配置当前环境账号的凭据。" : "Choose a provider and configure credentials for this environment account.";
 }
 
-function getAccountModeItems(providerId: AccountProviderId, language: UiLanguage) {
-  if (providerId === "deepseek" || providerId === "mimo" || providerId === "kimi" || providerId === "zai") {
-    return [{ value: "apikey", label: localizeAuthMode("apikey", language) }];
+function getAccountModeItems(providerId: AccountProviderId, language: UiLanguage, catalog: ProviderCatalogItem[]) {
+  const provider = catalog.find((item) => item.id === providerId);
+  const items: Array<{ value: string; label: string }> = [];
+  const codexAuthProvider = providerId === "openai" || providerId === "chatgpt" || providerId === "chatgpt-subscription" || providerId === "codex-subscription";
+  if (codexAuthProvider) {
+    items.push({ value: "auth", label: localizeAuthMode("auth", language) });
   }
-  return [
-    { value: "auth", label: localizeAuthMode("auth", language) },
-    { value: "apikey", label: localizeAuthMode("apikey", language) },
-    { value: "sub2api", label: localizeAuthMode("sub2api", language) },
-    { value: "cpa", label: localizeAuthMode("cpa", language) },
-  ];
+  if (provider?.authMethods.includes("api_key") || !provider) {
+    items.push({ value: "apikey", label: localizeAuthMode("apikey", language) });
+  }
+  if (codexAuthProvider) {
+    items.push({ value: "sub2api", label: localizeAuthMode("sub2api", language) });
+    items.push({ value: "cpa", label: localizeAuthMode("cpa", language) });
+  }
+  if (provider && (provider.authMethods.some((method) => ["oauth", "subscription", "plugin", "none"].includes(method)) || !items.length)) {
+    items.push({ value: "provider", label: language === "zh" ? "服务商凭据" : language === "ja" ? "プロバイダー資格情報" : "Provider credential" });
+  }
+  return items.length ? items : [{ value: "apikey", label: localizeAuthMode("apikey", language) }];
 }
 
 function readDefaultAccountEnvironment(): string {
@@ -169,6 +159,9 @@ export interface AccountProtocolSettings {
 export function AccountsPage({
   overview,
   language,
+  providerCatalog,
+  accountWizardRequest,
+  onAccountWizardRequestHandled,
   authMetricsLoading,
   authRefreshIntervalSeconds,
   loadingLabel,
@@ -208,12 +201,18 @@ export function AccountsPage({
   onDeleteAccount,
   onCopyAccount,
   onUpdateRuntime,
-  onUpdateIndependentModel,
+  onImportProviderCredential,
   onCopyBaseUrl,
   onCopyApiKey,
+  bridge,
+  onSuccess,
+  onError,
 }: {
   overview: OverviewPayload;
   language: UiLanguage;
+  providerCatalog: ProviderCatalogItem[];
+  accountWizardRequest?: { providerId?: string; requestId: number };
+  onAccountWizardRequestHandled?: () => void;
   authMetricsLoading: boolean;
   authRefreshIntervalSeconds: number;
   loadingLabel: string;
@@ -258,15 +257,12 @@ export function AccountsPage({
   onDeleteAccount: () => void;
   onCopyAccount: (account: AccountSummary, targetEnvName: string) => void;
   onUpdateRuntime: () => Promise<boolean>;
-  onUpdateIndependentModel: (
-    account: AccountSummary,
-    enabled: boolean,
-    providerId: string,
-    apiKey: string,
-    baseUrl: string,
-  ) => Promise<boolean>;
+  onImportProviderCredential: (request: ProviderCredentialImportRequest) => Promise<boolean>;
   onCopyBaseUrl: (value: string) => void;
   onCopyApiKey: (value: string) => void;
+  bridge: DesktopBridge;
+  onSuccess: (message: string) => void;
+  onError: (error: unknown) => void;
 }) {
   const [defaultEnvironment, setDefaultEnvironment] = useState(readDefaultAccountEnvironment);
   const [envFilter, setEnvFilter] = useState(readDefaultAccountEnvironment);
@@ -275,14 +271,12 @@ export function AccountsPage({
   const [sortMode, setSortMode] = useState("recent");
   const [loginDrawerOpen, setLoginDrawerOpen] = useState(false);
   const [runtimeDrawerOpen, setRuntimeDrawerOpen] = useState(false);
-  const [modelConfigOpen, setModelConfigOpen] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [modelAccountKey, setModelAccountKey] = useState("");
-  const [independentModelProviderIdDraft, setIndependentModelProviderIdDraft] = useState("custom");
-  const [independentModelApiKeyDraft, setIndependentModelApiKeyDraft] = useState("");
-  const [independentModelBaseUrlDraft, setIndependentModelBaseUrlDraft] = useState("");
   const [showApiKeyDraft, setShowApiKeyDraft] = useState(false);
+  const [providerCredentialAuthMethodDraft, setProviderCredentialAuthMethodDraft] = useState<NonNullable<ProviderCredentialImportRequest["authMethod"]>>("api_key");
+  const [providerRefreshTokenDraft, setProviderRefreshTokenDraft] = useState("");
+  const [providerHeadersDraft, setProviderHeadersDraft] = useState("");
   const [apiProtocolDraft, setApiProtocolDraft] = useState<"responses" | "chat_completions">("responses");
   const [compatibilityEnabled, setCompatibilityEnabled] = useState(false);
   const [compatibilityStatus, setCompatibilityStatus] = useState<AccountCompatibilityStatus | null>(null);
@@ -296,6 +290,8 @@ export function AccountsPage({
   const [customRefreshEditing, setCustomRefreshEditing] = useState(false);
   const [customRefreshDraft, setCustomRefreshDraft] = useState(String(authRefreshIntervalSeconds));
   const [accountListScrolled, setAccountListScrolled] = useState(false);
+  const [modelExposureOpen, setModelExposureOpen] = useState(false);
+  const [modelExposureAccount, setModelExposureAccount] = useState<{ envName: string; accountName: string }>();
   const accountListRef = useRef<HTMLDivElement>(null);
   const pageCopy = getDesktopCopy(language);
   const text = getTranslations(language);
@@ -348,16 +344,11 @@ export function AccountsPage({
     (account) => account.envName === accountEnvDraft.trim() && account.name === accountNameDraft.trim(),
   );
   const runtimeAccounts = overview.accounts.filter((account) => account.envName === runtimeEnvDraft.trim());
-  const modelConfigAccount = overview.accounts.find(
-    (account) => `${account.envName}/${account.name}` === modelAccountKey,
-  );
 
-  const loginModeNeedsApiKey = accountModeDraft === "apikey";
-  const isPresetApiKeyProvider = accountProviderDraft === "deepseek"
-    || accountProviderDraft === "mimo"
-    || accountProviderDraft === "kimi"
-    || accountProviderDraft === "zai";
-  const presetProviderBaseUrl = accountProviderDraft === "deepseek"
+  const selectedProvider = providerCatalog.find((provider) => provider.id === accountProviderDraft);
+  const providerMode = accountModeDraft === "provider";
+  const loginModeNeedsApiKey = accountModeDraft === "apikey" || (providerMode && providerCredentialAuthMethodDraft !== "none");
+  const legacyProviderBaseUrl = accountProviderDraft === "deepseek"
     ? DEEPSEEK_OFFICIAL_BASE_URL
     : accountProviderDraft === "mimo"
       ? MIMO_OFFICIAL_BASE_URL
@@ -366,6 +357,8 @@ export function AccountsPage({
         : accountProviderDraft === "zai"
           ? ZAI_OFFICIAL_BASE_URL
           : "";
+  const presetProviderBaseUrl = selectedProvider?.defaultBaseUrl || legacyProviderBaseUrl;
+  const isPresetApiKeyProvider = accountModeDraft === "apikey" && Boolean(presetProviderBaseUrl) && accountProviderDraft !== "custom";
   const credentialImportSource = accountModeDraft === "sub2api" || accountModeDraft === "cpa"
     ? accountModeDraft
     : undefined;
@@ -398,27 +391,53 @@ export function AccountsPage({
   }, [runtimeAccountDraft, runtimeAccounts, onRuntimeAccountDraftChange]);
 
   useEffect(() => {
-    if (!modelConfigAccount) {
-      return;
-    }
-    setIndependentModelProviderIdDraft(modelConfigAccount.runtime.independentModelProviderId ?? "custom");
-    setIndependentModelApiKeyDraft(modelConfigAccount.runtime.independentModelApiKey ?? "");
-    setIndependentModelBaseUrlDraft(modelConfigAccount.runtime.independentModelBaseUrl ?? "");
-  }, [modelConfigAccount]);
-
-  useEffect(() => {
     if (!loginDrawerOpen) {
       setShowApiKeyDraft(false);
+      setProviderRefreshTokenDraft("");
+      setProviderHeadersDraft("");
     }
   }, [loginDrawerOpen]);
+
+  useEffect(() => {
+    if (!accountWizardRequest) return;
+    onPrimeAccount(undefined);
+    if (accountWizardRequest.providerId) onAccountProviderDraftChange(accountWizardRequest.providerId);
+    setLoginDrawerOpen(true);
+    onAccountWizardRequestHandled?.();
+  }, [accountWizardRequest?.requestId]);
+
+  useEffect(() => {
+    const items = getAccountModeItems(accountProviderDraft, language, providerCatalog);
+    if (!items.some((item) => item.value === accountModeDraft)) {
+      onAccountModeDraftChange(items[0]?.value ?? "apikey");
+    }
+  }, [accountModeDraft, accountProviderDraft, language, onAccountModeDraftChange, providerCatalog]);
+
+  useEffect(() => {
+    if (!selectedProvider || selectedAccount) return;
+    const methods = selectedProvider.authMethods as NonNullable<ProviderCredentialImportRequest["authMethod"]>[];
+    if (providerMode && methods.length && !methods.includes(providerCredentialAuthMethodDraft)) {
+      setProviderCredentialAuthMethodDraft(methods.includes("api_key") ? "api_key" : methods[0]);
+    }
+    if (providerMode && selectedProvider.protocols.includes("chat_completions") && !selectedProvider.protocols.includes("responses")) {
+      setApiProtocolDraft("chat_completions");
+    }
+    if (providerMode && !accountBaseUrlDraft.trim() && selectedProvider.defaultBaseUrl) {
+      onAccountBaseUrlModeDraftChange("custom");
+      onAccountBaseUrlDraftChange(selectedProvider.defaultBaseUrl);
+    }
+  }, [accountBaseUrlDraft, accountProviderDraft, onAccountBaseUrlDraftChange, providerCredentialAuthMethodDraft, providerMode, selectedAccount, selectedProvider]);
 
   useEffect(() => {
     if (isPresetApiKeyProvider) {
       if (accountModeDraft !== "apikey") {
         onAccountModeDraftChange("apikey");
       }
-      if (apiProtocolDraft !== "responses") {
-        setApiProtocolDraft("responses");
+      const presetProtocol = selectedProvider?.protocols.includes("chat_completions") && !selectedProvider.protocols.includes("responses")
+        ? "chat_completions"
+        : "responses";
+      if (apiProtocolDraft !== presetProtocol) {
+        setApiProtocolDraft(presetProtocol);
       }
       if (accountBaseUrlModeDraft !== "custom") {
         onAccountBaseUrlModeDraftChange("custom");
@@ -448,6 +467,7 @@ export function AccountsPage({
     onAccountBaseUrlModeDraftChange,
     onAccountModeDraftChange,
     presetProviderBaseUrl,
+    selectedProvider,
   ]);
 
   useEffect(() => {
@@ -522,6 +542,11 @@ export function AccountsPage({
     finally { setCompatibilityBusy(false); }
   }
 
+  function openModelExposure(envName: string, accountName: string) {
+    setModelExposureAccount({ envName, accountName });
+    setModelExposureOpen(true);
+  }
+
   return (
     <section className="h-full min-h-0 overflow-hidden px-6 pb-6 pt-6 xl:px-8 xl:pb-8 xl:pt-8">
       <div className="admin-page-content flex h-full w-full flex-col gap-3">
@@ -532,7 +557,7 @@ export function AccountsPage({
                 {language === "zh" ? "账号管理" : language === "ja" ? "アカウント管理" : "Account Management"}
               </h2>
               <p className="text-[13px] leading-6 text-slate-500">
-                {language === "zh" ? "统一管理 ChatGPT 授权、API Key、独立模型和运行时配置。" : language === "ja" ? "ChatGPT 認証、API Key、独立モデル、ランタイム設定をまとめて管理します。" : "Manage ChatGPT auth, API keys, independent models, and runtime settings in one place."}
+                {language === "zh" ? "统一管理订阅授权、服务商账号连接和运行时配置。模型绑定请在模型页面维护。" : language === "ja" ? "サブスクリプション認証、プロバイダー接続、ランタイム設定をまとめて管理します。モデルのバインドはモデル画面で管理します。" : "Manage subscription auth, provider connections, and runtime settings. Model bindings are managed on the Models page."}
               </p>
             </div>
           </div>
@@ -702,6 +727,7 @@ export function AccountsPage({
               onListAccountProjects={onListAccountProjects}
               onPickDirectory={onPickDirectory}
               onLogin={() => setLoginDrawerOpen(true)}
+              onOpenModels={() => openModelExposure(account.envName, account.name)}
               onRelogin={onRelogin}
               onLogoutIntent={() => setLogoutOpen(true)}
               onDelete={() => setDeleteOpen(true)}
@@ -709,10 +735,6 @@ export function AccountsPage({
               copyTargetEnvironments={overview.envs
                 .filter((env) => env.name !== account.envName)
                 .map((env) => env.name)}
-              onModelConfig={() => {
-                setModelAccountKey(`${account.envName}/${account.name}`);
-                setModelConfigOpen(true);
-              }}
               onCopyBaseUrl={onCopyBaseUrl}
               onCopyApiKey={onCopyApiKey}
             />
@@ -739,19 +761,17 @@ export function AccountsPage({
         <div className="space-y-4">
           <Field
             label={language === "zh" ? "服务商" : language === "ja" ? "サービスプロバイダー" : "Provider"}
-            hint={getAccountProviderHint(accountProviderDraft, language)}
+            hint={getAccountProviderHint(accountProviderDraft, language, providerCatalog)}
           >
             <Select
               value={accountProviderDraft}
               onValueChange={(value) => onAccountProviderDraftChange(value as AccountProviderId)}
               openOnHover={false}
-              items={[
-                { value: "openai", label: getAccountProviderLabel("openai", language) },
-                { value: "deepseek", label: getAccountProviderLabel("deepseek", language) },
-                { value: "mimo", label: getAccountProviderLabel("mimo", language) },
-                { value: "kimi", label: getAccountProviderLabel("kimi", language) },
-                { value: "zai", label: getAccountProviderLabel("zai", language) },
-              ]}
+              items={(providerCatalog.length ? providerCatalog : [{ id: accountProviderDraft, displayName: getAccountProviderLabel(accountProviderDraft, language, providerCatalog), iconKey: "custom", category: "custom", authMethods: ["api_key"], protocols: ["responses"], discoveryMode: "manual", capabilities: { modelDiscovery: false, quota: false, tokenRefresh: false, accountPool: true, protocolConversion: false } }]).map((provider) => ({
+                value: provider.id,
+                label: provider.displayName,
+                iconUrl: providerIconUrls(provider.iconKey)[0],
+              }))}
             />
           </Field>
           <Field label={pageCopy.common.environment}>
@@ -772,10 +792,23 @@ export function AccountsPage({
                 value={accountModeDraft}
                 onValueChange={onAccountModeDraftChange}
                 openOnHover={false}
-                items={getAccountModeItems(accountProviderDraft, language)}
+                items={getAccountModeItems(accountProviderDraft, language, providerCatalog)}
               />
             </Field>
           </div>
+          {providerMode ? (
+            <Field
+              label={language === "zh" ? "凭据类型" : language === "ja" ? "資格情報の種類" : "Credential type"}
+              hint={language === "zh" ? "服务商类型决定凭据如何保存和刷新；账号仍然属于当前环境。" : "The provider credential type controls storage and refresh; the account remains scoped to this environment."}
+            >
+              <Select
+                value={providerCredentialAuthMethodDraft}
+                onValueChange={(value) => setProviderCredentialAuthMethodDraft(value as NonNullable<ProviderCredentialImportRequest["authMethod"]>)}
+                openOnHover={false}
+                items={(selectedProvider?.authMethods ?? ["api_key"]).map((method) => ({ value: method, label: method }))}
+              />
+            </Field>
+          ) : null}
           {loginModeNeedsApiKey ? (
             <Field label={pageCopy.accounts.apiKey}>
               <div className="relative">
@@ -822,6 +855,11 @@ export function AccountsPage({
               </div>
             </Field>
           ) : null}
+          {providerMode && (providerCredentialAuthMethodDraft === "oauth" || providerCredentialAuthMethodDraft === "subscription") ? (
+            <Field label={language === "zh" ? "刷新令牌（可选）" : language === "ja" ? "リフレッシュトークン（任意）" : "Refresh token (optional)"}>
+              <Input type="password" value={providerRefreshTokenDraft} onChange={(event) => setProviderRefreshTokenDraft(event.target.value)} autoComplete="off" />
+            </Field>
+          ) : null}
           {!credentialImportSource && !isPresetApiKeyProvider ? (
             <>
               <Field label={pageCopy.accounts.baseUrlMode}>
@@ -864,7 +902,7 @@ export function AccountsPage({
                 ]} />
             </Field>
           ) : null}
-          {loginModeNeedsApiKey && !isPresetApiKeyProvider && (apiProtocolDraft === "chat_completions" || compatibilityEnabled) && selectedAccount ? (
+          {loginModeNeedsApiKey && !providerMode && !isPresetApiKeyProvider && (apiProtocolDraft === "chat_completions" || compatibilityEnabled) && selectedAccount ? (
             <div className="space-y-3 border-t border-neutral-200/80 pt-4">
               <div className="flex items-center justify-between gap-4">
                 <div className="min-w-0">
@@ -944,12 +982,54 @@ export function AccountsPage({
               />
             </Field>
           ) : null}
+          {providerMode ? (
+            <Field
+              label={language === "zh" ? "额外请求头（可选 JSON）" : language === "ja" ? "追加ヘッダー（任意 JSON）" : "Extra request headers (optional JSON)"}
+              hint={language === "zh" ? "用于租户、版本等非认证头；敏感认证头不会被保存。" : "For tenant/version headers; sensitive authentication headers are not persisted."}
+            >
+              <Textarea value={providerHeadersDraft} onChange={(event) => setProviderHeadersDraft(event.target.value)} placeholder={'{"x-tenant-id":"team-a"}'} />
+            </Field>
+          ) : null}
           <div className="grid gap-3 sm:grid-cols-2">
             <Button
               onClick={async () => {
+                if (providerMode) {
+                  try {
+                    let requestHeaders: Record<string, string> | undefined;
+                    if (providerHeadersDraft.trim()) {
+                      const parsed = JSON.parse(providerHeadersDraft) as unknown;
+                      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)
+                        || Object.entries(parsed).some(([key, value]) => !key.trim() || typeof value !== "string")) {
+                        throw new Error(language === "zh" ? "额外请求头必须是字符串键值 JSON 对象" : "Extra headers must be a JSON object of string values");
+                      }
+                      requestHeaders = parsed as Record<string, string>;
+                    }
+                    const imported = await onImportProviderCredential({
+                      providerId: accountProviderDraft,
+                      account: accountNameDraft.trim(),
+                      envName: accountEnvDraft.trim(),
+                      target: "none",
+                      authMethod: providerCredentialAuthMethodDraft,
+                      accessToken: accountApiKeyDraft.trim() || undefined,
+                      refreshToken: providerRefreshTokenDraft.trim() || undefined,
+                      baseUrl: accountBaseUrlDraft.trim() || selectedProvider?.defaultBaseUrl,
+                      apiProtocol: apiProtocolDraft,
+                      ...(requestHeaders ? { requestHeaders } : {}),
+                    });
+                    if (imported) {
+                      setLoginDrawerOpen(false);
+                      openModelExposure(accountEnvDraft.trim(), accountNameDraft.trim());
+                    }
+                    return;
+                  } catch (error) {
+                    setCompatibilityStatus({ envName: accountEnvDraft, accountName: accountNameDraft, enabled: false, state: "degraded", message: error instanceof Error ? error.message : String(error) });
+                    return;
+                  }
+                }
                 const settings = buildProtocolSettings();
                 if (settings && await onLogin(settings)) {
                   setLoginDrawerOpen(false);
+                  openModelExposure(accountEnvDraft.trim(), accountNameDraft.trim());
                 }
               }}
               disabled={busy}
@@ -965,13 +1045,27 @@ export function AccountsPage({
                   ? language === "zh" ? "保存 API Key" : language === "ja" ? "API Key を保存" : "Save API Key"
                   : accountModeDraft === "sub2api"
                     ? language === "zh" ? "导入 Sub2API" : language === "ja" ? "Sub2API をインポート" : "Import Sub2API"
-                    : accountModeDraft === "cpa"
+                : accountModeDraft === "cpa"
                       ? language === "zh" ? "导入 CPA" : language === "ja" ? "CPA をインポート" : "Import CPA"
+                    : accountModeDraft === "provider"
+                      ? language === "zh" ? "保存服务商账号" : language === "ja" ? "プロバイダーアカウントを保存" : "Save provider account"
                     : language === "zh" ? "授权登录" : language === "ja" ? "認証ログイン" : "Authorize login"}
             </Button>
           </div>
         </div>
       </SidePanel>
+
+      <AccountModelExposurePanel
+        open={modelExposureOpen}
+        envName={modelExposureAccount?.envName}
+        accountName={modelExposureAccount?.accountName}
+        language={language}
+        providerCatalog={providerCatalog}
+        bridge={bridge}
+        onClose={() => setModelExposureOpen(false)}
+        onSaved={() => onSuccess(language === "zh" ? "账号模型暴露配置已保存" : "Account model exposure saved")}
+        onError={onError}
+      />
 
       <SidePanel
         open={runtimeDrawerOpen}
@@ -1015,66 +1109,6 @@ export function AccountsPage({
             disabled={busy}
           >
             {pageCopy.accounts.runtimeAction}
-          </Button>
-        </div>
-      </SidePanel>
-
-      <SidePanel
-        open={modelConfigOpen}
-        title={pageCopy.accounts.modelConfigTitle}
-        description={pageCopy.accounts.modelConfigDescription}
-        onClose={() => setModelConfigOpen(false)}
-        closeLabel={pageCopy.common.close}
-      >
-        <div className="space-y-4">
-          <Field label={pageCopy.common.environment}>
-            <Input value={modelConfigAccount?.envName ?? ""} disabled />
-          </Field>
-          <Field label={pageCopy.common.account}>
-            <Input value={modelConfigAccount?.name ?? ""} disabled />
-          </Field>
-          <Field label={pageCopy.accounts.modelProvider} hint={getModelProviderHint(language)}>
-            <Input
-              value={independentModelProviderIdDraft}
-              onChange={(event) => setIndependentModelProviderIdDraft(event.target.value)}
-              placeholder="custom"
-            />
-          </Field>
-          <Field label={pageCopy.accounts.modelApiKey}>
-            <Input
-              value={independentModelApiKeyDraft}
-              onChange={(event) => setIndependentModelApiKeyDraft(event.target.value)}
-              placeholder="sk-..."
-            />
-          </Field>
-          <Field label={pageCopy.accounts.modelBaseUrl}>
-            <Input
-              value={independentModelBaseUrlDraft}
-              onChange={(event) => setIndependentModelBaseUrlDraft(event.target.value)}
-              placeholder={text.inputs.baseUrl}
-            />
-          </Field>
-          <Button
-            className="w-full"
-            onClick={async () => {
-              if (!modelConfigAccount) {
-                return;
-              }
-              if (
-                await onUpdateIndependentModel(
-                  modelConfigAccount,
-                  true,
-                  independentModelProviderIdDraft,
-                  independentModelApiKeyDraft,
-                  independentModelBaseUrlDraft,
-                )
-              ) {
-                setModelConfigOpen(false);
-              }
-            }}
-            disabled={busy || !modelConfigAccount}
-          >
-            {pageCopy.environments.save}
           </Button>
         </div>
       </SidePanel>
@@ -1171,12 +1205,12 @@ function AccountListCard({
   onListAccountProjects,
   onPickDirectory,
   onLogin,
+  onOpenModels,
   onRelogin,
   onLogoutIntent,
   onDelete,
   onCopyAccount,
   copyTargetEnvironments,
-  onModelConfig,
   onCopyBaseUrl,
   onCopyApiKey,
 }: {
@@ -1197,26 +1231,22 @@ function AccountListCard({
   onListAccountProjects: (account: AccountSummary) => Promise<CodexProject[]>;
   onPickDirectory: () => Promise<string>;
   onLogin: () => void;
+  onOpenModels: () => void;
   onRelogin: () => Promise<boolean>;
   onLogoutIntent: () => void;
   onDelete: () => void;
   onCopyAccount: (targetEnvName: string) => void;
   copyTargetEnvironments: string[];
-  onModelConfig: () => void;
   onCopyBaseUrl: (value: string) => void;
   onCopyApiKey: (value: string) => void;
 }) {
   const isAuth = account.authMode === "auth";
-  const authCustomApiKey = account.runtime.independentModelApiKey?.trim() || "";
-  const authCustomBaseUrl = account.runtime.independentModelBaseUrl?.trim() || "";
-  const hasIndependentModelConfig = Boolean(authCustomApiKey || authCustomBaseUrl);
   const baseUrl = isAuth
-    ? authCustomApiKey && authCustomBaseUrl ? authCustomBaseUrl : ""
+    ? ""
     : account.route?.originalBaseUrl?.trim() || account.runtime.openaiBaseUrl?.trim() || "";
-  const apiKeyValue = isAuth ? authCustomApiKey : account.apiKeyValue?.trim() || "";
+  const apiKeyValue = isAuth ? "" : account.apiKeyValue?.trim() || "";
   const showRequestHealth = account.authMode === "apikey"
-    || Boolean(account.hasApiKey)
-    || Boolean(account.runtime.independentModelApiKey?.trim());
+    || Boolean(account.hasApiKey);
   const maskedApiKey = maskApiKeyForDisplay(apiKeyValue);
   const activeRouteLabels = [
     account.route?.enabled && (account.route.protocol !== "chat_completions" || account.route.poolEnabled)
@@ -1304,27 +1334,7 @@ function AccountListCard({
                 </button>
               </div>
             ) : null}
-            {isAuth && !hasIndependentModelConfig ? (
-              <span className="flex min-h-6 items-center truncate text-[12px] text-slate-400">
-                {pageCopy.accounts.independentModelNotSet}
-              </span>
-            ) : null}
           </div>
-          {isAuth ? (
-            <div className="account-model-actions">
-              <Tooltip content={getModelConfigHint(language)}>
-                <button
-                  type="button"
-                  className="motion-interactive-color inline-flex size-8 items-center justify-center rounded-lg text-slate-500 outline-none hover:bg-white hover:text-neutral-900 focus-visible:ring-2 focus-visible:ring-blue-300"
-                  onClick={onModelConfig}
-                  disabled={busy}
-                  aria-label={pageCopy.accounts.modelConfigTitle}
-                >
-                  <Settings2 className="size-4" />
-                </button>
-              </Tooltip>
-            </div>
-          ) : null}
         </div>
       </div>
 
@@ -1444,6 +1454,16 @@ function AccountListCard({
             onSwitchAccount("app", account, strategy);
           }}
         />
+        <button
+          type="button"
+          className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[12px] font-medium text-neutral-700 ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-55"
+          onClick={onOpenModels}
+          disabled={busy}
+          title={language === "zh" ? "选择账号暴露的模型" : "Choose exposed models"}
+        >
+          <ListChecks className="size-4" />
+          <span className="responsive-action-label">{language === "zh" ? "模型" : language === "ja" ? "モデル" : "Models"}</span>
+        </button>
         <button
           type="button"
           className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[12px] font-medium text-neutral-700 ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-55"

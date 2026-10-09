@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { connect as connectSocket } from "node:net";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -671,6 +671,94 @@ test("environment gateway records route diagnostics when no compatible route exi
   }]);
 });
 
+test("environment Responses gateway rejects GET and records the HTTP-only transport cause", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-gateway-transport-"));
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+  const now = Date.now();
+  const route = {
+    routeId: "route-transport",
+    envName: "work",
+    accountName: "account-a",
+    upstreamBaseUrl: "http://127.0.0.1:1/v1",
+    originalBaseUrl: "http://127.0.0.1:1/v1",
+    protocol: "responses" as const,
+    exposedModelId: "transport-model",
+    reasoningProfile: "auto" as const,
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const gateway = {
+    gatewayId: "gateway-transport",
+    envName: "work",
+    routeIds: [route.routeId],
+    defaultRouteId: route.routeId,
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  try {
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify(route),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}/secret`, {
+      method: "PUT", headers: adminHeaders,
+      body: JSON.stringify({ upstreamApiKey: "route-key", localRouteToken: "local-route" }),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway),
+    })).status, 204);
+
+    const response = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
+      method: "GET",
+      headers: { authorization: "Bearer local-route" },
+    });
+    assert.equal(response.status, 405);
+    const payload = await response.json() as { error?: string; code?: string; requestId?: string };
+    assert.equal(payload.error, "Gateway Responses endpoint only accepts HTTP POST requests");
+    assert.equal(payload.code, "GATEWAY_HTTP_ONLY");
+    assert.match(payload.requestId ?? "", /^[0-9a-f-]{36}$/);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const trace = await (await fetch(`${service.origin}/admin/trace?gatewayId=${gateway.gatewayId}&event=gateway_request_rejected&limit=10`, {
+      headers: { authorization: "Bearer secret" },
+    })).json() as Array<{ event: string; method?: string; requestedModel?: string | null; hasUpgrade?: boolean; rejectionCode?: string }>;
+    assert.equal(trace[0]?.event, "gateway_request_rejected");
+    assert.equal(trace[0]?.method, "GET");
+    assert.equal(trace[0]?.requestedModel, null);
+    assert.equal(trace[0]?.hasUpgrade, false);
+    assert.equal(trace[0]?.rejectionCode, "GATEWAY_HTTP_ONLY");
+
+    const upgradeResponse = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const client = httpRequest({
+        hostname: "127.0.0.1",
+        port: service.port,
+        path: `/gateways/${gateway.gatewayId}/responses`,
+        method: "GET",
+        headers: {
+          authorization: "Bearer local-route",
+          connection: "Upgrade",
+          upgrade: "websocket",
+          "sec-websocket-version": "13",
+          "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+        },
+      }, (upgrade) => {
+        const chunks: Buffer[] = [];
+        upgrade.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+        upgrade.on("end", () => resolve({ status: upgrade.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") }));
+      });
+      client.on("error", reject);
+      client.end();
+    });
+    assert.equal(upgradeResponse.status, 405);
+    assert.match(upgradeResponse.body, /GATEWAY_WEBSOCKET_UNSUPPORTED/);
+  } finally {
+    await service.close();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("environment gateway fails over a route group before the response starts", async () => {
   let firstCalls = 0;
   let secondCalls = 0;
@@ -1014,6 +1102,82 @@ test("environment Gateway converts the ingress Responses protocol to an Anthropi
     assert.equal(converted.object, "response");
     assert.equal(converted.output[0]?.content[0]?.text, "converted reply");
     assert.equal(converted.usage.total_tokens, 7);
+  } finally {
+    await service.close();
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
+});
+
+test("environment Gateway converts a Responses credential pool member to an Anthropic upstream route", async () => {
+  let upstreamPath = "";
+  let upstreamApiKey = "";
+  let upstreamBody: Record<string, unknown> | undefined;
+  const upstream = createServer(async (request, response) => {
+    upstreamPath = request.url ?? "";
+    upstreamApiKey = String(request.headers["x-api-key"] ?? "");
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    upstreamBody = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({
+      id: "pool_msg_converted",
+      type: "message",
+      role: "assistant",
+      content: [{ type: "text", text: "pool converted reply" }],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 3, output_tokens: 2 },
+    }));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const address = upstream.address(); assert(address && typeof address !== "string");
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-protocol-pool-"));
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+  const now = Date.now();
+  const route = {
+    routeId: "route-anthropic-pool", envName: "work", accountName: "anthropic", providerId: "anthropic",
+    exposedModelId: "shared-pool-model", upstreamModel: "claude-sonnet", upstreamBaseUrl: `http://127.0.0.1:${address.port}/v1`,
+    originalBaseUrl: `http://127.0.0.1:${address.port}/v1`, protocol: "anthropic" as const,
+    routeGroupId: "shared-pool-model", reasoningProfile: "auto" as const, enabled: true, createdAt: now, updatedAt: now,
+  };
+  const pool = {
+    poolId: "pool-anthropic", envName: "work", protocol: "responses" as const, enabled: true,
+    strategy: "sticky_weighted_round_robin" as const, sessionTtlMinutes: 60, maxFailoverAttempts: 1, maxSameAccountFailures: 1,
+    createdAt: now, updatedAt: now, cursor: 0,
+    members: [{ accountName: "anthropic", routeId: route.routeId, protocol: "responses" as const,
+      upstreamBaseUrl: route.upstreamBaseUrl, originalBaseUrl: route.originalBaseUrl, enabled: true, weight: 1, priority: 0 }],
+  };
+  const gateway = {
+    gatewayId: "gateway-anthropic-pool", envName: "work", routeIds: [route.routeId], poolId: pool.poolId,
+    routeGroups: {
+      "shared-pool-model": { id: "shared-pool-model", exposedModelId: "shared-pool-model", routeIds: [route.routeId], strategy: "order" as const, sessionPolicy: "off" as const, fallbackEnabled: true },
+    },
+    defaultRouteId: route.routeId, enabled: true, createdAt: now, updatedAt: now,
+  };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  try {
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(route) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/pools`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(pool) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/pools/${pool.poolId}/members/anthropic/secret`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify({ upstreamApiKey: "sk-anthropic-pool" }),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/pools/${pool.poolId}/token`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify({ localRouteToken: "local-anthropic-pool" }),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway) })).status, 204);
+
+    const response = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
+      method: "POST", headers: { authorization: "Bearer local-anthropic-pool", "content-type": "application/json" },
+      body: JSON.stringify({ model: "shared-pool-model", input: "hello from pool" }),
+    });
+    assert.equal(response.status, 200);
+    assert.equal(upstreamPath, "/v1/messages");
+    assert.equal(upstreamApiKey, "sk-anthropic-pool");
+    assert.equal(upstreamBody?.model, "claude-sonnet");
+    assert.deepEqual(upstreamBody?.messages, [{ role: "user", content: "hello from pool" }]);
+    const converted = await response.json() as { id: string; output: Array<{ content: Array<{ text: string }> }>; usage: { total_tokens: number } };
+    assert.equal(converted.id, "pool_msg_converted");
+    assert.equal(converted.output[0]?.content[0]?.text, "pool converted reply");
+    assert.equal(converted.usage.total_tokens, 5);
   } finally {
     await service.close();
     await new Promise<void>((resolve) => upstream.close(() => resolve()));

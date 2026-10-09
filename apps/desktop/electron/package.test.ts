@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 import { constants, existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -118,4 +118,21 @@ test("packaged provider plugin runtime resolves Gateway modules from resources",
   assert.doesNotMatch(providerRuntimeSource, /^import \{[^\n]+\} from ["'][^"']*packages\/gateway\/dist\/index\.js/m);
   assert.match(coreRuntimeSource, /packages", "gateway", "dist", "plugin"/);
   assert.match(coreRuntimeSource, /PluginMarket/);
+});
+
+test("CommonJS Electron production modules do not require Core or Gateway ESM directly", async () => {
+  const electronRoot = join(desktopRoot, "electron-dist", "electron");
+  const files = await readdir(electronRoot, { recursive: true });
+  const productionModules = files
+    .filter((file): file is string => typeof file === "string")
+    .filter((file) => /\.(?:cjs|js)$/.test(file) && !/\.test\.(?:cjs|js)$/.test(file));
+
+  for (const file of productionModules) {
+    const source = await readFile(join(electronRoot, file), "utf8");
+    assert.doesNotMatch(
+      source,
+      /require\(["'][^"']*packages\/(?:core|gateway)\/dist\//,
+      `production Electron module must load Core/Gateway through a runtime loader: ${file}`,
+    );
+  }
 });

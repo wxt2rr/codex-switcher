@@ -1,17 +1,37 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
-import { BUILT_IN_PROVIDER_IDS, createBuiltInProviderAdapters, createProviderAdapter } from "./adapters.js";
+import { BUILT_IN_PROVIDER_IDS, canonicalProviderDefinitions, createBuiltInProviderAdapters, createProviderAdapter, normalizeBuiltInProviderId } from "./adapters.js";
 import { ProviderRegistry } from "./registry.js";
 test("provider registry covers API key, local, OAuth and subscription providers", () => {
-    assert.equal(BUILT_IN_PROVIDER_IDS.length, 22);
-    assert.equal(new Set(BUILT_IN_PROVIDER_IDS).size, 22);
+    assert.equal(new Set(BUILT_IN_PROVIDER_IDS).size, BUILT_IN_PROVIDER_IDS.length);
     const registry = new ProviderRegistry();
     assert.equal(registry.list().length, BUILT_IN_PROVIDER_IDS.length);
     assert.ok(registry.get("openai").authMethods.includes("api_key"));
+    assert.ok(registry.get("qianfan").authMethods.includes("api_key"));
+    assert.ok(registry.get("nvidia-nim").authMethods.includes("api_key"));
     assert.ok(registry.get("ollama").authMethods.includes("none"));
+    assert.equal(registry.get("qianfan").category, "api");
+    assert.equal(registry.get("ollama").category, "local");
+    assert.equal(registry.get("chatgpt-subscription").category, "subscription");
+    assert.equal(registry.get("chatgpt-subscription").iconKey, "openai");
     assert.ok(registry.get("chatgpt").authMethods.includes("subscription"));
     assert.ok(registry.get("claude-subscription").authMethods.includes("oauth"));
+});
+test("canonical provider catalog covers the complete cloud, local, custom and subscription surface", () => {
+    const ids = new Set(canonicalProviderDefinitions().map((definition) => definition.id));
+    for (const id of [
+        "anthropic", "openai", "gemini", "deepseek", "moonshot", "zhipu", "minimax", "stepfun", "qwen",
+        "qianfan", "tencent-cloud", "huawei-maas", "volcengine-ark", "mistral", "groq", "xai", "openrouter",
+        "together", "fireworks", "siliconflow", "nvidia-nim", "modelscope", "ollama", "lmstudio", "custom-openai",
+        "custom-anthropic", "chatgpt-subscription", "claude-subscription", "copilot-subscription", "gemini-subscription",
+        "grok-subscription", "cursor-subscription", "devin-subscription",
+    ])
+        assert.ok(ids.has(id), `missing canonical provider ${id}`);
+    assert.equal(normalizeBuiltInProviderId("kimi"), "moonshot");
+    assert.equal(normalizeBuiltInProviderId("glm"), "zhipu");
+    assert.equal(normalizeBuiltInProviderId("codex-subscription"), "chatgpt-subscription");
+    assert.equal(canonicalProviderDefinitions().every((definition) => definition.iconKey), true);
 });
 test("provider adapter performs stateful login and model discovery without storing plaintext in the account ref", async () => {
     const adapter = createBuiltInProviderAdapters(() => "state-1").get("openai");

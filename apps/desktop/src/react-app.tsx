@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { mergeAccountUsageMetrics, mergeOverviewWithAuthMetrics } from "@/auth-metrics";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/components/theme-provider";
-import type { AccountPoolInput, AccountPoolStatus, AppEnvironmentBadgeStatus, AppPresenceStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, DesktopAutoUpdateStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry, DesktopLaunchStrategy, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, LaunchAtLoginStatus, RouterLifecycleSettings, RouterPortSettings } from "./bridge";
+import type { AccountPoolInput, AccountPoolStatus, AppEnvironmentBadgeStatus, AppPresenceStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, DesktopAutoUpdateStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry, DesktopLaunchStrategy, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, LaunchAtLoginStatus, ProviderCatalogItem, ProviderCredentialImportRequest, RouterLifecycleSettings, RouterPortSettings } from "./bridge";
 import { DesktopShell } from "./components/desktop-shell";
 import type { AccountSummary, AuthMetricsPayload, EnvironmentRouteStatus, NavView, OverviewPayload } from "./desktop-model";
 import { resolveDesktopBridge } from "./bridge";
@@ -12,6 +12,7 @@ import { AccountsPage, type AccountProtocolSettings } from "./pages/accounts-pag
 import { EnvironmentsPage } from "./pages/environments-page";
 import { OperationsPage } from "./pages/operations-page";
 import { ModelsPage } from "./pages/models-page";
+import { ProvidersPage } from "./pages/providers-page";
 import { SkillsPage } from "./pages/skills-page";
 import { UsagePage } from "./pages/usage-page";
 import { parseProxyStatusOutput, shouldAutoLoadProxy } from "./proxy-status";
@@ -37,7 +38,7 @@ function resolveInitialView(): NavView {
     return "accounts";
   }
   const view = new URLSearchParams(window.location.search).get("view");
-  if (view === "environments" || view === "accounts" || view === "models" || view === "skills" || view === "usage" || view === "operations") {
+  if (view === "environments" || view === "accounts" || view === "providers" || view === "models" || view === "skills" || view === "usage" || view === "operations") {
     return view;
   }
   return "accounts";
@@ -68,6 +69,8 @@ export function App() {
   const [accountTargetDraft, setAccountTargetDraft] = useState("cli");
   const [accountModeDraft, setAccountModeDraft] = useState("auth");
   const [accountProviderDraft, setAccountProviderDraft] = useState<AccountProviderId>("openai");
+  const [providerCatalog, setProviderCatalog] = useState<ProviderCatalogItem[]>([]);
+  const [accountWizardRequest, setAccountWizardRequest] = useState<{ providerId?: string; requestId: number }>();
   const [accountApiKeyDraft, setAccountApiKeyDraft] = useState("");
   const [accountBaseUrlModeDraft, setAccountBaseUrlModeDraft] = useState("default");
   const [accountBaseUrlDraft, setAccountBaseUrlDraft] = useState("");
@@ -270,8 +273,16 @@ export function App() {
     setInitialLoadingProgress(24);
     await loadCodexToolPaths();
     setInitialLoadingProgress(32);
+    try {
+      setProviderCatalog(await bridge.listProviderCatalog());
+    } catch (error) {
+      setErrorMessage(error);
+    }
     setInitialLoadingStage("restoring-routes");
     await refreshOverview({ loadMetrics: true });
+    // Keep cached discovery snapshots fresh on startup while preserving the
+    // user's existing per-account exposure selections.
+    void bridge.refreshAllAccountModels().catch(setErrorMessage);
   }
 
   async function handleCliTerminalSelection(id: CliTerminalId) {
@@ -844,27 +855,11 @@ export function App() {
     }
   }
 
-  async function handleUpdateIndependentModel(
-    account: AccountSummary,
-    enabled: boolean,
-    providerId: string,
-    apiKey: string,
-    baseUrl: string,
-  ): Promise<boolean> {
+  async function handleImportProviderCredential(request: ProviderCredentialImportRequest): Promise<boolean> {
     setBusy(true);
     try {
-      await bridge.updateIndependentModel({
-        envName: account.envName,
-        accountName: account.name,
-        enabled,
-        providerId,
-        apiKey,
-        baseUrl,
-      });
-      setTranslatedSuccessMessage(copy.message.independentModelUpdated, {
-        env: account.envName,
-        account: account.name,
-      });
+      await bridge.importProviderCredential(request);
+      setSuccessMessage(language === "zh" ? "服务商账号已添加" : language === "ja" ? "プロバイダーアカウントを追加しました" : "Provider account added");
       await refreshOverview({ loadMetrics: true });
       return true;
     } catch (error) {
@@ -873,6 +868,12 @@ export function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function openAccountWizard(providerId?: string) {
+    setView("accounts");
+    if (providerId) setAccountProviderDraft(providerId);
+    setAccountWizardRequest({ providerId, requestId: Date.now() });
   }
 
   async function handleNativeLogin(
@@ -899,11 +900,12 @@ export function App() {
 
     setBusy(true);
     try {
-      const isPresetApiKeyProvider = accountProviderDraft === "deepseek"
+      const selectedProvider = providerCatalog.find((provider) => provider.id === accountProviderDraft);
+      const legacyPresetProvider = accountProviderDraft === "deepseek"
         || accountProviderDraft === "mimo"
         || accountProviderDraft === "kimi"
         || accountProviderDraft === "zai";
-      const providerBaseUrl = accountProviderDraft === "deepseek"
+      const providerBaseUrl = selectedProvider?.defaultBaseUrl ?? (accountProviderDraft === "deepseek"
         ? DEEPSEEK_OFFICIAL_BASE_URL
         : accountProviderDraft === "mimo"
           ? MIMO_OFFICIAL_BASE_URL
@@ -911,8 +913,10 @@ export function App() {
             ? KIMI_OFFICIAL_BASE_URL
             : accountProviderDraft === "zai"
               ? ZAI_OFFICIAL_BASE_URL
-              : undefined;
-      const presetProtocol = accountProviderDraft === "kimi" || accountProviderDraft === "zai"
+              : undefined);
+      const isPresetApiKeyProvider = accountModeDraft === "apikey" && Boolean(providerBaseUrl) && (legacyPresetProvider || Boolean(selectedProvider));
+      const presetProtocol = selectedProvider?.protocols.includes("chat_completions") && !selectedProvider.protocols.includes("responses")
+        || accountProviderDraft === "kimi" || accountProviderDraft === "zai"
         ? "chat_completions"
         : "responses";
       const result = await bridge.nativeLogin({
@@ -1084,22 +1088,20 @@ export function App() {
 
     setAccountEnvDraft(account.envName);
     setAccountNameDraft(account.name);
-    setAccountModeDraft(account.authMode === "apikey" || account.authMode === "sub2api" ? account.authMode : "auth");
-    setAccountProviderDraft(
-      account.runtime.providerId === "mimo"
-        || account.runtime.openaiBaseUrl?.trim().startsWith(MIMO_OFFICIAL_BASE_URL)
+    setAccountModeDraft(account.runtime.providerAuthMethod && account.runtime.providerAuthMethod !== "api_key"
+      ? "provider"
+      : account.authMode === "apikey" || account.authMode === "sub2api" || account.authMode === "cpa" ? account.authMode : "auth");
+    const detectedProviderId = account.runtime.providerId
+      ?? (account.runtime.openaiBaseUrl?.trim().startsWith(MIMO_OFFICIAL_BASE_URL)
         ? "mimo"
-        : account.runtime.providerId === "kimi"
-          || account.runtime.openaiBaseUrl?.trim().startsWith(KIMI_OFFICIAL_BASE_URL)
+        : account.runtime.openaiBaseUrl?.trim().startsWith(KIMI_OFFICIAL_BASE_URL)
           ? "kimi"
-          : account.runtime.providerId === "zai"
-            || account.runtime.openaiBaseUrl?.trim().startsWith(ZAI_OFFICIAL_BASE_URL)
+          : account.runtime.openaiBaseUrl?.trim().startsWith(ZAI_OFFICIAL_BASE_URL)
             ? "zai"
-            : account.runtime.providerId === "deepseek"
-          || account.runtime.openaiBaseUrl?.trim().startsWith(DEEPSEEK_OFFICIAL_BASE_URL)
-            ? "deepseek"
-            : "openai",
-    );
+            : account.runtime.openaiBaseUrl?.trim().startsWith(DEEPSEEK_OFFICIAL_BASE_URL)
+              ? "deepseek"
+              : "openai");
+    setAccountProviderDraft(detectedProviderId);
     setAccountApiKeyDraft(account.apiKeyValue ?? "");
     setAccountBaseUrlModeDraft(account.runtime.openaiBaseUrlMode);
     setAccountBaseUrlDraft(account.route?.originalBaseUrl ?? account.runtime.openaiBaseUrl ?? "");
@@ -1115,6 +1117,7 @@ export function App() {
         nav={[
           { view: "accounts", label: copy.nav.accounts },
           { view: "environments", label: copy.nav.environments },
+          { view: "providers", label: copy.nav.providers },
           { view: "models", label: copy.nav.models },
           { view: "skills", label: copy.nav.skills },
           { view: "usage", label: copy.nav.usage },
@@ -1154,6 +1157,7 @@ export function App() {
         nav={[
           { view: "accounts", label: copy.nav.accounts },
           { view: "environments", label: copy.nav.environments },
+          { view: "providers", label: copy.nav.providers },
           { view: "models", label: copy.nav.models },
           { view: "skills", label: copy.nav.skills },
           { view: "usage", label: copy.nav.usage },
@@ -1183,6 +1187,7 @@ export function App() {
       nav={[
         { view: "accounts", label: copy.nav.accounts },
         { view: "environments", label: copy.nav.environments },
+        { view: "providers", label: copy.nav.providers },
         { view: "models", label: copy.nav.models },
         { view: "skills", label: copy.nav.skills },
         { view: "usage", label: copy.nav.usage },
@@ -1225,6 +1230,9 @@ export function App() {
         <AccountsPage
           overview={overview}
           language={language}
+          providerCatalog={providerCatalog}
+          accountWizardRequest={accountWizardRequest}
+          onAccountWizardRequestHandled={() => setAccountWizardRequest(undefined)}
           authMetricsLoading={authMetricsLoading}
           authRefreshIntervalSeconds={authRefreshIntervalSeconds}
           loadingLabel={loadingLabel}
@@ -1270,7 +1278,7 @@ export function App() {
           onDeleteAccount={() => void handleAccountCommand("rm")}
           onCopyAccount={(account, targetEnvName) => void handleCopyAccount(account, targetEnvName)}
           onUpdateRuntime={handleUpdateRuntime}
-          onUpdateIndependentModel={handleUpdateIndependentModel}
+          onImportProviderCredential={handleImportProviderCredential}
           onCopyBaseUrl={(value) => {
             void bridge.writeClipboardText(value)
               .then(() => setSuccessMessage(language === "zh" ? "Base URL 已复制" : language === "ja" ? "Base URL をコピーしました" : "Base URL copied"))
@@ -1281,6 +1289,9 @@ export function App() {
               .then(() => setSuccessMessage(language === "zh" ? "API Key 已复制" : language === "ja" ? "API Key をコピーしました" : "API key copied"))
               .catch(setErrorMessage);
           }}
+          bridge={bridge}
+          onSuccess={setSuccessMessage}
+          onError={setErrorMessage}
         />
       ) : null}
 
@@ -1288,10 +1299,15 @@ export function App() {
         <ModelsPage
           overview={overview}
           language={language}
+          providerCatalog={providerCatalog}
           bridge={bridge}
           onSuccess={setSuccessMessage}
           onError={setErrorMessage}
         />
+      ) : null}
+
+      {view === "providers" ? (
+        <ProvidersPage overview={overview} language={language} bridge={bridge} onAddAccount={openAccountWizard} onError={setErrorMessage} />
       ) : null}
 
       {view === "skills" ? (

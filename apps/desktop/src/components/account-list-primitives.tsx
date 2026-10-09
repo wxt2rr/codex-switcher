@@ -48,6 +48,7 @@ export function ListPageHeader({
   search,
   searchPlaceholder,
   onSearchChange,
+  showFilter = true,
   actions,
 }: {
   title: string;
@@ -55,6 +56,7 @@ export function ListPageHeader({
   search?: string;
   searchPlaceholder?: string;
   onSearchChange?: (value: string) => void;
+  showFilter?: boolean;
   actions?: ReactNode;
 }) {
   return (
@@ -76,14 +78,16 @@ export function ListPageHeader({
                 className="h-8 w-full rounded-lg border-transparent bg-[#f3f4f6] pl-10 text-[12px] shadow-none dark:bg-[#1b2129]"
               />
             </div>
-            <button
-              type="button"
-              className="flex size-8 items-center justify-center rounded-lg bg-[#f3f4f6] text-slate-600 dark:bg-[#1b2129] dark:text-slate-300"
-              aria-label="Filter"
-              title="Filter"
-            >
-              <SlidersHorizontal className="size-3.5" />
-            </button>
+            {showFilter ? (
+              <button
+                type="button"
+                className="flex size-8 items-center justify-center rounded-lg bg-[#f3f4f6] text-slate-600 dark:bg-[#1b2129] dark:text-slate-300"
+                aria-label="Filter"
+                title="Filter"
+              >
+                <SlidersHorizontal className="size-3.5" />
+              </button>
+            ) : null}
           </>
         ) : null}
         {actions}

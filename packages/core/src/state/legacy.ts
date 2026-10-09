@@ -93,6 +93,8 @@ interface LegacyRuntimeRecord {
   openai_base_url_mode?: string;
   openai_base_url?: string;
   provider_id?: string;
+  provider_auth_method?: string;
+  provider_request_headers?: Record<string, string>;
   independent_model_enabled?: boolean;
   independent_model_provider_id?: string;
   independent_model_api_key?: string;
@@ -175,6 +177,8 @@ export async function writeLegacyRuntime(
         openai_base_url_mode: options.runtime.openaiBaseUrlMode,
         openai_base_url: options.runtime.openaiBaseUrl ?? "",
         provider_id: options.runtime.providerId ?? "",
+        provider_auth_method: options.runtime.providerAuthMethod ?? "",
+        provider_request_headers: options.runtime.providerRequestHeaders ?? {},
         independent_model_enabled: options.runtime.independentModelEnabled ?? false,
         independent_model_provider_id: options.runtime.independentModelProviderId ?? "custom",
         independent_model_api_key: options.runtime.independentModelApiKey ?? "",
@@ -413,6 +417,10 @@ async function readLegacyAccountState(
         ),
         openaiBaseUrl: runtimeRecord.openai_base_url || undefined,
         providerId: runtimeRecord.provider_id || undefined,
+        providerAuthMethod: isProviderCredentialAuthMethod(runtimeRecord.provider_auth_method)
+          ? runtimeRecord.provider_auth_method
+          : undefined,
+        providerRequestHeaders: runtimeRecord.provider_request_headers,
         independentModelEnabled: runtimeRecord.independent_model_enabled === true,
         independentModelProviderId: runtimeRecord.independent_model_provider_id || "custom",
         independentModelApiKey: runtimeRecord.independent_model_api_key || undefined,
@@ -648,4 +656,8 @@ function normalizePreferredAuthMethod(value: unknown): PreferredAuthMethod {
 
 function normalizeOpenAIBaseUrlMode(value: unknown): OpenAIBaseUrlMode {
   return value === "custom" ? "custom" : "default";
+}
+
+function isProviderCredentialAuthMethod(value: unknown): value is NonNullable<AccountState["runtime"]["providerAuthMethod"]> {
+  return value === "api_key" || value === "oauth" || value === "subscription" || value === "plugin" || value === "none";
 }

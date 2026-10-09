@@ -15,6 +15,7 @@ export type AuthMode = "auth" | "apikey" | "provider-profile";
 export type PreferredAuthMethod = "chatgpt" | "apikey";
 export type OpenAIBaseUrlMode = "default" | "custom";
 export type AccountApiProtocol = "responses" | "chat_completions";
+export type ProviderCredentialAuthMethod = "api_key" | "oauth" | "subscription" | "plugin" | "none";
 export type ReasoningProfile = "auto" | "standard" | "reasoning_content" | "think_tags";
 export type LongConversationStrategy = "safe" | "continuity";
 export type CompatibilityInstructionRole = "auto" | "system" | "developer";
@@ -38,6 +39,8 @@ export interface AccountRuntimeSettings {
   openaiBaseUrlMode: OpenAIBaseUrlMode;
   openaiBaseUrl?: string;
   providerId?: string;
+  providerAuthMethod?: ProviderCredentialAuthMethod;
+  providerRequestHeaders?: Record<string, string>;
   model?: string;
   independentModelEnabled?: boolean;
   independentModelProviderId?: string;
@@ -321,6 +324,15 @@ function validateRuntimeSettings(
   if (typeof value.providerId === "string") {
     runtime.providerId = value.providerId;
   }
+  if (isProviderCredentialAuthMethod(value.providerAuthMethod)) {
+    runtime.providerAuthMethod = value.providerAuthMethod;
+  }
+  if (isRecord(value.providerRequestHeaders)
+    && Object.entries(value.providerRequestHeaders).every(([key, child]) => Boolean(key.trim()) && typeof child === "string")) {
+    runtime.providerRequestHeaders = Object.fromEntries(
+      Object.entries(value.providerRequestHeaders).map(([key, child]) => [key.trim(), child as string]),
+    );
+  }
   if (typeof value.model === "string") {
     runtime.model = value.model;
   }
@@ -414,6 +426,10 @@ function isAuthMode(value: unknown): value is AuthMode {
 
 function isPreferredAuthMethod(value: unknown): value is PreferredAuthMethod {
   return value === "chatgpt" || value === "apikey";
+}
+
+function isProviderCredentialAuthMethod(value: unknown): value is ProviderCredentialAuthMethod {
+  return value === "api_key" || value === "oauth" || value === "subscription" || value === "plugin" || value === "none";
 }
 
 function isOpenAIBaseUrlMode(value: unknown): value is OpenAIBaseUrlMode {
