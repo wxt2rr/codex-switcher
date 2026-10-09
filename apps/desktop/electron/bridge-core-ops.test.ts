@@ -1212,7 +1212,11 @@ test("desktop bridge materializes environment route changes in the active config
 
     await bridge.toggleEnvironmentRoute("project", true);
     const enabledConfig = await readFile(join(root, "envs", "project", "home", "config.toml"), "utf8");
-    assert.match(enabledConfig, new RegExp(`openai_base_url = \"http://127\\.0\\.0\\.1:${service.port}/routes/`));
+    assert.match(enabledConfig, /model_provider = "codex_switcher_router"/);
+    assert.match(
+      enabledConfig,
+      new RegExp(`base_url = \"http://127\\.0\\.0\\.1:${service.port}/routes/`),
+    );
     assert.match(enabledConfig, /model = 'gpt-5'/);
 
     await bridge.toggleEnvironmentRoute("project", false);
@@ -1282,7 +1286,11 @@ test("desktop bridge loadOverview refreshes stale environment route ports after 
     assert.match(runtime.openai_base_url ?? "", new RegExp(`^http://127\\.0\\.0\\.1:${secondService.port}/routes/`));
 
     const config = await readFile(join(root, "envs", "project", "home", "config.toml"), "utf8");
-    assert.match(config, new RegExp(`openai_base_url = \"http://127\\.0\\.0\\.1:${secondService.port}/routes/`));
+    assert.match(config, /model_provider = "codex_switcher_router"/);
+    assert.match(
+      config,
+      new RegExp(`base_url = \"http://127\\.0\\.0\\.1:${secondService.port}/routes/`),
+    );
     assert.match(config, /model = 'gpt-5'/);
   } finally {
     await firstService?.close();
