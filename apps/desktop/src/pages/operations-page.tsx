@@ -20,7 +20,7 @@ import { ConfirmDialog } from "../components/admin-primitives";
 import { getDesktopCopy } from "../desktop-copy";
 import { localizeLogKind } from "../desktop-utils";
 import type { UiLanguage } from "../i18n";
-import type { AppEnvironmentBadgeStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, DesktopAutoUpdateStatus, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, LaunchAtLoginStatus, RouterLifecycleSettings, RouterPortSettings } from "../bridge";
+import type { AppEnvironmentBadgeStatus, AppPresenceStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, DesktopAutoUpdateStatus, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, LaunchAtLoginStatus, RouterLifecycleSettings, RouterPortSettings } from "../bridge";
 
 function pageTitle(language: UiLanguage) {
   if (language === "zh") return "设置";
@@ -101,6 +101,9 @@ export function OperationsPage({
   appEnvironmentBadgesSaving,
   onAppEnvironmentBadgesChange,
   onRequestAppEnvironmentBadgePermission,
+  appPresence,
+  appPresenceSaving,
+  onAppPresenceChange,
   autoUpdateStatus,
   onCheckForAutoUpdate,
   onInstallDownloadedUpdate,
@@ -149,6 +152,9 @@ export function OperationsPage({
   appEnvironmentBadgesSaving: boolean;
   onAppEnvironmentBadgesChange: (enabled: boolean) => void;
   onRequestAppEnvironmentBadgePermission: () => void;
+  appPresence: AppPresenceStatus;
+  appPresenceSaving: boolean;
+  onAppPresenceChange: (value: { menuBar: boolean; dock: boolean }) => void;
   autoUpdateStatus: DesktopAutoUpdateStatus;
   onCheckForAutoUpdate: () => void;
   onInstallDownloadedUpdate: () => void;
@@ -332,6 +338,47 @@ export function OperationsPage({
             >
               <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${appEnvironmentBadges.enabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
             </button>
+          </div>
+        </OperationCard>
+
+        <OperationCard
+          title={language === "zh" ? "应用图标显示" : language === "ja" ? "アプリアイコンの表示" : "Application icon visibility"}
+          subtitle={language === "zh" ? "选择是否在 macOS 菜单栏和 Dock 中显示 Codex Switcher" : language === "ja" ? "macOS のメニューバーと Dock に Codex Switcher を表示するか選択" : "Choose whether Codex Switcher appears in the macOS menu bar and Dock"}
+        >
+          <div className="space-y-2">
+            <div className="grid gap-2 sm:grid-cols-2">
+              {([
+                ["menuBar", language === "zh" ? "菜单栏图标" : language === "ja" ? "メニューバーアイコン" : "Menu bar icon", language === "zh" ? "显示后台入口和网关状态菜单" : language === "ja" ? "バックグラウンド入口と Gateway 状態メニューを表示" : "Show background access and Gateway status menu"],
+                ["dock", language === "zh" ? "Dock 图标" : language === "ja" ? "Dock アイコン" : "Dock icon", language === "zh" ? "显示应用窗口和系统 Dock 入口" : language === "ja" ? "アプリウィンドウと Dock 入口を表示" : "Show the app window and Dock entry"],
+              ] as const).map(([key, title, subtitle]) => {
+                const enabled = appPresence[key];
+                const isLastVisibleIcon = enabled && !appPresence[key === "menuBar" ? "dock" : "menuBar"];
+                return (
+                  <div key={key} className="flex min-w-0 items-center gap-3 rounded-lg bg-[#f7f8fa] px-4 py-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[12px] font-medium text-neutral-800">{title}</div>
+                      <div className="mt-0.5 text-[11px] text-slate-400">{subtitle}</div>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-label={title}
+                      aria-checked={enabled}
+                      disabled={appPresenceSaving || !appPresence.supported || isLastVisibleIcon}
+                      onClick={() => onAppPresenceChange({ ...appPresence, [key]: !enabled })}
+                      className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:cursor-not-allowed disabled:opacity-50 ${enabled ? "bg-[#34C759]" : "bg-[#d1d1d6] dark:bg-slate-700"}`}
+                    >
+                      <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${enabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="text-[11px] text-slate-400">
+              {!appPresence.supported
+                ? language === "zh" ? "当前系统不支持此设置" : language === "ja" ? "現在のシステムでは利用できません" : "This setting is unavailable on the current system"
+                : language === "zh" ? "至少保留菜单栏图标或 Dock 图标中的一个；默认仅显示 Dock 图标" : language === "ja" ? "メニューバーまたは Dock の少なくとも一方を有効にします。既定では Dock のみ表示" : "Keep at least one icon visible; by default only the Dock icon is shown"}
+            </div>
           </div>
         </OperationCard>
 

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { mergeAccountUsageMetrics, mergeOverviewWithAuthMetrics } from "@/auth-metrics";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/components/theme-provider";
-import type { AccountPoolInput, AccountPoolStatus, AppEnvironmentBadgeStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, DesktopAutoUpdateStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry, DesktopLaunchStrategy, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, LaunchAtLoginStatus, RouterLifecycleSettings, RouterPortSettings } from "./bridge";
+import type { AccountPoolInput, AccountPoolStatus, AppEnvironmentBadgeStatus, AppPresenceStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, DesktopAutoUpdateStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry, DesktopLaunchStrategy, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, LaunchAtLoginStatus, RouterLifecycleSettings, RouterPortSettings } from "./bridge";
 import { DesktopShell } from "./components/desktop-shell";
 import type { AccountSummary, AuthMetricsPayload, EnvironmentRouteStatus, NavView, OverviewPayload } from "./desktop-model";
 import { resolveDesktopBridge } from "./bridge";
@@ -86,6 +86,8 @@ export function App() {
   const [routerPortSaving, setRouterPortSaving] = useState(false);
   const [launchAtLogin, setLaunchAtLogin] = useState<LaunchAtLoginStatus>({ enabled: false, supported: false });
   const [launchAtLoginSaving, setLaunchAtLoginSaving] = useState(false);
+  const [appPresence, setAppPresence] = useState<AppPresenceStatus>({ menuBar: false, dock: true, supported: false, platform: "unsupported" });
+  const [appPresenceSaving, setAppPresenceSaving] = useState(false);
   const [envHistoryRetention, setEnvHistoryRetention] = useState<EnvHistoryRetentionSettings>({ enabled: false, retentionDays: 30 });
   const [envHistoryRetentionSaving, setEnvHistoryRetentionSaving] = useState(false);
   const [generatedImageRecovery, setGeneratedImageRecovery] = useState<GeneratedImageRecoveryStatus>({
@@ -180,6 +182,7 @@ export function App() {
     void bridge.getRouterLifecycleSettings().then(setRouterLifecycle).catch(setErrorMessage);
     void bridge.getRouterPortSettings().then(setRouterPort).catch(setErrorMessage);
     void bridge.getLaunchAtLoginSettings().then(setLaunchAtLogin).catch(setErrorMessage);
+    void bridge.getAppPresenceSettings().then(setAppPresence).catch(setErrorMessage);
     void bridge.getEnvHistoryRetentionSettings().then(setEnvHistoryRetention).catch(setErrorMessage);
     void bridge.getGeneratedImageRecoverySettings().then(setGeneratedImageRecovery).catch(setErrorMessage);
     void bridge.getAppEnvironmentBadgeStatus().then(setAppEnvironmentBadges).catch(setErrorMessage);
@@ -351,6 +354,20 @@ export function App() {
       setErrorMessage(error);
     } finally {
       setLaunchAtLoginSaving(false);
+    }
+  }
+
+  async function handleAppPresenceChange(value: { menuBar: boolean; dock: boolean }) {
+    const previous = appPresence;
+    setAppPresence((current) => ({ ...current, ...value }));
+    setAppPresenceSaving(true);
+    try {
+      setAppPresence(await bridge.setAppPresenceSettings(value));
+    } catch (error) {
+      setAppPresence(previous);
+      setErrorMessage(error);
+    } finally {
+      setAppPresenceSaving(false);
     }
   }
 
@@ -1335,6 +1352,9 @@ export function App() {
           appEnvironmentBadgesSaving={appEnvironmentBadgesSaving}
           onAppEnvironmentBadgesChange={(enabled) => void handleAppEnvironmentBadgesChange(enabled)}
           onRequestAppEnvironmentBadgePermission={() => void handleRequestAppEnvironmentBadgePermission()}
+          appPresence={appPresence}
+          appPresenceSaving={appPresenceSaving}
+          onAppPresenceChange={(next) => void handleAppPresenceChange(next)}
           autoUpdateStatus={autoUpdateStatus}
           onCheckForAutoUpdate={() => void bridge.checkForAutoUpdate().then(setAutoUpdateStatus).catch(setErrorMessage)}
           onInstallDownloadedUpdate={() => void bridge.installDownloadedUpdate().then(setAutoUpdateStatus).catch(setErrorMessage)}

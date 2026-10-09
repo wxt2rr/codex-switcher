@@ -65,6 +65,7 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       return { preferredPort: 17832 };
     },
     getLaunchAtLoginSettings: async () => ({ enabled: false, supported: true }),
+    getAppPresenceSettings: async () => ({ menuBar: false, dock: true, supported: true, platform: "darwin" }),
     detectCodexToolPaths: async () => [],
     setCodexToolPath: async (kind, path) => ({ kind, path, detectedPath: "", manualPath: path, source: "manual", available: true }),
     clearCodexToolPath: async (kind) => ({ kind, path: "", detectedPath: "", manualPath: "", source: "missing", available: false }),
@@ -90,6 +91,7 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       return value;
     },
     setLaunchAtLoginSettings: async (value) => ({ enabled: value.enabled, supported: true }),
+    setAppPresenceSettings: async (value) => ({ ...value, supported: true, platform: "darwin" }),
     getCliTerminalSettings: async () => ({ selectedId: "terminal", terminals: [{ id: "terminal", label: "Terminal", supportsCurrentWindow: true }] }),
     scanCliTerminalSettings: async () => ({ selectedId: "terminal", terminals: [{ id: "terminal", label: "Terminal", supportsCurrentWindow: true }] }),
     setCliTerminalSelection: async (id) => ({ selectedId: id, terminals: [{ id, label: id, supportsCurrentWindow: false }] }),

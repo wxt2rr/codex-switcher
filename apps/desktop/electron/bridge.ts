@@ -1,8 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { dirname, join } from "node:path";
 import { existsSync } from "node:fs";
-import { access, appendFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, appendFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { getUiLanguage, setUiLanguage, type UiLanguage } from "./ui-language.js";
 import {
@@ -25,7 +26,6 @@ import type {
   GatewayEnvironmentState,
   GatewayRouteGroupDefinition,
 } from "../../../packages/core/dist/gateway/model.js";
-import { writeFileAtomically } from "../../../packages/core/dist/system/atomic-file.js";
 import { isLocalRouterBaseUrl, resolveRouteDisplayBaseUrl, selectCompatibilityUpstreamBaseUrl, type PricingProfile, type RouteProtocol, type UsageFilter, type UsageRequestQuery, type UsageTraceQuery } from "./usage-routing-model.js";
 import {
   buildEffectiveCodexEnv,
@@ -52,6 +52,7 @@ import {
   readEnvHistoryRetentionSettings,
   readGeneratedImageRecoverySettings,
   readLaunchAtLoginSettings,
+  readAppPresenceSettings,
   readAppEnvironmentBadgeSettings,
   readRouterLifecycleSettings,
   readRouterPortSettings,
@@ -62,6 +63,7 @@ import {
   saveEnvHistoryRetentionSettings,
   saveGeneratedImageRecoverySettings,
   saveLaunchAtLoginSettings,
+  saveAppPresenceSettings,
   saveAppEnvironmentBadgeSettings,
   saveRouterLifecycleSettings,
   saveRouterPortSettings,
@@ -69,6 +71,7 @@ import {
   type EnvHistoryRetentionSettings,
   type GeneratedImageRecoverySettings,
   type LaunchAtLoginSettings,
+  type AppPresenceSettings,
   type AppEnvironmentBadgeSettings,
   type RouterLifecycleSettings,
   type RouterPortSettings,
@@ -157,6 +160,22 @@ const execFileAsync = promisify(execFile);
 const currentDir = resolveCurrentDir();
 
 const AUTH_METRICS_TTL_MS = 60_000;
+
+async function writeFileAtomically(
+  path: string,
+  content: string,
+  options: { encoding: "utf8"; mode: number },
+): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, content, options);
+    await rename(temporary, path);
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
 
 type OverviewAccountRecord = Record<string, unknown> & {
   envName: string;
@@ -2262,6 +2281,23 @@ export async function getLaunchAtLoginSettings(): Promise<LaunchAtLoginStatus> {
   return { ...settings, supported: process.platform === "darwin" || process.platform === "win32" };
 }
 
+export interface AppPresenceStatus extends AppPresenceSettings {
+  supported: boolean;
+  platform: "darwin" | "win32" | "linux" | "unsupported";
+}
+
+function appPresencePlatform(): AppPresenceStatus["platform"] {
+  if (process.platform === "darwin") return "darwin";
+  if (process.platform === "win32") return "win32";
+  if (process.platform === "linux") return "linux";
+  return "unsupported";
+}
+
+export async function getAppPresenceSettings(): Promise<AppPresenceStatus> {
+  const settings = await readAppPresenceSettings(getCodexToolPathOptions().settingsPath);
+  return { ...settings, supported: process.platform === "darwin", platform: appPresencePlatform() };
+}
+
 export async function getEnvHistoryRetentionSettings(): Promise<EnvHistoryRetentionSettings> {
   return readEnvHistoryRetentionSettings(getCodexToolPathOptions().settingsPath);
 }
@@ -2330,6 +2366,11 @@ export async function setRouterPortSettings(value: RouterPortSettings): Promise<
 export async function setLaunchAtLoginSettings(value: { enabled: boolean }): Promise<LaunchAtLoginStatus> {
   const settings = await saveLaunchAtLoginSettings(getCodexToolPathOptions().settingsPath, value);
   return { ...settings, supported: process.platform === "darwin" || process.platform === "win32" };
+}
+
+export async function setAppPresenceSettings(value: AppPresenceSettings): Promise<AppPresenceStatus> {
+  const settings = await saveAppPresenceSettings(getCodexToolPathOptions().settingsPath, value);
+  return { ...settings, supported: process.platform === "darwin", platform: appPresencePlatform() };
 }
 
 export async function setEnvHistoryRetentionSettings(

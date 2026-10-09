@@ -55,6 +55,10 @@ test("desktop build emits electron main entry and preload bundle", async () => {
   assert.match(mainSource, /logo-win\.png/);
   assert.match(mainSource, /await createWindow\(\);[\s\S]*startEnvHistoryCleanupSchedule\(\)/);
   assert.match(mainSource, /ensureTray/);
+  assert.match(mainSource, /tray-template\.png/);
+  assert.match(mainSource, /setTemplateImage\(true\)/);
+  assert.match(mainSource, /getAppPresenceSettings/);
+  assert.match(mainSource, /setAppPresenceSettings/);
   assert.match(mainSource, /registerAutoUpdateController/);
   assert.match(mainSource, /desktop:loadGatewayAdminConfiguration/);
   assert.match(mainSource, /void \(0, \w+\.runEnvHistoryRetentionCleanup\)\(\)\.catch/);
@@ -77,6 +81,7 @@ test("desktop build emits electron main entry and preload bundle", async () => {
   assert.doesNotMatch(bridgeSource, /require\("\.\/model-catalog-store\.js"\)/);
   assert.match(bridgeSource, /require\("\.\/account-model-catalog\.cjs"\)/);
   assert.doesNotMatch(bridgeSource, /require\("\.\/account-model-catalog\.js"\)/);
+  assert.doesNotMatch(bridgeSource, /require\("\.\.\/\.\.\/\.\.\/packages\/core\/dist\/system\/atomic-file\.js"\)/);
 
   const accountModelCatalogSource = await readFile(accountModelCatalogPath, "utf8");
   assert.match(accountModelCatalogSource, /require\("\.\/model-catalog-store\.cjs"\)/);
@@ -95,10 +100,12 @@ test("desktop package defines packaged artifact verification script", async () =
   const verifyScriptPath = join(desktopRoot, "scripts", "verify-package-artifact.mjs");
   const windowsIconPath = join(desktopRoot, "build", "icon.ico");
   const windowsRuntimeIconPath = join(desktopRoot, "public", "logo-win.png");
+  const trayTemplateIconPath = join(desktopRoot, "public", "tray-template.png");
 
   await access(verifyScriptPath, constants.F_OK);
   await access(windowsIconPath, constants.F_OK);
   await access(windowsRuntimeIconPath, constants.F_OK);
+  await access(trayTemplateIconPath, constants.F_OK);
 
   const verifySource = await readFile(verifyScriptPath, "utf8");
   assert.match(verifySource, /CFBundleDisplayName/);

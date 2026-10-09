@@ -30,6 +30,10 @@ declare module "electron" {
     getVersion(): string;
     getAppPath(): string;
     setLoginItemSettings(settings: { openAtLogin: boolean }): void;
+    dock: {
+      show(): Promise<void>;
+      hide(): void;
+    };
     relaunch(): void;
     exit(exitCode?: number): void;
     on(event: string, listener: () => void | Promise<void>): void;

@@ -7,6 +7,12 @@ export interface CliAutoResumeSettings { enabled: boolean; sessionNumber: number
 export interface RouterLifecycleSettings { stopOnAppQuit: boolean; }
 export interface RouterPortSettings { preferredPort: number; }
 export interface LaunchAtLoginStatus { enabled: boolean; supported: boolean; }
+export interface AppPresenceStatus {
+  menuBar: boolean;
+  dock: boolean;
+  supported: boolean;
+  platform: "darwin" | "win32" | "linux" | "unsupported";
+}
 export interface EnvHistoryRetentionSettings { enabled: boolean; retentionDays: number; }
 export interface GeneratedImageRecoveryStatus {
   enabled: boolean; installedEnvironments: number; totalEnvironments: number; conflicts: string[];
@@ -330,6 +336,7 @@ export interface DesktopElectronApi {
   getRouterLifecycleSettings(): Promise<RouterLifecycleSettings>;
   getRouterPortSettings(): Promise<RouterPortSettings>;
   getLaunchAtLoginSettings(): Promise<LaunchAtLoginStatus>;
+  getAppPresenceSettings(): Promise<AppPresenceStatus>;
   detectCodexToolPaths(): Promise<CodexToolStatus[]>;
   setCodexToolPath(kind: "cli" | "app", path: string): Promise<CodexToolStatus>;
   clearCodexToolPath(kind: "cli" | "app"): Promise<CodexToolStatus>;
@@ -341,6 +348,7 @@ export interface DesktopElectronApi {
   setRouterLifecycleSettings(value: RouterLifecycleSettings): Promise<RouterLifecycleSettings>;
   setRouterPortSettings(value: RouterPortSettings): Promise<RouterPortSettings>;
   setLaunchAtLoginSettings(value: { enabled: boolean }): Promise<LaunchAtLoginStatus>;
+  setAppPresenceSettings(value: { menuBar: boolean; dock: boolean }): Promise<AppPresenceStatus>;
   getCliTerminalSettings(): Promise<CliTerminalSettings>;
   scanCliTerminalSettings(): Promise<CliTerminalSettings>;
   setCliTerminalSelection(id: CliTerminalId): Promise<CliTerminalSettings>;
@@ -447,6 +455,7 @@ export interface DesktopBridge {
   getRouterLifecycleSettings(): Promise<RouterLifecycleSettings>;
   getRouterPortSettings(): Promise<RouterPortSettings>;
   getLaunchAtLoginSettings(): Promise<LaunchAtLoginStatus>;
+  getAppPresenceSettings(): Promise<AppPresenceStatus>;
   detectCodexToolPaths(): Promise<CodexToolStatus[]>;
   setCodexToolPath(kind: "cli" | "app", path: string): Promise<CodexToolStatus>;
   clearCodexToolPath(kind: "cli" | "app"): Promise<CodexToolStatus>;
@@ -458,6 +467,7 @@ export interface DesktopBridge {
   setRouterLifecycleSettings(value: RouterLifecycleSettings): Promise<RouterLifecycleSettings>;
   setRouterPortSettings(value: RouterPortSettings): Promise<RouterPortSettings>;
   setLaunchAtLoginSettings(value: { enabled: boolean }): Promise<LaunchAtLoginStatus>;
+  setAppPresenceSettings(value: { menuBar: boolean; dock: boolean }): Promise<AppPresenceStatus>;
   getCliTerminalSettings(): Promise<CliTerminalSettings>;
   scanCliTerminalSettings(): Promise<CliTerminalSettings>;
   setCliTerminalSelection(id: CliTerminalId): Promise<CliTerminalSettings>;
@@ -566,6 +576,7 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       getRouterLifecycleSettings: unavailable,
       getRouterPortSettings: unavailable,
       getLaunchAtLoginSettings: unavailable,
+      getAppPresenceSettings: unavailable,
       detectCodexToolPaths: unavailable,
       setCodexToolPath: unavailable,
       clearCodexToolPath: unavailable,
@@ -577,6 +588,7 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       setRouterLifecycleSettings: unavailable,
       setRouterPortSettings: unavailable,
       setLaunchAtLoginSettings: unavailable,
+      setAppPresenceSettings: unavailable,
       getCliTerminalSettings: unavailable,
       scanCliTerminalSettings: unavailable,
       setCliTerminalSelection: unavailable,
@@ -777,6 +789,7 @@ function createBrowserPreviewBridge(): DesktopBridge {
     getAppEnvironmentBadgeStatus: async () => ({ enabled: false, supported: true, platform: "macos", permission: "denied", applied: 0, unresolved: 0 }),
     getRouterPortSettings: async () => ({ preferredPort: 17832 }),
     getLaunchAtLoginSettings: async () => ({ enabled: false, supported: true }),
+    getAppPresenceSettings: async () => ({ menuBar: false, dock: true, supported: true, platform: "darwin" }),
     detectCodexToolPaths: async () => [],
     setCodexToolPath: async (kind, path) => ({ kind, path, detectedPath: "", manualPath: path, source: "manual", available: true }),
     clearCodexToolPath: async (kind) => ({ kind, path: "", detectedPath: "", manualPath: "", source: "missing", available: false }),
@@ -785,6 +798,7 @@ function createBrowserPreviewBridge(): DesktopBridge {
     setRouterLifecycleSettings: async (value) => value,
     setRouterPortSettings: async (value) => value,
     setLaunchAtLoginSettings: async (value) => ({ enabled: value.enabled, supported: true }),
+    setAppPresenceSettings: async (value) => ({ ...value, supported: true, platform: "darwin" }),
     requestAppEnvironmentBadgePermission: async () => ({ enabled: false, supported: true, platform: "macos", permission: "granted", applied: 0, unresolved: 0 }),
     setAppEnvironmentBadgeSettings: async (value) => ({ enabled: value.enabled, supported: true, platform: "macos", permission: "granted", applied: value.enabled ? 2 : 0, unresolved: 0 }),
     getCliTerminalSettings: async () => ({ selectedId: "terminal", terminals: [{ id: "terminal", label: "Terminal", supportsCurrentWindow: true }] }),

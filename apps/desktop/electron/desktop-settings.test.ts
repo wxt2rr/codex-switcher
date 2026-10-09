@@ -4,8 +4,10 @@ import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  DEFAULT_APP_PRESENCE_SETTINGS,
   DEFAULT_APP_ENVIRONMENT_BADGE_SETTINGS,
   readAppEnvironmentBadgeSettings,
+  readAppPresenceSettings,
   readAppWindowSettings,
   readCliAutoResumeSettings,
   readEnvHistoryRetentionSettings,
@@ -17,6 +19,7 @@ import {
   renameAppWindowCount,
   saveAppWindowCount,
   saveAppEnvironmentBadgeSettings,
+  saveAppPresenceSettings,
   saveCliAutoResumeSettings,
   saveEnvHistoryRetentionSettings,
   saveGeneratedImageRecoverySettings,
@@ -100,6 +103,15 @@ test("launch-at-login defaults off and persists independently", async () => {
   assert.deepEqual(await saveLaunchAtLoginSettings(path, { enabled: true }), { enabled: true });
   assert.deepEqual(await readLaunchAtLoginSettings(path), { enabled: true });
   assert.deepEqual(await readCliAutoResumeSettings(path), { enabled: true, sessionNumber: 2 });
+});
+
+test("application presence defaults to Dock only and never allows both icons to be hidden", async () => {
+  const root = await mkdtemp(join(tmpdir(), "desktop-app-presence-"));
+  const path = join(root, "settings.json");
+  assert.deepEqual(await readAppPresenceSettings(path), DEFAULT_APP_PRESENCE_SETTINGS);
+  assert.deepEqual(await saveAppPresenceSettings(path, { menuBar: true, dock: false }), { menuBar: true, dock: false });
+  assert.deepEqual(await saveAppPresenceSettings(path, { menuBar: false, dock: false }), DEFAULT_APP_PRESENCE_SETTINGS);
+  assert.deepEqual(await readAppPresenceSettings(path), DEFAULT_APP_PRESENCE_SETTINGS);
 });
 
 test("environment history retention defaults safely and clamps to 1-365 days", async () => {

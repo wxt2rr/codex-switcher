@@ -19,6 +19,11 @@ export interface LaunchAtLoginSettings {
   enabled: boolean;
 }
 
+export interface AppPresenceSettings {
+  menuBar: boolean;
+  dock: boolean;
+}
+
 export interface EnvHistoryRetentionSettings {
   enabled: boolean;
   retentionDays: number;
@@ -43,6 +48,7 @@ interface DesktopSettingsFile {
   routerLifecycle?: Partial<RouterLifecycleSettings>;
   routerPort?: Partial<RouterPortSettings>;
   launchAtLogin?: Partial<LaunchAtLoginSettings>;
+  appPresence?: Partial<AppPresenceSettings>;
   envHistoryRetention?: Partial<EnvHistoryRetentionSettings>;
   generatedImageRecovery?: Partial<GeneratedImageRecoverySettings>;
   appEnvironmentBadges?: Partial<AppEnvironmentBadgeSettings>;
@@ -53,6 +59,7 @@ export const DEFAULT_CLI_AUTO_RESUME_SETTINGS: CliAutoResumeSettings = { enabled
 export const DEFAULT_ROUTER_LIFECYCLE_SETTINGS: RouterLifecycleSettings = { stopOnAppQuit: false };
 export const DEFAULT_ROUTER_PORT_SETTINGS: RouterPortSettings = { preferredPort: 17832 };
 export const DEFAULT_LAUNCH_AT_LOGIN_SETTINGS: LaunchAtLoginSettings = { enabled: false };
+export const DEFAULT_APP_PRESENCE_SETTINGS: AppPresenceSettings = { menuBar: false, dock: true };
 export const DEFAULT_ENV_HISTORY_RETENTION_SETTINGS: EnvHistoryRetentionSettings = {
   enabled: false,
   retentionDays: 30,
@@ -108,6 +115,22 @@ export async function saveLaunchAtLoginSettings(
   const normalized = { enabled: value.enabled === true };
   const settings = await readSettings(path);
   settings.launchAtLogin = normalized;
+  await writeSettings(path, settings);
+  return normalized;
+}
+
+export async function readAppPresenceSettings(path: string): Promise<AppPresenceSettings> {
+  const settings = await readSettings(path);
+  return normalizeAppPresenceSettings(settings.appPresence);
+}
+
+export async function saveAppPresenceSettings(
+  path: string,
+  value: AppPresenceSettings,
+): Promise<AppPresenceSettings> {
+  const normalized = normalizeAppPresenceSettings(value);
+  const settings = await readSettings(path);
+  settings.appPresence = normalized;
   await writeSettings(path, settings);
   return normalized;
 }
@@ -215,6 +238,13 @@ function normalizeCliAutoResumeSettings(value?: Partial<CliAutoResumeSettings>):
     enabled: value?.enabled === true,
     sessionNumber: Number.isInteger(sessionNumber) && sessionNumber >= 1 ? sessionNumber : 1,
   };
+}
+
+function normalizeAppPresenceSettings(value?: Partial<AppPresenceSettings>): AppPresenceSettings {
+  const menuBar = value?.menuBar === true;
+  const dock = value?.dock === true;
+  if (!menuBar && !dock) return DEFAULT_APP_PRESENCE_SETTINGS;
+  return { menuBar, dock };
 }
 
 function normalizeEnvHistoryRetentionSettings(

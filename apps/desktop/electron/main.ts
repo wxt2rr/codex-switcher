@@ -62,6 +62,7 @@ import {
   getRouterLifecycleSettings,
   getRouterPortSettings,
   getLaunchAtLoginSettings,
+  getAppPresenceSettings,
   detectCodexToolPaths,
   setCodexToolPath,
   setCliAutoResumeSettings,
@@ -73,6 +74,7 @@ import {
   setRouterLifecycleSettings,
   setRouterPortSettings,
   setLaunchAtLoginSettings,
+  setAppPresenceSettings,
   clearCodexToolPath,
   toggleEnvironmentRoute,
   toggleEnvironmentGateway,
@@ -125,6 +127,7 @@ import { createDesktopAutoUpdateController, restartAfterRollback, type AutoUpdat
 import { buildDesktopTrayActions } from "./tray-menu.js";
 import { createUpdateRollbackJournal, resolveUpdateJournalPath, validateUpdateManifest, type DesktopUpdateManifest } from "./update-security.js";
 import { copyInstallForRollback, restoreInstallFromRollback } from "./update-rollback.js";
+import type { AppPresenceStatus } from "./bridge.js";
 
 const currentDir = __dirname;
 const execFileAsync = promisify(execFile);
@@ -156,6 +159,15 @@ function resolveDesktopLogoPath() {
     join(appDir, "..", "dist", "logo.png"),
     join(app.getAppPath(), "dist", "logo.png"),
     join(process.cwd(), "apps", "desktop", "public", "logo.png"),
+  ];
+  return candidatePaths.find((candidate) => existsSync(candidate));
+}
+
+function resolveDesktopTrayTemplatePath() {
+  const candidatePaths = [
+    join(appDir, "..", "dist", "tray-template.png"),
+    join(app.getAppPath(), "dist", "tray-template.png"),
+    join(process.cwd(), "apps", "desktop", "public", "tray-template.png"),
   ];
   return candidatePaths.find((candidate) => existsSync(candidate));
 }
@@ -230,12 +242,38 @@ async function refreshTrayMenu() {
 
 async function ensureTray() {
   if (tray) return;
-  const iconPath = resolveDesktopLogoPath();
+  const iconPath = process.platform === "darwin"
+    ? resolveDesktopTrayTemplatePath()
+    : resolveDesktopLogoPath();
   const icon = iconPath ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty();
+  if (process.platform === "darwin") icon.setTemplateImage(true);
   tray = new Tray(icon);
   tray.setToolTip("Codex Switcher");
   tray.on("click", showMainWindow);
   await refreshTrayMenu();
+}
+
+function destroyTray() {
+  if (!tray) return;
+  tray.destroy();
+  tray = undefined;
+}
+
+async function applyAppPresenceSettings(settings: AppPresenceStatus): Promise<void> {
+  if (process.platform !== "darwin") {
+    await ensureTray();
+    return;
+  }
+  if (settings.dock) {
+    await app.dock.show();
+  } else {
+    app.dock.hide();
+  }
+  if (settings.menuBar) {
+    await ensureTray();
+  } else {
+    destroyTray();
+  }
 }
 
 app.whenReady().then(async () => {
@@ -274,7 +312,7 @@ app.whenReady().then(async () => {
     console.warn("Codex legacy config migration failed", error);
   });
   await createWindow();
-  await ensureTray();
+  await applyAppPresenceSettings(await getAppPresenceSettings());
   autoUpdateController.markHealthy();
   startEnvHistoryCleanupSchedule();
   void synchronizeAppEnvironmentBadges().catch(() => undefined);
@@ -359,6 +397,7 @@ function registerHandlers() {
   ipcMain.handle("desktop:getRouterLifecycleSettings", () => getRouterLifecycleSettings());
   ipcMain.handle("desktop:getRouterPortSettings", () => getRouterPortSettings());
   ipcMain.handle("desktop:getLaunchAtLoginSettings", () => getLaunchAtLoginSettings());
+  ipcMain.handle("desktop:getAppPresenceSettings", () => getAppPresenceSettings());
   ipcMain.handle("desktop:detectCodexToolPaths", () => detectCodexToolPaths());
   ipcMain.handle("desktop:setCodexToolPath", (_event, kind, path) => setCodexToolPath(kind, path));
   ipcMain.handle("desktop:clearCodexToolPath", (_event, kind) => clearCodexToolPath(kind));
@@ -372,6 +411,11 @@ function registerHandlers() {
   ipcMain.handle("desktop:setLaunchAtLoginSettings", async (_event, value) => {
     const settings = await setLaunchAtLoginSettings(value);
     applyLaunchAtLoginSettings(settings);
+    return settings;
+  });
+  ipcMain.handle("desktop:setAppPresenceSettings", async (_event, value) => {
+    const settings = await setAppPresenceSettings(value);
+    await applyAppPresenceSettings(settings);
     return settings;
   });
   ipcMain.handle("desktop:getCliTerminalSettings", async () => withTerminalIcons(await getCliTerminalSettings()));

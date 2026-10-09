@@ -39,6 +39,18 @@ test("settings page exposes login-at-startup control without adding intent routi
   assert.doesNotMatch(source, /intent classifier|prompt intent/i);
 });
 
+test("settings page exposes independent menu bar and Dock visibility controls", async () => {
+  const source = await readFile(sourcePath("./operations-page.tsx"), "utf8");
+  const app = await readFile(sourcePath("../react-app.tsx"), "utf8");
+  assert.match(source, /应用图标显示/);
+  assert.match(source, /菜单栏图标/);
+  assert.match(source, /Dock 图标/);
+  assert.match(source, /至少保留菜单栏图标或 Dock 图标中的一个/);
+  assert.match(source, /isLastVisibleIcon/);
+  assert.match(app, /getAppPresenceSettings/);
+  assert.match(app, /setAppPresenceSettings/);
+});
+
 test("settings page renders and refreshes the selected runtime log", async () => {
   const source = await readFile(sourcePath("./operations-page.tsx"), "utf8");
   const app = await readFile(sourcePath("../react-app.tsx"), "utf8");

@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   getRouterLifecycleSettings: () => ipcRenderer.invoke("desktop:getRouterLifecycleSettings"),
   getRouterPortSettings: () => ipcRenderer.invoke("desktop:getRouterPortSettings"),
   getLaunchAtLoginSettings: () => ipcRenderer.invoke("desktop:getLaunchAtLoginSettings"),
+  getAppPresenceSettings: () => ipcRenderer.invoke("desktop:getAppPresenceSettings"),
   detectCodexToolPaths: () => ipcRenderer.invoke("desktop:detectCodexToolPaths"),
   setCodexToolPath: (kind: "cli" | "app", path: string) => ipcRenderer.invoke("desktop:setCodexToolPath", kind, path),
   clearCodexToolPath: (kind: "cli" | "app") => ipcRenderer.invoke("desktop:clearCodexToolPath", kind),
@@ -29,6 +30,8 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     ipcRenderer.invoke("desktop:setRouterPortSettings", value),
   setLaunchAtLoginSettings: (value: { enabled: boolean }) =>
     ipcRenderer.invoke("desktop:setLaunchAtLoginSettings", value),
+  setAppPresenceSettings: (value: { menuBar: boolean; dock: boolean }) =>
+    ipcRenderer.invoke("desktop:setAppPresenceSettings", value),
   getCliTerminalSettings: () => ipcRenderer.invoke("desktop:getCliTerminalSettings"),
   scanCliTerminalSettings: () => ipcRenderer.invoke("desktop:scanCliTerminalSettings"),
   setCliTerminalSelection: (id: string) => ipcRenderer.invoke("desktop:setCliTerminalSelection", id),
