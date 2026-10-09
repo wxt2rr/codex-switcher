@@ -23,6 +23,71 @@ function restoreEnv(previousEnv: NodeJS.ProcessEnv): void {
   Object.assign(process.env, previousEnv);
 }
 
+test("AUTH identity matching uses account_id instead of the environment account name", () => {
+  const payload = Buffer.from(JSON.stringify({
+    "https://api.openai.com/auth": { chatgpt_account_id: "chat-account-1" },
+  })).toString("base64url");
+  const identity = bridge.__testUtils.deriveAuthIdentityKey({ tokens: { access_token: `header.${payload}.signature` } });
+  assert.equal(identity, "chatgpt:chat-account-1");
+  assert.notEqual(identity, bridge.__testUtils.deriveAuthIdentityKey({ account_id: "chat-account-2" }));
+  assert.equal(bridge.__testUtils.deriveAuthIdentityKey({ OPENAI_API_KEY: "same-name-is-not-an-auth-identity" }), undefined);
+});
+
+test("desktop bridge silently syncs reauthorized AUTH credentials across matching environments", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-auth-identity-sync-"));
+  const previousEnv = { ...process.env };
+  const accountId = "chat-account-shared";
+  const oldPayload = Buffer.from(JSON.stringify({
+    "https://api.openai.com/auth": { chatgpt_account_id: accountId },
+  })).toString("base64url");
+  const newPayload = Buffer.from(JSON.stringify({
+    "https://api.openai.com/auth": { chatgpt_account_id: accountId },
+  })).toString("base64url");
+  const differentPayload = Buffer.from(JSON.stringify({
+    "https://api.openai.com/auth": { chatgpt_account_id: "chat-account-different" },
+  })).toString("base64url");
+  const oldAuth = `${JSON.stringify({ tokens: { access_token: `old.${oldPayload}.signature` } })}\n`;
+  const newAuth = `${JSON.stringify({ tokens: { access_token: `new.${newPayload}.signature` } })}\n`;
+  const differentAuth = `${JSON.stringify({ tokens: { access_token: `other.${differentPayload}.signature` } })}\n`;
+
+  try {
+    process.env.HOME = root;
+    process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
+    process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
+    process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
+    bridge.__testUtils.resetUsageRouterManagerForTest();
+    for (const [envName, accountName, auth] of [["source", "chat", oldAuth], ["target", "renamed-chat", oldAuth], ["different", "chat", differentAuth]] as const) {
+      await writeFileRecursive(join(root, "envs", envName, "home", "config.toml"), "model = 'gpt-5'\n");
+      await writeFileRecursive(join(root, "state", "env-accounts", envName, accountName, "auth.json"), auth);
+      await writeFileRecursive(join(root, "state", "env-accounts", envName, accountName, "runtime.json"), "{\"preferred_auth_method\":\"chatgpt\",\"openai_base_url_mode\":\"default\"}\n");
+    }
+    await writeFileRecursive(join(root, "state", "current_cli_env"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_cli_account"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_app_env"), "default\n");
+    await writeFileRecursive(join(root, "state", "current_app_account"), "default\n");
+
+    await bridge.__testUtils.saveAccountArtifactsForTest({
+      envName: "source",
+      account: "chat",
+      runtime: { preferredAuthMethod: "chatgpt", openaiBaseUrlMode: "default" },
+      authJsonContent: newAuth,
+      target: "none",
+    });
+
+    assert.equal(await readFile(join(root, "state", "env-accounts", "source", "chat", "auth.json"), "utf8"), newAuth);
+    assert.equal(await readFile(join(root, "state", "env-accounts", "target", "renamed-chat", "auth.json"), "utf8"), newAuth);
+    assert.equal(await readFile(join(root, "state", "env-accounts", "different", "chat", "auth.json"), "utf8"), differentAuth);
+    assert.equal(await readFile(join(root, "state", "env-accounts", "source", "chat", "runtime.json"), "utf8").then((content) => JSON.parse(content).preferred_auth_method), "chatgpt");
+    const syncLog = await readFile(join(root, "state", "switcher.log"), "utf8");
+    assert.match(syncLog, /"event":"auth_identity_sync"/);
+    assert.doesNotMatch(syncLog, /old\.|new\.|other\./);
+  } finally {
+    bridge.__testUtils.resetUsageRouterManagerForTest();
+    restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("desktop bridge deleteAccount delegates to the core desktop operations service", async () => {
   const calls: string[] = [];
   bridge.__testUtils.setDesktopOperationsLoaderForTest(async () => ({

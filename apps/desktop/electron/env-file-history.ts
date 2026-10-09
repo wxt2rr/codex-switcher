@@ -9,6 +9,7 @@ export type EnvFileHistorySource =
   | "switch-app"
   | "restore"
   | "migration"
+  | "auth-sync"
   | "enable-environment-gateway"
   | "disable-environment-gateway";
 

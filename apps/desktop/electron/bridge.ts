@@ -25,6 +25,7 @@ import type {
   GatewayEnvironmentState,
   GatewayRouteGroupDefinition,
 } from "../../../packages/core/dist/gateway/model.js";
+import { writeFileAtomically } from "../../../packages/core/dist/system/atomic-file.js";
 import { isLocalRouterBaseUrl, resolveRouteDisplayBaseUrl, selectCompatibilityUpstreamBaseUrl, type PricingProfile, type RouteProtocol, type UsageFilter, type UsageRequestQuery, type UsageTraceQuery } from "./usage-routing-model.js";
 import {
   buildEffectiveCodexEnv,
@@ -509,6 +510,24 @@ function extractAccountIdFromAuthData(authData: Record<string, unknown> | undefi
   } catch {
     return undefined;
   }
+}
+
+export function deriveAuthIdentityKey(
+  authData: Record<string, unknown> | undefined,
+  providerId = "chatgpt",
+): string | undefined {
+  const accountId = extractAccountIdFromAuthData(authData);
+  const provider = providerId.trim() || "chatgpt";
+  return accountId ? `${provider}:${accountId}` : undefined;
+}
+
+function hashAuthIdentityKey(identityKey: string): string {
+  let hash = 2166136261;
+  for (const character of identityKey) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
 async function resolveAccountUpstreamBaseUrl(
@@ -3569,7 +3588,12 @@ async function saveAccountArtifacts(options: {
     state = next;
   }
 
-  await syncEnvironmentRouteIfEnabled(options.envName);
+  await synchronizeAuthIdentityAcrossEnvironments(
+    runtime,
+    options.envName,
+    options.account,
+    options.authJsonContent,
+  ).catch(() => undefined);
 }
 
 async function ensureProviderDefaultModelBindings(
@@ -4160,6 +4184,8 @@ end if
 
 export const __testUtils = {
   resolveLogPath,
+  deriveAuthIdentityKey,
+  saveAccountArtifactsForTest: saveAccountArtifacts,
   parseExternalCodexCredentials,
   buildCodexChatGptAuthJson,
   buildImportedAccountNames,
@@ -5028,8 +5054,8 @@ async function refreshAccountTokenOnceNativeDirect(
 
     if (afterRaw !== input.authRaw) {
       await writeFile(input.authFile, afterRaw, "utf8");
-      await syncUpdatedAuthToActiveTargetsDirect(runtime, input.envName, input.accountName);
-      await syncEnvironmentRouteIfEnabled(input.envName);
+      await synchronizeAuthIdentityAcrossEnvironments(runtime, input.envName, input.accountName, afterRaw)
+        .catch(() => undefined);
       return "changed";
     }
 
@@ -5104,6 +5130,160 @@ async function syncUpdatedAuthToActiveTargetsDirect(
       await applyTargetHomeStateWithHistory(runtime, state, target, target === "cli" ? "switch-cli" : "switch-app");
     }
   }
+}
+
+const authIdentitySyncLocks = new Map<string, Promise<void>>();
+
+async function synchronizeAuthIdentityAcrossEnvironments(
+  runtime: CoreRuntime,
+  sourceEnvName: string,
+  sourceAccountName: string,
+  authJsonContent: string,
+): Promise<void> {
+  const sourceAuthData = parseAuthJsonRecord(authJsonContent);
+  const sourceIdentityKey = deriveAuthIdentityKey(sourceAuthData);
+  if (!sourceAuthData || !sourceIdentityKey) {
+    await appendAuthIdentitySyncLog({
+      sourceEnvName,
+      sourceAccountName,
+      status: "skipped",
+      reason: "identity-unavailable",
+      matched: [],
+      updated: [],
+    });
+    await syncEnvironmentRouteIfEnabled(sourceEnvName).catch(() => undefined);
+    return;
+  }
+
+  const previous = authIdentitySyncLocks.get(sourceIdentityKey) ?? Promise.resolve();
+  const current = previous
+    .catch(() => undefined)
+    .then(() => synchronizeAuthIdentityNow(runtime, sourceEnvName, sourceAccountName, authJsonContent, sourceAuthData, sourceIdentityKey));
+  authIdentitySyncLocks.set(sourceIdentityKey, current);
+  try {
+    await current;
+  } finally {
+    if (authIdentitySyncLocks.get(sourceIdentityKey) === current) {
+      authIdentitySyncLocks.delete(sourceIdentityKey);
+    }
+  }
+}
+
+async function synchronizeAuthIdentityNow(
+  runtime: CoreRuntime,
+  sourceEnvName: string,
+  sourceAccountName: string,
+  authJsonContent: string,
+  sourceAuthData: Record<string, unknown>,
+  sourceIdentityKey: string,
+): Promise<void> {
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const sourceKey = `${sourceEnvName}/${sourceAccountName}`;
+  const matched: string[] = [];
+  const updated: string[] = [];
+  const affectedEnvironments = new Set<string>();
+
+  for (const [envName, env] of Object.entries(state.envs)) {
+    for (const [accountName, account] of Object.entries(env.accounts)) {
+      if (account.authMode !== "auth") continue;
+      const accountKey = `${envName}/${accountName}`;
+      const identityKey = accountKey === sourceKey
+        ? deriveAuthIdentityKey(sourceAuthData)
+        : deriveAuthIdentityKey(account.authData, account.runtime.providerId ?? "chatgpt");
+      if (identityKey !== sourceIdentityKey) continue;
+
+      matched.push(accountKey);
+      affectedEnvironments.add(envName);
+      if (accountKey === sourceKey) continue;
+
+      const authPath = join(getStateDir(), "env-accounts", envName, accountName, "auth.json");
+      const currentAuth = await readTextFileOrEmpty(authPath);
+      if (currentAuth === authJsonContent) continue;
+      await mkdir(dirname(authPath), { recursive: true });
+      await writeFileAtomically(authPath, authJsonContent, { encoding: "utf8", mode: 0o600 });
+      updated.push(accountKey);
+    }
+  }
+
+  if (!affectedEnvironments.size) {
+    affectedEnvironments.add(sourceEnvName);
+  }
+
+  let refreshedState = await runtime.readLegacyState(getLegacyOptions());
+  const gatewayEnvironments = new Set(
+    [...affectedEnvironments].filter((envName) => refreshedState.envs[envName]?.gateway?.mode === "gateway"),
+  );
+  if (gatewayEnvironments.size) {
+    refreshedState = await resynchronizeActiveEnvironmentGateways(runtime, refreshedState);
+  }
+
+  for (const envName of affectedEnvironments) {
+    if (gatewayEnvironments.has(envName)) continue;
+    await syncEnvironmentRouteIfEnabled(envName).catch(async (error) => {
+      await appendAuthIdentitySyncLog({
+        sourceEnvName,
+        sourceAccountName,
+        status: "partial",
+        reason: `route-sync-failed:${error instanceof Error ? error.message : String(error)}`,
+        matched,
+        updated,
+      });
+    });
+  }
+
+  const projectedTargets = new Set<string>();
+  for (const target of ["cli", "app"] as const) {
+    const pointer = refreshedState.targets[target];
+    const targetKey = `${pointer.env}/${pointer.account}`;
+    if (!matched.includes(targetKey) || projectedTargets.has(targetKey)) continue;
+    projectedTargets.add(targetKey);
+    await applyTargetHomeStateWithHistory(runtime, refreshedState, target, "auth-sync").catch(async (error) => {
+      await appendAuthIdentitySyncLog({
+        sourceEnvName,
+        sourceAccountName,
+        status: "partial",
+        reason: `target-sync-failed:${error instanceof Error ? error.message : String(error)}`,
+        matched,
+        updated,
+      });
+    });
+  }
+
+  await appendAuthIdentitySyncLog({
+    sourceEnvName,
+    sourceAccountName,
+    status: "synced",
+    identity: hashAuthIdentityKey(sourceIdentityKey),
+    matched,
+    updated,
+  });
+}
+
+function parseAuthJsonRecord(content: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(content) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function appendAuthIdentitySyncLog(details: {
+  sourceEnvName: string;
+  sourceAccountName: string;
+  status: "synced" | "partial" | "skipped";
+  reason?: string;
+  identity?: string;
+  matched: string[];
+  updated: string[];
+}): Promise<void> {
+  await appendFile(resolveLogPath("switcher"), `${JSON.stringify({
+    at: new Date().toISOString(),
+    event: "auth_identity_sync",
+    ...details,
+  })}\n`, "utf8").catch(() => undefined);
 }
 
 async function syncTargetsDirect(
