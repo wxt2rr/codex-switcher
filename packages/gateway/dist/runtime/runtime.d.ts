@@ -1,4 +1,7 @@
 import type { GatewayCapability, GatewayProtocol, JsonObject } from "../protocol.js";
+import { convertGatewayRequest } from "../conversion/request-converter.js";
+import { type ResponseStreamState } from "../conversion/stream-state.js";
+import type { ConversionOptions, ConversionResult } from "../conversion/types.js";
 import type { GatewayRequestIR } from "../request/request-ir.js";
 import { type RouteEngineState, type RouteGroupNode, type RouteFailureClass, type RouteResolveResult, type RuntimeRouteCandidate } from "../routing/engine.js";
 import { ProviderRegistry } from "../provider/registry.js";
@@ -30,10 +33,12 @@ export interface GatewayDispatchInput {
 }
 export interface GatewayDispatchResult {
     request: GatewayRequestIR;
+    requestBody: JsonObject;
     route: RouteResolveResult;
     upstreamProtocol: GatewayProtocol;
     upstreamModel: string;
     upstreamBody: JsonObject;
+    conversion: Awaited<ReturnType<typeof convertGatewayRequest>>;
     traceId: string;
     startedAt: number;
 }
@@ -50,6 +55,7 @@ export interface GatewayCompletionResult {
     responseBody?: JsonObject;
     usage: GatewayUsageRecord;
 }
+export type GatewayStreamResult = ConversionResult<JsonObject[]>;
 export interface GatewayTransportResult<T> {
     value?: T;
     status?: number | null;
@@ -86,8 +92,12 @@ export declare class GatewayRuntime {
     private readonly options;
     private readonly trace;
     constructor(options: GatewayRuntimeOptions);
-    dispatch(input: GatewayDispatchInput): GatewayDispatchResult;
+    dispatch(input: GatewayDispatchInput): Promise<GatewayDispatchResult>;
     dispatchWithFallback<T>(input: GatewayDispatchInput, send: (dispatch: GatewayDispatchResult, attempt: number) => Promise<GatewayTransportResult<T>> | GatewayTransportResult<T>): Promise<GatewayFallbackResult<T>>;
     private materializeDispatch;
-    complete(input: GatewayCompletionInput): GatewayCompletionResult;
+    complete(input: GatewayCompletionInput): Promise<GatewayCompletionResult>;
+    createResponseStream(dispatch: GatewayDispatchResult, options?: ConversionOptions): ResponseStreamState;
+    convertStreamChunk(state: ResponseStreamState, upstreamBody: JsonObject): Promise<GatewayStreamResult>;
+    finalizeStream(state: ResponseStreamState, reason?: string): Promise<GatewayStreamResult>;
+    failStream(state: ResponseStreamState, code: string, message: string): Promise<GatewayStreamResult>;
 }

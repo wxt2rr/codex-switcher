@@ -14,6 +14,7 @@ export * from "./usage/ledger.js";
 export * from "./profile/runtime.js";
 export * from "./provider/contracts.js";
 export * from "./protocol/codecs.js";
+export * from "./conversion/index.js";
 export * from "./provider/adapters.js";
 export * from "./provider/registry.js";
 export * from "./agent/contracts.js";

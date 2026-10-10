@@ -4,6 +4,7 @@ import { createServer, type IncomingHttpHeaders, type IncomingMessage, type Serv
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 
+import type { ConversionDiagnostic, ConversionQuality } from "../../../packages/gateway/dist/conversion/index.js";
 import {
   extractTokenUsage,
   type EnvironmentGateway,
@@ -38,6 +39,13 @@ import { FileHistoryPersistence } from "./openai-chat-compat/history-persistence
 import { handleChatCompatibilityRequest } from "./openai-chat-compat/compatibility-handler.js";
 import { loadGatewayPluginRuntime } from "./core-runtime.js";
 import { closeUpstreamProxyAgents, fetchWithOptionalProxy, normalizeUpstreamProxyUrl, resolveUpstreamProxy, type UpstreamProxySource } from "./upstream-proxy.js";
+import {
+  convertGatewayRequestAtRuntime,
+  convertGatewayResponseAtRuntime,
+  convertGatewayResponseStreamAtRuntime,
+  initializeGatewayConversionRuntime,
+  useLegacyProtocolConversion,
+} from "./gateway-conversion-runtime.js";
 
 export interface UsageRouterServiceOptions {
   stateDir: string;
@@ -97,6 +105,8 @@ interface RouteOutcomeTelemetry {
   retryAfterMs: number | null;
   proxySource: UpstreamProxySource;
   upstreamProtocol: RouteProtocol;
+  conversionQuality?: ConversionQuality | null;
+  conversionDiagnostics?: ConversionDiagnostic[];
 }
 
 /** Explicit request metadata used for observability; never contains prompt text or intent. */
@@ -472,6 +482,51 @@ function parseRequestBody(value: Buffer): Record<string, unknown> | undefined {
   }
 }
 
+interface DesktopConversionTrace {
+  quality: ConversionQuality;
+  diagnostics: ConversionDiagnostic[];
+}
+
+interface DesktopConvertedRequest extends DesktopConversionTrace {
+  body: Buffer;
+}
+
+async function convertRequestForRoute(
+  source: RouteProtocol,
+  target: RouteProtocol,
+  body: Record<string, unknown>,
+  upstreamModel: string | undefined,
+  originModel: string | undefined,
+): Promise<DesktopConvertedRequest> {
+  const converted = useLegacyProtocolConversion() ? undefined : await convertGatewayRequestAtRuntime(
+      source,
+      target,
+      body as unknown as import("../../../packages/gateway/dist/protocol.js").JsonObject,
+      { originModelName: originModel, upstreamModelName: upstreamModel },
+      { toolLossPolicy: "allow" },
+    );
+  if (converted) {
+    return {
+      body: Buffer.from(JSON.stringify(converted.value)),
+      quality: converted.quality,
+      diagnostics: converted.diagnostics,
+    };
+  }
+  return {
+    body: Buffer.from(JSON.stringify(adaptProtocolRequest(source, target, body, upstreamModel))),
+    quality: "fair",
+    diagnostics: [{
+      code: useLegacyProtocolConversion() ? "legacy_conversion_forced" : "conversion_runtime_unavailable",
+      level: "warning",
+      message: useLegacyProtocolConversion()
+        ? "The legacy compatibility adapter was explicitly enabled"
+        : "The shared gateway conversion runtime was unavailable; the legacy compatibility adapter was used",
+      source,
+      target,
+    }],
+  };
+}
+
 function retryAfterMs(response: Response): number | undefined {
   const value = response.headers.get("retry-after");
   if (!value) return undefined;
@@ -639,6 +694,8 @@ async function proxyAccountPoolRequest(
   let finalReason: string | null = null;
   let finalErrorMessage: string | null = null;
   let finalResponseId: string | null = null;
+  let finalConversionQuality: ConversionQuality | null = null;
+  let finalConversionDiagnostics: ConversionDiagnostic[] = [];
   let bindingKeyHash = derived.keyHash;
   let didRelayBytes = false;
   const maxSameAccountFailures = Math.min(3, Math.max(1, pool.maxSameAccountFailures ?? 1));
@@ -693,8 +750,14 @@ async function proxyAccountPoolRequest(
       : route;
     let candidateBody = rewriteGatewayModel(body, effectiveUpstreamModel) ?? body;
     const candidateParsedBody = candidateBody.length ? parseRequestBody(candidateBody) : parsedBody;
+    let conversionTrace: DesktopConversionTrace | undefined;
     if (candidateParsedBody && pool.protocol !== effectiveRoute.protocol) {
-      candidateBody = Buffer.from(JSON.stringify(adaptProtocolRequest(pool.protocol, effectiveRoute.protocol, candidateParsedBody, effectiveUpstreamModel)));
+      const converted = await convertRequestForRoute(pool.protocol, effectiveRoute.protocol, candidateParsedBody, effectiveUpstreamModel,
+        typeof parsedBody?.model === "string" ? parsedBody.model : undefined);
+      candidateBody = converted.body;
+      conversionTrace = converted;
+      finalConversionQuality = converted.quality;
+      finalConversionDiagnostics = converted.diagnostics;
     }
     const upstreamSuffix = pool.protocol !== effectiveRoute.protocol
       ? mapGatewaySuffix(routeSuffix, pool.protocol, effectiveRoute.protocol, effectiveUpstreamModel)
@@ -722,7 +785,10 @@ async function proxyAccountPoolRequest(
           ...(candidateBody.length ? { duplex: "half" } as RequestInit : {}), signal: AbortSignal.timeout(120_000),
         }, proxy.url);
       if (pool.protocol !== effectiveRoute.protocol && upstreamResponse.body) {
-        upstreamResponse = await convertUpstreamResponse(upstreamResponse, effectiveRoute.protocol, pool.protocol);
+        upstreamResponse = await convertUpstreamResponse(upstreamResponse, effectiveRoute.protocol, pool.protocol, {
+          originModelName: typeof parsedBody?.model === "string" ? parsedBody.model : undefined,
+          upstreamModelName: effectiveUpstreamModel,
+        });
       }
     } catch (error) {
       const reason = classifyPoolFailure(null, error);
@@ -825,7 +891,8 @@ async function proxyAccountPoolRequest(
     envName: pool.envName, entryAccountName: entryAccountName ?? null, finalAccountName: finalAccount || null,
     attemptedAccounts: attempted, attemptCount: attempted.length, status: finalStatus,
     failoverReason: attempted.length > 1 ? finalReason : null, latencyMs: completedAt - startedAt,
-    sessionKeyHash: bindingKeyHash, errorMessage: finalErrorMessage, attempts });
+    sessionKeyHash: bindingKeyHash, errorMessage: finalErrorMessage, attempts,
+    conversionQuality: finalConversionQuality, conversionDiagnostics: finalConversionDiagnostics });
   if (!didRelayBytes && !response.writableEnded) sendJson(response, finalStatus, { error: { message: "No account in the pool is currently available" }, code: "POOL_NO_AVAILABLE_MEMBER" });
 }
 
@@ -867,10 +934,14 @@ async function proxyRequest(
     const candidateSecret = resolveSecret?.(candidate) ?? (candidate.routeId === route.routeId ? secret : undefined);
     let candidateBody = rewriteGatewayModel(requestBody, candidate.upstreamModel);
     candidateBody = normalizeAuthResponsesRequest(candidateBody, candidate, candidateSecret);
+    let conversionTrace: DesktopConversionTrace | undefined;
     if (candidateBody && incomingProtocol && candidate.protocol !== incomingProtocol) {
       const parsed = parseRequestBody(candidateBody);
       if (parsed) {
-        candidateBody = Buffer.from(JSON.stringify(adaptProtocolRequest(incomingProtocol, candidate.protocol, parsed, candidate.upstreamModel ?? incomingModel)));
+        const converted = await convertRequestForRoute(incomingProtocol, candidate.protocol, parsed,
+          candidate.upstreamModel ?? incomingModel, incomingModel);
+        candidateBody = converted.body;
+        conversionTrace = converted;
       }
     }
     const hasBody = candidateBody ? candidateBody.length > 0 : request.method !== "GET" && request.method !== "HEAD";
@@ -905,7 +976,10 @@ async function proxyRequest(
         ...(hasBody ? { duplex: "half" } as RequestInit : {}),
       }, proxy.url);
       const convertedResponse = incomingProtocol && candidate.protocol !== incomingProtocol
-        ? await convertUpstreamResponse(response, candidate.protocol, incomingProtocol)
+        ? await convertUpstreamResponse(response, candidate.protocol, incomingProtocol, {
+          originModelName: incomingModel,
+          upstreamModelName: candidate.upstreamModel,
+        })
         : response;
       const responseReason = classifyPoolFailure(convertedResponse.status);
       const responseRetryAfterMs = retryAfterMs(convertedResponse) ?? null;
@@ -918,6 +992,8 @@ async function proxyRequest(
           attemptIndex: index + 1, attemptCount: candidates.length, outcome: "retry",
           failureReason: responseReason, errorMessage, retryAfterMs: responseRetryAfterMs,
           proxySource: proxy.source, upstreamProtocol: candidate.protocol,
+          conversionQuality: conversionTrace?.quality ?? null,
+          conversionDiagnostics: conversionTrace?.diagnostics,
         });
         attempts.push({
           accountName: candidate.accountName, startedAt: attemptStartedAt, completedAt: Date.now(),
@@ -941,6 +1017,8 @@ async function proxyRequest(
         failureReason: convertedResponse.ok ? null : responseReason,
         errorMessage, retryAfterMs: responseRetryAfterMs,
         proxySource: proxy.source, upstreamProtocol: candidate.protocol,
+        conversionQuality: conversionTrace?.quality ?? null,
+        conversionDiagnostics: conversionTrace?.diagnostics,
       });
       upstreamResponse = convertedResponse;
       attempts.push({
@@ -961,6 +1039,8 @@ async function proxyRequest(
         failureReason, errorMessage, retryAfterMs: null,
         errorName: diagnostics.name, errorCode: diagnostics.code, errorCause: diagnostics.cause,
         proxySource: proxy.source, upstreamProtocol: candidate.protocol,
+        conversionQuality: conversionTrace?.quality ?? null,
+        conversionDiagnostics: conversionTrace?.diagnostics,
       });
       lastError = error;
       attempts.push({
@@ -1048,10 +1128,17 @@ function mapGatewaySuffix(routeSuffix: string, incoming: RouteProtocol, target: 
   return "responses";
 }
 
-async function convertUpstreamResponse(response: Response, source: RouteProtocol, target: RouteProtocol): Promise<Response> {
+async function convertUpstreamResponse(
+  response: Response,
+  source: RouteProtocol,
+  target: RouteProtocol,
+  metadata: { requestId?: string; originModelName?: string; upstreamModelName?: string } = {},
+): Promise<Response> {
   const contentType = response.headers.get("content-type") ?? "";
   if (!response.body) return response;
   if (contentType.includes("text/event-stream")) {
+    const streamed = useLegacyProtocolConversion() ? undefined : await convertGatewayResponseStreamAtRuntime(response, source, target, metadata, { emitSequenceNumber: true });
+    if (streamed) return streamed;
     const raw = await response.text();
     const converted = adaptProtocolSseChunk(source, target, raw);
     const headers = new Headers(response.headers);
@@ -1062,6 +1149,17 @@ async function convertUpstreamResponse(response: Response, source: RouteProtocol
   try {
     const body = JSON.parse(await response.text()) as unknown;
     if (!body || typeof body !== "object" || Array.isArray(body)) return response;
+    const convertedResult = useLegacyProtocolConversion() ? undefined : await convertGatewayResponseAtRuntime(
+        source,
+        target,
+        body as import("../../../packages/gateway/dist/protocol.js").JsonObject,
+        metadata,
+      );
+    if (convertedResult) {
+      const headers = new Headers(response.headers);
+      headers.delete("content-length");
+      return new Response(JSON.stringify(convertedResult.value), { status: response.status, statusText: response.statusText, headers });
+    }
     const converted = adaptProtocolResponse(source, target, body as Record<string, unknown>);
     const headers = new Headers(response.headers);
     headers.delete("content-length");
@@ -1139,6 +1237,13 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
   // service.  The local resolver remains as a test/development fallback when
   // a package artifact is unavailable.
   await initializeModelRouteEngine();
+  const conversionRuntimeReady = await initializeGatewayConversionRuntime();
+  if (!conversionRuntimeReady) {
+    console.warn("[gateway-conversion] shared conversion runtime unavailable; legacy compatibility conversion will be used");
+  }
+  if (useLegacyProtocolConversion()) {
+    console.warn("[gateway-conversion] legacy compatibility conversion explicitly enabled by CODEX_SWITCHER_LEGACY_PROTOCOL_CONVERSION");
+  }
   let pluginManager: RuntimePluginManager | undefined;
   try {
     const pluginRuntime = await loadGatewayPluginRuntime();
@@ -1710,6 +1815,8 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
             errorCause: telemetry.errorCause ?? null,
             retryAfterMs: telemetry.retryAfterMs,
             latencyMs: telemetry.latencyMs,
+            conversionQuality: telemetry.conversionQuality ?? null,
+            conversionDiagnostics: telemetry.conversionDiagnostics ?? [],
             proxySource: telemetry.proxySource,
             cooldownUntil: gatewayHealth.get(gatewayRouteMetricKey(gateway, candidate.routeId))?.cooldownUntil ?? null,
           });

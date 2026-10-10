@@ -191,6 +191,43 @@ test("account model discovery preserves selected history and marks missing model
   assert.equal(snapshot.accountModelDiscoveries?.["default/deepseek"]?.models[0]?.status, "unavailable");
 });
 
+test("provider switch migrates the selected account binding to the new provider model", async () => {
+  const root = await mkdtemp(join(tmpdir(), "model-discovery-provider-switch-"));
+  const store = createModelCatalogStore(join(root, "models.json"));
+  const oldModel = {
+    providerModelKey: "openai:qwen-plus",
+    providerId: "openai",
+    upstreamModelId: "qwen-plus",
+    displayName: "Qwen Plus",
+    protocols: ["chat_completions"],
+    capabilities: { reasoning: true, tools: true, vision: false, streaming: true },
+    source: "discovery" as const,
+  };
+  await store.saveAccountModelDiscovery({ accountKey: "test/阿里云", providerId: "openai", state: "ready", models: [oldModel] });
+  const oldCatalogModel = (await store.load()).models[0]!;
+  await store.setAccountBindings("test/阿里云", [oldCatalogModel.id], {
+    [oldCatalogModel.id]: { upstreamModelId: "qwen-plus", priority: 3, weight: 2 },
+  });
+
+  await store.saveAccountModelDiscovery({
+    accountKey: "test/阿里云",
+    providerId: "qwen",
+    state: "ready",
+    models: [{ ...oldModel, providerModelKey: "qwen:qwen-plus", providerId: "qwen" }],
+  });
+
+  const snapshot = await store.load();
+  const nextModel = snapshot.models.find((model) => model.entry.provider_model_key === "qwen:qwen-plus");
+  assert.ok(nextModel);
+  assert.deepEqual(snapshot.accountBindings["test/阿里云"], [nextModel.id]);
+  assert.deepEqual(snapshot.accountBindingOptions?.["test/阿里云"]?.[nextModel.id], {
+    upstreamModelId: "qwen-plus",
+    priority: 3,
+    weight: 2,
+  });
+  assert.equal(snapshot.accountBindings["test/阿里云"]?.includes(oldCatalogModel.id), false);
+});
+
 test("failed discovery preserves the previous models as stale", async () => {
   const root = await mkdtemp(join(tmpdir(), "model-discovery-failure-"));
   const store = createModelCatalogStore(join(root, "models.json"));

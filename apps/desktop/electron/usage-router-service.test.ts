@@ -1178,6 +1178,70 @@ test("environment Gateway converts a Responses credential pool member to an Anth
     assert.equal(converted.id, "pool_msg_converted");
     assert.equal(converted.output[0]?.content[0]?.text, "pool converted reply");
     assert.equal(converted.usage.total_tokens, 5);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const trace = await (await fetch(`${service.origin}/admin/trace?event=pool_request_completed&limit=10`, { headers: { authorization: "Bearer secret" } })).json() as Array<{ conversionQuality?: string | null; conversionDiagnostics?: unknown[] }>;
+    assert.equal(trace[0]?.conversionQuality, "fair");
+    assert.equal(JSON.stringify(trace[0]?.conversionDiagnostics).includes("anthropic_default_max_tokens"), true);
+  } finally {
+    await service.close();
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
+});
+
+test("environment Gateway converts Responses requests and Chat SSE responses through the shared stream engine", async () => {
+  let upstreamPath = "";
+  let upstreamBody: Record<string, unknown> | undefined;
+  const upstream = createServer(async (request, response) => {
+    upstreamPath = request.url ?? "";
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    upstreamBody = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+    response.setHeader("content-type", "text/event-stream");
+    response.end([
+      `data: ${JSON.stringify({ id: "chat-stream-1", choices: [{ index: 0, delta: { role: "assistant", content: "hello" }, finish_reason: null }] })}\n\n`,
+      `data: ${JSON.stringify({ id: "chat-stream-1", choices: [], usage: { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 } })}\n\n`,
+      `data: ${JSON.stringify({ id: "chat-stream-1", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`,
+      "data: [DONE]\n\n",
+    ].join(""));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const address = upstream.address(); assert(address && typeof address !== "string");
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-stream-conversion-"));
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+  const route = {
+    routeId: "route-chat-stream-conversion", envName: "work", accountName: "chat", providerId: "chat-provider",
+    exposedModelId: "shared-stream-model", upstreamModel: "chat-upstream-model", upstreamBaseUrl: `http://127.0.0.1:${address.port}/v1`,
+    originalBaseUrl: "default", protocol: "chat_completions" as const, reasoningProfile: "auto" as const,
+    capabilities: { streaming: true },
+    enabled: true, createdAt: 1, updatedAt: 1,
+  };
+  const gateway = {
+    gatewayId: "gateway-chat-stream-conversion", envName: "work", routeIds: [route.routeId], defaultRouteId: route.routeId,
+    routeGroups: { "shared-stream-model": { id: "shared-stream-model", exposedModelId: "shared-stream-model", routeIds: [route.routeId], strategy: "order" as const, sessionPolicy: "off" as const, fallbackEnabled: true, capabilities: { streaming: true } } },
+    enabled: true, createdAt: 1, updatedAt: 1,
+  };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  try {
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(route) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}/secret`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify({ upstreamApiKey: "sk-chat", localRouteToken: "local-chat" }),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway) })).status, 204);
+
+    const response = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
+      method: "POST", headers: { authorization: "Bearer local-chat", "content-type": "application/json" },
+      body: JSON.stringify({ model: "shared-stream-model", stream: true, input: "hello" }),
+    });
+    const streamText = await response.text();
+    assert.equal(response.status, 200, streamText);
+    assert.equal(upstreamPath, "/v1/chat/completions");
+    assert.equal(upstreamBody?.model, "chat-upstream-model");
+    assert.deepEqual(upstreamBody?.messages, [{ role: "user", content: "hello" }]);
+    assert.match(streamText, /event: response\.created/);
+    assert.match(streamText, /event: response\.output_text\.delta/);
+    assert.match(streamText, /hello/);
+    assert.match(streamText, /event: response\.usage/);
+    assert.match(streamText, /event: response\.completed/);
   } finally {
     await service.close();
     await new Promise<void>((resolve) => upstream.close(() => resolve()));

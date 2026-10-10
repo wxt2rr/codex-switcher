@@ -4,7 +4,7 @@ import { GatewayFallbackError, GatewayRuntime } from "./runtime.js";
 import { PluginHost } from "../plugin/host.js";
 import { createPluginProviderAdapter } from "../plugin/provider-adapter.js";
 import { ProviderRegistry } from "../provider/registry.js";
-test("gateway runtime dispatches across protocols and records usage", () => {
+test("gateway runtime dispatches across protocols and records usage", async () => {
     const runtime = new GatewayRuntime({
         candidates: [
             { id: "openai-route", providerId: "openai", credentialId: "key-1", modelId: "gpt-5", protocol: "chat_completions", capabilities: ["tools", "streaming"], priority: 1, weight: 1, healthy: true },
@@ -16,7 +16,7 @@ test("gateway runtime dispatches across protocols and records usage", () => {
         pricingProfiles: [{ providerId: "openai", modelPattern: "gpt-5", inputPerMillion: 1, outputPerMillion: 2, currency: "USD" }],
         now: () => 1_000,
     });
-    const dispatch = runtime.dispatch({
+    const dispatch = await runtime.dispatch({
         requestId: "req-1",
         traceId: "trace-1",
         environmentId: "env-1",
@@ -30,7 +30,13 @@ test("gateway runtime dispatches across protocols and records usage", () => {
     assert.equal(dispatch.upstreamModel, "gpt-5");
     assert.equal(dispatch.upstreamBody.model, "gpt-5");
     assert.deepEqual(dispatch.upstreamBody.messages, [{ role: "user", content: "fix this TypeScript bug" }]);
-    const completion = runtime.complete({
+    assert.equal(dispatch.conversion.quality, "good");
+    const stream = runtime.createResponseStream(dispatch, { emitSequenceNumber: true });
+    const streamChunk = await runtime.convertStreamChunk(stream, { id: "chatcmpl-stream", choices: [{ delta: { content: "done" }, finish_reason: null }] });
+    const streamEnd = await runtime.finalizeStream(stream);
+    assert.equal(streamChunk.value[0]?.type, "response.created");
+    assert.equal(streamEnd.value[0]?.type, "response.completed");
+    const completion = await runtime.complete({
         dispatch,
         upstreamBody: { id: "chatcmpl-1", choices: [{ message: { role: "assistant", content: "done" }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } },
         firstByteAt: 1_250,
@@ -59,7 +65,7 @@ test("gateway runtime isolates simultaneous requests from multiple agents", asyn
         const startedAt = 1_000 + index;
         const result = await runtime.dispatchWithFallback({ requestId: `request-${agentId}`, traceId: `trace-${agentId}`, environmentId: "env", agentId, protocol: "responses", model: "shared", sessionId, now: startedAt, body: { model: "shared", input: agentId } }, async (dispatch) => {
             await new Promise((resolve) => setTimeout(resolve, index === 0 ? 8 : 1));
-            const completion = runtime.complete({
+            const completion = await runtime.complete({
                 dispatch,
                 upstreamBody: { id: `chat-${agentId}`, choices: [{ message: { role: "assistant", content: "done" }, finish_reason: "stop" }], usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 } },
                 firstByteAt: startedAt + 1,
@@ -74,14 +80,14 @@ test("gateway runtime isolates simultaneous requests from multiple agents", asyn
     assert.equal(runtime.ledger.size(), 2);
     assert.deepEqual(runtime.ledger.aggregate({}, "agentId").map((item) => item.key).sort(), ["claude", "codex"]);
 });
-test("gateway runtime rejects a provider/protocol mismatch before sending upstream", () => {
+test("gateway runtime rejects a provider/protocol mismatch before sending upstream", async () => {
     const runtime = new GatewayRuntime({
         candidates: [{ id: "bad", providerId: "openai", credentialId: "key", modelId: "gpt-5", protocol: "gemini", capabilities: [], priority: 0, weight: 1, healthy: true }],
         groups: {},
     });
-    assert.throws(() => runtime.dispatch({ environmentId: "env", agentId: "codex", protocol: "gemini", model: "gpt-5", body: { contents: [] } }), /does not expose protocol/);
+    await assert.rejects(runtime.dispatch({ environmentId: "env", agentId: "codex", protocol: "gemini", model: "gpt-5", body: { contents: [] } }), /does not expose protocol/);
 });
-test("a provider plugin registered in the shared registry participates in model routing", () => {
+test("a provider plugin registered in the shared registry participates in model routing", async () => {
     const pluginHost = new PluginHost({
         send: async (request) => ({ jsonrpc: "2.0", id: request.id, result: {} }),
         close: async () => undefined,
@@ -100,7 +106,7 @@ test("a provider plugin registered in the shared registry participates in model 
         candidates: [{ id: "plugin-route", providerId: "plugin-provider", credentialId: "plugin-key", modelId: "plugin-model", protocol: "responses", capabilities: ["streaming"], priority: 0, weight: 1, healthy: true }],
         groups: {},
     });
-    const dispatch = runtime.dispatch({
+    const dispatch = await runtime.dispatch({
         environmentId: "env",
         agentId: "codex",
         protocol: "responses",

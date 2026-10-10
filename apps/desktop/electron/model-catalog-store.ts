@@ -257,6 +257,9 @@ export function createModelCatalogStore(path: string): ModelCatalogStore {
       }
 
       snapshot.accountModelDiscoveries ??= {};
+      if (previous && input.state === "ready" && incoming.size > 0 && previous.providerId !== input.providerId) {
+        migrateAccountBindingsToProvider(snapshot, input.accountKey, previous, [...incoming.values()]);
+      }
       snapshot.accountModelDiscoveries[input.accountKey] = {
         providerId: input.providerId.trim(),
         state: input.state,
@@ -392,6 +395,56 @@ function upsertDiscoveredCatalogModel(
     return;
   }
   snapshot.models.push({ id: randomUUID(), entry, createdAt: now, updatedAt: now });
+}
+
+/**
+ * A provider switch changes the stable provider-model key while the exposed
+ * model selection remains the user's intent. Move only this account's old
+ * discovered bindings by upstream model id; models and bindings belonging to
+ * other accounts/providers are intentionally left untouched.
+ */
+function migrateAccountBindingsToProvider(
+  snapshot: ModelCatalogSnapshot,
+  accountKey: string,
+  previous: AccountModelDiscoverySnapshot,
+  incoming: readonly AccountDiscoveredModel[],
+): void {
+  const existingBindings = snapshot.accountBindings[accountKey];
+  if (!existingBindings?.length) return;
+
+  const incomingByUpstream = new Map(incoming.map((model) => [model.upstreamModelId, model]));
+  const catalogByProviderKey = new Map<string, CustomModelRecord>();
+  for (const model of snapshot.models) {
+    const key = model.entry.provider_model_key;
+    if (typeof key === "string" && key.trim()) catalogByProviderKey.set(key, model);
+  }
+  const replacements = new Map<string, string>();
+
+  for (const oldModel of previous.models) {
+    if (oldModel.providerId === previous.providerId) {
+      const nextModel = incomingByUpstream.get(oldModel.upstreamModelId);
+      const oldCatalogModel = catalogByProviderKey.get(oldModel.providerModelKey);
+      const nextCatalogModel = nextModel ? catalogByProviderKey.get(nextModel.providerModelKey) : undefined;
+      if (oldCatalogModel && nextCatalogModel && oldCatalogModel.id !== nextCatalogModel.id) {
+        replacements.set(oldCatalogModel.id, nextCatalogModel.id);
+      }
+    }
+  }
+  if (!replacements.size) return;
+
+  const nextBindings = [...new Set(existingBindings.map((id) => replacements.get(id) ?? id))];
+  snapshot.accountBindings[accountKey] = nextBindings;
+  const existingOptions = snapshot.accountBindingOptions?.[accountKey];
+  if (!existingOptions) return;
+  const nextOptions = Object.fromEntries(
+    Object.entries(existingOptions).map(([modelId, options]) => [replacements.get(modelId) ?? modelId, options]),
+  );
+  if (Object.keys(nextOptions).length) {
+    snapshot.accountBindingOptions ??= {};
+    snapshot.accountBindingOptions[accountKey] = nextOptions;
+  } else if (snapshot.accountBindingOptions) {
+    delete snapshot.accountBindingOptions[accountKey];
+  }
 }
 
 function createDiscoveredModelSlug(providerId: string, upstreamModelId: string): string {

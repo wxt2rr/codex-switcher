@@ -114,6 +114,12 @@ import {
 } from "./account-model-catalog.js";
 import { applyModelCatalogBindings, inspectGatewayModelBindings } from "./gateway-model-bindings.js";
 import {
+  createAccountSecretRef,
+  createGatewayAccountDiscoveryView,
+  resolveRuntimeProviderId,
+  synchronizeGatewayAccountMetadata,
+} from "./gateway-account-sync.js";
+import {
   DEEPSEEK_DEFAULT_MODEL_SLUG,
   DEEPSEEK_DEFAULT_MODEL_SLUGS,
   KIMI_DEFAULT_MODEL_SLUG,
@@ -984,7 +990,11 @@ async function buildEnvironmentGatewayState(
   runtime: Awaited<ReturnType<typeof loadCoreRuntime>>,
   environment: Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>["envs"][string],
 ): Promise<GatewayEnvironmentState> {
-  const base = environment.gateway ?? runtime.buildLegacyGatewayEnvironmentState(environment);
+  const base = synchronizeGatewayAccountMetadata(
+    environment,
+    environment.gateway ?? runtime.buildLegacyGatewayEnvironmentState(environment),
+    { rebindRoutes: true },
+  );
   const snapshot = await getModelCatalogStore().load();
   const bundledModels = await loadGatewayBundledModels(environment, snapshot);
   return applyModelCatalogBindings(environment, base, snapshot, bundledModels);
@@ -2724,15 +2734,26 @@ export async function discoverAccountModels(envName: string, accountName: string
   const account = environment?.accounts[accountName];
   if (!environment || !account) throw new Error(`Account '${envName}/${accountName}' not found`);
 
-  const providerId = account.runtime.providerId ?? (account.authMode === "auth" ? "chatgpt" : "openai");
+  const providerId = resolveRuntimeProviderId(account);
   const accountKey = accountModelBindingKey(envName, accountName);
+  const persistedGatewayCredential = Object.values(environment.gateway?.credentials ?? {})
+    .find((credential) => credential.secretRef === createAccountSecretRef(envName, accountName));
+  const persistedGatewayProviderId = persistedGatewayCredential?.providerId;
+  const discoveryLogContext = {
+    gatewayCredentialId: persistedGatewayCredential?.id,
+    gatewayCredentialFound: persistedGatewayCredential !== undefined,
+    gatewayProviderIdBeforeSync: persistedGatewayProviderId,
+    gatewayProviderMismatch: persistedGatewayProviderId !== undefined && persistedGatewayProviderId !== providerId,
+  };
   const store = getModelCatalogStore();
   await store.saveAccountModelDiscovery({ accountKey, providerId, state: "discovering" });
-  await appendModelDiscoveryLog({ envName, accountName, accountKey, providerId, state: "discovering" });
+  await appendModelDiscoveryLog({ envName, accountName, accountKey, providerId, state: "discovering", ...discoveryLogContext });
 
   let gateway: GatewayEnvironmentState;
+  let discoverySucceeded = false;
   try {
-    gateway = environment.gateway ?? await buildEnvironmentGatewayState(runtime, environment);
+    const baseGateway = environment.gateway ?? await buildEnvironmentGatewayState(runtime, environment);
+    gateway = createGatewayAccountDiscoveryView(environment, baseGateway, accountName);
     const result = await discoverGatewayAccountModels({
       environment,
       envName,
@@ -2772,7 +2793,9 @@ export async function discoverAccountModels(envName: string, accountName: string
       state: "ready",
       modelCount: models.length,
       modelIds: models.map((model) => model.upstreamModelId),
+      ...discoveryLogContext,
     });
+    discoverySucceeded = true;
   } catch (error) {
     const message = sanitizeModelDiscoveryError(error);
     await store.saveAccountModelDiscovery({
@@ -2789,10 +2812,16 @@ export async function discoverAccountModels(envName: string, accountName: string
       state: "failed",
       modelCount: 0,
       error: message,
+      ...discoveryLogContext,
     });
   }
 
-  await resynchronizeActiveModelCatalogs(accountKey).catch(() => undefined);
+  // Do not persist a half-repaired gateway after a failed discovery. A
+  // successful result is rebuilt from the synchronized account/provider and
+  // model-catalog state below.
+  if (discoverySucceeded) {
+    await resynchronizeActiveModelCatalogs(accountKey).catch(() => undefined);
+  }
   return listCustomModels();
 }
 
@@ -2828,6 +2857,10 @@ async function appendModelDiscoveryLog(details: {
   modelCount?: number;
   modelIds?: string[];
   error?: string;
+  gatewayCredentialId?: string;
+  gatewayCredentialFound?: boolean;
+  gatewayProviderIdBeforeSync?: string;
+  gatewayProviderMismatch?: boolean;
 }): Promise<void> {
   const safeModelIds = details.modelIds?.map((value) => value.replace(/[\r\n]/g, "").slice(0, 160)).slice(0, 200);
   await appendFile(resolveLogPath("switcher"), `${JSON.stringify({
@@ -2841,6 +2874,10 @@ async function appendModelDiscoveryLog(details: {
     ...(details.modelCount !== undefined ? { modelCount: details.modelCount } : {}),
     ...(safeModelIds?.length ? { modelIds: safeModelIds } : {}),
     ...(details.error ? { error: details.error } : {}),
+    ...(details.gatewayCredentialId ? { gatewayCredentialId: details.gatewayCredentialId } : {}),
+    ...(details.gatewayCredentialFound !== undefined ? { gatewayCredentialFound: details.gatewayCredentialFound } : {}),
+    ...(details.gatewayProviderIdBeforeSync ? { gatewayProviderIdBeforeSync: details.gatewayProviderIdBeforeSync } : {}),
+    ...(details.gatewayProviderMismatch ? { gatewayProviderMismatch: true } : {}),
   })}\n`, "utf8").catch(() => undefined);
 }
 

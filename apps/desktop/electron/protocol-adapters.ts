@@ -1,5 +1,14 @@
 import type { RouteProtocol } from "./usage-routing-model.js";
 
+/**
+ * Compatibility-only protocol adapter.
+ *
+ * The production Gateway path uses packages/gateway/src/conversion through
+ * gateway-conversion-runtime.ts. Keep this module stable for emergency
+ * rollback and older packaged resources; new protocol behavior belongs in
+ * the shared conversion engine and its tests.
+ */
+
 export interface ProtocolCredential {
   upstreamApiKey?: string;
   authMode?: "auth" | "apikey";
