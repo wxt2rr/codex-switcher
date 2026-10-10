@@ -30,10 +30,10 @@ test("create-update-index builds a platform-aware GitHub release index", () => {
     assert.equal(index.releaseUrl, "https://github.com/wxt2rr/codex-switcher/releases/tag/desktop-v1.2.3");
     assert.deepEqual(index.artifacts.map((item) => [item.platform, item.kind]).sort(), [
       ["darwin-arm64", "mac-dmg"],
-      ["darwin-arm64", "mac-zip"],
       ["linux-x64", "linux-appimage"],
       ["win32-x64", "win-nsis"],
     ].sort());
+    assert.equal(index.artifacts.filter((item) => item.platform === "darwin-arm64").length, 1);
     assert.equal(index.artifacts.every((item) => item.url.startsWith("https://github.com/")), true);
   } finally {
     rmSync(root, { recursive: true, force: true });

@@ -7,6 +7,7 @@ import {
   verifyUpdateArtifact,
   verifyUpdateIndex,
   type DesktopUpdateArtifact,
+  type DesktopUpdateArtifactKind,
   type DesktopUpdateIndex,
 } from "./update-security.js";
 
@@ -85,12 +86,24 @@ export async function findGitHubUpdate(options: GitHubUpdateClientOptions): Prom
       requireSignature: options.requireSignedIndex,
     });
     if (!verification.ok) throw new Error(verification.reason);
-    const artifact = index.artifacts.find((item) => item.platform === options.platform);
+    const artifact = selectPreferredUpdateArtifact(index.artifacts, options.platform);
     if (!artifact) continue;
     if (compareVersions(index.version, options.currentVersion) <= 0) continue;
     return { index, artifact, releaseTag: release.tag_name as string, signatureVerified: verification.signatureVerified };
   }
   return undefined;
+}
+
+export function selectPreferredUpdateArtifact(
+  artifacts: DesktopUpdateArtifact[],
+  platform: string,
+): DesktopUpdateArtifact | undefined {
+  return artifacts
+    .filter((artifact) => artifact.platform === platform)
+    .sort((left, right) => {
+      const priorityDifference = artifactPriority(right.kind) - artifactPriority(left.kind);
+      return priorityDifference || left.fileName.localeCompare(right.fileName);
+    })[0];
 }
 
 export async function downloadUpdate(
@@ -168,4 +181,10 @@ function parseContentLength(value: string | null): number | undefined {
   if (!value) return undefined;
   const result = Number(value);
   return Number.isFinite(result) && result >= 0 ? result : undefined;
+}
+
+function artifactPriority(kind: DesktopUpdateArtifactKind): number {
+  if (kind === "mac-dmg" || kind === "win-nsis" || kind === "linux-appimage") return 20;
+  if (kind === "mac-zip" || kind === "linux-deb") return 10;
+  return 0;
 }

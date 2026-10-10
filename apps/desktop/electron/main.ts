@@ -171,7 +171,10 @@ function installDownloadedUpdatePackage(downloaded: import("./github-update.js")
   const mode = resolveUpdateInstallMode(downloaded.candidate.artifact.kind, process.platform);
   if (mode === "manual") {
     void shell.openPath(downloaded.path);
-    return { mode, message: "更新包已下载，请打开安装包完成更新" };
+    const message = downloaded.candidate.artifact.kind === "mac-dmg"
+      ? "已打开 DMG，请将新版本拖入 Applications 替换旧版本"
+      : "更新包已下载，请打开安装包完成更新";
+    return { mode, message };
   }
   if (mode === "unsupported") {
     if (downloaded.candidate.index.releaseUrl) void shell.openExternal(downloaded.candidate.index.releaseUrl);

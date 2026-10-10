@@ -11,14 +11,14 @@ const releaseUrl = required(args["release-url"], "--release-url");
 const artifactBaseUrl = required(args["artifact-base-url"], "--artifact-base-url");
 const output = required(args.out, "--out");
 const privateKeyPem = args["key-file"] ? readFileSync(args["key-file"], "utf8") : process.env.CODEX_SWITCHER_UPDATE_SIGNING_KEY;
-const artifacts = [];
+const artifactCandidates = [];
 
 for (const fileName of readdirSync(directory)) {
   const kind = classify(fileName);
   if (!kind) continue;
   const filePath = join(directory, fileName);
   if (!statSync(filePath).isFile()) continue;
-  artifacts.push({
+  artifactCandidates.push({
     platform: platformFor(fileName, kind),
     kind,
     fileName,
@@ -27,6 +27,13 @@ for (const fileName of readdirSync(directory)) {
     size: statSync(filePath).size,
   });
 }
+
+const artifactsByPlatform = new Map();
+for (const candidate of artifactCandidates) {
+  artifactsByPlatform.set(candidate.platform, preferArtifact(candidate, artifactsByPlatform.get(candidate.platform)));
+}
+const artifacts = [...artifactsByPlatform.values()]
+  .sort((left, right) => left.platform.localeCompare(right.platform));
 
 if (artifacts.length === 0) throw new Error("no desktop artifacts found");
 const index = { version, channel, releaseUrl, publishedAt: Date.now(), artifacts };
@@ -45,6 +52,20 @@ function classify(fileName) {
   if (fileName.endsWith(".AppImage")) return "linux-appimage";
   if (fileName.endsWith(".deb")) return "linux-deb";
   return undefined;
+}
+
+function preferArtifact(candidate, current) {
+  if (!current) return candidate;
+  const candidatePriority = artifactPriority(candidate.kind);
+  const currentPriority = artifactPriority(current.kind);
+  if (candidatePriority !== currentPriority) return candidatePriority > currentPriority ? candidate : current;
+  return candidate.fileName.localeCompare(current.fileName) < 0 ? candidate : current;
+}
+
+function artifactPriority(kind) {
+  if (kind === "mac-dmg" || kind === "win-nsis" || kind === "linux-appimage") return 20;
+  if (kind === "mac-zip" || kind === "linux-deb") return 10;
+  return 0;
 }
 
 function platformFor(fileName, kind) {

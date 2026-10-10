@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { downloadUpdate, findGitHubUpdate } from "./github-update.js";
+import { downloadUpdate, findGitHubUpdate, selectPreferredUpdateArtifact } from "./github-update.js";
 import type { DesktopUpdateIndex } from "./update-security.js";
 
 function response(value: unknown, init?: ResponseInit): Response {
@@ -68,6 +68,27 @@ test("GitHub updater selects the newest compatible release and platform artifact
   assert.equal(candidate?.index.version, "2.1.0");
   assert.equal(candidate?.artifact.kind, "linux-appimage");
   assert.equal(candidate?.signatureVerified, false);
+});
+
+test("GitHub updater prefers the DMG when an older index contains duplicate macOS assets", () => {
+  const artifacts = [
+    {
+      platform: "darwin-arm64" as const,
+      kind: "mac-zip" as const,
+      fileName: "codex-switcher-arm64-mac.zip",
+      url: "https://downloads.test/codex-switcher-arm64-mac.zip",
+      sha256: "a".repeat(64),
+    },
+    {
+      platform: "darwin-arm64" as const,
+      kind: "mac-dmg" as const,
+      fileName: "codex-switcher-arm64.dmg",
+      url: "https://downloads.test/codex-switcher-arm64.dmg",
+      sha256: "b".repeat(64),
+    },
+  ];
+  assert.equal(selectPreferredUpdateArtifact(artifacts, "darwin-arm64")?.kind, "mac-dmg");
+  assert.equal(selectPreferredUpdateArtifact(artifacts, "darwin-x64"), undefined);
 });
 
 test("GitHub updater downloads and verifies artifact bytes", async () => {
