@@ -21,15 +21,20 @@ test("Codex execution environment restores GUI Node lookup for an absolute CLI",
 });
 
 test("Codex execution environment keeps a user-local Node bin directory", () => {
+  const platform = process.platform === "win32" ? "win32" : "darwin";
+  const home = platform === "win32" ? "C:\\Users\\tester" : "/Users/tester";
+  const codexBin = platform === "win32"
+    ? "C:\\Users\\tester\\.local\\bin\\codex.cmd"
+    : "/Users/tester/.local/bin/codex";
   const environment = buildCodexExecutionEnvironment(
-    { HOME: "/Users/tester", PATH: "/usr/bin" },
-    "/Users/tester/.local/bin/codex",
-    "darwin",
+    { HOME: home, USERPROFILE: home, PATH: platform === "win32" ? "C:\\Windows\\System32" : "/usr/bin" },
+    codexBin,
+    platform,
   );
 
-  assert.equal(environment.PATH?.split(delimiter)[0], "/Users/tester/.local/bin");
-  assert.ok(environment.PATH?.includes("/Users/tester/.volta/bin"));
-  assert.ok(environment.PATH?.includes("/usr/bin"));
+  assert.equal(environment.PATH?.split(delimiter)[0], dirname(codexBin));
+  assert.ok(environment.PATH?.includes(platform === "win32" ? join(home, "AppData", "Local", "Programs", "nodejs") : join(home, ".volta", "bin")));
+  assert.ok(environment.PATH?.includes(platform === "win32" ? "C:\\Windows\\System32" : "/usr/bin"));
 });
 
 test("CLI detection prefers an executable found on PATH", async () => { const root = await mkdtemp(join(tmpdir(), "codex-tools-")); const bin = join(root, "bin"); const cli = join(bin, "codex"); await executable(cli); const status = await getCodexToolStatus("cli", { settingsPath: join(root, "settings.json"), env: { HOME: root, PATH: [bin, "/bin"].join(delimiter) }, platform: "darwin" }); assert.equal(status.path, cli); assert.equal(status.source, "path"); });

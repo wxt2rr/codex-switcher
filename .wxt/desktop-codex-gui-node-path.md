@@ -17,7 +17,8 @@
 | --- | --- | --- | --- | --- | --- |
 | 1 | 定义并测试 GUI 启动下的 Codex 执行 PATH 合并策略 | `codex-tool-paths.ts`, tests | Codex 工具路径单测 | done | 新增 `buildCodexExecutionEnvironment`；覆盖绝对 CLI 目录、macOS Homebrew/用户 Node 目录和原 PATH 保留；工具路径单测通过 |
 | 2 | 将模型发现及桌面端 Codex 命令统一接入该运行环境 | `account-model-catalog.ts`, `bridge.ts` | 桌面单测、类型检查 | done | 模型目录调用、CLI 登录、终端执行、令牌刷新已接入；真实受限 PATH 模型发现解析 8 个模型；桌面全量测试 452 通过、1 跳过；生产构建通过 |
-| 3 | 打包验证、版本发布并验收下载版启动 | package scripts, release workflow | desktop build/test、GitHub Actions、清单校验 | in_progress | 版本升至 0.1.45；arm64/x64 本地目录包生成并通过 `package:verify`；待提交推送并验收 GitHub Actions 和 Release 清单 |
+| 3 | 打包验证、版本发布并验收下载版启动 | package scripts, release workflow | desktop build/test、GitHub Actions、清单校验 | done | 本地 arm64/x64 目录包通过 `package:verify`；`desktop-v0.1.45` 的 Windows 测试失败原因已定位为新增测试使用 POSIX 固定路径 |
+| 4 | 修正跨平台回归测试并重新发布 | `codex-tool-paths.test.ts`, release version files | Windows desktop test、Actions、Release manifest | in_progress | 测试已改为按宿主平台构造路径；待升版、推送新标签并验收 |
 
 ## Rules
 - 同时只能有一个 `in_progress`。
