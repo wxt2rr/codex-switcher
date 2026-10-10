@@ -195,6 +195,23 @@ export function App() {
   useEffect(() => {
     if (view !== "operations") return;
     let stopped = false;
+    const refreshUpdateStatus = () => {
+      void bridge.getAutoUpdateStatus().then((status) => {
+        if (!stopped) setAutoUpdateStatus(status);
+      }).catch((error) => {
+        if (!stopped) setErrorMessage(error);
+      });
+    };
+    const interval = window.setInterval(refreshUpdateStatus, 1500);
+    return () => {
+      stopped = true;
+      window.clearInterval(interval);
+    };
+  }, [view]);
+
+  useEffect(() => {
+    if (view !== "operations") return;
+    let stopped = false;
     const loadLog = async () => {
       try {
         const result = selectedLogKind === "token-refresh"

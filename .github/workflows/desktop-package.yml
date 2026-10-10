@@ -313,50 +313,64 @@ jobs:
           test -n "$(find release-assets-flat -maxdepth 1 -name '*.blockmap' -print -quit)"
           find release-assets-flat -maxdepth 1 -type f -print
 
-      - name: Generate optional update manifests
+      - name: Generate update index and optional signed manifests
         shell: bash
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.CODEX_SWITCHER_UPDATE_SIGNING_KEY }}
         run: |
-          if test -z "$RELEASE_SIGNING_KEY"; then
-            echo "No update signing key configured; continuing with unsigned release artifacts."
-            exit 0
-          fi
-          key_file="$(mktemp)"
-          trusted_key_file="$(mktemp)"
-          trap 'rm -f "$key_file" "$trusted_key_file"' EXIT
-          umask 077
-          printf '%s' "$RELEASE_SIGNING_KEY" > "$key_file"
-          node - "$key_file" "$trusted_key_file" <<'NODE'
+          key_file=""
+          trusted_key_file=""
+          cleanup_files() {
+            test -z "$key_file" || rm -f "$key_file"
+            test -z "$trusted_key_file" || rm -f "$trusted_key_file"
+          }
+          trap cleanup_files EXIT
+          if test -n "$RELEASE_SIGNING_KEY"; then
+            key_file="$(mktemp)"
+            trusted_key_file="$(mktemp)"
+            umask 077
+            printf '%s' "$RELEASE_SIGNING_KEY" > "$key_file"
+            node - "$key_file" "$trusted_key_file" <<'NODE'
           const { createPrivateKey, createPublicKey } = require("node:crypto");
           const { readFileSync, writeFileSync } = require("node:fs");
           const privateKey = createPrivateKey(readFileSync(process.argv[2], "utf8"));
           const publicKey = createPublicKey(privateKey).export({ type: "spki", format: "pem" }).toString();
           writeFileSync(process.argv[3], publicKey, { mode: 0o600 });
           NODE
-          shopt -s nullglob
-          for artifact in release-assets-flat/*; do
-            case "$artifact" in
-              *.exe) platform="win32-x64" ;;
-              *.AppImage|*.deb) platform="linux-x64" ;;
-              *-arm64.dmg|*-arm64-mac.zip) platform="darwin-arm64" ;;
-              *.dmg|*-mac.zip) platform="darwin-x64" ;;
-              *) continue ;;
-            esac
-            base="$(basename "$artifact")"
-            node scripts/create-update-manifest.mjs \
-              --artifact "$artifact" \
-              --key-file "$key_file" \
-              --version "${GITHUB_REF_NAME#desktop-v}" \
-              --channel stable \
-              --platform "$platform" \
-              --url "https://github.com/${GH_REPO}/releases/download/${GITHUB_REF_NAME}/${base}" \
-              --out "release-assets-flat/${base}.manifest.json"
-            node scripts/verify-update-manifest.mjs \
-              --manifest "release-assets-flat/${base}.manifest.json" \
-              --artifact "$artifact" \
-              --trusted-public-key-file "$trusted_key_file"
-          done
+            shopt -s nullglob
+            for artifact in release-assets-flat/*; do
+              case "$artifact" in
+                *.exe) platform="win32-x64" ;;
+                *.AppImage|*.deb) platform="linux-x64" ;;
+                *-arm64.dmg|*-arm64-mac.zip) platform="darwin-arm64" ;;
+                *.dmg|*-mac.zip) platform="darwin-x64" ;;
+                *) continue ;;
+              esac
+              base="$(basename "$artifact")"
+              node scripts/create-update-manifest.mjs \
+                --artifact "$artifact" \
+                --key-file "$key_file" \
+                --version "${GITHUB_REF_NAME#desktop-v}" \
+                --channel stable \
+                --platform "$platform" \
+                --url "https://github.com/${GH_REPO}/releases/download/${GITHUB_REF_NAME}/${base}" \
+                --out "release-assets-flat/${base}.manifest.json"
+              node scripts/verify-update-manifest.mjs \
+                --manifest "release-assets-flat/${base}.manifest.json" \
+                --artifact "$artifact" \
+                --trusted-public-key-file "$trusted_key_file"
+            done
+          else
+            echo "No update signing key configured; generating an unsigned HTTPS+SHA256 index."
+          fi
+          node scripts/create-update-index.mjs \
+            --dir release-assets-flat \
+            --version "${GITHUB_REF_NAME#desktop-v}" \
+            --channel stable \
+            --release-url "https://github.com/${GH_REPO}/releases/tag/${GITHUB_REF_NAME}" \
+            --artifact-base-url "https://github.com/${GH_REPO}/releases/download/${GITHUB_REF_NAME}" \
+            --out release-assets-flat/latest.json \
+            ${key_file:+--key-file "$key_file"}
 
       - name: Create or update GitHub Pre-release
         shell: bash

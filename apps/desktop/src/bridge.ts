@@ -277,10 +277,18 @@ export interface ProviderPluginMarketEntry {
 
 export interface DesktopAutoUpdateStatus {
   enabled: boolean;
-  state: "disabled" | "idle" | "checking" | "available" | "downloaded" | "error";
+  state: "disabled" | "idle" | "checking" | "available" | "downloading" | "downloaded" | "installing" | "manual-install" | "unsupported" | "error";
   version?: string;
   message?: string;
   checkedAt?: number;
+  signatureVerified?: boolean;
+  rollbackAvailable?: boolean;
+  downloadedFile?: string;
+  progress?: number;
+  releaseUrl?: string;
+  notes?: string;
+  installMode?: "automatic" | "manual" | "unsupported";
+  platform?: string;
 }
 
 export type ModelCatalogEntry = Record<string, unknown> & {

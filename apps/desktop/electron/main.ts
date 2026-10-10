@@ -1,5 +1,5 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Tray, type IpcMainInvokeEvent } from "electron";
-import { execFile } from "node:child_process";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, net, shell, Tray, type IpcMainInvokeEvent } from "electron";
+import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -129,6 +129,7 @@ import {
 } from "./bridge.js";
 import { closeProviderPluginRuntime } from "./provider-plugin-runtime.js";
 import { createDesktopAutoUpdateController, restartAfterRollback, type AutoUpdaterLike } from "./auto-update.js";
+import { createLinuxAppImageInstallScript, createUpdateHelperPath, createWindowsInstallScript, resolveUpdateInstallMode, type UpdateInstallResult } from "./update-installer.js";
 import { buildDesktopTrayActions } from "./tray-menu.js";
 import { createUpdateRollbackJournal, resolveUpdateJournalPath, validateUpdateManifest, type DesktopUpdateManifest } from "./update-security.js";
 import { copyInstallForRollback, restoreInstallFromRollback } from "./update-rollback.js";
@@ -153,6 +154,75 @@ function readConfiguredUpdateManifest(): DesktopUpdateManifest | undefined {
     console.warn("Ignoring invalid CODEX_SWITCHER_UPDATE_MANIFEST_JSON");
     return undefined;
   }
+}
+
+function resolveUpdatePlatform(): string {
+  if (process.platform === "darwin") return `darwin-${process.arch === "arm64" ? "arm64" : "x64"}`;
+  if (process.platform === "win32") return `win32-${process.arch === "arm64" ? "arm64" : "x64"}`;
+  if (process.platform === "linux") return `linux-${process.arch === "arm64" ? "arm64" : "x64"}`;
+  return `${process.platform}-${process.arch}`;
+}
+
+function resolveUpdateRollbackTarget(): string {
+  return process.platform === "linux" && process.env.APPIMAGE ? process.env.APPIMAGE : app.getAppPath();
+}
+
+function installDownloadedUpdatePackage(downloaded: import("./github-update.js").DownloadedUpdate): UpdateInstallResult {
+  const mode = resolveUpdateInstallMode(downloaded.candidate.artifact.kind, process.platform);
+  if (mode === "manual") {
+    void shell.openPath(downloaded.path);
+    return { mode, message: "更新包已下载，请打开安装包完成更新" };
+  }
+  if (mode === "unsupported") {
+    if (downloaded.candidate.index.releaseUrl) void shell.openExternal(downloaded.candidate.index.releaseUrl);
+    return { mode, message: "当前平台不支持自动安装，已打开发布页面" };
+  }
+  if (process.platform === "win32") {
+    const scriptPath = createUpdateHelperPath("cmd");
+    createWindowsInstallScript({
+      artifactKind: downloaded.candidate.artifact.kind,
+      downloadedPath: downloaded.path,
+      currentPid: process.pid,
+      executablePath: process.execPath,
+      releaseUrl: downloaded.candidate.index.releaseUrl,
+    }, scriptPath);
+    spawn(process.env.ComSpec || "cmd.exe", ["/d", "/c", scriptPath], { detached: true, stdio: "ignore" }).unref();
+    app.quit();
+    return { mode, message: "更新即将安装，应用将自动重启" };
+  }
+  if (process.platform === "linux" && process.env.APPIMAGE) {
+    const scriptPath = createUpdateHelperPath("sh");
+    createLinuxAppImageInstallScript({
+      artifactKind: downloaded.candidate.artifact.kind,
+      downloadedPath: downloaded.path,
+      currentPid: process.pid,
+      executablePath: process.execPath,
+      appImagePath: process.env.APPIMAGE,
+      releaseUrl: downloaded.candidate.index.releaseUrl,
+    }, scriptPath);
+    spawn("/bin/sh", [scriptPath], { detached: true, stdio: "ignore" }).unref();
+    app.quit();
+    return { mode, message: "更新即将安装，应用将自动重启" };
+  }
+  if (downloaded.candidate.index.releaseUrl) void shell.openExternal(downloaded.candidate.index.releaseUrl);
+  return { mode: "unsupported", message: "当前安装方式不支持自动安装，已打开发布页面" };
+}
+
+let desktopUpdateScheduleTimer: NodeJS.Timeout | undefined;
+
+function startDesktopUpdateSchedule(controller: ReturnType<typeof createDesktopAutoUpdateController>): void {
+  if (desktopUpdateScheduleTimer || !controller.getStatus().enabled) return;
+  const check = () => {
+    void controller.check().then((status) => {
+      if (status.state === "error") console.warn(`Desktop update check failed: ${status.message ?? "unknown error"}`);
+    }).catch((error) => {
+      console.warn("Desktop update check failed", error);
+    });
+  };
+  const initialCheckTimer = setTimeout(check, 5000);
+  initialCheckTimer.unref?.();
+  desktopUpdateScheduleTimer = setInterval(check, 6 * 60 * 60 * 1000);
+  desktopUpdateScheduleTimer.unref?.();
 }
 
 function resolveDesktopLogoPath() {
@@ -287,6 +357,18 @@ app.whenReady().then(async () => {
   }
   registerHandlers();
   const updateFeedUrl = process.env.CODEX_SWITCHER_UPDATE_FEED_URL?.trim();
+  const githubUpdateEnabled = app.isPackaged || process.env.CODEX_SWITCHER_ENABLE_GITHUB_UPDATES === "1";
+  const githubUpdate = githubUpdateEnabled ? {
+    owner: process.env.CODEX_SWITCHER_UPDATE_GITHUB_OWNER?.trim() || "wxt2rr",
+    repo: process.env.CODEX_SWITCHER_UPDATE_GITHUB_REPO?.trim() || "codex-switcher",
+    platform: resolveUpdatePlatform(),
+    channel: (process.env.CODEX_SWITCHER_UPDATE_CHANNEL?.trim() as "stable" | "beta" | "nightly" | "all" | undefined) || "all",
+    downloadDirectory: join(app.getPath("userData"), "updates", "downloads"),
+    trustedPublicKeyPem: process.env.CODEX_SWITCHER_UPDATE_TRUSTED_PUBLIC_KEY,
+    requireSignedIndex: process.env.CODEX_SWITCHER_UPDATE_REQUIRE_SIGNATURE === "1",
+    fetchImpl: net.fetch.bind(net) as typeof fetch,
+    installDownloadedUpdate: installDownloadedUpdatePackage,
+  } : undefined;
   const updateBackupPath = process.env.CODEX_SWITCHER_UPDATE_BACKUP_PATH?.trim() || join(app.getPath("userData"), "updates", "app-backup");
   const updateSource: AutoUpdaterLike = updateFeedUrl
     ? (await import("electron")).autoUpdater
@@ -298,15 +380,16 @@ app.whenReady().then(async () => {
     };
   const autoUpdateController = createDesktopAutoUpdateController(updateSource, {
     feedUrl: updateFeedUrl,
+    github: githubUpdate,
     manifest: readConfiguredUpdateManifest(),
     trustedPublicKeyPem: process.env.CODEX_SWITCHER_UPDATE_TRUSTED_PUBLIC_KEY,
     requireSignedManifest: process.env.CODEX_SWITCHER_UPDATE_REQUIRE_SIGNATURE === "1",
-    ...(updateFeedUrl ? {
+    ...(updateFeedUrl || githubUpdate ? {
       rollbackJournal: createUpdateRollbackJournal(resolveUpdateJournalPath(app.getPath("userData"))),
       currentVersion: app.getVersion(),
       backupPath: updateBackupPath,
-      prepareRollbackBackup: (backupPath: string) => copyInstallForRollback(app.getAppPath(), backupPath),
-      restoreRollbackBackup: (backupPath: string) => restoreInstallFromRollback(app.getAppPath(), backupPath),
+      prepareRollbackBackup: (backupPath: string) => copyInstallForRollback(resolveUpdateRollbackTarget(), backupPath),
+      restoreRollbackBackup: (backupPath: string) => restoreInstallFromRollback(resolveUpdateRollbackTarget(), backupPath),
     } : {}),
   });
   applyLaunchAtLoginSettings(await getLaunchAtLoginSettings());
@@ -319,6 +402,7 @@ app.whenReady().then(async () => {
   await createWindow();
   await applyAppPresenceSettings(await getAppPresenceSettings());
   autoUpdateController.markHealthy();
+  startDesktopUpdateSchedule(autoUpdateController);
   startEnvHistoryCleanupSchedule();
   void synchronizeAppEnvironmentBadges().catch(() => undefined);
 
