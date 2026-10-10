@@ -3,8 +3,35 @@ import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { delimiter, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { buildWindowsPackagedAppDetectionCommand, getCodexToolStatus, resetCodexToolPath, saveCodexToolPath } from "./codex-tool-paths.js";
+import { buildCodexExecutionEnvironment, buildWindowsPackagedAppDetectionCommand, getCodexToolStatus, resetCodexToolPath, saveCodexToolPath } from "./codex-tool-paths.js";
 async function executable(path: string) { await mkdir(dirname(path), { recursive: true }); await writeFile(path, "#!/bin/sh\necho codex-cli 1.0\n"); await chmod(path, 0o755); }
+test("Codex execution environment restores GUI Node lookup for an absolute CLI", () => {
+  const environment = buildCodexExecutionEnvironment(
+    { HOME: "/Users/tester", PATH: "/usr/bin:/bin" },
+    "/opt/homebrew/bin/codex",
+    "darwin",
+  );
+
+  assert.equal(environment.PATH?.split(delimiter)[0], "/opt/homebrew/bin");
+  assert.ok(environment.PATH?.includes("/opt/homebrew/sbin"));
+  assert.ok(environment.PATH?.includes("/usr/local/bin"));
+  assert.ok(environment.PATH?.includes("/usr/local/sbin"));
+  assert.ok(environment.PATH?.includes("/usr/bin"));
+  assert.equal(environment.HOME, "/Users/tester");
+});
+
+test("Codex execution environment keeps a user-local Node bin directory", () => {
+  const environment = buildCodexExecutionEnvironment(
+    { HOME: "/Users/tester", PATH: "/usr/bin" },
+    "/Users/tester/.local/bin/codex",
+    "darwin",
+  );
+
+  assert.equal(environment.PATH?.split(delimiter)[0], "/Users/tester/.local/bin");
+  assert.ok(environment.PATH?.includes("/Users/tester/.volta/bin"));
+  assert.ok(environment.PATH?.includes("/usr/bin"));
+});
+
 test("CLI detection prefers an executable found on PATH", async () => { const root = await mkdtemp(join(tmpdir(), "codex-tools-")); const bin = join(root, "bin"); const cli = join(bin, "codex"); await executable(cli); const status = await getCodexToolStatus("cli", { settingsPath: join(root, "settings.json"), env: { HOME: root, PATH: [bin, "/bin"].join(delimiter) }, platform: "darwin" }); assert.equal(status.path, cli); assert.equal(status.source, "path"); });
 test("manual CLI path persists and reset restores automatic detection", async () => { const root = await mkdtemp(join(tmpdir(), "codex-tools-")); const automatic = join(root, "auto", "codex"); const manual = join(root, "manual", "codex"); await executable(automatic); await executable(manual); const options = { settingsPath: join(root, "settings.json"), env: { HOME: root, PATH: join(root, "auto") }, platform: "darwin" as const, validateCli: async () => undefined }; assert.equal((await saveCodexToolPath("cli", manual, options)).source, "manual"); assert.equal((await resetCodexToolPath("cli", options)).path, automatic); });
 test("invalid manual App path is rejected", async () => { const root = await mkdtemp(join(tmpdir(), "codex-tools-")); await assert.rejects(() => saveCodexToolPath("app", join(root, "missing"), { settingsPath: join(root, "settings.json"), env: { HOME: root }, platform: "darwin" }), /not executable/); });

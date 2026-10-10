@@ -45,6 +45,7 @@ import {
 } from "./usage-routing-model.js";
 import {
   buildEffectiveCodexEnv,
+  buildCodexExecutionEnvironment,
   getCodexToolStatus,
   listCodexToolStatuses,
   normalizeWindowsPackagedAppTarget,
@@ -3302,8 +3303,8 @@ async function openCommandInPreferredTerminalOnce(
   }
   const terminalSettings = await getCliTerminalSettings();
   const launchEnv = terminalSettings.terminals.some((item) => item.id === "powershell7")
-    ? { ...process.env, CODEX_SWITCHER_WINDOWS_PWSH_AVAILABLE: "1" }
-    : process.env;
+    ? { ...await getEffectiveCodexEnv(), CODEX_SWITCHER_WINDOWS_PWSH_AVAILABLE: "1" }
+    : await getEffectiveCodexEnv();
   const plan = buildCliTerminalLaunchPlan({
     repoRoot,
     workingDirectory: launchDirectory,
@@ -3328,7 +3329,7 @@ async function openCommandInPreferredTerminalOnce(
     try {
       const result = await execFileAsync(attempt.command, attempt.args, {
         cwd: repoRoot,
-        env: process.env,
+        env: launchEnv,
       });
       await appendTerminalLaunchDebug(launchId, "attempt-success", {
         command: attempt.command,
@@ -3907,7 +3908,7 @@ async function nativeAuthLogin(request: {
   await execFileAsync(codexBin, ["login"], {
     cwd: getRepoRoot(),
     env: {
-      ...process.env,
+      ...await getEffectiveCodexEnv(),
       CODEX_HOME: env.path,
     },
   });
@@ -5656,7 +5657,7 @@ async function runCodexExecRefreshDirect(input: {
   return new Promise((resolve, reject) => {
     const child = spawn(input.codexBin, ["exec", "--skip-git-repo-check", "reply with: ok"], {
       env: {
-        ...process.env,
+        ...buildCodexExecutionEnvironment(process.env, input.codexBin),
         CODEX_HOME: input.codexHome,
       },
       stdio: ["ignore", "pipe", "pipe"],

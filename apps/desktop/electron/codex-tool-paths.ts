@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import { access, mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, dirname, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -25,6 +25,44 @@ async function isExecutable(path: string) { try { const info = await stat(path);
 async function readSettings(path: string): Promise<DesktopSettings> { try { return JSON.parse(await readFile(path, "utf8")) as DesktopSettings; } catch { return {}; } }
 async function writeSettings(path: string, value: DesktopSettings) { await mkdir(dirname(path), { recursive: true }); await writeFile(path, `${JSON.stringify(value, null, 2)}\n`); }
 function pathCandidates(command: string, env: NodeJS.ProcessEnv, platform: NodeJS.Platform) { const exts = platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""]; return (env.PATH || "").split(delimiter).filter(Boolean).flatMap((dir) => exts.map((ext) => join(dir, `${command}${ext}`))); }
+
+/**
+ * Electron apps launched from Finder/Dock do not inherit the user's shell
+ * initialisation files. Codex CLI is commonly a `#!/usr/bin/env node` script,
+ * so an otherwise valid absolute CLI path still fails when the GUI PATH does
+ * not contain the Node installation that owns it.
+ */
+export function buildCodexExecutionEnvironment(
+  env: NodeJS.ProcessEnv = process.env,
+  codexBin?: string,
+  platform: NodeJS.Platform = process.platform,
+): NodeJS.ProcessEnv {
+  const home = platform === "win32" ? env.USERPROFILE || env.HOME : env.HOME;
+  const homePaths = home
+    ? platform === "win32"
+      ? [
+          join(home, "AppData", "Roaming", "npm"),
+          join(home, "AppData", "Local", "Programs", "nodejs"),
+        ]
+      : [
+          join(home, ".local", "bin"),
+          join(home, ".volta", "bin"),
+          join(home, ".fnm", "current", "bin"),
+          join(home, ".npm-global", "bin"),
+          join(home, "Library", "pnpm"),
+        ]
+    : [];
+  const platformPaths = platform === "darwin"
+    ? ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "/usr/local/sbin"]
+    : platform === "linux"
+      ? ["/usr/local/bin", "/usr/bin"]
+      : [];
+  const codexDir = codexBin && isAbsolute(codexBin) ? dirname(codexBin) : "";
+  const existingPaths = (env.PATH || "").split(delimiter).filter(Boolean);
+  const path = [...new Set([codexDir, ...existingPaths, ...platformPaths, ...homePaths].filter(Boolean))].join(delimiter);
+  return { ...env, PATH: path };
+}
+
 function knownCandidates(kind: CodexToolKind, env: NodeJS.ProcessEnv, platform: NodeJS.Platform) {
   const home = platform === "win32" ? env.USERPROFILE || env.HOME || "" : env.HOME || "";
   if (kind === "cli") return platform === "win32"
@@ -149,15 +187,15 @@ async function detectPath(kind: CodexToolKind, env: NodeJS.ProcessEnv, platform:
   return candidate ? { path: candidate, source: "candidate" } : { path: "", source: "missing" };
 }
 export async function getCodexToolStatus(kind: CodexToolKind, options: CodexToolPathOptions): Promise<CodexToolStatus> {
-  const env = options.env ?? process.env; const platform = options.platform ?? process.platform; const settings = await readSettings(options.settingsPath);
+  const platform = options.platform ?? process.platform; const env = buildCodexExecutionEnvironment(options.env ?? process.env, undefined, platform); const settings = await readSettings(options.settingsPath);
   const manualPath = (kind === "cli" ? settings.cliPath : settings.appPath)?.trim() || ""; const detected = await detectPath(kind, env, platform, options.detectWindowsPackagedApp ?? detectWindowsPackagedApp); const manualAvailable = manualPath ? (kind === "app" && platform === "win32" && Boolean(normalizeWindowsPackagedAppTarget(manualPath))) || await isExecutable(manualPath) : false;
   return { kind, path: manualAvailable ? manualPath : detected.path, detectedPath: detected.path, manualPath, source: manualAvailable ? "manual" : detected.source, available: manualAvailable || Boolean(detected.path) };
 }
 export async function listCodexToolStatuses(options: CodexToolPathOptions) { return Promise.all([getCodexToolStatus("cli", options), getCodexToolStatus("app", options)]); }
 export async function saveCodexToolPath(kind: CodexToolKind, path: string, options: CodexToolPathOptions) {
-  const input = path.trim(); const value = input ? await normalizeManualPath(kind, input, options.platform ?? process.platform) : ""; if (!value) throw new Error(`${kind === "cli" ? "Codex CLI" : "Codex App"} path is not executable: ${input || "(empty)"}`);
-  if (kind === "cli") { try { if (options.validateCli) await options.validateCli(value); else if ((options.platform ?? process.platform) === "win32" && /\.(cmd|bat)$/i.test(value)) await execFileAsync("cmd.exe", ["/d", "/s", "/c", `"${value}" --version`], { timeout: 10_000 }); else await execFileAsync(value, ["--version"], { timeout: 10_000 }); } catch (error) { throw new Error(`Codex CLI validation failed: ${error instanceof Error ? error.message : String(error)}`); } }
+  const platform = options.platform ?? process.platform; const input = path.trim(); const value = input ? await normalizeManualPath(kind, input, platform) : ""; if (!value) throw new Error(`${kind === "cli" ? "Codex CLI" : "Codex App"} path is not executable: ${input || "(empty)"}`);
+  if (kind === "cli") { try { if (options.validateCli) await options.validateCli(value); else if (platform === "win32" && /\.(cmd|bat)$/i.test(value)) await execFileAsync("cmd.exe", ["/d", "/s", "/c", `"${value}" --version`], { timeout: 10_000, env: buildCodexExecutionEnvironment(options.env ?? process.env, value, platform) }); else await execFileAsync(value, ["--version"], { timeout: 10_000, env: buildCodexExecutionEnvironment(options.env ?? process.env, value, platform) }); } catch (error) { throw new Error(`Codex CLI validation failed: ${error instanceof Error ? error.message : String(error)}`); } }
   const settings = await readSettings(options.settingsPath); if (kind === "cli") settings.cliPath = value; else settings.appPath = value; await writeSettings(options.settingsPath, settings); return getCodexToolStatus(kind, options);
 }
 export async function resetCodexToolPath(kind: CodexToolKind, options: CodexToolPathOptions) { const settings = await readSettings(options.settingsPath); if (kind === "cli") delete settings.cliPath; else delete settings.appPath; await writeSettings(options.settingsPath, settings); return getCodexToolStatus(kind, options); }
-export function buildEffectiveCodexEnv(statuses: CodexToolStatus[], env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv { const cli = statuses.find((x) => x.kind === "cli"); const app = statuses.find((x) => x.kind === "app"); return { ...env, ...(cli?.available ? { CODEX_SWITCHER_CODEX_BIN: cli.path, CODEX_BIN: cli.path } : {}), ...(app?.available ? { CODEX_SWITCHER_APP_BIN: app.path } : {}) }; }
+export function buildEffectiveCodexEnv(statuses: CodexToolStatus[], env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): NodeJS.ProcessEnv { const cli = statuses.find((x) => x.kind === "cli"); const app = statuses.find((x) => x.kind === "app"); return buildCodexExecutionEnvironment({ ...env, ...(cli?.available ? { CODEX_SWITCHER_CODEX_BIN: cli.path, CODEX_BIN: cli.path } : {}), ...(app?.available ? { CODEX_SWITCHER_APP_BIN: app.path } : {}) }, cli?.available ? cli.path : undefined, platform); }

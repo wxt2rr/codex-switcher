@@ -13,6 +13,7 @@ import {
 } from "./model-catalog-store.js";
 import { resolveProviderModelPreset } from "./provider-model-presets.js";
 import { buildGatewayModelCatalog } from "./gateway-model-catalog.js";
+import { buildCodexExecutionEnvironment } from "./codex-tool-paths.js";
 import type { GatewayEnvironmentState } from "../../../packages/core/dist/gateway/model.js";
 
 const execFileAsync = promisify(execFile);
@@ -34,9 +35,14 @@ export function buildBundledCatalogCommand(
   return { command: codexBin, args: ["debug", "models", "--bundled"] };
 }
 
-export async function loadBundledModelCatalog(codexBin: string): Promise<BundledModelCatalog> {
-  const invocation = buildBundledCatalogCommand(codexBin);
+export async function loadBundledModelCatalog(
+  codexBin: string,
+  options?: { env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform },
+): Promise<BundledModelCatalog> {
+  const platform = options?.platform ?? process.platform;
+  const invocation = buildBundledCatalogCommand(codexBin, platform);
   const { stdout } = await execFileAsync(invocation.command, invocation.args, {
+    env: buildCodexExecutionEnvironment(options?.env ?? process.env, codexBin, platform),
     timeout: 20_000,
     maxBuffer: 10 * 1024 * 1024,
   });
