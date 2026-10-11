@@ -827,40 +827,23 @@ test("environment gateway fails over a route group in an enabled credential pool
     assert.equal((await routed.json()).id, "group-fallback-success");
     assert.equal(firstCalls, 1);
     assert.equal(secondCalls, 1);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    const attempts = await (await fetch(`${service.origin}/admin/trace?gatewayId=${gateway.gatewayId}&event=gateway_route_attempt`, { headers: adminHeaders })).json() as Array<{
-      requestId?: string;
-      routeId?: string;
-      accountName?: string;
-      attemptIndex?: number;
-      attemptCount?: number;
-      status?: number | null;
-      outcome?: string;
-      failureReason?: string | null;
-      errorMessage?: string | null;
-      proxySource?: string;
-      cooldownUntil?: number | null;
-    }>;
-    assert.equal(attempts.length, 2);
-    assert.equal(attempts[0]?.requestId, attempts[1]?.requestId);
-    const firstAttempt = attempts.find((attempt) => attempt.routeId === firstRoute.routeId);
-    const secondAttempt = attempts.find((attempt) => attempt.routeId === secondRoute.routeId);
-    assert.deepEqual({
-      accountName: firstAttempt?.accountName, attemptIndex: firstAttempt?.attemptIndex, attemptCount: firstAttempt?.attemptCount,
-      status: firstAttempt?.status, outcome: firstAttempt?.outcome, failureReason: firstAttempt?.failureReason,
-      errorMessage: firstAttempt?.errorMessage, proxySource: firstAttempt?.proxySource,
-    }, {
-      accountName: "first", attemptIndex: 1, attemptCount: 2, status: 429, outcome: "retry",
-      failureReason: "rate_limit", errorMessage: "rate limited", proxySource: "direct",
-    });
-    assert.deepEqual({
-      accountName: secondAttempt?.accountName, attemptIndex: secondAttempt?.attemptIndex, attemptCount: secondAttempt?.attemptCount,
-      status: secondAttempt?.status, outcome: secondAttempt?.outcome, failureReason: secondAttempt?.failureReason,
-      errorMessage: secondAttempt?.errorMessage, proxySource: secondAttempt?.proxySource,
-    }, {
-      accountName: "second", attemptIndex: 2, attemptCount: 2, status: 200, outcome: "success",
-      failureReason: null, errorMessage: null, proxySource: "direct",
-    });
+    const page = await (await fetch(`${service.origin}/admin/requests?from=0&to=${Date.now() + 1000}&page=1&pageSize=20`, {
+      headers: adminHeaders,
+    })).json() as { items: Array<{
+      poolId: string;
+      accountName: string;
+      attemptCount: number;
+      attemptedAccounts: string[];
+      failoverReason: string | null;
+      attempts: Array<{ accountName: string; httpStatus: number | null; outcome: string }>;
+    }> };
+    const failedOver = page.items.find((item) => item.poolId === pool.poolId && item.attemptCount === 2);
+    assert.equal(failedOver?.accountName, "second");
+    assert.deepEqual(failedOver?.attemptedAccounts, ["first", "second"]);
+    assert.equal(failedOver?.failoverReason, "rate_limit");
+    assert.deepEqual(failedOver?.attempts.map((attempt) => [attempt.accountName, attempt.httpStatus, attempt.outcome]), [
+      ["first", 429, "retry"], ["second", 200, "success"],
+    ]);
     const health = await (await fetch(`${service.origin}/admin/gateways/${gateway.gatewayId}/health`, { headers: adminHeaders })).json() as Array<{ routeId: string; state: string }>;
     assert.equal(health.find((item) => item.routeId === firstRoute.routeId)?.state, "cooldown");
     assert.equal(health.find((item) => item.routeId === secondRoute.routeId)?.state, "healthy");
@@ -886,8 +869,10 @@ test("environment gateway fails over a route group in an enabled credential pool
   }
 });
 
-test("changing the global proxy clears gateway route cooldowns", async () => {
+test("an unpooled gateway does not cool down its selected route", async () => {
+  let calls = 0;
   const upstream = createServer(async (request, response) => {
+    calls += 1;
     for await (const _chunk of request) { /* drain */ }
     response.statusCode = 429;
     response.end(JSON.stringify({ error: { message: "rate limited" } }));
@@ -919,14 +904,19 @@ test("changing the global proxy clears gateway route cooldowns", async () => {
       body: JSON.stringify({ model: "proxy-reset", input: "hello" }),
     });
     assert.equal(failed.status, 429);
-    const before = await (await fetch(`${service.origin}/admin/gateways/${gateway.gatewayId}/health`, { headers: adminHeaders })).json() as Array<{ routeId: string; state: string }>;
-    assert.equal(before.find((item) => item.routeId === route.routeId)?.state, "cooldown");
+    const afterFirstFailure = await (await fetch(`${service.origin}/admin/gateways/${gateway.gatewayId}/health`, { headers: adminHeaders })).json() as Array<{ routeId: string; state: string; cooldownUntil: number | null }>;
+    assert.equal(afterFirstFailure.find((item) => item.routeId === route.routeId)?.state, "healthy");
+    assert.equal(afterFirstFailure.find((item) => item.routeId === route.routeId)?.cooldownUntil, null);
 
-    assert.equal((await fetch(`${service.origin}/admin/proxy`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ proxyUrl: "http://127.0.0.1:7899" }) })).status, 204);
-    const after = await (await fetch(`${service.origin}/admin/gateways/${gateway.gatewayId}/health`, { headers: adminHeaders })).json() as Array<{ routeId: string; state: string; cooldownUntil: number | null }>;
-    const reset = after.find((item) => item.routeId === route.routeId);
-    assert.equal(reset?.state, "healthy");
-    assert.equal(reset?.cooldownUntil, null);
+    const repeated = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
+      method: "POST", headers: { authorization: "Bearer local-route", "content-type": "application/json" },
+      body: JSON.stringify({ model: "proxy-reset", input: "repeat" }),
+    });
+    assert.equal(repeated.status, 429);
+    assert.equal(calls, 2);
+    const afterRepeatedFailure = await (await fetch(`${service.origin}/admin/gateways/${gateway.gatewayId}/health`, { headers: adminHeaders })).json() as Array<{ routeId: string; state: string; cooldownUntil: number | null }>;
+    assert.equal(afterRepeatedFailure.find((item) => item.routeId === route.routeId)?.state, "healthy");
+    assert.equal(afterRepeatedFailure.find((item) => item.routeId === route.routeId)?.cooldownUntil, null);
   } finally {
     await service.close();
     await new Promise<void>((resolve) => upstream.close(() => resolve()));
