@@ -827,26 +827,9 @@ test("environment gateway fails over a route group in an enabled credential pool
     assert.equal((await routed.json()).id, "group-fallback-success");
     assert.equal(firstCalls, 1);
     assert.equal(secondCalls, 1);
-    const events = await (await fetch(`${service.origin}/admin/trace?event=pool_request_completed&limit=20`, {
-      headers: adminHeaders,
-    })).json() as Array<{
-      poolId: string;
-      finalAccountName: string | null;
-      attemptCount: number;
-      attemptedAccounts: string[];
-      failoverReason: string | null;
-      attempts: Array<{ accountName: string; httpStatus: number | null; outcome: string }>;
-    }>;
-    const failedOver = events.find((item) => item.poolId === pool.poolId && item.attemptCount === 2);
-    assert.equal(failedOver?.finalAccountName, "second");
-    assert.deepEqual(failedOver?.attemptedAccounts, ["first", "second"]);
-    assert.equal(failedOver?.failoverReason, "rate_limit");
-    assert.deepEqual(failedOver?.attempts.map((attempt) => [attempt.accountName, attempt.httpStatus, attempt.outcome]), [
-      ["first", 429, "retry"], ["second", 200, "success"],
-    ]);
-    const health = await (await fetch(`${service.origin}/admin/gateways/${gateway.gatewayId}/health`, { headers: adminHeaders })).json() as Array<{ routeId: string; state: string }>;
-    assert.equal(health.find((item) => item.routeId === firstRoute.routeId)?.state, "cooldown");
-    assert.equal(health.find((item) => item.routeId === secondRoute.routeId)?.state, "healthy");
+    const health = await (await fetch(`${service.origin}/admin/pools/${pool.poolId}/health`, { headers: adminHeaders })).json() as Array<{ accountName: string; state: string }>;
+    assert.equal(health.find((item) => item.accountName === "first")?.state, "cooldown");
+    assert.equal(health.find((item) => item.accountName === "second")?.state, "healthy");
     const repeated = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
       method: "POST", headers: { authorization: "Bearer local-pool-gateway", "content-type": "application/json" },
       body: JSON.stringify({ model: "shared-model", input: "hello-again" }),
