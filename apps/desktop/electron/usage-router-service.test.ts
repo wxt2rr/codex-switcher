@@ -827,18 +827,18 @@ test("environment gateway fails over a route group in an enabled credential pool
     assert.equal((await routed.json()).id, "group-fallback-success");
     assert.equal(firstCalls, 1);
     assert.equal(secondCalls, 1);
-    const page = await (await fetch(`${service.origin}/admin/requests?from=0&to=${Date.now() + 1000}&page=1&pageSize=20`, {
+    const events = await (await fetch(`${service.origin}/admin/trace?event=pool_request_completed&limit=20`, {
       headers: adminHeaders,
-    })).json() as { items: Array<{
+    })).json() as Array<{
       poolId: string;
-      accountName: string;
+      finalAccountName: string | null;
       attemptCount: number;
       attemptedAccounts: string[];
       failoverReason: string | null;
       attempts: Array<{ accountName: string; httpStatus: number | null; outcome: string }>;
-    }> };
-    const failedOver = page.items.find((item) => item.poolId === pool.poolId && item.attemptCount === 2);
-    assert.equal(failedOver?.accountName, "second");
+    }>;
+    const failedOver = events.find((item) => item.poolId === pool.poolId && item.attemptCount === 2);
+    assert.equal(failedOver?.finalAccountName, "second");
     assert.deepEqual(failedOver?.attemptedAccounts, ["first", "second"]);
     assert.equal(failedOver?.failoverReason, "rate_limit");
     assert.deepEqual(failedOver?.attempts.map((attempt) => [attempt.accountName, attempt.httpStatus, attempt.outcome]), [
