@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, RefreshCw, Search } from "lucide-react";
+import { Check, CircleHelp, RefreshCw, Search } from "lucide-react";
 
 import type {
   AccountModelDiscoverySnapshot,
@@ -11,6 +11,7 @@ import type { UiLanguage } from "../i18n";
 import { ProviderIcon } from "./provider-icon";
 import { SidePanel } from "./admin-primitives";
 import { Input, Select } from "./form-primitives";
+import { Tooltip } from "./ui/tooltip";
 import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
 import {
@@ -38,7 +39,8 @@ function discoveryStateLabel(snapshot: AccountModelDiscoverySnapshot | undefined
   return zh ? `已发现 ${snapshot.models.length} 个模型` : `${snapshot.models.length} models discovered`;
 }
 
-function providerLabel(providerId: string, providerCatalog: ProviderCatalogItem[], zh: boolean): string {
+function providerLabel(providerId: string, providerCatalog: ProviderCatalogItem[], zh: boolean, displayName?: string): string {
+  if (displayName?.trim()) return displayName.trim();
   if (providerId === "custom") return zh ? "手动配置" : "Manual";
   return providerCatalog.find((provider) => provider.id === providerId)?.displayName ?? providerId;
 }
@@ -50,6 +52,7 @@ export function AccountModelExposurePanel({
   language,
   providerCatalog,
   bridge,
+  onOpenModelSettings,
   onClose,
   onSaved,
   onError,
@@ -60,6 +63,7 @@ export function AccountModelExposurePanel({
   language: UiLanguage;
   providerCatalog: ProviderCatalogItem[];
   bridge: DesktopBridge;
+  onOpenModelSettings: () => void;
   onClose: () => void;
   onSaved?: () => void;
   onError: (error: unknown) => void;
@@ -101,14 +105,16 @@ export function AccountModelExposurePanel({
   }, [open, accountKey]);
 
   const discovery = snapshot.accountModelDiscoveries?.[accountKey];
+  const catalogFallback = discovery?.state === "failed"
+    || (discovery?.state === "ready" && !discovery.models.some((model) => model.status === "available"));
   const discoveryByProviderKey = useMemo(
     () => discoveryByProviderKeyOf(snapshot, accountKey),
     [snapshot, accountKey],
   );
 
   const allCandidates = useMemo(() => {
-    return buildAccountModelCandidates(snapshot, accountKey, selectedIds);
-  }, [accountKey, selectedIds, snapshot]);
+    return buildAccountModelCandidates(snapshot, accountKey, selectedIds, catalogFallback);
+  }, [accountKey, catalogFallback, selectedIds, snapshot]);
 
   const providerOptions = useMemo(() => {
     return [...new Set(allCandidates.map((model) => providerIdForAccountModel(model, discoveryByProviderKey)))].sort((left, right) =>
@@ -122,7 +128,7 @@ export function AccountModelExposurePanel({
       const providerId = providerIdForAccountModel(model, discoveryByProviderKey);
       if (providerFilter !== "all" && providerId !== providerFilter) return false;
       if (!query) return true;
-      return `${model.entry.display_name} ${model.entry.slug} ${providerId}`.toLowerCase().includes(query);
+      return `${model.entry.display_name} ${model.entry.slug} ${providerId} ${String(model.entry.provider_display_name ?? "")}`.toLowerCase().includes(query);
     });
   }, [allCandidates, discoveryByProviderKey, providerFilter, search]);
 
@@ -162,6 +168,19 @@ export function AccountModelExposurePanel({
             ? "只会暴露你勾选的模型。服务商返回的模型和模型页面手动配置的模型可以同时选择；发现失败不会删除上次结果。"
             : "Only checked models are exposed. Discovered provider models and manually configured models can be selected together; a failed refresh keeps the last result."}
         </div>
+        {catalogFallback ? (
+          <div role="status" className="rounded-xl border border-amber-200 bg-amber-50/70 px-3.5 py-3 text-[12px] leading-5 text-amber-900">
+            <div className="font-medium">
+              {discovery?.state === "failed"
+                ? (zh ? "尝试抓取服务商模型失败" : "Failed to fetch provider models")
+                : (zh ? "服务商没有返回模型" : "The provider returned no models")}
+            </div>
+            {discovery.lastError ? <div className="mt-1 break-words text-amber-800">{discovery.lastError}</div> : null}
+            <div className="mt-1 text-amber-800">
+              {zh ? "你可以从当前模型列表中选择模型；保存后会按当前服务商绑定。" : "Choose from the existing model catalog; saved selections will be bound to this provider."}
+            </div>
+          </div>
+        ) : null}
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
@@ -174,7 +193,12 @@ export function AccountModelExposurePanel({
               { value: "all", label: zh ? "全部服务商" : "All providers" },
               ...providerOptions.map((providerId) => ({
                 value: providerId,
-                label: providerLabel(providerId, providerCatalog, zh),
+                label: providerLabel(
+                  providerId,
+                  providerCatalog,
+                  zh,
+                  String(allCandidates.find((model) => providerIdForAccountModel(model, discoveryByProviderKey) === providerId)?.entry.provider_display_name ?? ""),
+                ),
               })),
             ]}
             openOnHover={false}
@@ -184,6 +208,16 @@ export function AccountModelExposurePanel({
             <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
             {zh ? "刷新" : "Refresh"}
           </Button>
+          <Tooltip content={zh ? "找不到支持的模型？点击这里，去模型设置页新增自定义模型吧。" : "Can't find a supported model? Open Models to add a custom model."}>
+            <button
+              type="button"
+              onClick={onOpenModelSettings}
+              aria-label={zh ? "打开模型设置" : "Open model settings"}
+              className="inline-flex size-9 items-center justify-center rounded-lg border border-black/[0.08] bg-white text-slate-500 transition-colors hover:bg-slate-50 hover:text-neutral-900"
+            >
+              <CircleHelp className="size-4" />
+            </button>
+          </Tooltip>
         </div>
         <div className="flex items-center justify-between text-[12px] text-slate-500">
           <span>{loading ? (zh ? "正在加载目录…" : "Loading catalog…") : (zh ? `显示 ${candidates.length} 个模型，已选 ${selectedIds.length} 个` : `${candidates.length} shown, ${selectedIds.length} selected`)}</span>
@@ -211,11 +245,16 @@ export function AccountModelExposurePanel({
               : undefined;
             const stale = discovered?.status === "stale" || discovered?.status === "unavailable";
             const checked = selectedIds.includes(model.id);
-            const historicalBinding = Boolean(providerModelKey && !discovered && checked);
+            const historicalBinding = !catalogFallback && Boolean(providerModelKey && !discovered && checked);
             return (
               <label key={model.id} className={cn("flex cursor-pointer items-start gap-3 rounded-xl border px-3.5 py-3 transition-colors", historicalBinding ? "border-amber-200 bg-amber-50/40" : checked ? "border-neutral-300 bg-neutral-50" : "border-black/[0.07] bg-white hover:bg-neutral-50")}>
                 <input type="checkbox" checked={checked} onChange={(event) => toggleModel(model.id, event.target.checked)} className="mt-1 size-4 accent-[#34C759]" />
-                <ProviderIcon providerId={providerId} displayName={providerId} size={24} className="mt-0.5" />
+                <ProviderIcon
+                  providerId={providerCatalog.find((item) => item.id === providerId)?.iconKey ?? providerId}
+                  displayName={providerLabel(providerId, providerCatalog, zh, String(model.entry.provider_display_name ?? ""))}
+                  size={24}
+                  className="mt-0.5"
+                />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-2">
                     <span className="truncate text-[13px] font-medium text-neutral-900">{model.entry.display_name}</span>

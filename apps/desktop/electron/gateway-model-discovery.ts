@@ -35,7 +35,7 @@ export interface GatewayProviderDiscoveryResult {
 export interface GatewayAccountDiscoveryResult {
   accountName: string;
   providerId: string;
-  models: GatewayModelDefinition[];
+  models: Array<GatewayModelDefinition & { source?: ProviderModel["source"] }>;
 }
 
 export async function discoverGatewayProviderModels(input: {
@@ -183,6 +183,7 @@ export async function discoverGatewayAccountModels(input: {
     protocols: model.protocols,
     capabilities: model.capabilities,
     enabled: true,
+    source: model.source,
   })).sort((left, right) => left.id.localeCompare(right.id));
   return { accountName: input.accountName, providerId: input.providerId, models };
 }

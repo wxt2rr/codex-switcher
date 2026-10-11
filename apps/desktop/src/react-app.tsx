@@ -1307,6 +1307,7 @@ export function App() {
               .catch(setErrorMessage);
           }}
           bridge={bridge}
+          onOpenModelSettings={() => setView("models")}
           onSuccess={setSuccessMessage}
           onError={setErrorMessage}
         />

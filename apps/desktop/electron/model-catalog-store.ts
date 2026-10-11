@@ -28,6 +28,7 @@ export type AccountModelAvailability = "available" | "stale" | "unavailable" | "
 export interface AccountDiscoveredModel {
   providerModelKey: string;
   providerId: string;
+  providerDisplayName?: string;
   upstreamModelId: string;
   displayName: string;
   iconKey?: string;
@@ -87,6 +88,13 @@ export interface ModelCatalogStore {
     modelIds: string[],
     optionsByModel?: Record<string, ModelBindingOptions>,
   ): Promise<ModelCatalogSnapshot>;
+  setAccountBindingsFromCatalog(input: {
+    accountKey: string;
+    modelIds: string[];
+    providerId: string;
+    providerDisplayName?: string;
+    protocol: string;
+  }): Promise<ModelCatalogSnapshot>;
   setModelBindings(
     modelId: string,
     accountKeys: string[],
@@ -168,6 +176,95 @@ export function createModelCatalogStore(path: string): ModelCatalogStore {
       await writeSnapshot(path, snapshot);
       return snapshot;
     },
+    async setAccountBindingsFromCatalog(input) {
+      const snapshot = await readSnapshot(path);
+      const uniqueSourceIds = [...new Set(input.modelIds)];
+      const sourceById = new Map(snapshot.models.map((model) => [model.id, model]));
+      const missing = uniqueSourceIds.find((id) => !sourceById.has(id));
+      if (missing) throw new Error(`Model '${missing}' not found`);
+
+      const existingByProviderKey = new Map(snapshot.models.flatMap((model) => {
+        const key = typeof model.entry.provider_model_key === "string" ? model.entry.provider_model_key.trim() : "";
+        return key ? [[key, model] as const] : [];
+      }));
+      const selectedIds: string[] = [];
+      const nextOptions: Record<string, ModelBindingOptions> = {};
+
+      for (const sourceId of uniqueSourceIds) {
+        const source = sourceById.get(sourceId)!;
+        const sourceOptions = snapshot.accountBindingOptions?.[input.accountKey]?.[sourceId] ?? {};
+        const configuredUpstreamId = sourceOptions.upstreamModelId?.trim();
+        const entryUpstreamId = resolveCatalogUpstreamModelId(source.entry);
+        const upstreamModelId = configuredUpstreamId || entryUpstreamId;
+        const providerModelKey = `${input.providerId}:${upstreamModelId}`;
+        let target = existingByProviderKey.get(providerModelKey);
+
+        if (!target) {
+          const slug = uniqueProviderModelSlug(snapshot.models, input.providerId, upstreamModelId, providerModelKey);
+          const entry = normalizeCustomModelInput({
+            ...source.entry,
+            slug,
+            display_name: source.entry.display_name,
+            provider_id: input.providerId,
+            ...(input.providerDisplayName ? { provider_display_name: input.providerDisplayName } : {}),
+            provider_model_key: providerModelKey,
+            upstream_model_id: upstreamModelId,
+            model_source: "manual",
+            protocol: input.protocol,
+            wire_api: input.protocol,
+            api_protocol: input.protocol,
+            supported_protocols: [input.protocol],
+          });
+          const now = new Date().toISOString();
+          target = { id: randomUUID(), entry, createdAt: now, updatedAt: now };
+          snapshot.models.push(target);
+          existingByProviderKey.set(providerModelKey, target);
+        } else {
+          const existingProtocols = Array.isArray(target.entry.supported_protocols)
+            ? target.entry.supported_protocols.filter((value): value is string => typeof value === "string")
+            : [];
+          const nextDisplayName = input.providerDisplayName?.trim()
+            || (typeof target.entry.provider_display_name === "string" ? target.entry.provider_display_name.trim() : "");
+          const missingProtocol = !existingProtocols.includes(input.protocol)
+            || target.entry.protocol !== input.protocol
+            || target.entry.wire_api !== input.protocol
+            || target.entry.api_protocol !== input.protocol;
+          const mismatchedUpstreamId = target.entry.upstream_model_id !== upstreamModelId;
+          const mismatchedProviderId = target.entry.provider_id !== input.providerId;
+          const mismatchedDisplayName = Boolean(nextDisplayName && target.entry.provider_display_name !== nextDisplayName);
+          if (mismatchedDisplayName || missingProtocol || mismatchedUpstreamId || mismatchedProviderId) {
+            target.entry = normalizeCustomModelInput({
+              ...target.entry,
+              provider_id: input.providerId,
+              provider_model_key: providerModelKey,
+              upstream_model_id: upstreamModelId,
+              protocol: input.protocol,
+              wire_api: input.protocol,
+              api_protocol: input.protocol,
+              ...(nextDisplayName ? { provider_display_name: nextDisplayName } : {}),
+              supported_protocols: [...new Set([...existingProtocols, input.protocol])],
+            });
+            target.updatedAt = new Date().toISOString();
+          }
+        }
+
+        selectedIds.push(target.id);
+        const { upstreamModelId: _upstreamModelId, ...sourceBindingOptions } = sourceOptions;
+        const bindingOptions = normalizeModelBindingOptions(sourceBindingOptions);
+        if (Object.keys(bindingOptions).length) nextOptions[target.id] = bindingOptions;
+      }
+
+      if (selectedIds.length) snapshot.accountBindings[input.accountKey] = [...new Set(selectedIds)];
+      else delete snapshot.accountBindings[input.accountKey];
+      if (Object.keys(nextOptions).length) {
+        snapshot.accountBindingOptions ??= {};
+        snapshot.accountBindingOptions[input.accountKey] = nextOptions;
+      } else if (snapshot.accountBindingOptions) {
+        delete snapshot.accountBindingOptions[input.accountKey];
+      }
+      await writeSnapshot(path, snapshot);
+      return snapshot;
+    },
     async setModelBindings(modelId, accountKeys, optionsByAccount = {}) {
       const snapshot = await readSnapshot(path);
       if (!snapshot.models.some((model) => model.id === modelId)) {
@@ -216,6 +313,7 @@ export function createModelCatalogStore(path: string): ModelCatalogStore {
         const model: AccountDiscoveredModel = {
           providerModelKey,
           providerId,
+          ...(rawModel.providerDisplayName?.trim() ? { providerDisplayName: rawModel.providerDisplayName.trim() } : {}),
           upstreamModelId,
           displayName,
           ...(rawModel.iconKey?.trim() ? { iconKey: rawModel.iconKey.trim() } : {}),
@@ -261,7 +359,7 @@ export function createModelCatalogStore(path: string): ModelCatalogStore {
         migrateAccountBindingsToProvider(snapshot, input.accountKey, previous, [...incoming.values()]);
       }
       snapshot.accountModelDiscoveries[input.accountKey] = {
-        providerId: input.providerId.trim(),
+        providerId: input.state === "ready" || !previous ? input.providerId.trim() : previous.providerId,
         state: input.state,
         models: dedupeDiscoveredModels(models),
         ...(input.discoveredAt || incoming.size ? { discoveredAt: input.discoveredAt ?? now } : previous?.discoveredAt ? { discoveredAt: previous.discoveredAt } : {}),
@@ -370,7 +468,9 @@ function upsertDiscoveredCatalogModel(
       // Provider preset records created before discovery did not carry a
       // provider key. Reuse the exact upstream slug so onboarding does not
       // create a second visually identical model entry.
-      || (!candidate.entry.provider_model_key && candidate.entry.slug === model.upstreamModelId)
+      || (!candidate.entry.provider_model_key
+        && candidate.entry.slug === model.upstreamModelId
+        && (!candidate.entry.provider_id || candidate.entry.provider_id === model.providerId))
   ));
   const slug = existing?.entry.slug ?? createDiscoveredModelSlug(model.providerId, model.upstreamModelId);
   const entry = normalizeCustomModelInput({
@@ -379,6 +479,7 @@ function upsertDiscoveredCatalogModel(
     display_name: model.displayName,
     description: existing?.entry.description ?? `Discovered from ${model.providerId}`,
     provider_id: model.providerId,
+    ...(model.providerDisplayName ? { provider_display_name: model.providerDisplayName } : {}),
     provider_model_key: model.providerModelKey,
     upstream_model_id: model.upstreamModelId,
     model_source: "discovered",
@@ -453,6 +554,42 @@ function createDiscoveredModelSlug(providerId: string, upstreamModelId: string):
   return `${provider}:${model}`;
 }
 
+function uniqueProviderModelSlug(
+  models: readonly CustomModelRecord[],
+  providerId: string,
+  upstreamModelId: string,
+  providerModelKey: string,
+): string {
+  const base = createDiscoveredModelSlug(providerId, upstreamModelId);
+  const sameSlug = models.find((model) => model.entry.slug === base);
+  if (!sameSlug || sameSlug.entry.provider_model_key === providerModelKey) return base;
+  let suffix = 2;
+  while (models.some((model) => model.entry.slug === `${base}-${suffix}`)) suffix += 1;
+  return `${base}-${suffix}`;
+}
+
+/**
+ * Custom OpenAI-compatible accounts share one transport adapter. Include the
+ * normalized service origin in their catalog identity so equal model ids from
+ * different gateways remain separate while accounts on the same gateway can
+ * still share a model identity.
+ */
+export function resolveModelCatalogProviderId(providerId: string, baseUrl?: string): string {
+  const normalizedProviderId = providerId.trim() || "custom";
+  if (!new Set(["custom", "custom-openai"]).has(normalizedProviderId) || !baseUrl?.trim()) {
+    return normalizedProviderId;
+  }
+  try {
+    const url = new URL(baseUrl.trim());
+    const host = `${url.hostname.toLowerCase()}${url.port ? `-${url.port}` : ""}`;
+    const path = url.pathname.replace(/\/+$/, "").replace(/\/v\d+$/i, "");
+    const pathKey = path.replace(/[^A-Za-z0-9._:-]+/g, "-").replace(/^-+|-+$/g, "");
+    return `${normalizedProviderId}:${host}${pathKey ? `:${pathKey}` : ""}`;
+  } catch {
+    return normalizedProviderId;
+  }
+}
+
 function normalizeModelCapabilities(value: AccountDiscoveredModel["capabilities"]): AccountDiscoveredModel["capabilities"] {
   return {
     reasoning: value?.reasoning === true,
@@ -480,9 +617,12 @@ export function resolveModelBinding(
   upstreamModelId: string;
 } {
   const options = snapshot.accountBindingOptions?.[accountKey]?.[model.id] ?? {};
+  const catalogUpstreamModelId = typeof model.entry.upstream_model_id === "string"
+    ? model.entry.upstream_model_id.trim()
+    : "";
   return {
     modelId: model.id,
-    upstreamModelId: options.upstreamModelId?.trim() || model.entry.slug,
+    upstreamModelId: options.upstreamModelId?.trim() || catalogUpstreamModelId || model.entry.slug,
     enabled: options.enabled !== false,
     priority: Number.isFinite(options.priority) ? Math.max(0, options.priority ?? 0) : 0,
     weight: Number.isFinite(options.weight) ? Math.max(1, options.weight ?? 1) : 1,
@@ -610,6 +750,23 @@ function normalizeModelBindingOptions(value: ModelBindingOptions | undefined): M
   return result;
 }
 
+function resolveCatalogUpstreamModelId(entry: ModelCatalogEntry): string {
+  const configured = typeof entry.upstream_model_id === "string" ? entry.upstream_model_id.trim() : "";
+  if (configured) return configured;
+
+  const providerId = typeof entry.provider_id === "string" ? entry.provider_id.trim() : "";
+  const providerModelKey = typeof entry.provider_model_key === "string" ? entry.provider_model_key.trim() : "";
+  if (providerId && providerModelKey.startsWith(`${providerId}:`)) {
+    const upstreamModelId = providerModelKey.slice(providerId.length + 1).trim();
+    if (upstreamModelId) return upstreamModelId;
+  }
+  if (providerId && entry.slug.startsWith(`${providerId}:`)) {
+    const upstreamModelId = entry.slug.slice(providerId.length + 1).trim();
+    if (upstreamModelId) return upstreamModelId;
+  }
+  return entry.slug;
+}
+
 function normalizeAccountBindingOptions(
   value: unknown,
   modelIds: ReadonlySet<string>,
@@ -647,6 +804,9 @@ function normalizeAccountModelDiscoveries(value: unknown): Record<string, Accoun
       models.push({
         providerModelKey,
         providerId,
+        ...(typeof rawModel.providerDisplayName === "string" && rawModel.providerDisplayName.trim()
+          ? { providerDisplayName: rawModel.providerDisplayName.trim() }
+          : {}),
         upstreamModelId,
         displayName,
         ...(typeof rawModel.iconKey === "string" && rawModel.iconKey.trim() ? { iconKey: rawModel.iconKey.trim() } : {}),

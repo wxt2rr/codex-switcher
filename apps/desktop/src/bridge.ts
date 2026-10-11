@@ -315,6 +315,7 @@ export type AccountModelAvailability = "available" | "stale" | "unavailable" | "
 export interface AccountDiscoveredModel {
   providerModelKey: string;
   providerId: string;
+  providerDisplayName?: string;
   upstreamModelId: string;
   displayName: string;
   iconKey?: string;

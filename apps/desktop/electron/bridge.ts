@@ -102,6 +102,7 @@ import {
   accountModelBindingKey,
   filterModelCatalogBindings,
   normalizeCustomModelInput,
+  resolveModelCatalogProviderId,
   type AccountDiscoveredModel,
   type ModelBindingOptions,
   type ModelCatalogEntry,
@@ -2736,6 +2737,10 @@ export async function discoverAccountModels(envName: string, accountName: string
   if (!environment || !account) throw new Error(`Account '${envName}/${accountName}' not found`);
 
   const providerId = resolveRuntimeProviderId(account);
+  const catalogProviderId = resolveModelCatalogProviderId(providerId, account.runtime.openaiBaseUrl);
+  const providerDisplayName = providerId === "custom" || providerId === "custom-openai"
+    ? account.name.trim() || undefined
+    : undefined;
   const accountKey = accountModelBindingKey(envName, accountName);
   const persistedGatewayCredential = Object.values(environment.gateway?.credentials ?? {})
     .find((credential) => credential.secretRef === createAccountSecretRef(envName, accountName));
@@ -2747,7 +2752,7 @@ export async function discoverAccountModels(envName: string, accountName: string
     gatewayProviderMismatch: persistedGatewayProviderId !== undefined && persistedGatewayProviderId !== providerId,
   };
   const store = getModelCatalogStore();
-  await store.saveAccountModelDiscovery({ accountKey, providerId, state: "discovering" });
+  await store.saveAccountModelDiscovery({ accountKey, providerId: catalogProviderId, state: "discovering" });
   await appendModelDiscoveryLog({ envName, accountName, accountKey, providerId, state: "discovering", ...discoveryLogContext });
 
   let gateway: GatewayEnvironmentState;
@@ -2764,8 +2769,9 @@ export async function discoverAccountModels(envName: string, accountName: string
       stateDir: getStateDir(),
     });
     const models: Array<Omit<AccountDiscoveredModel, "firstSeenAt" | "lastSeenAt" | "status"> & { status?: AccountDiscoveredModel["status"] }> = result.models.map((model) => ({
-      providerModelKey: `${model.providerId}:${model.upstreamModelId}`,
-      providerId: model.providerId,
+      providerModelKey: `${catalogProviderId}:${model.upstreamModelId}`,
+      providerId: catalogProviderId,
+      ...(providerDisplayName ? { providerDisplayName } : {}),
       upstreamModelId: model.upstreamModelId,
       displayName: model.displayName,
       iconKey: providerId,
@@ -2776,12 +2782,12 @@ export async function discoverAccountModels(envName: string, accountName: string
         vision: model.capabilities.vision === true,
         streaming: model.capabilities.streaming !== false,
       },
-      source: "discovery",
+      source: model.source ?? "discovery",
       status: "available",
     }));
     await store.saveAccountModelDiscovery({
       accountKey,
-      providerId,
+      providerId: catalogProviderId,
       state: "ready",
       models,
       discoveredAt: new Date().toISOString(),
@@ -2801,7 +2807,7 @@ export async function discoverAccountModels(envName: string, accountName: string
     const message = sanitizeModelDiscoveryError(error);
     await store.saveAccountModelDiscovery({
       accountKey,
-      providerId,
+      providerId: catalogProviderId,
       state: "failed",
       lastError: message,
     });
@@ -2924,7 +2930,32 @@ export async function deleteCustomModel(id: string) {
 }
 
 export async function setAccountModelBindings(accountKey: string, modelIds: string[]) {
-  const snapshot = await getModelCatalogStore().setAccountBindings(accountKey, modelIds);
+  const store = getModelCatalogStore();
+  const currentCatalog = await store.load();
+  const discovery = currentCatalog.accountModelDiscoveries?.[accountKey];
+  let snapshot: ModelCatalogSnapshot;
+  if (discovery?.state === "failed" || (discovery?.state === "ready" && !discovery.models.some((model) => model.status === "available"))) {
+    const separator = accountKey.indexOf("/");
+    if (separator < 1 || separator === accountKey.length - 1) throw new Error(`Invalid account model key '${accountKey}'`);
+    const envName = accountKey.slice(0, separator);
+    const accountName = accountKey.slice(separator + 1);
+    const runtime = await loadCoreRuntime();
+    const state = await runtime.readLegacyState(getLegacyOptions());
+    const account = state.envs[envName]?.accounts[accountName];
+    if (!account) throw new Error(`Account '${envName}/${accountName}' not found`);
+    const runtimeProviderId = resolveRuntimeProviderId(account);
+    snapshot = await store.setAccountBindingsFromCatalog({
+      accountKey,
+      modelIds,
+      providerId: resolveModelCatalogProviderId(runtimeProviderId, account.runtime.openaiBaseUrl),
+      ...((runtimeProviderId === "custom" || runtimeProviderId === "custom-openai") && account.name.trim()
+        ? { providerDisplayName: account.name.trim() }
+        : {}),
+      protocol: account.authMode === "auth" ? "responses" : account.runtime.apiProtocol ?? "responses",
+    });
+  } else {
+    snapshot = await store.setAccountBindings(accountKey, modelIds);
+  }
   await resynchronizeActiveModelCatalogs(accountKey);
   return filterModelCatalogBindings(snapshot, await loadKnownAccountKeys());
 }

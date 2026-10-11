@@ -205,6 +205,7 @@ export function AccountsPage({
   onCopyBaseUrl,
   onCopyApiKey,
   bridge,
+  onOpenModelSettings,
   onSuccess,
   onError,
 }: {
@@ -261,6 +262,7 @@ export function AccountsPage({
   onCopyBaseUrl: (value: string) => void;
   onCopyApiKey: (value: string) => void;
   bridge: DesktopBridge;
+  onOpenModelSettings: () => void;
   onSuccess: (message: string) => void;
   onError: (error: unknown) => void;
 }) {
@@ -1062,6 +1064,7 @@ export function AccountsPage({
         language={language}
         providerCatalog={providerCatalog}
         bridge={bridge}
+        onOpenModelSettings={onOpenModelSettings}
         onClose={() => setModelExposureOpen(false)}
         onSaved={() => onSuccess(language === "zh" ? "账号模型暴露配置已保存" : "Account model exposure saved")}
         onError={onError}

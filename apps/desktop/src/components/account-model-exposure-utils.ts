@@ -26,6 +26,7 @@ export function buildAccountModelCandidates(
   snapshot: ModelCatalogSnapshot,
   accountKey: string,
   selectedIds: string[],
+  includeAllCatalogModels = false,
 ): CustomModelRecord[] {
   const discoveryKeys = new Set(
     (snapshot.accountModelDiscoveries?.[accountKey]?.models ?? [])
@@ -38,7 +39,8 @@ export function buildAccountModelCandidates(
   const manualRecords = snapshot.models.filter((model) => !providerModelKeyOf(model));
   const selectedHistory = snapshot.models.filter((model) => selectedIds.includes(model.id));
   const byId = new Map<string, CustomModelRecord>();
-  for (const model of [...discoveredRecords, ...manualRecords, ...selectedHistory]) {
+  const catalogFallback = includeAllCatalogModels ? snapshot.models : [];
+  for (const model of [...discoveredRecords, ...manualRecords, ...selectedHistory, ...catalogFallback]) {
     byId.set(model.id, model);
   }
   return [...byId.values()];

@@ -1283,6 +1283,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
     return true;
   };
   const gatewayRouteAvailable = (gateway: EnvironmentGateway, route: RouteTarget): boolean => {
+    if (!gateway.poolId) return true;
     const health = gatewayHealth.get(gatewayRouteMetricKey(gateway, route.routeId));
     return !health || health.cooldownUntil === null || health.cooldownUntil <= Date.now();
   };
@@ -1330,7 +1331,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
       gatewayHealth.delete(gatewayRouteMetricKey(gateway, route.routeId));
       return;
     }
-    if (!isPoolRetryableFailure(classifyPoolFailure(status), status)) return;
+    if (!gateway.poolId || !isPoolRetryableFailure(classifyPoolFailure(status), status)) return;
     const healthKey = gatewayRouteMetricKey(gateway, route.routeId);
     const previous = gatewayHealth.get(healthKey) ?? { consecutiveFailures: 0, cooldownUntil: null };
     const failures = previous.consecutiveFailures + 1;
@@ -1829,7 +1830,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           store,
           routeSecrets.get(route.routeId),
           bodyOverride,
-          routeResult.fallbackRoutes ?? legacyFallbackRoutes,
+          gateway.poolId ? routeResult.fallbackRoutes ?? legacyFallbackRoutes : [],
           (candidate) => routeSecrets.get(candidate.routeId),
           onGatewayRouteOutcome,
           gatewayProtocol,

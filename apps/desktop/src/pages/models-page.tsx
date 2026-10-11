@@ -23,7 +23,8 @@ import {
   serializeSingleModelCatalog,
 } from "../model-editor";
 
-function providerLabel(providerId: string, providerCatalog: ProviderCatalogItem[], zh: boolean): string {
+function providerLabel(providerId: string, providerCatalog: ProviderCatalogItem[], zh: boolean, displayName?: string): string {
+  if (displayName?.trim()) return displayName.trim();
   if (providerId === "custom") return zh ? "手动配置" : "Manual";
   return providerCatalog.find((provider) => provider.id === providerId)?.displayName ?? providerId;
 }
@@ -160,7 +161,7 @@ export function ModelsPage({
       const discoveryInfo = providerKey ? discoveryByModelKey.get(providerKey) : undefined;
       const providerId = String(model.entry.provider_id ?? discoveryInfo?.providerId ?? "custom");
       if (providerFilter !== "all" && providerId !== providerFilter) return false;
-      return !normalized || `${model.entry.display_name} ${model.entry.slug} ${providerId}`.toLowerCase().includes(normalized);
+      return !normalized || `${model.entry.display_name} ${model.entry.slug} ${providerId} ${String(model.entry.provider_display_name ?? "")}`.toLowerCase().includes(normalized);
     });
   }, [discoveryByModelKey, providerFilter, query, snapshot.models]);
 
@@ -262,7 +263,12 @@ export function ModelsPage({
                 { value: "all", label: zh ? "全部服务商" : "All providers" },
                 ...providerOptions.map((providerId) => ({
                   value: providerId,
-                  label: providerLabel(providerId, providerCatalog, zh),
+                  label: providerLabel(
+                    providerId,
+                    providerCatalog,
+                    zh,
+                    String(snapshot.models.find((model) => model.entry.provider_id === providerId)?.entry.provider_display_name ?? ""),
+                  ),
                 })),
               ]}
               openOnHover={false}
@@ -296,11 +302,15 @@ export function ModelsPage({
             <ListCard key={model.id} className="flex min-h-[226px] flex-col gap-4 p-5">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-start gap-3">
-                  <ProviderIcon providerId={providerId} displayName={providerLabel(providerId, providerCatalog, zh)} size={34} />
+                  <ProviderIcon
+                    providerId={providerCatalog.find((item) => item.id === providerId)?.iconKey ?? providerId}
+                    displayName={providerLabel(providerId, providerCatalog, zh, String(model.entry.provider_display_name ?? ""))}
+                    size={34}
+                  />
                 <div className="min-w-0">
                   <div className="flex min-w-0 items-center gap-2">
                     <h3 className="truncate text-[15px] font-semibold text-neutral-950 dark:text-white">{model.entry.display_name}</h3>
-                    <SoftBadge label={providerLabel(providerId, providerCatalog, zh)} className="max-w-[130px] truncate text-[10px]" />
+                    <SoftBadge label={providerLabel(providerId, providerCatalog, zh, String(model.entry.provider_display_name ?? ""))} className="max-w-[130px] truncate text-[10px]" />
                   </div>
                   <p className="mt-1 truncate font-mono text-[11px] text-slate-400">{model.entry.slug}</p>
                   <div className="mt-1 flex flex-wrap gap-1.5">
