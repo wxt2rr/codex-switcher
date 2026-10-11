@@ -759,7 +759,7 @@ test("environment Responses gateway rejects GET and records the HTTP-only transp
   }
 });
 
-test("environment gateway fails over a route group before the response starts", async () => {
+test("environment gateway fails over a route group in an enabled credential pool before the response starts", async () => {
   let firstCalls = 0;
   let secondCalls = 0;
   const firstUpstream = createServer(async (request, response) => {
@@ -786,82 +786,104 @@ test("environment gateway fails over a route group before the response starts", 
   const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-gateway-failover-"));
   const firstRoute = { routeId: "route-first", envName: "work", accountName: "first", providerId: "provider-a", exposedModelId: "provider-a:model", upstreamModel: "model-a", upstreamBaseUrl: `http://127.0.0.1:${firstAddress.port}/v1`, originalBaseUrl: "default", protocol: "responses" as const, routeGroupId: "shared-model", reasoningProfile: "auto" as const, enabled: true, createdAt: 1, updatedAt: 1 };
   const secondRoute = { ...firstRoute, routeId: "route-second", accountName: "second", providerId: "provider-b", exposedModelId: "provider-b:model", upstreamModel: "model-b", upstreamBaseUrl: `http://127.0.0.1:${secondAddress.port}/v1` };
+  const pool = {
+    poolId: "pool-gateway-failover", envName: "work", protocol: "responses" as const, enabled: true,
+    strategy: "sticky_weighted_round_robin" as const, sessionTtlMinutes: 60, maxFailoverAttempts: 1, maxSameAccountFailures: 1,
+    createdAt: 1, updatedAt: 1,
+    members: [firstRoute, secondRoute].map((route, priority) => ({
+      accountName: route.accountName, routeId: route.routeId, protocol: "responses" as const,
+      upstreamBaseUrl: route.upstreamBaseUrl, originalBaseUrl: route.originalBaseUrl, upstreamModel: route.upstreamModel,
+      enabled: true, weight: 1, priority,
+    })),
+  };
   const gateway = {
-    gatewayId: "gateway-failover", envName: "work", routeIds: [firstRoute.routeId, secondRoute.routeId],
+    gatewayId: "gateway-failover", envName: "work", routeIds: [firstRoute.routeId, secondRoute.routeId], poolId: pool.poolId,
     routeGroups: { "shared-model": { id: "shared-model", exposedModelId: "shared-model", routeIds: [firstRoute.routeId, secondRoute.routeId], strategy: "order", sessionPolicy: "off", fallbackEnabled: true } },
     quota: { windowMinutes: 60, maxRequests: 2 },
     defaultRouteId: firstRoute.routeId, enabled: true, createdAt: 1, updatedAt: 1,
   };
   const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
   const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
-  for (const route of [firstRoute, secondRoute]) {
-    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(route) })).status, 204);
-    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}/secret`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ upstreamApiKey: `${route.accountName}-token`, localRouteToken: "local-route" }) })).status, 204);
+  try {
+    for (const route of [firstRoute, secondRoute]) {
+      assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(route) })).status, 204);
+      assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}/secret`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ upstreamApiKey: `${route.accountName}-token`, localRouteToken: "local-route" }) })).status, 204);
+    }
+    assert.equal((await fetch(`${service.origin}/admin/pools`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(pool) })).status, 204);
+    for (const member of pool.members) {
+      assert.equal((await fetch(`${service.origin}/admin/pools/${pool.poolId}/members/${member.accountName}/secret`, {
+        method: "PUT", headers: adminHeaders, body: JSON.stringify({ upstreamApiKey: `${member.accountName}-token` }),
+      })).status, 204);
+    }
+    assert.equal((await fetch(`${service.origin}/admin/pools/${pool.poolId}/token`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify({ localRouteToken: "local-pool-gateway" }),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway) })).status, 204);
+    const routed = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
+      method: "POST", headers: { authorization: "Bearer local-pool-gateway", "content-type": "application/json" },
+      body: JSON.stringify({ model: "shared-model", input: "hello" }),
+    });
+    assert.equal(routed.status, 200);
+    assert.equal((await routed.json()).id, "group-fallback-success");
+    assert.equal(firstCalls, 1);
+    assert.equal(secondCalls, 1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const attempts = await (await fetch(`${service.origin}/admin/trace?gatewayId=${gateway.gatewayId}&event=gateway_route_attempt`, { headers: adminHeaders })).json() as Array<{
+      requestId?: string;
+      routeId?: string;
+      accountName?: string;
+      attemptIndex?: number;
+      attemptCount?: number;
+      status?: number | null;
+      outcome?: string;
+      failureReason?: string | null;
+      errorMessage?: string | null;
+      proxySource?: string;
+      cooldownUntil?: number | null;
+    }>;
+    assert.equal(attempts.length, 2);
+    assert.equal(attempts[0]?.requestId, attempts[1]?.requestId);
+    const firstAttempt = attempts.find((attempt) => attempt.routeId === firstRoute.routeId);
+    const secondAttempt = attempts.find((attempt) => attempt.routeId === secondRoute.routeId);
+    assert.deepEqual({
+      accountName: firstAttempt?.accountName, attemptIndex: firstAttempt?.attemptIndex, attemptCount: firstAttempt?.attemptCount,
+      status: firstAttempt?.status, outcome: firstAttempt?.outcome, failureReason: firstAttempt?.failureReason,
+      errorMessage: firstAttempt?.errorMessage, proxySource: firstAttempt?.proxySource,
+    }, {
+      accountName: "first", attemptIndex: 1, attemptCount: 2, status: 429, outcome: "retry",
+      failureReason: "rate_limit", errorMessage: "rate limited", proxySource: "direct",
+    });
+    assert.deepEqual({
+      accountName: secondAttempt?.accountName, attemptIndex: secondAttempt?.attemptIndex, attemptCount: secondAttempt?.attemptCount,
+      status: secondAttempt?.status, outcome: secondAttempt?.outcome, failureReason: secondAttempt?.failureReason,
+      errorMessage: secondAttempt?.errorMessage, proxySource: secondAttempt?.proxySource,
+    }, {
+      accountName: "second", attemptIndex: 2, attemptCount: 2, status: 200, outcome: "success",
+      failureReason: null, errorMessage: null, proxySource: "direct",
+    });
+    const health = await (await fetch(`${service.origin}/admin/gateways/${gateway.gatewayId}/health`, { headers: adminHeaders })).json() as Array<{ routeId: string; state: string }>;
+    assert.equal(health.find((item) => item.routeId === firstRoute.routeId)?.state, "cooldown");
+    assert.equal(health.find((item) => item.routeId === secondRoute.routeId)?.state, "healthy");
+    const repeated = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
+      method: "POST", headers: { authorization: "Bearer local-pool-gateway", "content-type": "application/json" },
+      body: JSON.stringify({ model: "shared-model", input: "hello-again" }),
+    });
+    assert.equal(repeated.status, 200);
+    assert.equal(firstCalls, 1);
+    assert.equal(secondCalls, 2);
+    const quotaRejected = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
+      method: "POST", headers: { authorization: "Bearer local-pool-gateway", "content-type": "application/json" },
+      body: JSON.stringify({ model: "shared-model", input: "over-quota" }),
+    });
+    assert.equal(quotaRejected.status, 429);
+    assert.equal((await quotaRejected.json()).code, "GATEWAY_QUOTA_EXCEEDED");
+  } finally {
+    await service.close();
+    await Promise.all([
+      new Promise<void>((resolve) => firstUpstream.close(() => resolve())),
+      new Promise<void>((resolve) => secondUpstream.close(() => resolve())),
+    ]);
   }
-  assert.equal((await fetch(`${service.origin}/admin/gateways`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway) })).status, 204);
-  const routed = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
-    method: "POST", headers: { authorization: "Bearer local-route", "content-type": "application/json" },
-    body: JSON.stringify({ model: "shared-model", input: "hello" }),
-  });
-  assert.equal(routed.status, 200);
-  assert.equal((await routed.json()).id, "group-fallback-success");
-  assert.equal(firstCalls, 1);
-  assert.equal(secondCalls, 1);
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  const attempts = await (await fetch(`${service.origin}/admin/trace?gatewayId=${gateway.gatewayId}&event=gateway_route_attempt`, { headers: adminHeaders })).json() as Array<{
-    requestId?: string;
-    routeId?: string;
-    accountName?: string;
-    attemptIndex?: number;
-    attemptCount?: number;
-    status?: number | null;
-    outcome?: string;
-    failureReason?: string | null;
-    errorMessage?: string | null;
-    proxySource?: string;
-    cooldownUntil?: number | null;
-  }>;
-  assert.equal(attempts.length, 2);
-  assert.equal(attempts[0]?.requestId, attempts[1]?.requestId);
-  const firstAttempt = attempts.find((attempt) => attempt.routeId === firstRoute.routeId);
-  const secondAttempt = attempts.find((attempt) => attempt.routeId === secondRoute.routeId);
-  assert.deepEqual({
-    accountName: firstAttempt?.accountName, attemptIndex: firstAttempt?.attemptIndex, attemptCount: firstAttempt?.attemptCount,
-    status: firstAttempt?.status, outcome: firstAttempt?.outcome, failureReason: firstAttempt?.failureReason,
-    errorMessage: firstAttempt?.errorMessage, proxySource: firstAttempt?.proxySource,
-  }, {
-    accountName: "first", attemptIndex: 1, attemptCount: 2, status: 429, outcome: "retry",
-    failureReason: "rate_limit", errorMessage: "rate limited", proxySource: "direct",
-  });
-  assert.deepEqual({
-    accountName: secondAttempt?.accountName, attemptIndex: secondAttempt?.attemptIndex, attemptCount: secondAttempt?.attemptCount,
-    status: secondAttempt?.status, outcome: secondAttempt?.outcome, failureReason: secondAttempt?.failureReason,
-    errorMessage: secondAttempt?.errorMessage, proxySource: secondAttempt?.proxySource,
-  }, {
-    accountName: "second", attemptIndex: 2, attemptCount: 2, status: 200, outcome: "success",
-    failureReason: null, errorMessage: null, proxySource: "direct",
-  });
-  const health = await (await fetch(`${service.origin}/admin/gateways/${gateway.gatewayId}/health`, { headers: adminHeaders })).json() as Array<{ routeId: string; state: string }>;
-  assert.equal(health.find((item) => item.routeId === firstRoute.routeId)?.state, "cooldown");
-  assert.equal(health.find((item) => item.routeId === secondRoute.routeId)?.state, "healthy");
-  const repeated = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
-    method: "POST", headers: { authorization: "Bearer local-route", "content-type": "application/json" },
-    body: JSON.stringify({ model: "shared-model", input: "hello-again" }),
-  });
-  assert.equal(repeated.status, 200);
-  assert.equal(firstCalls, 1);
-  assert.equal(secondCalls, 2);
-  const quotaRejected = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
-    method: "POST", headers: { authorization: "Bearer local-route", "content-type": "application/json" },
-    body: JSON.stringify({ model: "shared-model", input: "over-quota" }),
-  });
-  assert.equal(quotaRejected.status, 429);
-  assert.equal((await quotaRejected.json()).code, "GATEWAY_QUOTA_EXCEEDED");
-  await service.close();
-  await Promise.all([
-    new Promise<void>((resolve) => firstUpstream.close(() => resolve())),
-    new Promise<void>((resolve) => secondUpstream.close(() => resolve())),
-  ]);
 });
 
 test("changing the global proxy clears gateway route cooldowns", async () => {
