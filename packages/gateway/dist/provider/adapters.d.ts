@@ -34,6 +34,25 @@ export interface ProviderSignedRequest {
         body?: string;
     };
 }
+/** Optional provider-owned request path for upstreams that are not expressible
+ * as a plain signed HTTP request. The provider still receives the normalized
+ * route protocol; the Gateway remains responsible for ingress conversion and
+ * usage accounting. */
+export interface ProviderRequestInput {
+    account: ProviderAccountRef;
+    secret: string;
+    protocol: GatewayProtocol;
+    url: string;
+    method: string;
+    headers: HeadersInit;
+    body?: string;
+}
+export interface ProviderRequestResult {
+    status: number;
+    headers?: Readonly<Record<string, string>>;
+    body?: JsonObject;
+    events?: JsonObject[];
+}
 export interface ProviderAccountRef {
     accountId: string;
     displayName: string;
@@ -122,6 +141,8 @@ export interface ProviderAdapter {
     fetchQuota(client: ProviderHttpClient, account: ProviderAccountRef, secret?: string): Promise<ProviderQuotaSnapshot | null>;
     authorizationHeaders(account: ProviderAccountRef, secret: string, protocol: GatewayProtocol): Headers;
     signRequest(input: ProviderSignRequestInput): ProviderSignedRequest;
+    /** Optional RPC-backed custom request handler for provider-specific upstreams. */
+    request?(input: ProviderRequestInput): Promise<ProviderRequestResult>;
     classifyError(input: ProviderErrorInput): ProviderFailureClass;
 }
 export interface ProviderDefinition {

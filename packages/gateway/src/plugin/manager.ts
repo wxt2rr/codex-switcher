@@ -12,12 +12,21 @@ import {
   type ActivePluginProvider,
   type PluginRuntimeOptions,
 } from "./runtime.js";
+import { GatewayMiddlewareRegistry } from "./middleware.js";
+import {
+  PluginMiddlewareRuntimeManager,
+  type PluginMiddlewareRuntimeOptions,
+} from "./middleware-runtime.js";
+import type { ActiveGatewayMiddleware } from "./middleware.js";
 import type { GatewayPluginManifest } from "./host.js";
+import { PluginSettingsStore } from "./settings.js";
 
-export interface ProviderPluginManagerOptions extends Omit<PluginRuntimeOptions, "registry"> {
+export interface ProviderPluginManagerOptions extends Omit<PluginRuntimeOptions, "registry">, Omit<PluginMiddlewareRuntimeOptions, "registry"> {
   rootDir: string;
   registry?: ProviderRegistry;
+  middlewareRegistry?: GatewayMiddlewareRegistry;
   verifySignature?: (manifest: GatewayPluginManifest, checksum: string) => boolean | Promise<boolean>;
+  settingsDir?: string;
 }
 
 export interface PluginActivationFailure {
@@ -28,7 +37,13 @@ export interface PluginActivationFailure {
 
 export interface PluginActivationReport {
   activated: ActivePluginProvider[];
+  middlewareActivated: ActiveGatewayMiddleware[];
   failed: PluginActivationFailure[];
+}
+
+export interface ActivePluginComponents {
+  provider?: ActivePluginProvider;
+  middleware?: ActiveGatewayMiddleware;
 }
 
 /**
@@ -39,19 +54,26 @@ export interface PluginActivationReport {
  */
 export class ProviderPluginManager {
   readonly registry: ProviderRegistry;
+  readonly middlewareRegistry: GatewayMiddlewareRegistry;
   readonly installations: PluginInstallationStore;
   readonly runtime: PluginRuntimeManager;
+  readonly middlewareRuntime: PluginMiddlewareRuntimeManager;
+  readonly settings?: PluginSettingsStore;
 
   constructor(private readonly options: ProviderPluginManagerOptions) {
     this.registry = options.registry ?? new ProviderRegistry();
+    this.middlewareRegistry = options.middlewareRegistry ?? new GatewayMiddlewareRegistry();
+    this.settings = options.settingsDir ? new PluginSettingsStore(join(options.settingsDir, "settings.enc.json")) : undefined;
     this.installations = new PluginInstallationStore(join(options.rootDir, "installed"), {
       ...(options.verifySignature ? { verifySignature: options.verifySignature } : {}),
     });
-    this.runtime = new PluginRuntimeManager({ ...options, registry: this.registry });
+    this.runtime = new PluginRuntimeManager({ ...options, registry: this.registry, ...(this.settings ? { settings: (pluginId) => this.settings!.get(pluginId) } : {}) });
+    this.middlewareRuntime = new PluginMiddlewareRuntimeManager({ ...options, registry: this.middlewareRegistry });
   }
 
   async activateInstalled(): Promise<PluginActivationReport> {
     const activated: ActivePluginProvider[] = [];
+    const middlewareActivated: ActiveGatewayMiddleware[] = [];
     const failed: PluginActivationFailure[] = [];
     for (const installed of await this.installations.list()) {
       const manifest = installed.manifest;
@@ -61,12 +83,14 @@ export class ProviderPluginManager {
       }
       try {
         await this.assertTrustedManifest(manifest, installed.checksum);
-        activated.push(await this.runtime.activateInstalled(manifest, installed));
+        const components = await this.activateInstalledComponents(manifest, installed);
+        if (components.provider) activated.push(components.provider);
+        if (components.middleware) middlewareActivated.push(components.middleware);
       } catch (error) {
         failed.push({ id: installed.id, version: installed.version, message: error instanceof Error ? error.message : String(error) });
       }
     }
-    return { activated, failed };
+    return { activated, middlewareActivated, failed };
   }
 
   async install(
@@ -74,20 +98,30 @@ export class ProviderPluginManager {
     source: PluginInstallSource,
     runCommand?: PluginCommandRunner,
   ): Promise<ActivePluginProvider> {
+    const result = await this.installPlugin(manifest, source, runCommand);
+    if (!result.provider) throw new Error(`Plugin '${manifest.id}' does not expose a provider`);
+    return result.provider;
+  }
+
+  async installPlugin(
+    manifest: GatewayPluginManifest,
+    source: PluginInstallSource,
+    runCommand?: PluginCommandRunner,
+  ): Promise<ActivePluginComponents> {
     const previous = (await this.installations.list()).find((item) => item.id === manifest.id);
-    await this.runtime.deactivate(manifest.id);
+    await this.deactivate(manifest.id);
     let installed: InstalledPlugin | undefined;
     try {
       installed = await this.installations.installFromSource(manifest, source, runCommand);
       await this.assertTrustedManifest(manifest, installed.checksum);
-      return await this.runtime.activateInstalled(manifest, installed);
+      return await this.activateInstalledComponents(manifest, installed);
     } catch (error) {
-      await this.runtime.deactivate(manifest.id).catch(() => undefined);
+      await this.deactivate(manifest.id).catch(() => undefined);
       if (installed?.previousVersion) {
         const restored = await this.installations.rollback(manifest.id).catch(() => undefined);
-        if (restored?.manifest) await this.runtime.activateInstalled(restored.manifest, restored).catch(() => undefined);
+        if (restored?.manifest) await this.activateInstalledComponents(restored.manifest, restored).catch(() => undefined);
       } else if (previous?.manifest) {
-        await this.runtime.activateInstalled(previous.manifest, previous).catch(() => undefined);
+        await this.activateInstalledComponents(previous.manifest, previous).catch(() => undefined);
       } else {
         await this.installations.remove(manifest.id).catch(() => undefined);
       }
@@ -96,20 +130,39 @@ export class ProviderPluginManager {
   }
 
   async deactivate(id: string): Promise<boolean> {
-    return this.runtime.deactivate(id);
+    const provider = await this.runtime.deactivate(id);
+    const middleware = await this.middlewareRuntime.deactivate(id);
+    return provider || middleware;
+  }
+
+  async activate(id: string): Promise<ActivePluginComponents> {
+    if (this.runtime.list().some((item) => item.manifest.id === id) || this.middlewareRuntime.list().some((item) => item.id === id)) {
+      throw new Error(`Plugin '${id}' is already active`);
+    }
+    const installed = (await this.installations.list()).find((item) => item.id === id);
+    if (!installed?.manifest) throw new Error(`Plugin '${id}' is not installed or its manifest is invalid`);
+    await this.assertTrustedManifest(installed.manifest, installed.checksum);
+    return this.activateInstalledComponents(installed.manifest, installed);
   }
 
   async rollback(id: string): Promise<ActivePluginProvider> {
-    await this.runtime.deactivate(id);
+    const result = await this.rollbackPlugin(id);
+    if (!result.provider) throw new Error(`Plugin '${id}' does not expose a provider`);
+    return result.provider;
+  }
+
+  async rollbackPlugin(id: string): Promise<ActivePluginComponents> {
+    await this.deactivate(id);
     const installed = await this.installations.rollback(id);
     if (!installed.manifest) throw new Error(`Plugin '${id}' rollback manifest is missing or invalid`);
     await this.assertTrustedManifest(installed.manifest, installed.checksum);
-    return this.runtime.activateInstalled(installed.manifest, installed);
+    return this.activateInstalledComponents(installed.manifest, installed);
   }
 
   async remove(id: string): Promise<void> {
-    await this.runtime.deactivate(id);
+    await this.deactivate(id);
     await this.installations.remove(id);
+    await this.settings?.clear(id);
   }
 
   listInstalled(): Promise<InstalledPlugin[]> {
@@ -120,8 +173,45 @@ export class ProviderPluginManager {
     return this.runtime.list();
   }
 
-  close(): Promise<void> {
-    return this.runtime.close();
+  listActiveMiddleware(): ActiveGatewayMiddleware[] {
+    return this.middlewareRuntime.list();
+  }
+
+  async getSettings(id: string): Promise<Record<string, unknown>> {
+    return this.settings?.get(id) ?? {};
+  }
+
+  async setSettings(id: string, values: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const installed = (await this.installations.list()).find((item) => item.id === id);
+    if (!installed?.manifest) throw new Error(`Plugin '${id}' is not installed`);
+    return this.settings?.set(id, values, installed.manifest.settingsSchema) ?? values;
+  }
+
+  async clearSettings(id: string): Promise<void> {
+    await this.settings?.clear(id);
+  }
+
+  async close(): Promise<void> {
+    await this.runtime.close();
+    await this.middlewareRuntime.close();
+  }
+
+  private async activateInstalledComponents(manifest: GatewayPluginManifest, installed: InstalledPlugin): Promise<ActivePluginComponents> {
+    if (manifest.id !== installed.id || manifest.version !== installed.version) throw new Error("Installed plugin does not match its manifest");
+    const shouldActivateProvider = manifest.permissions.includes("provider");
+    const shouldActivateMiddleware = manifest.permissions.includes("middleware");
+    if (!shouldActivateProvider && !shouldActivateMiddleware) throw new Error(`Plugin '${manifest.id}' declares no executable capability`);
+    let provider: ActivePluginProvider | undefined;
+    let middleware: ActiveGatewayMiddleware | undefined;
+    try {
+      if (shouldActivateProvider) provider = await this.runtime.activateInstalled(manifest, installed);
+      if (shouldActivateMiddleware) middleware = await this.middlewareRuntime.activate(manifest, installed.path);
+      return { ...(provider ? { provider } : {}), ...(middleware ? { middleware } : {}) };
+    } catch (error) {
+      await this.runtime.deactivate(manifest.id).catch(() => undefined);
+      await this.middlewareRuntime.deactivate(manifest.id).catch(() => undefined);
+      throw error;
+    }
   }
 
   private async assertTrustedManifest(manifest: GatewayPluginManifest, checksum: string | undefined): Promise<void> {

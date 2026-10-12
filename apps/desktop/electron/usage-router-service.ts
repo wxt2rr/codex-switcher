@@ -53,6 +53,8 @@ export interface UsageRouterServiceOptions {
   port?: number;
   preferredPort?: number;
   defaultProxyUrl?: string;
+  /** Keep the secure default in production while allowing deterministic test/diagnostic hosts. */
+  providerPluginSandboxMode?: "required" | "best-effort" | "disabled";
 }
 
 export interface RunningUsageRouterService {
@@ -83,12 +85,32 @@ interface RouterPortStateFile {
 
 interface RuntimeProviderAdapter {
   authorizationHeaders(account: { accountId: string; displayName: string; authMethod: "api_key" | "subscription"; secretRef: string; status: "active" }, secret: string, protocol: RouteProtocol): Headers;
+  request?(input: { account: { accountId: string; displayName: string; authMethod: "api_key" | "subscription"; secretRef: string; status: "active" }; secret: string; protocol: RouteProtocol; url: string; method: string; headers: HeadersInit; body?: string }): Promise<{ status: number; headers?: Readonly<Record<string, string>>; body?: Record<string, unknown>; events?: Array<Record<string, unknown>> }>;
 }
 
 interface RuntimePluginManager {
   registry: { has(id: string): boolean; get(id: string): RuntimeProviderAdapter };
+  middlewareRegistry?: RuntimeGatewayMiddlewareRegistry;
   activateInstalled(): Promise<{ failed: Array<{ id: string; message: string }> }>;
   close(): Promise<void>;
+}
+
+interface RuntimeGatewayMiddlewareContext {
+  requestId: string;
+  traceId: string;
+  protocol: RouteProtocol;
+  model: string;
+  stream: boolean;
+  path?: string;
+  agentId?: string;
+  environmentId?: string;
+  state: Record<string, unknown>;
+}
+
+interface RuntimeGatewayMiddlewareRegistry {
+  runRequest(body: Record<string, unknown>, context: RuntimeGatewayMiddlewareContext): Promise<{ body: Record<string, unknown>; model?: string; reject?: { status?: number; message: string; code?: string } }>;
+  runResponse(body: Record<string, unknown>, context: RuntimeGatewayMiddlewareContext): Promise<{ body: Record<string, unknown>; reject?: { status?: number; message: string; code?: string } }>;
+  runEvent(event: Record<string, unknown>, context: RuntimeGatewayMiddlewareContext): Promise<{ event: Record<string, unknown> | null; reject?: { status?: number; message: string; code?: string } }>;
 }
 
 interface RouteOutcomeTelemetry {
@@ -327,6 +349,104 @@ async function relayResponse(source: Response, target: ServerResponse, tap?: { p
     }
   }
   target.end();
+}
+
+async function applyGatewayMiddlewareResponse(
+  source: Response,
+  middleware: RuntimeGatewayMiddlewareRegistry | undefined,
+  context: RuntimeGatewayMiddlewareContext | undefined,
+): Promise<Response> {
+  if (!middleware || !context || !source.body) return source;
+  const contentType = source.headers.get("content-type") ?? "";
+  if (contentType.includes("text/event-stream")) {
+    return wrapGatewayMiddlewareStream(source, middleware, context);
+  }
+  if (!contentType.includes("json")) return source;
+  let raw: Buffer | undefined;
+  try {
+    raw = Buffer.from(await source.arrayBuffer());
+    const value = JSON.parse(raw.toString("utf8")) as unknown;
+    if (!isJsonRecord(value)) return new Response(raw as unknown as BodyInit, { status: source.status, statusText: source.statusText, headers: source.headers });
+    const result = await middleware.runResponse(value, context);
+    if (result.reject) return middlewareRejectResponse(source, result.reject);
+    const headers = new Headers(source.headers);
+    headers.delete("content-length");
+    return new Response(JSON.stringify(result.body), { status: source.status, statusText: source.statusText, headers });
+  } catch {
+    // A middleware failure must be fail-open and must not turn a valid
+    // upstream body into an empty response. The registry itself catches
+    // plugin failures; this fallback also covers malformed provider JSON.
+    return raw ? new Response(raw as unknown as BodyInit, { status: source.status, statusText: source.statusText, headers: source.headers }) : source;
+  }
+}
+
+function middlewareRejectResponse(source: Response, reject: { status?: number; message: string; code?: string }): Response {
+  const headers = new Headers({ "content-type": "application/json; charset=utf-8" });
+  return new Response(JSON.stringify({ error: reject.message, ...(reject.code ? { code: reject.code } : {}) }), { status: reject.status ?? 400, headers });
+}
+
+function wrapGatewayMiddlewareStream(source: Response, middleware: RuntimeGatewayMiddlewareRegistry, context: RuntimeGatewayMiddlewareContext): Response {
+  if (!source.body) return source;
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let pending = "";
+  const transform = new TransformStream<Uint8Array, Uint8Array>({
+    async transform(chunk, controller) {
+      pending += decoder.decode(chunk, { stream: true });
+      const blocks = pending.split(/\r?\n\r?\n/);
+      pending = blocks.pop() ?? "";
+      for (const block of blocks) {
+        const transformed = await transformGatewaySseBlock(block, middleware, context);
+        if (transformed) controller.enqueue(encoder.encode(`${transformed}\n\n`));
+      }
+    },
+    async flush(controller) {
+      pending += decoder.decode();
+      if (pending.trim()) {
+        const transformed = await transformGatewaySseBlock(pending, middleware, context);
+        if (transformed) controller.enqueue(encoder.encode(transformed));
+      }
+    },
+  });
+  const headers = new Headers(source.headers);
+  headers.delete("content-length");
+  return new Response(source.body.pipeThrough(transform), { status: source.status, statusText: source.statusText, headers });
+}
+
+async function transformGatewaySseBlock(block: string, middleware: RuntimeGatewayMiddlewareRegistry, context: RuntimeGatewayMiddlewareContext): Promise<string | null> {
+  const data = block.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("\n");
+  if (!data || data === "[DONE]") return block;
+  let event: unknown;
+  try { event = JSON.parse(data); } catch { return block; }
+  if (!isJsonRecord(event)) return block;
+  const result = await middleware.runEvent(event, context);
+  if (result.reject || !result.event) return null;
+  const lines = block.split(/\r?\n/);
+  let replaced = false;
+  return lines.map((line) => {
+    if (!replaced && line.startsWith("data:")) {
+      replaced = true;
+      return `data: ${JSON.stringify(result.event)}`;
+    }
+    return line;
+  }).join("\n");
+}
+
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function responseFromProviderRequest(result: { status: number; headers?: Readonly<Record<string, string>>; body?: Record<string, unknown>; events?: Array<Record<string, unknown>> }): Response {
+  const headers = new Headers(result.headers);
+  let body: string | undefined;
+  if (result.events?.length) {
+    headers.set("content-type", headers.get("content-type") ?? "text/event-stream");
+    body = `${result.events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")}data: [DONE]\n\n`;
+  } else if (result.body !== undefined) {
+    headers.set("content-type", headers.get("content-type") ?? "application/json; charset=utf-8");
+    body = JSON.stringify(result.body);
+  }
+  return new Response(body, { status: result.status, headers });
 }
 
 // These headers describe the client-to-next-hop connection. Forwarding them
@@ -673,6 +793,9 @@ async function proxyAccountPoolRequest(
   bodyOverride?: Buffer,
   usageContext?: UsageTelemetryContext,
   defaultProxyUrl?: string,
+  middleware?: RuntimeGatewayMiddlewareRegistry,
+  middlewareContext?: RuntimeGatewayMiddlewareContext,
+  resolveProviderAdapter?: (providerId: string | undefined) => RuntimeProviderAdapter | undefined,
 ): Promise<void> {
   const startedAt = Date.now();
   const body = bodyOverride ?? (request.method === "GET" || request.method === "HEAD" ? Buffer.alloc(0) : await readRequestBodyBuffer(request));
@@ -765,11 +888,23 @@ async function proxyAccountPoolRequest(
     const upstream = `${effectiveRoute.upstreamBaseUrl.replace(/\/+$/, "")}/${upstreamSuffix.replace(/^\/+/, "")}`;
     const headers = forwardedHeaders(request.headers);
     applyConfiguredRouteHeaders(headers, effectiveRoute.requestHeaders);
-    applyProtocolCredentialHeaders(headers, effectiveRoute.protocol, {
+    const providerAdapter = resolveProviderAdapter?.(effectiveRoute.providerId);
+    const providerAccount = providerAdapter ? {
+      accountId: secret.accountId ?? effectiveRoute.accountName,
+      displayName: effectiveRoute.accountName,
+      authMethod: secret.authMode === "auth" ? "subscription" as const : "api_key" as const,
+      secretRef: `route/${effectiveRoute.routeId}`,
+      status: "active" as const,
+    } : undefined;
+    if (providerAdapter && providerAccount) {
+      for (const [name, value] of providerAdapter.authorizationHeaders(providerAccount, secret.upstreamBearerToken, effectiveRoute.protocol).entries()) headers.set(name, value);
+    } else {
+      applyProtocolCredentialHeaders(headers, effectiveRoute.protocol, {
       upstreamApiKey: secret.upstreamBearerToken,
       authMode: secret.authMode,
       accountId: secret.accountId,
-    });
+      });
+    }
     const proxy = resolveUpstreamProxy(upstream, effectiveRoute.proxyUrl ?? member.proxyUrl, defaultProxyUrl);
     let upstreamResponse: Response;
     try {
@@ -780,6 +915,16 @@ async function proxyAccountPoolRequest(
           authorization: `Bearer ${localRouteToken}`, request: candidateParsedBody ?? {}, headers,
           history, signal: AbortSignal.timeout(120_000),
         })
+        : providerAdapter?.request && providerAccount
+        ? responseFromProviderRequest(await providerAdapter.request!({
+          account: providerAccount,
+          secret: secret.upstreamBearerToken,
+          protocol: effectiveRoute.protocol,
+          url: upstream,
+          method: request.method ?? "GET",
+          headers,
+          ...(candidateBody.length ? { body: candidateBody.toString("utf8") } : {}),
+        }))
         : await fetchWithOptionalProxy(upstream, {
           method: request.method, headers, body: candidateBody.length ? candidateBody as unknown as BodyInit : undefined, redirect: "manual",
           ...(candidateBody.length ? { duplex: "half" } as RequestInit : {}), signal: AbortSignal.timeout(120_000),
@@ -809,6 +954,7 @@ async function proxyAccountPoolRequest(
       sendJson(response, 502, { error: { message: "All selected accounts failed before receiving a response" }, code: "POOL_UPSTREAM_UNAVAILABLE" });
       finalStatus = 502; break;
     }
+    upstreamResponse = await applyGatewayMiddlewareResponse(upstreamResponse, middleware, middlewareContext);
     const reason = classifyPoolFailure(upstreamResponse.status);
     const retryable = !upstreamResponse.ok && isPoolRetryableFailure(reason, upstreamResponse.status);
     if (retryable && attempt + 1 < maxAttempts) {
@@ -912,6 +1058,8 @@ async function proxyRequest(
   resolveProviderAdapter?: (providerId: string | undefined) => RuntimeProviderAdapter | undefined,
   usageContext?: UsageTelemetryContext,
   defaultProxyUrl?: string,
+  middleware?: RuntimeGatewayMiddlewareRegistry,
+  middlewareContext?: RuntimeGatewayMiddlewareContext,
 ): Promise<void> {
   const startedAt = Date.now();
   const candidates = [route, ...fallbackRoutes.filter((candidate) => candidate.routeId !== route.routeId)];
@@ -954,38 +1102,49 @@ async function proxyRequest(
       const headers = forwardedHeaders(request.headers);
       applyConfiguredRouteHeaders(headers, candidate.requestHeaders);
       const providerAdapter = resolveProviderAdapter?.(candidate.providerId);
-      if (providerAdapter && candidateSecret) {
-        const account = {
-          accountId: candidateSecret.accountId ?? candidate.accountName,
-          displayName: candidate.accountName,
-          authMethod: candidateSecret.authMode === "auth" ? "subscription" as const : "api_key" as const,
-          secretRef: `route/${candidate.routeId}`,
-          status: "active" as const,
-        };
-        for (const [name, value] of providerAdapter.authorizationHeaders(account, candidateSecret.upstreamApiKey, candidate.protocol).entries()) headers.set(name, value);
+      const providerAccount = candidateSecret ? {
+        accountId: candidateSecret.accountId ?? candidate.accountName,
+        displayName: candidate.accountName,
+        authMethod: candidateSecret.authMode === "auth" ? "subscription" as const : "api_key" as const,
+        secretRef: `route/${candidate.routeId}`,
+        status: "active" as const,
+      } : undefined;
+      if (providerAdapter && candidateSecret && providerAccount) {
+        for (const [name, value] of providerAdapter.authorizationHeaders(providerAccount, candidateSecret.upstreamApiKey, candidate.protocol).entries()) headers.set(name, value);
       } else {
         applyProtocolCredentialHeaders(headers, candidate.protocol, candidateSecret);
       }
-      const response = await fetchWithOptionalProxy(upstream, {
-        method: request.method,
-        headers,
-        body: hasBody
-          ? candidateBody ? candidateBody.toString("utf8") : (Readable.toWeb(request) as ReadableStream<Uint8Array>)
-          : undefined,
-        redirect: "manual",
-        ...(hasBody ? { duplex: "half" } as RequestInit : {}),
-      }, proxy.url);
+      const response = providerAdapter?.request && candidateSecret && providerAccount
+        ? responseFromProviderRequest(await providerAdapter.request({
+          account: providerAccount,
+          secret: candidateSecret.upstreamApiKey,
+          protocol: candidate.protocol,
+          url: upstream,
+          method: request.method ?? "GET",
+          headers,
+          ...(hasBody ? { body: candidateBody?.toString("utf8") } : {}),
+        }))
+        : await fetchWithOptionalProxy(upstream, {
+          method: request.method,
+          headers,
+          body: hasBody
+            ? candidateBody ? candidateBody.toString("utf8") : (Readable.toWeb(request) as ReadableStream<Uint8Array>)
+            : undefined,
+          redirect: "manual",
+          ...(hasBody ? { duplex: "half" } as RequestInit : {}),
+        }, proxy.url);
       const convertedResponse = incomingProtocol && candidate.protocol !== incomingProtocol
         ? await convertUpstreamResponse(response, candidate.protocol, incomingProtocol, {
           originModelName: incomingModel,
           upstreamModelName: candidate.upstreamModel,
         })
         : response;
-      const responseReason = classifyPoolFailure(convertedResponse.status);
+      const middlewareResponse = await applyGatewayMiddlewareResponse(convertedResponse, middleware, middlewareContext);
+      const responseReason = classifyPoolFailure(middlewareResponse.status);
       const responseRetryAfterMs = retryAfterMs(convertedResponse) ?? null;
-      if (!convertedResponse.ok && index < candidates.length - 1
-        && isPoolRetryableFailure(responseReason, convertedResponse.status)) {
-        const body = Buffer.from(await convertedResponse.arrayBuffer());
+      if (!middlewareResponse.ok && index < candidates.length - 1
+        && isPoolRetryableFailure(responseReason, middlewareResponse.status)) {
+        const body = Buffer.from(await middlewareResponse.arrayBuffer());
         const errorMessage = extractSafeErrorMessage(body.toString("utf8"), `Upstream returned HTTP ${convertedResponse.status}`);
         onOutcome?.(candidate, false, convertedResponse.status, {
           latencyMs: Date.now() - attemptStartedAt, estimatedTokens,
@@ -1001,31 +1160,31 @@ async function proxyRequest(
           retryAfterMs: responseRetryAfterMs, outcome: "retry",
         });
         lastRetryableResponse = {
-          status: convertedResponse.status,
-          headers: new Headers(convertedResponse.headers),
+          status: middlewareResponse.status,
+          headers: new Headers(middlewareResponse.headers),
           body,
           retryAfterMs: responseRetryAfterMs,
         };
         lastRetryableRoute = candidate;
         continue;
       }
-      const errorMessage = await extractSafeUpstreamResponseError(convertedResponse, `Upstream returned HTTP ${convertedResponse.status}`);
-      onOutcome?.(candidate, convertedResponse.ok, convertedResponse.status, {
+      const errorMessage = await extractSafeUpstreamResponseError(middlewareResponse, `Upstream returned HTTP ${middlewareResponse.status}`);
+      onOutcome?.(candidate, middlewareResponse.ok, middlewareResponse.status, {
         latencyMs: Date.now() - attemptStartedAt, estimatedTokens,
         attemptIndex: index + 1, attemptCount: candidates.length,
-        outcome: convertedResponse.ok ? "success" : "returned",
-        failureReason: convertedResponse.ok ? null : responseReason,
+        outcome: middlewareResponse.ok ? "success" : "returned",
+        failureReason: middlewareResponse.ok ? null : responseReason,
         errorMessage, retryAfterMs: responseRetryAfterMs,
         proxySource: proxy.source, upstreamProtocol: candidate.protocol,
         conversionQuality: conversionTrace?.quality ?? null,
         conversionDiagnostics: conversionTrace?.diagnostics,
       });
-      upstreamResponse = convertedResponse;
+      upstreamResponse = middlewareResponse;
       attempts.push({
         accountName: candidate.accountName, startedAt: attemptStartedAt, completedAt: Date.now(),
-        httpStatus: convertedResponse.status, reason: convertedResponse.ok ? null : responseReason,
+        httpStatus: middlewareResponse.status, reason: middlewareResponse.ok ? null : responseReason,
         errorMessage, retryAfterMs: responseRetryAfterMs,
-        outcome: convertedResponse.ok ? "success" : "returned",
+        outcome: middlewareResponse.ok ? "success" : "returned",
       });
       break;
     } catch (error) {
@@ -1247,8 +1406,15 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
   let pluginManager: RuntimePluginManager | undefined;
   try {
     const pluginRuntime = await loadGatewayPluginRuntime();
+    const trustedPublicKeyPem = process.env.CODEX_SWITCHER_PLUGIN_TRUSTED_PUBLIC_KEY?.trim();
     const candidate = new pluginRuntime.ProviderPluginManager({
       rootDir: join(options.stateDir, "provider-plugins"),
+      settingsDir: join(options.stateDir, "provider-plugin-settings"),
+      sandbox: { mode: options.providerPluginSandboxMode ?? "required" },
+      ...(trustedPublicKeyPem ? {
+        verifySignature: (manifest: import("../../../packages/gateway/dist/plugin/host.js").GatewayPluginManifest, checksum: string) =>
+          pluginRuntime.verifyPluginManifestSignature(manifest, trustedPublicKeyPem, checksum),
+      } : {}),
       log: (line: string) => console.warn(`[provider-plugin] ${line}`),
     }) as RuntimePluginManager;
     const activation = await candidate.activateInstalled();
@@ -1643,8 +1809,35 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
         if (requestMethod !== "GET" && requestMethod !== "HEAD") {
           bodyOverride = await readRequestBodyBuffer(request);
         }
-        const parsedGatewayBody = bodyOverride?.length ? parseRequestBody(bodyOverride) : undefined;
-        const requestedModel = extractProtocolModel(gatewayProtocol, gatewayRouteSuffix, parsedGatewayBody);
+        let parsedGatewayBody = bodyOverride?.length ? parseRequestBody(bodyOverride) : undefined;
+        let middlewareModel: string | undefined;
+        const gatewayMiddleware = pluginManager?.middlewareRegistry;
+        const gatewayMiddlewareContext: RuntimeGatewayMiddlewareContext | undefined = parsedGatewayBody && gatewayMiddleware
+          ? {
+            requestId: gatewayRequestId,
+            traceId: request.headers["x-request-id"]?.toString().trim() || gatewayRequestId,
+            protocol: gatewayProtocol,
+            model: extractProtocolModel(gatewayProtocol, gatewayRouteSuffix, parsedGatewayBody) ?? "unknown",
+            stream: parsedGatewayBody.stream === true,
+            path: url.pathname,
+            agentId: request.headers["x-codex-agent"]?.toString().trim() || undefined,
+            environmentId: gateway.envName,
+            state: {},
+          }
+          : undefined;
+        if (parsedGatewayBody && gatewayMiddleware && gatewayMiddlewareContext) {
+          const middlewareResult = await gatewayMiddleware.runRequest(parsedGatewayBody, gatewayMiddlewareContext);
+          if (middlewareResult.reject) {
+            void recordPoolEvent({ event: "gateway_middleware_rejected", at: Date.now(), requestId: gatewayRequestId, gatewayId, envName: gateway.envName, pluginCode: middlewareResult.reject.code ?? null, errorMessage: middlewareResult.reject.message });
+            return sendJson(response, middlewareResult.reject.status ?? 400, { error: middlewareResult.reject.message, ...(middlewareResult.reject.code ? { code: middlewareResult.reject.code } : {}) });
+          }
+          parsedGatewayBody = middlewareResult.body;
+          middlewareModel = middlewareResult.model;
+          bodyOverride = Buffer.from(JSON.stringify(parsedGatewayBody));
+          gatewayMiddlewareContext.model = middlewareModel ?? extractProtocolModel(gatewayProtocol, gatewayRouteSuffix, parsedGatewayBody) ?? "unknown";
+          gatewayMiddlewareContext.stream = parsedGatewayBody.stream === true;
+        }
+        const requestedModel = middlewareModel ?? extractProtocolModel(gatewayProtocol, gatewayRouteSuffix, parsedGatewayBody);
         const gatewayRoutes = gateway.routeIds
           .map((routeId) => routes.get(routeId))
           .filter((route): route is RouteTarget => route !== undefined);
@@ -1674,7 +1867,6 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           const routeDiagnostics = gateway.routeIds.map((routeId) => {
             const loadedRoute = routes.get(routeId);
             const persistedRoute = persistedRoutesById.get(routeId);
-            const health = gatewayHealth.get(gatewayRouteMetricKey(gateway, routeId));
             return {
               routeId,
               accountName: persistedRoute?.accountName ?? loadedRoute?.accountName ?? null,
@@ -1683,7 +1875,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
               enabled: persistedRoute?.enabled ?? loadedRoute?.enabled ?? false,
               loaded: Boolean(loadedRoute),
               available: Boolean(loadedRoute && gatewayRouteAvailable(gateway, loadedRoute)),
-              cooldownUntil: health?.cooldownUntil ?? null,
+              cooldownUntil: gatewayHealth.get(gatewayRouteMetricKey(gateway, routeId))?.cooldownUntil ?? null,
             };
           });
           void recordPoolEvent({
@@ -1784,6 +1976,9 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
             bodyOverride,
             gatewayUsageContext,
             defaultProxyUrl,
+            gatewayMiddleware,
+            gatewayMiddlewareContext,
+            (providerId) => providerId && pluginManager?.registry.has(providerId) ? pluginManager.registry.get(providerId) : undefined,
           );
         }
         const legacyFallbackRoutes = gateway.routeGroups
@@ -1838,6 +2033,8 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           (providerId) => providerId && pluginManager?.registry.has(providerId) ? pluginManager.registry.get(providerId) : undefined,
           gatewayUsageContext,
           defaultProxyUrl,
+          gatewayMiddleware,
+          gatewayMiddlewareContext,
         );
       }
       const poolMatch = url.pathname.match(/^\/pools\/([^/]+)\/?(.*)$/);
@@ -1858,7 +2055,8 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
         ), token ?? "", store, history, routeSuffix, matchedMember, recordPoolEvent, undefined, undefined, undefined, undefined, {
           agentId: request.headers["x-codex-agent"]?.toString().trim() || null,
           ingressProtocol: pool!.protocol,
-        }, defaultProxyUrl);
+        }, defaultProxyUrl, undefined, undefined,
+          (providerId) => providerId && pluginManager?.registry.has(providerId) ? pluginManager.registry.get(providerId) : undefined);
       }
       const match = url.pathname.match(/^\/routes\/([^/]+)\/?(.*)$/);
       if (!match) return sendJson(response, 404, { error: "Not found" });

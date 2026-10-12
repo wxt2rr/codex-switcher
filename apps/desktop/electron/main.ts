@@ -90,6 +90,11 @@ import {
   saveGatewayAdminConfiguration,
   discoverGatewayAdminModels,
   loadProviderPluginSnapshot,
+  loadProviderPluginDiagnostics,
+  loadProviderPluginSettings,
+  saveProviderPluginSettings,
+  resetProviderPluginSettings,
+  activateProviderPluginById,
   loadProviderPluginMarket,
   refreshProviderPluginMarket,
   installProviderPlugin,
@@ -654,6 +659,11 @@ function registerHandlers() {
   ipcMain.handle("desktop:saveGatewayAdminConfiguration", (_event: IpcMainInvokeEvent, request) => saveGatewayAdminConfiguration(request));
   ipcMain.handle("desktop:discoverGatewayAdminModels", (_event: IpcMainInvokeEvent, request) => discoverGatewayAdminModels(request));
   ipcMain.handle("desktop:loadProviderPluginSnapshot", () => loadProviderPluginSnapshot());
+  ipcMain.handle("desktop:loadProviderPluginDiagnostics", (_event: IpcMainInvokeEvent, pluginId?: string) => loadProviderPluginDiagnostics(pluginId));
+  ipcMain.handle("desktop:loadProviderPluginSettings", (_event: IpcMainInvokeEvent, id: string) => loadProviderPluginSettings(id));
+  ipcMain.handle("desktop:saveProviderPluginSettings", (_event: IpcMainInvokeEvent, id: string, values: Record<string, unknown>) => saveProviderPluginSettings(id, values));
+  ipcMain.handle("desktop:resetProviderPluginSettings", (_event: IpcMainInvokeEvent, id: string) => resetProviderPluginSettings(id));
+  ipcMain.handle("desktop:activateProviderPlugin", (_event: IpcMainInvokeEvent, id: string) => activateProviderPluginById(id));
   ipcMain.handle("desktop:loadProviderPluginMarket", () => loadProviderPluginMarket());
   ipcMain.handle("desktop:refreshProviderPluginMarket", (_event: IpcMainInvokeEvent, url: string) => refreshProviderPluginMarket(url));
   ipcMain.handle("desktop:installProviderPlugin", (_event: IpcMainInvokeEvent, request) => installProviderPlugin(request));

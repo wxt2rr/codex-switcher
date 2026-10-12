@@ -21,6 +21,7 @@ export interface PluginRuntimeOptions {
   maxRestarts?: number;
   log?: PluginLogSink;
   transportFactory?: (manifest: GatewayPluginManifest, path: string, sandbox: PluginSandboxOptions) => PluginTransport | Promise<PluginTransport>;
+  settings?: (pluginId: string) => Promise<Record<string, unknown>> | Record<string, unknown>;
 }
 
 export interface ActivePluginProvider {
@@ -62,8 +63,16 @@ export class PluginRuntimeManager {
     });
     try {
       const response = await host.call("provider.describe");
-      const descriptor = normalizeProviderDescriptor(response.result, manifest.id);
-      const adapter = createPluginProviderAdapter({ ...descriptor, host });
+      const declaredProviderIds = new Set([
+        manifest.id,
+        ...(manifest.providers?.map((provider) => provider.id) ?? []),
+      ]);
+      const descriptor = normalizeProviderDescriptor(response.result, declaredProviderIds);
+      const adapter = createPluginProviderAdapter({
+        ...descriptor,
+        host,
+        ...(this.options.settings ? { settings: () => this.options.settings!(manifest.id) } : {}),
+      });
       this.options.registry.register(adapter);
       const active: ActivePluginProvider = { manifest, path, descriptor, host };
       this.active.set(manifest.id, active);
@@ -96,22 +105,22 @@ export class PluginRuntimeManager {
   list(): ActivePluginProvider[] { return [...this.active.values()]; }
 }
 
-function normalizeProviderDescriptor(value: unknown, expectedId: string): PluginProviderDescriptor {
+function normalizeProviderDescriptor(value: unknown, expectedIds: ReadonlySet<string>): PluginProviderDescriptor {
   const record = isRecord(value) && isRecord(value.provider) ? value.provider : value;
-  if (!isRecord(record) || record.id !== expectedId || typeof record.displayName !== "string" || !record.displayName.trim()) {
-    throw new Error(`Plugin provider descriptor must use plugin id '${expectedId}'`);
+  if (!isRecord(record) || typeof record.id !== "string" || !expectedIds.has(record.id) || typeof record.displayName !== "string" || !record.displayName.trim()) {
+    throw new Error(`Plugin provider descriptor must use a declared provider id (${[...expectedIds].join(", ")})`);
   }
   const authMethods = Array.isArray(record.authMethods)
     ? record.authMethods.filter((method): method is ProviderAuthMethod => method === "api_key" || method === "oauth" || method === "subscription" || method === "none")
     : [];
-  if (!authMethods.length) throw new Error(`Plugin provider '${expectedId}' must declare an auth method`);
-  if (!Array.isArray(record.endpoints) || !record.endpoints.length) throw new Error(`Plugin provider '${expectedId}' must declare an endpoint`);
+  if (!authMethods.length) throw new Error(`Plugin provider '${String(record.id)}' must declare an auth method`);
+  if (!Array.isArray(record.endpoints) || !record.endpoints.length) throw new Error(`Plugin provider '${String(record.id)}' must declare an endpoint`);
   const endpoints = record.endpoints.flatMap((endpoint): ProviderEndpoint[] => {
     if (!isRecord(endpoint) || !isGatewayProtocol(endpoint.protocol) || typeof endpoint.baseUrl !== "string" || typeof endpoint.modelsPath !== "string") return [];
     return [{ protocol: endpoint.protocol, baseUrl: endpoint.baseUrl, modelsPath: endpoint.modelsPath, ...(typeof endpoint.quotaPath === "string" ? { quotaPath: endpoint.quotaPath } : {}) }];
   });
-  if (!endpoints.length) throw new Error(`Plugin provider '${expectedId}' has no valid endpoint`);
-  return { id: expectedId, displayName: record.displayName, authMethods, endpoints };
+  if (!endpoints.length) throw new Error(`Plugin provider '${String(record.id)}' has no valid endpoint`);
+  return { id: String(record.id), displayName: record.displayName, authMethods, endpoints };
 }
 
 function isGatewayProtocol(value: unknown): value is GatewayProtocol {

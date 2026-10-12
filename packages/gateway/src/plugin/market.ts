@@ -37,7 +37,7 @@ export interface InstalledPlugin {
 export type PluginInstallSource =
   | { kind: "local"; path: string }
   | { kind: "npm"; spec: string }
-  | { kind: "git"; url: string; ref?: string };
+  | { kind: "git"; url: string; ref: string };
 
 export interface PluginCommandResult {
   code: number;
@@ -100,12 +100,14 @@ export class PluginInstallationStore {
     source: PluginInstallSource,
     runCommand: PluginCommandRunner = runPluginCommand,
   ): Promise<InstalledPlugin> {
-    if (source.kind === "local") return this.install(manifest, source.path);
     const worktree = await mkdtemp(join(tmpdir(), "codex-switcher-plugin-"));
     try {
-      const sourceDirectory = source.kind === "npm"
-        ? await materializeNpmPlugin(source.spec, worktree, runCommand)
-        : await materializeGitPlugin(source, worktree, runCommand);
+      const sourceDirectory = source.kind === "local"
+        ? await materializeLocalPlugin(source.path, worktree)
+        : source.kind === "npm"
+          ? await materializeNpmPlugin(source.spec, worktree, runCommand)
+          : await materializeGitPlugin(source, worktree, runCommand);
+      await installPluginDependencies(sourceDirectory, runCommand);
       return await this.install(manifest, sourceDirectory);
     } finally {
       await rm(worktree, { recursive: true, force: true });
@@ -280,10 +282,35 @@ async function materializeNpmPlugin(spec: string, worktree: string, runCommand: 
   return join(extracted, "package");
 }
 
+async function materializeLocalPlugin(source: string, worktree: string): Promise<string> {
+  if (!source.trim()) throw new Error("local plugin path is required");
+  const sourceInfo = await stat(source).catch(() => undefined);
+  if (!sourceInfo?.isDirectory()) throw new Error("Plugin source directory does not exist");
+  const target = join(worktree, "package");
+  await cp(source, target, { recursive: true, force: false, errorOnExist: true });
+  return target;
+}
+
+async function installPluginDependencies(sourceDirectory: string, runCommand: PluginCommandRunner): Promise<void> {
+  let packageJson: Record<string, unknown>;
+  try {
+    packageJson = JSON.parse(await readFile(join(sourceDirectory, "package.json"), "utf8")) as Record<string, unknown>;
+  } catch {
+    return;
+  }
+  const dependencies = [packageJson.dependencies, packageJson.optionalDependencies]
+    .filter(isRecord)
+    .flatMap((value) => Object.keys(value));
+  if (!dependencies.length) return;
+  const installed = await runCommand("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--omit=dev"], sourceDirectory);
+  if (installed.code !== 0) throw new Error(`plugin dependency installation failed: ${installed.stderr.trim() || installed.stdout.trim()}`);
+}
+
 async function materializeGitPlugin(source: Extract<PluginInstallSource, { kind: "git" }>, worktree: string, runCommand: PluginCommandRunner): Promise<string> {
   if (!source.url.trim()) throw new Error("git plugin URL is required");
+  if (!source.ref.trim()) throw new Error("git plugin ref is required; use a tag or commit");
   const repository = join(worktree, "repository");
-  const args = ["clone", "--depth", "1", ...(source.ref?.trim() ? ["--branch", source.ref.trim()] : []), "--", source.url.trim(), repository];
+  const args = ["clone", "--depth", "1", "--branch", source.ref.trim(), "--", source.url.trim(), repository];
   const cloned = await runCommand("git", args, worktree);
   if (cloned.code !== 0) throw new Error(`git plugin clone failed: ${cloned.stderr.trim() || cloned.stdout.trim()}`);
   return repository;
@@ -312,7 +339,7 @@ function isPluginInstallSource(value: unknown): value is PluginInstallSource {
   if (value.kind === "local") return typeof value.path === "string" && value.path.trim().length > 0;
   if (value.kind === "npm") return typeof value.spec === "string" && value.spec.trim().length > 0;
   if (value.kind === "git") return typeof value.url === "string" && value.url.trim().length > 0
-    && (value.ref === undefined || typeof value.ref === "string");
+    && typeof value.ref === "string" && value.ref.trim().length > 0;
   return false;
 }
 

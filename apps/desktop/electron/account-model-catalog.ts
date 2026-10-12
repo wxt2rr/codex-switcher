@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 
 import {
   accountModelBindingKey,
+  formatCodexModelDisplayName,
   isModelAvailableForAccount,
   normalizeCustomModelInput,
   type ModelCatalogEntry,
@@ -110,7 +111,10 @@ export async function synchronizeAccountModelCatalog(options: {
   }).map((id) => {
     const model = byId.get(id);
     if (!model) throw new Error(`Bound custom model '${id}' no longer exists`);
-    return model.entry;
+    return {
+      ...model.entry,
+      display_name: formatCodexModelDisplayName(model.entry),
+    };
   });
   const bundled = options.loadBundledCatalog
     ? await options.loadBundledCatalog()

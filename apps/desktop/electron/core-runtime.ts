@@ -5,6 +5,7 @@ import {
   getConfiguredResourcesPath,
   resolveRuntimeResource,
   resolveRuntimeRoot,
+  resolveWorkspaceRoot,
 } from "./runtime-paths.js";
 
 export interface CoreRuntime {
@@ -170,10 +171,10 @@ export async function loadGatewayPluginRuntime(): Promise<GatewayPluginRuntime> 
   });
   const sourceRoot = join(getSourceRepoRoot(), "packages", "gateway", "src", "plugin");
   const [manager, market, signing] = await Promise.all([
-    importFirstExisting<GatewayPluginRuntimeModule>([
+    importFirstCompatible<GatewayPluginRuntimeModule>([
       join(runtimeRoot, "manager.js"),
       join(sourceRoot, "manager.ts"),
-    ]),
+    ], (module) => typeof module.ProviderPluginManager?.prototype?.activate === "function" && typeof module.ProviderPluginManager?.prototype?.installPlugin === "function"),
     importFirstExisting<GatewayPluginMarketModule>([
       join(runtimeRoot, "market.js"),
       join(sourceRoot, "market.ts"),
@@ -326,6 +327,20 @@ async function importFirstExisting<T>(candidates: string[]): Promise<T> {
   throw new Error(`Unable to resolve module from candidates: ${candidates.join(", ")}`);
 }
 
+async function importFirstCompatible<T>(candidates: string[], predicate: (module: T) => boolean): Promise<T> {
+  let lastError: unknown;
+  for (const candidate of candidates) {
+    try {
+      const module = await importModule<T>(candidate);
+      if (predicate(module)) return module;
+      lastError = new Error(`Module does not satisfy the required runtime contract: ${candidate}`);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(`Unable to resolve a compatible module from candidates: ${candidates.join(", ")}`);
+}
+
 function resolveCurrentFile(): string {
   if (typeof __filename === "string") {
     return __filename;
@@ -366,10 +381,14 @@ function getSourceRepoRoot(): string {
   // process.resourcesPath. The source fallback is still needed in development,
   // but resolving it eagerly must not fail before the packaged dist module is
   // selected.
-  return resolveRuntimeRoot({
-    currentFile: resolveCurrentFile(),
-    resourcesPath: getConfiguredResourcesPath(),
-  });
+  try {
+    return resolveWorkspaceRoot(resolveCurrentFile());
+  } catch {
+    return resolveRuntimeRoot({
+      currentFile: resolveCurrentFile(),
+      resourcesPath: getConfiguredResourcesPath(),
+    });
+  }
 }
 
 function getCoreDist(): string {

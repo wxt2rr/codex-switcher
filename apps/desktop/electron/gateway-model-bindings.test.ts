@@ -108,6 +108,78 @@ test("model page bindings compile into an environment-scoped route group", () =>
   assert.equal(Object.values(result.routeGroups).some((candidate) => candidate.exposedModelId === "other-env-model"), false);
 });
 
+test("discovered catalog models use upstream_model_id on the provider wire", () => {
+  const env = environment();
+  const catalog: ModelCatalogSnapshot = {
+    version: 1,
+    models: [{
+      id: "model-openai-gpt-5-5",
+      entry: {
+        slug: "openai:gpt-5.5",
+        upstream_model_id: "gpt-5.5",
+        display_name: "GPT-5.5",
+        provider_id: "openai",
+        provider_model_key: "openai:gpt-5.5",
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }],
+    accountBindings: { "wangxt/alpha": ["model-openai-gpt-5-5"] },
+  };
+
+  const result = applyModelCatalogBindings(env, buildLegacyGatewayEnvironmentState(env), catalog);
+  const group = Object.values(result.routeGroups).find((candidate) => candidate.exposedModelId === "openai:gpt-5.5");
+  assert.ok(group);
+  const model = Object.values(result.models).find((candidate) => candidate.id === group.members[0]?.modelId);
+  assert.equal(model?.upstreamModelId, "gpt-5.5");
+
+  const explicit = applyModelCatalogBindings(
+    env,
+    buildLegacyGatewayEnvironmentState(env),
+    {
+      ...catalog,
+      accountBindingOptions: {
+        "wangxt/alpha": {
+          "model-openai-gpt-5-5": { upstreamModelId: "provider-specific-gpt-5.5" },
+        },
+      },
+    },
+  );
+  assert.equal(
+    Object.values(explicit.models).find((candidate) => candidate.id.includes("provider-specific-gpt-5.5"))?.upstreamModelId,
+    "provider-specific-gpt-5.5",
+  );
+});
+
+test("gateway labels aliased provider models while preserving the upstream model id", () => {
+  const env = environment();
+  const catalog: ModelCatalogSnapshot = {
+    version: 1,
+    models: [{
+      id: "model-ckt-gpt-5-5",
+      entry: {
+        slug: "custom:aicode.ckt.cn:gpt-5.5",
+        upstream_model_id: "gpt-5.5",
+        display_name: "GPT-5.5",
+        provider_display_name: "ckt-aicode",
+        provider_id: "custom:aicode.ckt.cn",
+        provider_model_key: "custom:aicode.ckt.cn:gpt-5.5",
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }],
+    accountBindings: { "wangxt/alpha": ["model-ckt-gpt-5-5"] },
+  };
+
+  const result = applyModelCatalogBindings(env, buildLegacyGatewayEnvironmentState(env), catalog);
+  const group = Object.values(result.routeGroups).find((candidate) => candidate.exposedModelId === "custom:aicode.ckt.cn:gpt-5.5");
+  assert.ok(group);
+  assert.equal(group.displayName, "ckt-aicode:5.5");
+  const model = Object.values(result.models).find((candidate) => candidate.id === group.members[0]?.modelId);
+  assert.equal(model?.displayName, "ckt-aicode:5.5");
+  assert.equal(model?.upstreamModelId, "gpt-5.5");
+});
+
 test("explicitly disabled tool models remain incompatible with tool requests", () => {
   const env = environment();
   const disabled: ModelCatalogSnapshot = {

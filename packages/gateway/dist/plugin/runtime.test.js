@@ -124,7 +124,7 @@ test("plugin runtime rejects a descriptor that attempts to impersonate another p
             async send(request) { return { jsonrpc: "2.0", id: request.id, result: { id: "other-provider", displayName: "Other", authMethods: ["api_key"], endpoints: [{ protocol: "responses", baseUrl: "https://example.test", modelsPath: "/models" }] } }; },
             async close() { },
         }) });
-    await assert.rejects(manager.activate(manifest, "/tmp/runtime-provider"), /must use plugin id/);
+    await assert.rejects(manager.activate(manifest, "/tmp/runtime-provider"), /declared provider id/);
     assert.equal(manager.list().length, 0);
 });
 test("plugin runtime activates a real child provider through the shared registry", async () => {

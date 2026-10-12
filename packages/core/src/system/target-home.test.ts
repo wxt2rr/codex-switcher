@@ -67,6 +67,60 @@ test("target-home writer installs auth.json and managed config for apikey accoun
   }
 });
 
+test("target-home writer prefers the environment gateway over an account route", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-gateway-"));
+  const homePath = join(root, "home");
+  const state: SwitcherState = {
+    schemaVersion: DEFAULT_SCHEMA_VERSION,
+    generatedAt: "2026-10-12T10:00:00.000Z",
+    targets: {
+      cli: { env: "default", account: "proxy" },
+      app: { env: "default", account: "proxy" },
+    },
+    envs: {
+      default: {
+        name: "default",
+        path: homePath,
+        accounts: {
+          proxy: {
+            name: "proxy",
+            authMode: "apikey",
+            runtime: {
+              preferredAuthMethod: "apikey",
+              apiProtocol: "chat_completions",
+              openaiBaseUrlMode: "custom",
+              openaiBaseUrl: "http://127.0.0.1:17832/routes/account-route",
+              compatibilityRouteEnabled: true,
+              compatibilityRouteBaseUrl: "http://127.0.0.1:17832/routes/account-route",
+              compatibilityRouteToken: "local-route-token",
+            },
+            authData: {
+              OPENAI_API_KEY: "sk-upstream",
+            },
+          },
+        },
+      },
+    },
+    tasks: { recent: [] },
+  };
+
+  try {
+    await applyTargetHomeState({
+      state,
+      target: "cli",
+      gatewayBaseUrl: "http://127.0.0.1:17832/gateways/gateway-default",
+    });
+
+    const config = await readFile(join(homePath, "config.toml"), "utf8");
+    assert.match(config, /base_url = "http:\/\/127\.0\.0\.1:17832\/gateways\/gateway-default"/);
+    assert.doesNotMatch(config, /\/routes\/account-route/);
+    assert.match(config, /wire_api = "responses"/);
+    assert.match(config, /requires_openai_auth = false/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("legacy target-home repair scans every environment and preserves auth.json", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-migration-"));
   const firstHome = join(root, "first");

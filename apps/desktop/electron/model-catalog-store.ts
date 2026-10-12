@@ -449,6 +449,28 @@ export function normalizeCustomModelInput(value: Record<string, unknown>): Model
   };
 }
 
+/**
+ * Adds the account/provider alias to the Codex-facing label while keeping the
+ * catalog slug and upstream model id unchanged for routing.
+ *
+ * Codex commonly renders official names such as "GPT-5.5" as "5.5". Keep
+ * that compact convention for aliased models too, so a custom account appears
+ * as "ckt-aicode:5.5" instead of duplicating the longer provider name.
+ */
+export function formatCodexModelDisplayName(
+  entry: { display_name: string; provider_display_name?: unknown },
+  fallbackProviderDisplayName?: string,
+): string {
+  const displayName = entry.display_name.trim();
+  const providerDisplayName = (typeof entry.provider_display_name === "string"
+    ? entry.provider_display_name
+    : fallbackProviderDisplayName ?? "").trim();
+  if (!displayName || !providerDisplayName) return displayName;
+  if (displayName.startsWith(`${providerDisplayName}:`)) return displayName;
+  const compactName = displayName.replace(/^GPT[-\s]+(?=\d)/i, "").trim() || displayName;
+  return `${providerDisplayName}:${compactName}`;
+}
+
 function isSupportedModelProtocol(value: string): boolean {
   const normalized = value.trim().toLowerCase().replaceAll("-", "_");
   return normalized === "responses"

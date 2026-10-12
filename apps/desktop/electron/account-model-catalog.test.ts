@@ -36,6 +36,35 @@ test("account catalog merges bundled models with the account's bound custom mode
   assert.match(await readFile(configPath, "utf8"), /model_catalog_json = /);
 });
 
+test("account catalog prefixes discovered provider aliases in Codex display names", async () => {
+  const root = await mkdtemp(join(tmpdir(), "account-model-catalog-label-"));
+  const store = createModelCatalogStore(join(root, "custom-models.json"));
+  const custom = await store.saveModel({
+    entry: {
+      slug: "custom:aicode.ckt.cn:gpt-5.5",
+      display_name: "GPT-5.5",
+      provider_display_name: "ckt-aicode",
+      upstream_model_id: "gpt-5.5",
+    },
+  });
+  await store.setAccountBindings("work/ckt-aicode", [custom.id]);
+
+  const result = await synchronizeAccountModelCatalog({
+    envName: "work",
+    accountName: "ckt-aicode",
+    homePath: join(root, "home"),
+    store,
+    loadBundledCatalog: async () => ({ models: [] }),
+  });
+
+  const generated = JSON.parse(await readFile(result.catalogPath!, "utf8")) as {
+    models: Array<Record<string, unknown>>;
+  };
+  assert.equal(generated.models[0]?.slug, "custom:aicode.ckt.cn:gpt-5.5");
+  assert.equal(generated.models[0]?.display_name, "ckt-aicode:5.5");
+  assert.equal(generated.models[0]?.upstream_model_id, "gpt-5.5");
+});
+
 test("account catalog removes model_catalog_json when the account has no bindings", async () => {
   const root = await mkdtemp(join(tmpdir(), "account-model-catalog-clear-"));
   const homePath = join(root, "home");

@@ -9,6 +9,14 @@ const LOCAL_ROUTER_PROVIDER_ID = "codex_switcher_router";
 export interface ApplyTargetHomeStateOptions {
   state: SwitcherState;
   target: TargetName;
+  /**
+   * Override the selected account route with the environment gateway route.
+   *
+   * Account runtime data may still contain a direct compatibility route (or a
+   * stale per-account router URL) while an environment gateway is active. The
+   * target home must follow the environment gateway in that case.
+   */
+  gatewayBaseUrl?: string;
 }
 
 export interface LegacyTargetHomeRepairEntry {
@@ -94,18 +102,29 @@ export async function applyTargetHomeState(
     return;
   }
 
+  const targetRuntime = options.gatewayBaseUrl
+    ? {
+        ...account.runtime,
+        openaiBaseUrlMode: "custom" as const,
+        openaiBaseUrl: options.gatewayBaseUrl,
+        // A compatibility route is account-scoped. When the environment
+        // gateway is selected, project the gateway ingress instead.
+        compatibilityRouteEnabled: false,
+      }
+    : account.runtime;
+
   const compatibilityRouteActive =
-    account.runtime.apiProtocol === "chat_completions" &&
-    account.runtime.compatibilityRouteEnabled === true;
+    targetRuntime.apiProtocol === "chat_completions" &&
+    targetRuntime.compatibilityRouteEnabled === true;
   if (
     compatibilityRouteActive &&
-    (!account.runtime.compatibilityRouteBaseUrl ||
-      !account.runtime.compatibilityRouteToken)
+    (!targetRuntime.compatibilityRouteBaseUrl ||
+      !targetRuntime.compatibilityRouteToken)
   ) {
     throw new Error(`Compatibility route for '${account.name}' is incomplete`);
   }
   const targetAuthData = compatibilityRouteActive
-    ? { OPENAI_API_KEY: account.runtime.compatibilityRouteToken! }
+    ? { OPENAI_API_KEY: targetRuntime.compatibilityRouteToken! }
     : account.authData;
 
   if (targetAuthData) {
@@ -118,7 +137,7 @@ export async function applyTargetHomeState(
     await rm(join(env.path, "auth.json"), { force: true });
   }
 
-  await writeManagedConfig(join(env.path, "config.toml"), account.runtime);
+  await writeManagedConfig(join(env.path, "config.toml"), targetRuntime);
 }
 
 export async function clearTargetHomeState(homePath: string): Promise<void> {

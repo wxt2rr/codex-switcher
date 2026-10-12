@@ -7,6 +7,7 @@ import { join } from "node:path";
 import {
   closeProviderPluginRuntime,
   getProviderPluginAdapter,
+  listProviderPluginDiagnostics,
   listProviderPluginMarket,
   listProviderPlugins,
   refreshProviderPluginMarket,
@@ -41,8 +42,25 @@ test("desktop provider plugin market reads explicit sources and rejects unsuppor
       entry: "index.js", permissions: ["provider"], source: { kind: "npm", spec: "provider-demo@1.0.0" }, updatedAt: Date.now(),
     }])}\n`, "utf8");
     const entries = await listProviderPluginMarket(stateDir);
-    assert.equal(entries[0]?.source?.kind, "npm");
+    assert.equal(entries.find((entry) => entry.id === "provider-demo")?.source?.kind, "npm");
+    assert.equal(entries.some((entry) => entry.id === "csw-our-free-model"), true);
     await assert.rejects(refreshProviderPluginMarket(stateDir, "file:///tmp/plugins.json"), /http or https/);
+  } finally {
+    await closeProviderPluginRuntime();
+  }
+});
+
+test("desktop provider plugin runtime persists actionable lifecycle diagnostics", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-plugin-diagnostics-"));
+  try {
+    await assert.rejects(async () => {
+      const { activateProviderPlugin } = await import("./provider-plugin-runtime.js");
+      await activateProviderPlugin(stateDir, "missing-plugin");
+    });
+    const diagnostics = await listProviderPluginDiagnostics(stateDir, "missing-plugin");
+    assert.equal(diagnostics[0]?.level, "error");
+    assert.equal(diagnostics[0]?.phase, "activation");
+    assert.match(diagnostics[0]?.message ?? "", /missing-plugin/i);
   } finally {
     await closeProviderPluginRuntime();
   }

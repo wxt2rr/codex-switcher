@@ -7,6 +7,7 @@ import type { GatewayProtocol, GatewayRouteCompatibilityIssue } from "../../../p
 import type { EnvState } from "../../../packages/core/dist/state/store.js";
 import {
   resolveModelBinding,
+  formatCodexModelDisplayName,
   isModelAvailableForAccount,
   type ModelCatalogEntry,
   type CustomModelRecord,
@@ -160,6 +161,10 @@ function addModelBinding(
   if (!credential) return;
 
   const providerId = credential.providerId;
+  const displayName = formatCodexModelDisplayName(
+    model.entry,
+    isCustomOpenAIProvider(providerId) ? accountName : undefined,
+  );
   const internalModelId = createCatalogModelId(model.id, providerId, binding.upstreamModelId);
   const configuredProtocol: GatewayProtocol = account.authMode === "auth" ? "responses" : account.runtime.apiProtocol ?? "responses";
   const existingProvider = gateway.providers[providerId];
@@ -189,7 +194,7 @@ function addModelBinding(
     id: internalModelId,
     providerId,
     upstreamModelId: binding.upstreamModelId,
-    displayName: model.entry.display_name,
+    displayName,
     protocols: modelProtocols,
     capabilities: {
       reasoning: Array.isArray(model.entry.supported_reasoning_levels)
@@ -206,7 +211,7 @@ function addModelBinding(
   const routeGroupId = createCatalogRouteGroupId(environment.name, model.entry.slug);
   const group: GatewayRouteGroupDefinition = gateway.routeGroups[routeGroupId] ?? {
     id: routeGroupId,
-    displayName: model.entry.display_name,
+    displayName,
     exposedModelId: model.entry.slug,
     members: [],
     strategy: "smart",
@@ -232,6 +237,14 @@ function addModelBinding(
   }
   group.members.sort((left, right) => left.priority - right.priority || left.modelId.localeCompare(right.modelId));
   gateway.routeGroups[group.id] = group;
+}
+
+function isCustomOpenAIProvider(providerId: string): boolean {
+  const normalized = providerId.trim().toLowerCase();
+  return normalized === "custom"
+    || normalized === "custom-openai"
+    || normalized.startsWith("custom:")
+    || normalized.startsWith("custom-openai:");
 }
 
 /**

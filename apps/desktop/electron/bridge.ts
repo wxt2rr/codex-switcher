@@ -168,6 +168,7 @@ import type {
   ProviderHttpClient,
 } from "../../../packages/gateway/dist/provider/adapters.js";
 import {
+  activateProviderPlugin as activateProviderPluginRuntime,
   deactivateProviderPlugin as deactivateProviderPluginRuntime,
   installProviderPlugin as installProviderPluginRuntime,
   listProviderPlugins as listProviderPluginsRuntime,
@@ -176,10 +177,15 @@ import {
   refreshProviderPluginMarket as refreshProviderPluginMarketRuntime,
   rollbackProviderPlugin as rollbackProviderPluginRuntime,
   installProviderPluginFromMarket as installProviderPluginFromMarketRuntime,
+  getProviderPluginSettings as getProviderPluginSettingsRuntime,
+  setProviderPluginSettings as setProviderPluginSettingsRuntime,
+  clearProviderPluginSettings as clearProviderPluginSettingsRuntime,
+  listProviderPluginDiagnostics as listProviderPluginDiagnosticsRuntime,
   getProviderPluginAdapter,
   getProviderPluginDescriptor,
   type ProviderPluginInstallRequest,
   type ProviderPluginMarketInstallRequest,
+  type ProviderPluginDiagnostic,
 } from "./provider-plugin-runtime.js";
 import {
   buildCodexChatGptAuthJson,
@@ -404,6 +410,31 @@ function getEnvironmentRouteAccounts(
         : {}),
       ...(proxyUrl ? { proxyUrl } : {}),
     };
+  });
+}
+
+/**
+ * Gateway rebuilds need the provider's upstream URL, even when the account
+ * runtime currently points at a local /routes, /pools, or /gateways URL. The
+ * persisted route record retains that upstream value, so use it as the source
+ * of truth while rebuilding the environment gateway.
+ */
+async function getEnvironmentGatewayRouteAccounts(
+  state: Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>,
+  envName: string,
+  gateway: GatewayEnvironmentState,
+) {
+  const accounts = getEnvironmentRouteAccounts(state, envName, gateway);
+  const routes = await getUsageRouterManager().listPersistedRoutes().catch(() => []);
+  return accounts.map((account) => {
+    if (!isLocalRouterBaseUrl(account.baseUrl)) return account;
+    const candidates = routes.filter((route) => (
+      route.envName === envName
+      && route.accountName === account.accountName
+      && route.enabled
+    ));
+    const route = candidates.find((candidate) => !candidate.exposedModelId) ?? candidates[0];
+    return route ? { ...account, baseUrl: resolveRouteDisplayBaseUrl(route) } : account;
   });
 }
 
@@ -758,9 +789,14 @@ async function applyEnvironmentRouteToActiveTarget(
 
   const env = state.envs[envName];
   if (!env) throw new Error(`Environment '${envName}' not found`);
+  const gatewayBaseUrl = await resolveEnvironmentGatewayBaseUrl(envName);
   const before = await readEnvFileSnapshot(env.path);
   try {
-    await runtime.applyTargetHomeState({ state, target });
+    await runtime.applyTargetHomeState({
+      state,
+      target,
+      ...(gatewayBaseUrl ? { gatewayBaseUrl } : {}),
+    });
   } catch (error) {
     await restoreEnvFileSnapshot(env.path, before);
     throw error;
@@ -777,6 +813,15 @@ async function applyEnvironmentRouteToActiveTarget(
 async function syncEnvironmentRouteIfEnabled(envName: string): Promise<void> {
   const runtime = await loadCoreRuntime();
   const state = await runtime.readLegacyState(getLegacyOptions());
+  const activeGateway = (await getUsageRouterManager().listPersistedEnvironmentGateways())
+    .find((gateway) => gateway.envName === envName && gateway.enabled);
+  if (activeGateway) {
+    // A gateway owns the environment's routes. Do not fall through to the
+    // account-route synchronizer, which would replace the gateway ingress
+    // with the selected account's direct /routes URL.
+    await resynchronizeActiveEnvironmentGateways(runtime, state, envName);
+    return;
+  }
   const pool = (await getUsageRouterManager().listPersistedAccountPools()).find((item) => item.envName === envName && item.enabled);
   if (pool) {
     const accountMap = new Map(Object.entries(state.envs[envName]?.accounts ?? {}));
@@ -909,7 +954,7 @@ async function restoreEnabledRoutes(): Promise<void> {
     };
     await runtime.writeLegacyGateway({ stateDir: getStateDir(), envName: environment.name, gateway });
     initialState = await runtime.readLegacyState(getLegacyOptions());
-    const accounts = getEnvironmentRouteAccounts(initialState, environment.name, gateway);
+    const accounts = await getEnvironmentGatewayRouteAccounts(initialState, environment.name, gateway);
     const updateBaseUrl = createEnvironmentRouteBaseUrlUpdater(runtime, environment.name);
     await manager.enableEnvironmentGateway(
       environment.name,
@@ -949,7 +994,7 @@ export async function toggleEnvironmentGateway(envName: string, enabled: boolean
   const env = state.envs[envName];
   if (!env) throw new Error(`Environment '${envName}' not found`);
   const generated = await buildEnvironmentGatewayState(runtime, env);
-  const accounts = getEnvironmentRouteAccounts(state, envName, generated);
+  const accounts = await getEnvironmentGatewayRouteAccounts(state, envName, generated);
   const updateBaseUrl = createEnvironmentRouteBaseUrlUpdater(runtime, envName);
   const manager = getUsageRouterManager();
 
@@ -1211,7 +1256,8 @@ export async function discoverGatewayAdminModels(input: { envName: string; provi
   });
   const activeGateway = (await getUsageRouterManager().listPersistedEnvironmentGateways()).find((item) => item.envName === input.envName && item.enabled);
   if (activeGateway) {
-    const accounts = getEnvironmentRouteAccounts(await runtime.readLegacyState(getLegacyOptions()), input.envName, nextGateway);
+    const latestState = await runtime.readLegacyState(getLegacyOptions());
+    const accounts = await getEnvironmentGatewayRouteAccounts(latestState, input.envName, nextGateway);
     const updateBaseUrl = createEnvironmentRouteBaseUrlUpdater(runtime, input.envName);
     await getUsageRouterManager().enableEnvironmentGateway(
       input.envName,
@@ -1234,6 +1280,27 @@ export async function discoverGatewayAdminModels(input: { envName: string; provi
 
 export function loadProviderPluginSnapshot() {
   return listProviderPluginsRuntime(getStateDir());
+}
+
+export function loadProviderPluginDiagnostics(pluginId?: string): Promise<ProviderPluginDiagnostic[]> {
+  return listProviderPluginDiagnosticsRuntime(getStateDir(), pluginId);
+}
+
+export function loadProviderPluginSettings(id: string) {
+  return getProviderPluginSettingsRuntime(getStateDir(), id);
+}
+
+export function saveProviderPluginSettings(id: string, values: Record<string, unknown>) {
+  return setProviderPluginSettingsRuntime(getStateDir(), id, values);
+}
+
+export async function resetProviderPluginSettings(id: string) {
+  await clearProviderPluginSettingsRuntime(getStateDir(), id);
+  return getProviderPluginSettingsRuntime(getStateDir(), id);
+}
+
+export function activateProviderPluginById(id: string) {
+  return activateProviderPluginRuntime(getStateDir(), id);
 }
 
 export function loadProviderPluginMarket() {
@@ -1415,7 +1482,7 @@ export async function saveGatewayAdminConfiguration(input: SaveGatewayAdminConfi
   if (activeGateway) {
     const gateway = latest.envs[input.envName]?.gateway;
     if (gateway) {
-      const gatewayAccounts = getEnvironmentRouteAccounts(latest, input.envName, gateway);
+      const gatewayAccounts = await getEnvironmentGatewayRouteAccounts(latest, input.envName, gateway);
       await getUsageRouterManager().enableEnvironmentGateway(
         input.envName,
         gatewayAccounts,
@@ -2890,7 +2957,7 @@ async function appendModelDiscoveryLog(details: {
 
 export async function listProviderCatalog() {
   const runtime = await loadGatewayProviderRuntime();
-  return runtime.canonicalProviderDefinitions().map((definition) => {
+  const builtIns: import("../src/bridge.js").ProviderCatalogItem[] = runtime.canonicalProviderDefinitions().map((definition) => {
     const protocols = [...new Set(definition.endpoints.map((endpoint) => endpoint.protocol))];
     return {
       id: definition.id,
@@ -2915,6 +2982,36 @@ export async function listProviderCatalog() {
       },
     };
   });
+  const byId = new Map(builtIns.map((item) => [item.id, item]));
+  // A provider plugin is part of the account onboarding catalog as soon as it
+  // is installed and active. Keep built-ins authoritative on id collisions.
+  const plugins = await listProviderPluginsRuntime(getStateDir());
+  for (const plugin of plugins) {
+    const provider = plugin.provider;
+    if (!provider || byId.has(provider.id)) continue;
+    const protocols = [...new Set(provider.endpoints.map((endpoint) => endpoint.protocol))];
+    const iconUrl = plugin.icon && /^(?:https?:|data:|file:)/i.test(plugin.icon) ? plugin.icon : undefined;
+    byId.set(provider.id, {
+      id: provider.id,
+      displayName: provider.displayName,
+      category: "custom" as const,
+      iconKey: iconUrl ? "custom" : provider.id,
+      ...(iconUrl ? { iconUrl } : {}),
+      pluginId: plugin.id,
+      ...(provider.endpoints[0]?.baseUrl ? { defaultBaseUrl: provider.endpoints[0].baseUrl } : {}),
+      authMethods: [...provider.authMethods],
+      protocols,
+      discoveryMode: "plugin",
+      capabilities: {
+        modelDiscovery: provider.endpoints.some((endpoint) => Boolean(endpoint.modelsPath)),
+        quota: provider.endpoints.some((endpoint) => Boolean(endpoint.quotaPath)),
+        tokenRefresh: provider.authMethods.includes("oauth") || provider.authMethods.includes("subscription"),
+        accountPool: true,
+        protocolConversion: protocols.some((protocol) => protocol !== "responses"),
+      },
+    });
+  }
+  return [...byId.values()].sort((left, right) => left.displayName.localeCompare(right.displayName));
 }
 
 export async function saveCustomModel(input: SaveCustomModelInput) {
@@ -3001,10 +3098,11 @@ async function resynchronizeActiveModelCatalogs(accountKey?: string): Promise<vo
 async function resynchronizeActiveEnvironmentGateways(
   runtime: Awaited<ReturnType<typeof loadCoreRuntime>>,
   initialState: Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>,
+  onlyEnvName?: string,
 ): Promise<Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>> {
   let state = initialState;
   const activeGateways = (await getUsageRouterManager().listPersistedEnvironmentGateways())
-    .filter((item) => item.enabled);
+    .filter((item) => item.enabled && (!onlyEnvName || item.envName === onlyEnvName));
   for (const activeGateway of activeGateways) {
     const environment = state.envs[activeGateway.envName];
     if (!environment) continue;
@@ -3017,7 +3115,7 @@ async function resynchronizeActiveEnvironmentGateways(
     };
     await runtime.writeLegacyGateway({ stateDir: getStateDir(), envName: environment.name, gateway });
     state = await runtime.readLegacyState(getLegacyOptions());
-    const accounts = getEnvironmentRouteAccounts(state, environment.name, gateway);
+    const accounts = await getEnvironmentGatewayRouteAccounts(state, environment.name, gateway);
     const updateBaseUrl = createEnvironmentRouteBaseUrlUpdater(runtime, environment.name);
     await getUsageRouterManager().enableEnvironmentGateway(
       environment.name,
@@ -3677,10 +3775,15 @@ async function applyTargetHomeStateWithHistory(
 
   const pointer = state.targets[target];
   await inferLegacyProviderId(runtime, state, pointer.env, pointer.account);
+  const gatewayBaseUrl = await resolveEnvironmentGatewayBaseUrl(envName);
 
   const before = await readEnvFileSnapshot(env.path);
   try {
-    await runtime.applyTargetHomeState({ state, target });
+    await runtime.applyTargetHomeState({
+      state,
+      target,
+      ...(gatewayBaseUrl ? { gatewayBaseUrl } : {}),
+    });
     const refreshedAccount = state.envs[pointer.env]?.accounts[pointer.account];
     const cliStatus = await getCodexToolStatus("cli", getCodexToolPathOptions());
     const catalogBaseUrl = refreshedAccount?.runtime.independentModelEnabled
@@ -3725,6 +3828,23 @@ async function applyTargetHomeStateWithHistory(
   }
   const after = await readEnvFileSnapshot(env.path);
   await recordEnvFileDiffHistory(envName, before, after, source);
+}
+
+/**
+ * Return the ingress URL for an active environment gateway.
+ *
+ * The selected account's runtime URL is intentionally not used here: it can
+ * be a direct account route and must not replace the environment gateway in a
+ * target home. When no gateway is active this returns undefined, preserving
+ * the existing direct-route behavior.
+ */
+async function resolveEnvironmentGatewayBaseUrl(envName: string): Promise<string | undefined> {
+  const [status] = await getUsageRouterManager()
+    .getEnvironmentStatuses([envName])
+    .catch(() => []);
+  return status?.gatewayEnabled && status.localGatewayBaseUrl
+    ? status.localGatewayBaseUrl
+    : undefined;
 }
 
 async function inferLegacyProviderId(
@@ -5977,7 +6097,12 @@ async function launchAppTarget(
               [state.targets.app.env]: { ...env, path: projectionHome },
             },
           };
-          await runtime.applyTargetHomeState({ state: projectionState, target: "app" });
+          const gatewayBaseUrl = await resolveEnvironmentGatewayBaseUrl(state.targets.app.env);
+          await runtime.applyTargetHomeState({
+            state: projectionState,
+            target: "app",
+            ...(gatewayBaseUrl ? { gatewayBaseUrl } : {}),
+          });
         },
       });
     }

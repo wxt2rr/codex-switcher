@@ -34,13 +34,13 @@ export function createPluginProviderAdapter(options) {
         async refresh(_client, account, refreshToken) {
             if (!refreshToken.trim())
                 throw new Error(`Provider '${options.id}' refresh token is required`);
-            return normalizeCredentialResult(await callPlugin(options.host, "provider.refresh", { account, refreshToken }, true), account);
+            return normalizeCredentialResult(await callPlugin(options.host, "provider.refresh", { account, refreshToken, ...(await pluginSettings(options)) }, true), account);
         },
         async revoke(_client, account, secret = "") {
-            await callPlugin(options.host, "provider.revoke", { account, ...(secret ? { secret } : {}) }, Boolean(secret));
+            await callPlugin(options.host, "provider.revoke", { account, ...(secret ? { secret } : {}), ...(await pluginSettings(options)) }, Boolean(secret));
         },
         async discoverModels(_client, account, secret) {
-            const models = normalizeModels(await callPlugin(options.host, "provider.models", { account, secretRef: account.secretRef, ...(secret !== undefined ? { secret } : {}) }, secret !== undefined), options.id);
+            const models = normalizeModels(await callPlugin(options.host, "provider.models", { account, secretRef: account.secretRef, ...(secret !== undefined ? { secret } : {}), ...(await pluginSettings(options)) }, secret !== undefined), options.id);
             if (!account.allowedModelIds)
                 return models;
             const allowed = new Set(account.allowedModelIds);
@@ -50,7 +50,7 @@ export function createPluginProviderAdapter(options) {
             return this.discoverModels(client, account, secret);
         },
         async readQuota(_client, account, secret) {
-            const result = await callPlugin(options.host, "provider.quota", { account, secretRef: account.secretRef, ...(secret !== undefined ? { secret } : {}) }, secret !== undefined);
+            const result = await callPlugin(options.host, "provider.quota", { account, secretRef: account.secretRef, ...(secret !== undefined ? { secret } : {}), ...(await pluginSettings(options)) }, secret !== undefined);
             return result == null ? null : normalizeQuota(result, options.id, account.accountId);
         },
         async fetchQuota(client, account, secret) {
@@ -80,16 +80,45 @@ export function createPluginProviderAdapter(options) {
                 headers.set("content-type", "application/json");
             return { url: input.url, init: { method: input.method, headers, ...(input.body !== undefined ? { body: input.body } : {}) } };
         },
+        async request(input) {
+            const result = await callPlugin(options.host, "provider.request", {
+                account: input.account,
+                secretRef: input.account.secretRef,
+                secret: input.secret,
+                protocol: input.protocol,
+                url: input.url,
+                method: input.method,
+                headers: Object.fromEntries(new Headers(input.headers).entries()),
+                ...(input.body !== undefined ? { body: input.body } : {}),
+                ...(await pluginSettings(options)),
+            }, Boolean(input.secret));
+            return normalizeRequestResult(result);
+        },
         classifyError(input) {
             return classifyProviderError(input);
         },
     };
+}
+function normalizeRequestResult(value) {
+    if (!isRecord(value) || typeof value.status !== "number" || !Number.isInteger(value.status) || value.status < 100 || value.status > 599) {
+        throw new Error("Provider plugin returned an invalid request result");
+    }
+    const headers = isRecord(value.headers)
+        ? Object.fromEntries(Object.entries(value.headers).filter(([, item]) => typeof item === "string"))
+        : undefined;
+    const body = isRecord(value.body) ? value.body : undefined;
+    const events = Array.isArray(value.events) ? value.events.filter(isRecord).map((event) => event) : undefined;
+    return { status: value.status, ...(headers && Object.keys(headers).length ? { headers } : {}), ...(body ? { body } : {}), ...(events?.length ? { events } : {}) };
 }
 async function callPlugin(host, method, params, includesSecret) {
     const response = includesSecret
         ? await host.callWithPermission(method, params, "secrets")
         : await host.call(method, params);
     return response.result;
+}
+async function pluginSettings(options) {
+    const settings = await options.settings?.();
+    return settings ? { settings } : {};
 }
 function normalizeCredentialResult(value, fallback) {
     if (!isRecord(value))

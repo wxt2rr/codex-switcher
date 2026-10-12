@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { buildPluginLaunchSpec } from "./sandbox.js";
-export const PLUGIN_PROTOCOL_VERSION = 1;
+export const PLUGIN_PROTOCOL_VERSION = 2;
+export const SUPPORTED_PLUGIN_PROTOCOL_VERSIONS = [1, PLUGIN_PROTOCOL_VERSION];
 export const MAX_PLUGIN_FRAME_BYTES = 1024 * 1024;
 /**
  * Bounds plugin RPC work across all ProviderPlugin hosts in one Gateway
@@ -65,9 +66,25 @@ export function validatePluginManifest(value) {
         return false;
     if (typeof value.version !== "string" || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(value.version))
         return false;
-    if (value.apiVersion !== PLUGIN_PROTOCOL_VERSION || typeof value.entry !== "string" || !isSafePluginEntry(value.entry))
+    if (!SUPPORTED_PLUGIN_PROTOCOL_VERSIONS.includes(value.apiVersion) || typeof value.entry !== "string" || !isSafePluginEntry(value.entry))
         return false;
-    if (!Array.isArray(value.permissions) || value.permissions.some((permission) => !["provider", "agent", "usage", "network", "filesystem", "secrets"].includes(String(permission))))
+    if (!Array.isArray(value.permissions) || value.permissions.some((permission) => !["provider", "middleware", "agent", "usage", "network", "filesystem", "secrets"].includes(String(permission))))
+        return false;
+    if (value.kind !== undefined && (!Array.isArray(value.kind) || value.kind.length === 0 || value.kind.some((kind) => kind !== "provider" && kind !== "middleware")))
+        return false;
+    if (value.description !== undefined && typeof value.description !== "string")
+        return false;
+    if (value.author !== undefined && typeof value.author !== "string")
+        return false;
+    if (value.homepage !== undefined && typeof value.homepage !== "string")
+        return false;
+    if (value.icon !== undefined && typeof value.icon !== "string")
+        return false;
+    if (value.trust !== undefined && !["official", "verified", "community", "local"].includes(String(value.trust)))
+        return false;
+    if (value.providers !== undefined && (!Array.isArray(value.providers) || value.providers.some((provider) => !isRecord(provider) || typeof provider.id !== "string" || !/^[a-z][a-z0-9._-]{1,63}$/.test(provider.id) || typeof provider.displayName !== "string" || !provider.displayName.trim())))
+        return false;
+    if (value.settingsSchema !== undefined && !isSettingsSchema(value.settingsSchema))
         return false;
     if (value.signature !== undefined && typeof value.signature !== "string")
         return false;
@@ -79,6 +96,8 @@ export function requiredPluginPermission(method) {
         return "agent";
     if (prefix === "usage")
         return "usage";
+    if (prefix === "middleware" || prefix === "hook")
+        return "middleware";
     if (prefix === "network")
         return "network";
     if (prefix === "filesystem" || prefix === "fs")
@@ -399,6 +418,21 @@ export class RestartingPluginTransport {
     }
 }
 function isRecord(value) { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function isSettingsSchema(value) {
+    if (!isRecord(value) || value.type !== "object" || !isRecord(value.properties))
+        return false;
+    return Object.values(value.properties).every((property) => {
+        if (!isRecord(property) || typeof property.title !== "string")
+            return false;
+        if (!["string", "number", "integer", "boolean", "select"].includes(String(property.type)))
+            return false;
+        if (property.secret !== undefined && typeof property.secret !== "boolean")
+            return false;
+        if (property.options !== undefined && (!Array.isArray(property.options) || property.options.some((option) => !isRecord(option) || typeof option.label !== "string" || typeof option.value !== "string")))
+            return false;
+        return true;
+    });
+}
 function isSafePluginEntry(value) {
     const entry = value.trim();
     if (!entry || entry.startsWith("/") || entry.startsWith("\\") || /^[A-Za-z]:[\\/]/.test(entry))

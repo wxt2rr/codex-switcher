@@ -56,15 +56,25 @@ export async function applyTargetHomeState(options) {
         await clearTargetHomeState(env.path);
         return;
     }
-    const compatibilityRouteActive = account.runtime.apiProtocol === "chat_completions" &&
-        account.runtime.compatibilityRouteEnabled === true;
+    const targetRuntime = options.gatewayBaseUrl
+        ? {
+            ...account.runtime,
+            openaiBaseUrlMode: "custom",
+            openaiBaseUrl: options.gatewayBaseUrl,
+            // A compatibility route is account-scoped. When the environment
+            // gateway is selected, project the gateway ingress instead.
+            compatibilityRouteEnabled: false,
+        }
+        : account.runtime;
+    const compatibilityRouteActive = targetRuntime.apiProtocol === "chat_completions" &&
+        targetRuntime.compatibilityRouteEnabled === true;
     if (compatibilityRouteActive &&
-        (!account.runtime.compatibilityRouteBaseUrl ||
-            !account.runtime.compatibilityRouteToken)) {
+        (!targetRuntime.compatibilityRouteBaseUrl ||
+            !targetRuntime.compatibilityRouteToken)) {
         throw new Error(`Compatibility route for '${account.name}' is incomplete`);
     }
     const targetAuthData = compatibilityRouteActive
-        ? { OPENAI_API_KEY: account.runtime.compatibilityRouteToken }
+        ? { OPENAI_API_KEY: targetRuntime.compatibilityRouteToken }
         : account.authData;
     if (targetAuthData) {
         await writeFileAtomically(join(env.path, "auth.json"), `${JSON.stringify(normalizeAuthDataForTargetHome(targetAuthData), null, 2)}\n`, { encoding: "utf8" });
@@ -72,7 +82,7 @@ export async function applyTargetHomeState(options) {
     else {
         await rm(join(env.path, "auth.json"), { force: true });
     }
-    await writeManagedConfig(join(env.path, "config.toml"), account.runtime);
+    await writeManagedConfig(join(env.path, "config.toml"), targetRuntime);
 }
 export async function clearTargetHomeState(homePath) {
     await rm(join(homePath, "auth.json"), { force: true });

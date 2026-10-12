@@ -1,4 +1,4 @@
-export type NavView = "overview" | "environments" | "accounts" | "providers" | "models" | "skills" | "usage" | "operations";
+export type NavView = "overview" | "environments" | "accounts" | "providers" | "models" | "plugins" | "skills" | "usage" | "operations";
 
 export interface EnvironmentRouteStatus {
   envName: string;

@@ -215,6 +215,14 @@ export interface ProviderPluginSnapshot {
   version: string;
   active: boolean;
   permissions: string[];
+  kind?: string[];
+  description?: string;
+  author?: string;
+  homepage?: string;
+  icon?: string;
+  trust?: string;
+  settingsSchema?: unknown;
+  middleware?: { hooks: string[]; priority: number };
   provider?: {
     id: string;
     displayName: string;
@@ -224,11 +232,27 @@ export interface ProviderPluginSnapshot {
   error?: string;
 }
 
+export interface ProviderPluginSettingsSnapshot {
+  pluginId: string;
+  values: Record<string, unknown>;
+  secretKeys: string[];
+}
+
+export interface ProviderPluginDiagnostic {
+  pluginId?: string;
+  level: "info" | "error";
+  phase: "activation" | "install" | "runtime" | "settings" | "market" | "lifecycle";
+  message: string;
+  at: number;
+}
+
 export interface ProviderCatalogItem {
   id: string;
   displayName: string;
   category: "api" | "subscription" | "local" | "custom";
   iconKey: string;
+  iconUrl?: string;
+  pluginId?: string;
   defaultBaseUrl?: string;
   aliasOf?: string;
   authMethods: string[];
@@ -251,13 +275,20 @@ export interface ProviderPluginInstallRequest {
     apiVersion: number;
     entry: string;
     permissions: string[];
+    kind?: string[];
+    description?: string;
+    author?: string;
+    homepage?: string;
+    icon?: string;
+    trust?: string;
+    settingsSchema?: unknown;
     signature?: string;
     checksum?: string;
   };
   source:
     | { kind: "local"; path: string }
     | { kind: "npm"; spec: string }
-  | { kind: "git"; url: string; ref?: string };
+  | { kind: "git"; url: string; ref: string };
 }
 
 export interface ProviderPluginMarketEntry {
@@ -267,6 +298,12 @@ export interface ProviderPluginMarketEntry {
   apiVersion: number;
   entry: string;
   permissions: string[];
+  kind?: string[];
+  author?: string;
+  homepage?: string;
+  icon?: string;
+  trust?: string;
+  settingsSchema?: unknown;
   description?: string;
   downloadUrl?: string;
   source?: ProviderPluginInstallRequest["source"];
@@ -495,6 +532,11 @@ export interface DesktopElectronApi {
   saveGatewayAdminConfiguration(request: SaveGatewayAdminConfigurationRequest): Promise<GatewayAdminConfiguration>;
   discoverGatewayAdminModels(request: DiscoverGatewayModelsRequest): Promise<DiscoverGatewayModelsResult>;
   loadProviderPluginSnapshot(): Promise<ProviderPluginSnapshot[]>;
+  loadProviderPluginDiagnostics?(pluginId?: string): Promise<ProviderPluginDiagnostic[]>;
+  loadProviderPluginSettings?(id: string): Promise<ProviderPluginSettingsSnapshot>;
+  saveProviderPluginSettings?(id: string, values: Record<string, unknown>): Promise<ProviderPluginSettingsSnapshot>;
+  resetProviderPluginSettings?(id: string): Promise<ProviderPluginSettingsSnapshot>;
+  activateProviderPlugin?(id: string): Promise<ProviderPluginSnapshot[]>;
   loadProviderPluginMarket(): Promise<ProviderPluginMarketEntry[]>;
   refreshProviderPluginMarket(url: string): Promise<ProviderPluginMarketEntry[]>;
   installProviderPlugin(request: ProviderPluginInstallRequest): Promise<ProviderPluginSnapshot>;
@@ -619,6 +661,11 @@ export interface DesktopBridge {
   saveGatewayAdminConfiguration(request: SaveGatewayAdminConfigurationRequest): Promise<GatewayAdminConfiguration>;
   discoverGatewayAdminModels(request: DiscoverGatewayModelsRequest): Promise<DiscoverGatewayModelsResult>;
   loadProviderPluginSnapshot(): Promise<ProviderPluginSnapshot[]>;
+  loadProviderPluginDiagnostics(pluginId?: string): Promise<ProviderPluginDiagnostic[]>;
+  loadProviderPluginSettings(id: string): Promise<ProviderPluginSettingsSnapshot>;
+  saveProviderPluginSettings(id: string, values: Record<string, unknown>): Promise<ProviderPluginSettingsSnapshot>;
+  resetProviderPluginSettings(id: string): Promise<ProviderPluginSettingsSnapshot>;
+  activateProviderPlugin(id: string): Promise<ProviderPluginSnapshot[]>;
   loadProviderPluginMarket(): Promise<ProviderPluginMarketEntry[]>;
   refreshProviderPluginMarket(url: string): Promise<ProviderPluginMarketEntry[]>;
   installProviderPlugin(request: ProviderPluginInstallRequest): Promise<ProviderPluginSnapshot>;
@@ -739,6 +786,11 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       saveGatewayAdminConfiguration: unavailable,
       discoverGatewayAdminModels: unavailable,
       loadProviderPluginSnapshot: unavailable,
+      loadProviderPluginDiagnostics: unavailable,
+      loadProviderPluginSettings: unavailable,
+      saveProviderPluginSettings: unavailable,
+      resetProviderPluginSettings: unavailable,
+      activateProviderPlugin: unavailable,
       loadProviderPluginMarket: unavailable,
       refreshProviderPluginMarket: unavailable,
       installProviderPlugin: unavailable,
@@ -763,7 +815,14 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
     };
   }
 
-  return api;
+  return {
+    ...api,
+    loadProviderPluginDiagnostics: api.loadProviderPluginDiagnostics ?? (async () => []),
+    loadProviderPluginSettings: api.loadProviderPluginSettings ?? (async (id) => ({ pluginId: id, values: {}, secretKeys: [] })),
+    saveProviderPluginSettings: api.saveProviderPluginSettings ?? (async (id, values) => ({ pluginId: id, values, secretKeys: [] })),
+    resetProviderPluginSettings: api.resetProviderPluginSettings ?? (async (id) => ({ pluginId: id, values: {}, secretKeys: [] })),
+    activateProviderPlugin: api.activateProviderPlugin ?? unavailable,
+  };
 }
 
 export function resolveDesktopBridge(): DesktopBridge {
@@ -1013,6 +1072,11 @@ function createBrowserPreviewBridge(): DesktopBridge {
     saveGatewayAdminConfiguration: async (request) => ({ envName: request.envName, revision: 0, gateway: request.gateway, agentBindings: {} }),
     discoverGatewayAdminModels: async (request) => ({ envName: request.envName, providerId: request.providerId, modelIds: [], credentialsUsed: 0, catalogVersion: 0 }),
     loadProviderPluginSnapshot: async () => [],
+    loadProviderPluginDiagnostics: async () => [],
+    loadProviderPluginSettings: async (id) => ({ pluginId: id, values: {}, secretKeys: [] }),
+    saveProviderPluginSettings: async (id, values) => ({ pluginId: id, values, secretKeys: [] }),
+    resetProviderPluginSettings: async (id) => ({ pluginId: id, values: {}, secretKeys: [] }),
+    activateProviderPlugin: async () => [],
     loadProviderPluginMarket: async () => [],
     refreshProviderPluginMarket: async () => { throw new Error("Provider plugin market is unavailable in preview mode"); },
     installProviderPlugin: async () => { throw new Error("Provider plugin management is unavailable in preview mode"); },

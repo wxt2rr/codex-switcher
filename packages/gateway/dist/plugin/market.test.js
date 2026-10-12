@@ -127,6 +127,7 @@ test("plugin installation accepts the explicit local/npm/git source contract", a
         const manifest = { id: "provider-demo", name: "Demo", version: "1.0.0", apiVersion: 1, entry: "index.js", permissions: ["provider"] };
         await writeFile(join(source, "index.js"), "module.exports = {};\n", "utf8");
         assert.equal((await store.installFromSource(manifest, { kind: "local", path: source })).version, "1.0.0");
+        await assert.rejects(store.installFromSource({ ...manifest, version: "1.0.1" }, { kind: "git", url: "https://example.invalid/provider-demo.git", ref: "" }), /git plugin ref is required/);
         const calls = [];
         const runner = async (command, args) => {
             calls.push({ command, args });
@@ -188,6 +189,26 @@ test("plugin installation materializes npm and git sources before activation", a
         await rm(root, { recursive: true, force: true });
         await rm(npmSource, { recursive: true, force: true });
         await rm(gitSource, { recursive: true, force: true });
+    }
+});
+test("plugin installation resolves declared runtime dependencies without lifecycle scripts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "gateway-plugin-dependencies-"));
+    const source = await mkdtemp(join(tmpdir(), "gateway-plugin-dependency-source-"));
+    try {
+        await writeFile(join(source, "index.js"), "module.exports = {};\\n", "utf8");
+        await writeFile(join(source, "package.json"), JSON.stringify({ dependencies: { "plugin-helper": "1.0.0" }, scripts: { preinstall: "touch SHOULD_NOT_RUN" } }), "utf8");
+        const calls = [];
+        const runner = async (command, args) => {
+            calls.push({ command, args });
+            return { code: 0, stdout: "", stderr: "" };
+        };
+        const store = new PluginInstallationStore(join(root, "installed"));
+        await store.installFromSource({ id: "provider-deps", name: "Dependency Provider", version: "1.0.0", apiVersion: 1, entry: "index.js", permissions: ["provider"] }, { kind: "local", path: source }, runner);
+        assert.deepEqual(calls, [{ command: "npm", args: ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--omit=dev"] }]);
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+        await rm(source, { recursive: true, force: true });
     }
 });
 test("signed plugins require an explicit trust verifier", async () => {

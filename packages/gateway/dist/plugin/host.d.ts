@@ -1,6 +1,7 @@
 import { type ChildProcessWithoutNullStreams } from "node:child_process";
 import { type PluginSandboxOptions } from "./sandbox.js";
-export declare const PLUGIN_PROTOCOL_VERSION = 1;
+export declare const PLUGIN_PROTOCOL_VERSION = 2;
+export declare const SUPPORTED_PLUGIN_PROTOCOL_VERSIONS: readonly [1, 2];
 export declare const MAX_PLUGIN_FRAME_BYTES: number;
 export interface GatewayPluginManifest {
     id: string;
@@ -9,10 +10,45 @@ export interface GatewayPluginManifest {
     apiVersion: number;
     entry: string;
     permissions: PluginPermission[];
+    kind?: PluginKind[];
+    description?: string;
+    author?: string;
+    homepage?: string;
+    icon?: string;
+    providers?: PluginProviderDeclaration[];
+    settingsSchema?: PluginSettingsSchema;
+    trust?: PluginTrustLevel;
     signature?: string;
     checksum?: string;
 }
-export type PluginPermission = "provider" | "agent" | "usage" | "network" | "filesystem" | "secrets";
+export type PluginKind = "provider" | "middleware";
+export type PluginTrustLevel = "official" | "verified" | "community" | "local";
+export type PluginPermission = "provider" | "middleware" | "agent" | "usage" | "network" | "filesystem" | "secrets";
+export interface PluginProviderDeclaration {
+    id: string;
+    displayName: string;
+    icon?: string;
+    authMethods?: string[];
+    protocols?: string[];
+}
+export interface PluginSettingsSchema {
+    type: "object";
+    properties: Record<string, PluginSettingsProperty>;
+    required?: string[];
+}
+export interface PluginSettingsProperty {
+    type: "string" | "number" | "integer" | "boolean" | "select";
+    title: string;
+    description?: string;
+    secret?: boolean;
+    default?: string | number | boolean;
+    options?: Array<{
+        label: string;
+        value: string;
+    }>;
+    minimum?: number;
+    maximum?: number;
+}
 export interface PluginRpcRequest {
     jsonrpc: "2.0";
     id: string;

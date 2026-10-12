@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { GatewayProtocol } from "../protocol.js";
+import type { GatewayProtocol, JsonObject } from "../protocol.js";
 import type {
   ProviderAccountRef,
   ProviderAdapter,
@@ -12,6 +12,8 @@ import type {
   ProviderLoginStart,
   ProviderModel,
   ProviderQuotaSnapshot,
+  ProviderRequestInput,
+  ProviderRequestResult,
   ProviderSignRequestInput,
   ProviderSignedRequest,
 } from "../provider/adapters.js";
@@ -24,6 +26,7 @@ export interface PluginProviderAdapterOptions {
   endpoints: readonly ProviderEndpoint[];
   host: PluginHost;
   random?: () => string;
+  settings?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
 }
 
 /**
@@ -56,13 +59,13 @@ export function createPluginProviderAdapter(options: PluginProviderAdapterOption
     },
     async refresh(_client, account, refreshToken) {
       if (!refreshToken.trim()) throw new Error(`Provider '${options.id}' refresh token is required`);
-      return normalizeCredentialResult(await callPlugin(options.host, "provider.refresh", { account, refreshToken }, true), account);
+      return normalizeCredentialResult(await callPlugin(options.host, "provider.refresh", { account, refreshToken, ...(await pluginSettings(options)) }, true), account);
     },
     async revoke(_client, account, secret = "") {
-      await callPlugin(options.host, "provider.revoke", { account, ...(secret ? { secret } : {}) }, Boolean(secret));
+      await callPlugin(options.host, "provider.revoke", { account, ...(secret ? { secret } : {}), ...(await pluginSettings(options)) }, Boolean(secret));
     },
     async discoverModels(_client, account, secret) {
-      const models = normalizeModels(await callPlugin(options.host, "provider.models", { account, secretRef: account.secretRef, ...(secret !== undefined ? { secret } : {}) }, secret !== undefined), options.id);
+      const models = normalizeModels(await callPlugin(options.host, "provider.models", { account, secretRef: account.secretRef, ...(secret !== undefined ? { secret } : {}), ...(await pluginSettings(options)) }, secret !== undefined), options.id);
       if (!account.allowedModelIds) return models;
       const allowed = new Set(account.allowedModelIds);
       return models.filter((model) => allowed.has(model.id));
@@ -71,7 +74,7 @@ export function createPluginProviderAdapter(options: PluginProviderAdapterOption
       return this.discoverModels(client, account, secret);
     },
     async readQuota(_client, account, secret) {
-      const result = await callPlugin(options.host, "provider.quota", { account, secretRef: account.secretRef, ...(secret !== undefined ? { secret } : {}) }, secret !== undefined);
+      const result = await callPlugin(options.host, "provider.quota", { account, secretRef: account.secretRef, ...(secret !== undefined ? { secret } : {}), ...(await pluginSettings(options)) }, secret !== undefined);
       return result == null ? null : normalizeQuota(result, options.id, account.accountId);
     },
     async fetchQuota(client, account, secret) {
@@ -96,10 +99,36 @@ export function createPluginProviderAdapter(options: PluginProviderAdapterOption
       if (input.body !== undefined && !headers.has("content-type")) headers.set("content-type", "application/json");
       return { url: input.url, init: { method: input.method, headers, ...(input.body !== undefined ? { body: input.body } : {}) } };
     },
+    async request(input: ProviderRequestInput): Promise<ProviderRequestResult> {
+      const result = await callPlugin(options.host, "provider.request", {
+        account: input.account,
+        secretRef: input.account.secretRef,
+        secret: input.secret,
+        protocol: input.protocol,
+        url: input.url,
+        method: input.method,
+        headers: Object.fromEntries(new Headers(input.headers).entries()),
+        ...(input.body !== undefined ? { body: input.body } : {}),
+        ...(await pluginSettings(options)),
+      }, Boolean(input.secret));
+      return normalizeRequestResult(result);
+    },
     classifyError(input) {
       return classifyProviderError(input);
     },
   };
+}
+
+function normalizeRequestResult(value: unknown): ProviderRequestResult {
+  if (!isRecord(value) || typeof value.status !== "number" || !Number.isInteger(value.status) || value.status < 100 || value.status > 599) {
+    throw new Error("Provider plugin returned an invalid request result");
+  }
+  const headers = isRecord(value.headers)
+    ? Object.fromEntries(Object.entries(value.headers).filter(([, item]) => typeof item === "string")) as Record<string, string>
+    : undefined;
+  const body = isRecord(value.body) ? value.body as JsonObject : undefined;
+  const events = Array.isArray(value.events) ? value.events.filter(isRecord).map((event) => event as JsonObject) : undefined;
+  return { status: value.status, ...(headers && Object.keys(headers).length ? { headers } : {}), ...(body ? { body } : {}), ...(events?.length ? { events } : {}) };
 }
 
 async function callPlugin(host: PluginHost, method: string, params: Record<string, unknown>, includesSecret: boolean): Promise<unknown> {
@@ -107,6 +136,11 @@ async function callPlugin(host: PluginHost, method: string, params: Record<strin
     ? await host.callWithPermission(method, params, "secrets")
     : await host.call(method, params);
   return response.result;
+}
+
+async function pluginSettings(options: PluginProviderAdapterOptions): Promise<Record<string, unknown>> {
+  const settings = await options.settings?.();
+  return settings ? { settings } : {};
 }
 
 function normalizeCredentialResult(value: unknown, fallback: ProviderAccountRef): { account: ProviderAccountRef; accessToken?: string; refreshToken?: string } {

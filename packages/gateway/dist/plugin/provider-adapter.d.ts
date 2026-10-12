@@ -7,6 +7,7 @@ export interface PluginProviderAdapterOptions {
     endpoints: readonly ProviderEndpoint[];
     host: PluginHost;
     random?: () => string;
+    settings?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
 }
 /**
  * Exposes a signed/installed provider plugin through the same adapter

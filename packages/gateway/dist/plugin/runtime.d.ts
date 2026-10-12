@@ -20,6 +20,7 @@ export interface PluginRuntimeOptions {
     maxRestarts?: number;
     log?: PluginLogSink;
     transportFactory?: (manifest: GatewayPluginManifest, path: string, sandbox: PluginSandboxOptions) => PluginTransport | Promise<PluginTransport>;
+    settings?: (pluginId: string) => Promise<Record<string, unknown>> | Record<string, unknown>;
 }
 export interface ActivePluginProvider {
     manifest: GatewayPluginManifest;

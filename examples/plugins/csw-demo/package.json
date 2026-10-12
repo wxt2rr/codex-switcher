@@ -1,0 +1,7 @@
+{
+  "name": "csw-demo-provider",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Minimal external provider plugin example for codex-switcher"
+}

@@ -5,6 +5,7 @@ import type { ConversionOptions, ConversionResult } from "../conversion/types.js
 import type { GatewayRequestIR } from "../request/request-ir.js";
 import { type RouteEngineState, type RouteGroupNode, type RouteFailureClass, type RouteResolveResult, type RuntimeRouteCandidate } from "../routing/engine.js";
 import { ProviderRegistry } from "../provider/registry.js";
+import { GatewayMiddlewareRegistry, type GatewayMiddlewareContext } from "../plugin/middleware.js";
 import { UsageLedger, type GatewayUsageRecord, type UsagePricingProfile, type UsageQuotaPolicy } from "../usage/ledger.js";
 export interface GatewayRuntimeOptions {
     candidates: readonly RuntimeRouteCandidate[];
@@ -13,6 +14,7 @@ export interface GatewayRuntimeOptions {
     ledger?: UsageLedger;
     quotaPolicy?: UsageQuotaPolicy;
     pricingProfiles?: readonly UsagePricingProfile[];
+    middleware?: GatewayMiddlewareRegistry;
     now?: () => number;
 }
 export interface GatewayDispatchInput {
@@ -41,6 +43,7 @@ export interface GatewayDispatchResult {
     conversion: Awaited<ReturnType<typeof convertGatewayRequest>>;
     traceId: string;
     startedAt: number;
+    middlewareContext?: GatewayMiddlewareContext;
 }
 export interface GatewayCompletionInput {
     dispatch: GatewayDispatchResult;
@@ -75,8 +78,13 @@ export interface GatewayFallbackResult<T> {
 }
 export declare class GatewayFallbackError extends Error {
     readonly attempts: GatewayFallbackAttempt[];
-    readonly lastError?: unknown;
-    constructor(message: string, attempts: GatewayFallbackAttempt[], lastError?: unknown);
+    readonly lastError?: unknown | undefined;
+    constructor(message: string, attempts: GatewayFallbackAttempt[], lastError?: unknown | undefined);
+}
+export declare class GatewayMiddlewareRejectedError extends Error {
+    readonly status: number;
+    readonly code: string;
+    constructor(message: string, status?: number, code?: string);
 }
 /**
  * The framework-agnostic Gateway orchestration layer.
@@ -91,6 +99,7 @@ export declare class GatewayRuntime {
     private readonly now;
     private readonly options;
     private readonly trace;
+    private readonly streamMiddlewareContexts;
     constructor(options: GatewayRuntimeOptions);
     dispatch(input: GatewayDispatchInput): Promise<GatewayDispatchResult>;
     dispatchWithFallback<T>(input: GatewayDispatchInput, send: (dispatch: GatewayDispatchResult, attempt: number) => Promise<GatewayTransportResult<T>> | GatewayTransportResult<T>): Promise<GatewayFallbackResult<T>>;
@@ -100,4 +109,7 @@ export declare class GatewayRuntime {
     convertStreamChunk(state: ResponseStreamState, upstreamBody: JsonObject): Promise<GatewayStreamResult>;
     finalizeStream(state: ResponseStreamState, reason?: string): Promise<GatewayStreamResult>;
     failStream(state: ResponseStreamState, code: string, message: string): Promise<GatewayStreamResult>;
+    private createMiddlewareContext;
+    private createMiddlewareContextFromDispatch;
+    private createMiddlewareContextFromStream;
 }

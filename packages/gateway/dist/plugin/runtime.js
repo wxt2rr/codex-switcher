@@ -33,8 +33,16 @@ export class PluginRuntimeManager {
         });
         try {
             const response = await host.call("provider.describe");
-            const descriptor = normalizeProviderDescriptor(response.result, manifest.id);
-            const adapter = createPluginProviderAdapter({ ...descriptor, host });
+            const declaredProviderIds = new Set([
+                manifest.id,
+                ...(manifest.providers?.map((provider) => provider.id) ?? []),
+            ]);
+            const descriptor = normalizeProviderDescriptor(response.result, declaredProviderIds);
+            const adapter = createPluginProviderAdapter({
+                ...descriptor,
+                host,
+                ...(this.options.settings ? { settings: () => this.options.settings(manifest.id) } : {}),
+            });
             this.options.registry.register(adapter);
             const active = { manifest, path, descriptor, host };
             this.active.set(manifest.id, active);
@@ -66,26 +74,26 @@ export class PluginRuntimeManager {
     }
     list() { return [...this.active.values()]; }
 }
-function normalizeProviderDescriptor(value, expectedId) {
+function normalizeProviderDescriptor(value, expectedIds) {
     const record = isRecord(value) && isRecord(value.provider) ? value.provider : value;
-    if (!isRecord(record) || record.id !== expectedId || typeof record.displayName !== "string" || !record.displayName.trim()) {
-        throw new Error(`Plugin provider descriptor must use plugin id '${expectedId}'`);
+    if (!isRecord(record) || typeof record.id !== "string" || !expectedIds.has(record.id) || typeof record.displayName !== "string" || !record.displayName.trim()) {
+        throw new Error(`Plugin provider descriptor must use a declared provider id (${[...expectedIds].join(", ")})`);
     }
     const authMethods = Array.isArray(record.authMethods)
         ? record.authMethods.filter((method) => method === "api_key" || method === "oauth" || method === "subscription" || method === "none")
         : [];
     if (!authMethods.length)
-        throw new Error(`Plugin provider '${expectedId}' must declare an auth method`);
+        throw new Error(`Plugin provider '${String(record.id)}' must declare an auth method`);
     if (!Array.isArray(record.endpoints) || !record.endpoints.length)
-        throw new Error(`Plugin provider '${expectedId}' must declare an endpoint`);
+        throw new Error(`Plugin provider '${String(record.id)}' must declare an endpoint`);
     const endpoints = record.endpoints.flatMap((endpoint) => {
         if (!isRecord(endpoint) || !isGatewayProtocol(endpoint.protocol) || typeof endpoint.baseUrl !== "string" || typeof endpoint.modelsPath !== "string")
             return [];
         return [{ protocol: endpoint.protocol, baseUrl: endpoint.baseUrl, modelsPath: endpoint.modelsPath, ...(typeof endpoint.quotaPath === "string" ? { quotaPath: endpoint.quotaPath } : {}) }];
     });
     if (!endpoints.length)
-        throw new Error(`Plugin provider '${expectedId}' has no valid endpoint`);
-    return { id: expectedId, displayName: record.displayName, authMethods, endpoints };
+        throw new Error(`Plugin provider '${String(record.id)}' has no valid endpoint`);
+    return { id: String(record.id), displayName: record.displayName, authMethods, endpoints };
 }
 function isGatewayProtocol(value) {
     return value === "responses" || value === "chat_completions" || value === "anthropic" || value === "gemini";

@@ -2,6 +2,14 @@ import type { SwitcherState, TargetName } from "../state/store.js";
 export interface ApplyTargetHomeStateOptions {
     state: SwitcherState;
     target: TargetName;
+    /**
+     * Override the selected account route with the environment gateway route.
+     *
+     * Account runtime data may still contain a direct compatibility route (or a
+     * stale per-account router URL) while an environment gateway is active. The
+     * target home must follow the environment gateway in that case.
+     */
+    gatewayBaseUrl?: string;
 }
 export interface LegacyTargetHomeRepairEntry {
     envName: string;

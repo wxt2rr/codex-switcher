@@ -2,7 +2,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
 import { buildPluginLaunchSpec, type PluginSandboxOptions } from "./sandbox.js";
 
-export const PLUGIN_PROTOCOL_VERSION = 1;
+export const PLUGIN_PROTOCOL_VERSION = 2;
+export const SUPPORTED_PLUGIN_PROTOCOL_VERSIONS = [1, PLUGIN_PROTOCOL_VERSION] as const;
 export const MAX_PLUGIN_FRAME_BYTES = 1024 * 1024;
 
 export interface GatewayPluginManifest {
@@ -12,11 +13,46 @@ export interface GatewayPluginManifest {
   apiVersion: number;
   entry: string;
   permissions: PluginPermission[];
+  kind?: PluginKind[];
+  description?: string;
+  author?: string;
+  homepage?: string;
+  icon?: string;
+  providers?: PluginProviderDeclaration[];
+  settingsSchema?: PluginSettingsSchema;
+  trust?: PluginTrustLevel;
   signature?: string;
   checksum?: string;
 }
 
-export type PluginPermission = "provider" | "agent" | "usage" | "network" | "filesystem" | "secrets";
+export type PluginKind = "provider" | "middleware";
+export type PluginTrustLevel = "official" | "verified" | "community" | "local";
+export type PluginPermission = "provider" | "middleware" | "agent" | "usage" | "network" | "filesystem" | "secrets";
+
+export interface PluginProviderDeclaration {
+  id: string;
+  displayName: string;
+  icon?: string;
+  authMethods?: string[];
+  protocols?: string[];
+}
+
+export interface PluginSettingsSchema {
+  type: "object";
+  properties: Record<string, PluginSettingsProperty>;
+  required?: string[];
+}
+
+export interface PluginSettingsProperty {
+  type: "string" | "number" | "integer" | "boolean" | "select";
+  title: string;
+  description?: string;
+  secret?: boolean;
+  default?: string | number | boolean;
+  options?: Array<{ label: string; value: string }>;
+  minimum?: number;
+  maximum?: number;
+}
 
 export interface PluginRpcRequest {
   jsonrpc: "2.0";
@@ -116,8 +152,16 @@ export function validatePluginManifest(value: unknown): value is GatewayPluginMa
   if (!/^[a-z][a-z0-9._-]{1,63}$/.test(String(value.id))) return false;
   if (typeof value.name !== "string" || !value.name.trim()) return false;
   if (typeof value.version !== "string" || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(value.version)) return false;
-  if (value.apiVersion !== PLUGIN_PROTOCOL_VERSION || typeof value.entry !== "string" || !isSafePluginEntry(value.entry)) return false;
-  if (!Array.isArray(value.permissions) || value.permissions.some((permission) => !["provider", "agent", "usage", "network", "filesystem", "secrets"].includes(String(permission)))) return false;
+  if (!SUPPORTED_PLUGIN_PROTOCOL_VERSIONS.includes(value.apiVersion as 1 | 2) || typeof value.entry !== "string" || !isSafePluginEntry(value.entry)) return false;
+  if (!Array.isArray(value.permissions) || value.permissions.some((permission) => !["provider", "middleware", "agent", "usage", "network", "filesystem", "secrets"].includes(String(permission)))) return false;
+  if (value.kind !== undefined && (!Array.isArray(value.kind) || value.kind.length === 0 || value.kind.some((kind) => kind !== "provider" && kind !== "middleware"))) return false;
+  if (value.description !== undefined && typeof value.description !== "string") return false;
+  if (value.author !== undefined && typeof value.author !== "string") return false;
+  if (value.homepage !== undefined && typeof value.homepage !== "string") return false;
+  if (value.icon !== undefined && typeof value.icon !== "string") return false;
+  if (value.trust !== undefined && !["official", "verified", "community", "local"].includes(String(value.trust))) return false;
+  if (value.providers !== undefined && (!Array.isArray(value.providers) || value.providers.some((provider) => !isRecord(provider) || typeof provider.id !== "string" || !/^[a-z][a-z0-9._-]{1,63}$/.test(provider.id) || typeof provider.displayName !== "string" || !provider.displayName.trim()))) return false;
+  if (value.settingsSchema !== undefined && !isSettingsSchema(value.settingsSchema)) return false;
   if (value.signature !== undefined && typeof value.signature !== "string") return false;
   return value.checksum === undefined || typeof value.checksum === "string" && /^sha256:[a-f0-9]{64}$/i.test(value.checksum);
 }
@@ -126,6 +170,7 @@ export function requiredPluginPermission(method: string): PluginPermission {
   const prefix = method.split(/[.:/]/, 1)[0]?.toLowerCase();
   if (prefix === "agent") return "agent";
   if (prefix === "usage") return "usage";
+  if (prefix === "middleware" || prefix === "hook") return "middleware";
   if (prefix === "network") return "network";
   if (prefix === "filesystem" || prefix === "fs") return "filesystem";
   if (prefix === "secrets" || prefix === "secret") return "secrets";
@@ -436,6 +481,17 @@ export class RestartingPluginTransport implements PluginTransport {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+
+function isSettingsSchema(value: unknown): value is PluginSettingsSchema {
+  if (!isRecord(value) || value.type !== "object" || !isRecord(value.properties)) return false;
+  return Object.values(value.properties).every((property) => {
+    if (!isRecord(property) || typeof property.title !== "string") return false;
+    if (!["string", "number", "integer", "boolean", "select"].includes(String(property.type))) return false;
+    if (property.secret !== undefined && typeof property.secret !== "boolean") return false;
+    if (property.options !== undefined && (!Array.isArray(property.options) || property.options.some((option) => !isRecord(option) || typeof option.label !== "string" || typeof option.value !== "string"))) return false;
+    return true;
+  });
+}
 
 function isSafePluginEntry(value: string): boolean {
   const entry = value.trim();

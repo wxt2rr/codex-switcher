@@ -74,6 +74,10 @@ test("desktop package defines electron packaging entrypoints", () => {
       to: "plugins/codex-switcher/scripts",
     },
     {
+      from: "../../plugins/csw-our-free-model",
+      to: "plugins/csw-our-free-model",
+    },
+    {
       from: "../../scripts/bin",
       to: "scripts/bin",
     },

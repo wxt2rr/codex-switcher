@@ -2,12 +2,47 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer, request as httpRequest } from "node:http";
 import { connect as connectSocket } from "node:net";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { extractRouterErrorDiagnostics, extractSafeErrorMessage, sanitizeRouterErrorMessage, startUsageRouterService } from "./usage-router-service.js";
 import type { RouteTarget } from "./usage-routing-model.js";
+import { ProviderPluginManager } from "../../../packages/gateway/dist/plugin/manager.js";
+
+async function installTestProviderPlugin(stateDir: string): Promise<void> {
+  const source = join(stateDir, "test-provider-source");
+  await mkdir(source, { recursive: true });
+  await writeFile(join(source, "plugin.mjs"), [
+    "import readline from 'node:readline';",
+    "const rl = readline.createInterface({ input: process.stdin });",
+    "const send = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n');",
+    "rl.on('line', (line) => {",
+    "  const request = JSON.parse(line);",
+    "  if (request.method === 'provider.describe') return send(request.id, { provider: { id: 'test-provider', displayName: 'Test Provider', authMethods: ['api_key'], endpoints: [{ protocol: 'responses', baseUrl: 'https://upstream.invalid/v1', modelsPath: '/models' }] } });",
+    "  if (request.method === 'provider.request') return send(request.id, { status: 200, headers: { 'content-type': 'application/json' }, body: { id: 'plugin-routed-response', model: 'plugin-model', authorization: request.params.headers.authorization } });",
+    "  if (request.method === 'provider.models') return send(request.id, { models: [{ id: 'plugin-model', protocols: ['responses'] }] });",
+    "  return send(request.id, {});",
+    "});",
+  ].join("\n"));
+  const manager = new ProviderPluginManager({
+    rootDir: join(stateDir, "provider-plugins"),
+    sandbox: { mode: "disabled" },
+  });
+  try {
+    await manager.installPlugin({
+      id: "test-provider",
+      name: "Test Provider",
+      version: "1.0.0",
+      apiVersion: 2,
+      entry: "plugin.mjs",
+      permissions: ["provider", "secrets"],
+      providers: [{ id: "test-provider", displayName: "Test Provider", authMethods: ["api_key"], protocols: ["responses"] }],
+    }, { kind: "local", path: source });
+  } finally {
+    await manager.close();
+  }
+}
 
 test("router diagnostics extract useful errors while redacting credentials", () => {
   assert.equal(extractSafeErrorMessage(JSON.stringify({ error: { message: "rate limited for sk-secretvalue" } })), "rate limited for sk-[REDACTED]");
@@ -594,6 +629,105 @@ test("environment gateway persists, selects an account route, and survives route
   assert.equal(upstreamModel, "gpt-upstream");
   await second.close();
   await new Promise<void>((resolve) => upstream.close(() => resolve()));
+});
+
+test("environment gateway delegates an installed provider plugin request before contacting the route URL", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-gateway-provider-plugin-"));
+  await installTestProviderPlugin(stateDir);
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret", providerPluginSandboxMode: "disabled" });
+  const now = Date.now();
+  const route = {
+    routeId: "route-provider-plugin",
+    envName: "work",
+    accountName: "plugin-account",
+    providerId: "test-provider",
+    upstreamBaseUrl: "https://upstream.invalid/v1",
+    originalBaseUrl: "https://upstream.invalid/v1",
+    protocol: "responses" as const,
+    exposedModelId: "plugin-model",
+    upstreamModel: "plugin-model",
+    reasoningProfile: "auto" as const,
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const gateway = {
+    gatewayId: "gateway-provider-plugin",
+    envName: "work",
+    routeIds: [route.routeId],
+    defaultRouteId: route.routeId,
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  try {
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify(route),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}/secret`, {
+      method: "PUT", headers: adminHeaders,
+      body: JSON.stringify({ upstreamApiKey: "plugin-key", localRouteToken: "local-plugin" }),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway),
+    })).status, 204);
+    const response = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
+      method: "POST",
+      headers: { authorization: "Bearer local-plugin", "content-type": "application/json" },
+      body: JSON.stringify({ model: "plugin-model", input: "hello" }),
+    });
+    const responseText = await response.text();
+    assert.equal(response.status, 200);
+    assert.deepEqual(JSON.parse(responseText), {
+      id: "plugin-routed-response",
+      model: "plugin-model",
+      authorization: "Bearer plugin-key",
+    });
+
+    const pool = {
+      poolId: "pool-provider-plugin",
+      envName: "work",
+      protocol: "responses" as const,
+      enabled: true,
+      strategy: "sticky_weighted_round_robin" as const,
+      sessionTtlMinutes: 60,
+      maxFailoverAttempts: 0,
+      maxSameAccountFailures: 1,
+      createdAt: now,
+      updatedAt: now,
+      members: [{
+        accountName: route.accountName,
+        routeId: route.routeId,
+        protocol: "responses" as const,
+        upstreamBaseUrl: route.upstreamBaseUrl,
+        originalBaseUrl: route.originalBaseUrl,
+        upstreamModel: route.upstreamModel,
+        enabled: true,
+        weight: 1,
+        priority: 0,
+      }],
+    };
+    assert.equal((await fetch(`${service.origin}/admin/pools`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify(pool),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/pools/${pool.poolId}/members/${route.accountName}/secret`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify({ upstreamApiKey: "plugin-key" }),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/pools/${pool.poolId}/token`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify({ localRouteToken: "local-plugin-pool" }),
+    })).status, 204);
+    const pooled = await fetch(`${service.origin}/pools/${pool.poolId}/responses`, {
+      method: "POST",
+      headers: { authorization: "Bearer local-plugin-pool", "content-type": "application/json" },
+      body: JSON.stringify({ model: "plugin-model", input: "hello from pool" }),
+    });
+    assert.equal(pooled.status, 200);
+    assert.equal((await pooled.json()).id, "plugin-routed-response");
+  } finally {
+    await service.close();
+    await rm(stateDir, { recursive: true, force: true });
+  }
 });
 
 test("environment gateway records route diagnostics when no compatible route exists", async (testContext) => {

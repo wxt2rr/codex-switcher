@@ -152,15 +152,39 @@ function FallbackProviderIcon({
 export function ProviderIcon({
   providerId,
   displayName,
+  iconUrl: pluginIconUrl,
   size = 24,
   className,
   ...svgProps
 }: {
   providerId?: string;
   displayName?: string;
+  iconUrl?: string;
   size?: number;
   className?: string;
 } & Omit<SVGProps<SVGSVGElement>, "width" | "height" | "viewBox">) {
+  if (pluginIconUrl?.trim()) {
+    return (
+      <span
+        className={className}
+        style={{ display: "inline-flex", width: size, height: size, flex: "none", alignItems: "center", justifyContent: "center" }}
+        role="img"
+        aria-label={displayName || providerId || "Provider"}
+        data-provider-icon-source="plugin"
+      >
+        <img
+          src={pluginIconUrl}
+          width={size}
+          height={size}
+          alt=""
+          draggable={false}
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }}
+        />
+      </span>
+    );
+  }
   const urls = providerIconUrls(providerId);
   const [urlIndex, setUrlIndex] = useState(0);
   useEffect(() => setUrlIndex(0), [providerId]);

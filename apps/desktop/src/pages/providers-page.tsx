@@ -107,7 +107,7 @@ export function ProvidersPage({
                     const accountCount = overview.accounts.filter((account) => account.runtime.providerId === item.id).length;
                     return (
                       <ListCard key={item.id} className="flex min-h-[152px] items-start gap-3 p-4">
-                        <ProviderIcon providerId={item.iconKey} displayName={item.displayName} size={32} />
+                        <ProviderIcon providerId={item.iconKey} iconUrl={item.iconUrl} displayName={item.displayName} size={32} />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
                             <h2 className="truncate text-[14px] font-semibold text-neutral-950 dark:text-white">{item.displayName}</h2>
@@ -148,7 +148,7 @@ export function ProvidersPage({
         {activeProvider ? (
           <div className="grid gap-4">
             <div className="flex items-center gap-3 rounded-xl border border-black/[0.05] bg-slate-50 p-3">
-              <ProviderIcon providerId={activeProvider.iconKey} displayName={activeProvider.displayName} size={36} />
+              <ProviderIcon providerId={activeProvider.iconKey} iconUrl={activeProvider.iconUrl} displayName={activeProvider.displayName} size={36} />
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-neutral-900">{activeProvider.displayName}</div>
                 <div className="font-mono text-[11px] text-slate-400">{activeProvider.id}</div>

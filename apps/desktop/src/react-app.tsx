@@ -13,6 +13,7 @@ import { EnvironmentsPage } from "./pages/environments-page";
 import { OperationsPage } from "./pages/operations-page";
 import { ModelsPage } from "./pages/models-page";
 import { ProvidersPage } from "./pages/providers-page";
+import { PluginsPage } from "./pages/plugins-page";
 import { SkillsPage } from "./pages/skills-page";
 import { UsagePage } from "./pages/usage-page";
 import { parseProxyStatusOutput, shouldAutoLoadProxy } from "./proxy-status";
@@ -38,7 +39,7 @@ function resolveInitialView(): NavView {
     return "accounts";
   }
   const view = new URLSearchParams(window.location.search).get("view");
-  if (view === "environments" || view === "accounts" || view === "providers" || view === "models" || view === "skills" || view === "usage" || view === "operations") {
+  if (view === "environments" || view === "accounts" || view === "providers" || view === "models" || view === "plugins" || view === "skills" || view === "usage" || view === "operations") {
     return view;
   }
   return "accounts";
@@ -1136,6 +1137,7 @@ export function App() {
           { view: "environments", label: copy.nav.environments },
           { view: "providers", label: copy.nav.providers },
           { view: "models", label: copy.nav.models },
+          { view: "plugins", label: copy.nav.plugins },
           { view: "skills", label: copy.nav.skills },
           { view: "usage", label: copy.nav.usage },
           { view: "operations", label: copy.nav.operations },
@@ -1176,6 +1178,7 @@ export function App() {
           { view: "environments", label: copy.nav.environments },
           { view: "providers", label: copy.nav.providers },
           { view: "models", label: copy.nav.models },
+          { view: "plugins", label: copy.nav.plugins },
           { view: "skills", label: copy.nav.skills },
           { view: "usage", label: copy.nav.usage },
           { view: "operations", label: copy.nav.operations },
@@ -1206,6 +1209,7 @@ export function App() {
         { view: "environments", label: copy.nav.environments },
         { view: "providers", label: copy.nav.providers },
         { view: "models", label: copy.nav.models },
+        { view: "plugins", label: copy.nav.plugins },
         { view: "skills", label: copy.nav.skills },
         { view: "usage", label: copy.nav.usage },
         { view: "operations", label: copy.nav.operations },
@@ -1326,6 +1330,15 @@ export function App() {
 
       {view === "providers" ? (
         <ProvidersPage overview={overview} language={language} bridge={bridge} onAddAccount={openAccountWizard} onError={setErrorMessage} />
+      ) : null}
+
+      {view === "plugins" ? (
+        <PluginsPage
+          bridge={bridge}
+          language={language}
+          onSuccess={setSuccessMessage}
+          onError={setErrorMessage}
+        />
       ) : null}
 
       {view === "skills" ? (

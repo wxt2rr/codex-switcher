@@ -1,0 +1,17 @@
+{
+  "id": "csw-demo-provider",
+  "name": "CSW Demo Provider",
+  "version": "1.0.0",
+  "apiVersion": 2,
+  "entry": "plugin.mjs",
+  "permissions": ["provider"],
+  "kind": ["provider"],
+  "trust": "local",
+  "description": "A minimal SDK-based provider plugin used by the integration test and external developer docs.",
+  "providers": [{
+    "id": "csw-demo-provider",
+    "displayName": "CSW Demo Provider",
+    "authMethods": ["api_key"],
+    "protocols": ["responses"]
+  }]
+}

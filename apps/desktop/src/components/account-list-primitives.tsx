@@ -117,12 +117,15 @@ export function ListStack({
 export function ListCard({
   children,
   className,
+  onClick,
 }: {
   children: ReactNode;
   className?: string;
+  onClick?: () => void;
 }) {
   return (
     <article
+      onClick={onClick}
       className={cn(
         "management-list-card rounded-[14px] border border-black/[0.05] bg-white px-5 py-4 dark:border-white/[0.07] dark:bg-[#141a22]",
         className,

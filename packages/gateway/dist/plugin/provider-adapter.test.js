@@ -14,7 +14,9 @@ function fixture() {
                     ? { tokensRemaining: 42, resetAt: 123 }
                     : request.method === "provider.refresh"
                         ? { account: { status: "active" }, accessToken: "next-token" }
-                        : undefined;
+                        : request.method === "provider.request"
+                            ? { status: 200, headers: { "content-type": "application/json" }, body: { ok: true, echoedModel: "plugin-model" } }
+                            : undefined;
             return { jsonrpc: "2.0", id: request.id, result };
         },
         async close() { },
@@ -60,5 +62,21 @@ test("plugin provider adapter keeps login and signing compatible with built-in p
     assert.equal(result.account.secretRef, "provider/provider-plugin/a");
     const signed = adapter.signRequest({ account: result.account, secret: "secret", protocol: "responses", url: "https://provider.example/v1/responses", method: "POST", body: "{}" });
     assert.equal(signed.init.headers.get("authorization"), "Bearer secret");
+});
+test("plugin provider adapter exposes a permission-checked custom request path", async () => {
+    const { adapter, requests } = fixture();
+    const result = await adapter.request?.({
+        account: { accountId: "a", displayName: "A", authMethod: "api_key", secretRef: "secure:a", status: "active" },
+        secret: "secret-value",
+        protocol: "responses",
+        url: "https://provider.example/v1/responses",
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: "plugin-model" }),
+    });
+    assert.equal(result?.status, 200);
+    assert.deepEqual(result?.body, { ok: true, echoedModel: "plugin-model" });
+    assert.equal(requests.at(-1)?.method, "provider.request");
+    assert.equal(requests.at(-1)?.params?.secret, "secret-value");
 });
 //# sourceMappingURL=provider-adapter.test.js.map

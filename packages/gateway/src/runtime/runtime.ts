@@ -11,6 +11,7 @@ import type { GatewayRequestIR } from "../request/request-ir.js";
 import { createGatewayRequestContext } from "../request/request-ir.js";
 import { classifyRouteFailure, isRetryableRouteFailure, resolveRoute, type RouteEngineState, type RouteGroupNode, type RouteFailureClass, type RouteResolveResult, type RuntimeRouteCandidate } from "../routing/engine.js";
 import { ProviderRegistry } from "../provider/registry.js";
+import { GatewayMiddlewareRegistry, type GatewayMiddlewareContext } from "../plugin/middleware.js";
 import { UsageLedger, UsageTrace, calculateUsageCost, hashSessionId, type GatewayUsageRecord, type UsagePricingProfile, type UsageQuotaPolicy } from "../usage/ledger.js";
 
 export interface GatewayRuntimeOptions {
@@ -20,6 +21,7 @@ export interface GatewayRuntimeOptions {
   ledger?: UsageLedger;
   quotaPolicy?: UsageQuotaPolicy;
   pricingProfiles?: readonly UsagePricingProfile[];
+  middleware?: GatewayMiddlewareRegistry;
   now?: () => number;
 }
 
@@ -50,6 +52,7 @@ export interface GatewayDispatchResult {
   conversion: Awaited<ReturnType<typeof convertGatewayRequest>>;
   traceId: string;
   startedAt: number;
+  middlewareContext?: GatewayMiddlewareContext;
 }
 
 export interface GatewayCompletionInput {
@@ -100,6 +103,13 @@ export class GatewayFallbackError extends Error {
   }
 }
 
+export class GatewayMiddlewareRejectedError extends Error {
+  constructor(message: string, public readonly status = 403, public readonly code = "MIDDLEWARE_REJECTED") {
+    super(message);
+    this.name = "GatewayMiddlewareRejectedError";
+  }
+}
+
 /**
  * The framework-agnostic Gateway orchestration layer.
  *
@@ -113,6 +123,7 @@ export class GatewayRuntime {
   private readonly now: () => number;
   private readonly options: GatewayRuntimeOptions;
   private readonly trace: UsageTrace;
+  private readonly streamMiddlewareContexts = new WeakMap<ResponseStreamState, GatewayMiddlewareContext>();
 
   constructor(options: GatewayRuntimeOptions) {
     this.options = { ...options, candidates: [...options.candidates] };
@@ -126,6 +137,18 @@ export class GatewayRuntime {
     const startedAt = input.now ?? this.now();
     const requestId = input.requestId ?? randomUUID();
     const traceId = input.traceId ?? randomUUID();
+    const middlewareContext = this.createMiddlewareContext({
+      requestId,
+      traceId,
+      input,
+      model: input.model,
+    });
+    const middlewareRequest = await this.options.middleware?.runRequest(input.body, middlewareContext);
+    if (middlewareRequest?.reject) {
+      throw new GatewayMiddlewareRejectedError(middlewareRequest.reject.message, middlewareRequest.reject.status, middlewareRequest.reject.code);
+    }
+    const requestBody = middlewareRequest?.body ?? input.body;
+    const requestedModel = middlewareRequest?.model ?? input.model;
     const context = createGatewayRequestContext({
       requestId,
       environmentId: input.environmentId,
@@ -137,11 +160,10 @@ export class GatewayRuntime {
       receivedAt: startedAt,
       metadata: input.metadata,
     });
-    const request = decodeGatewayRequest(input.protocol, input.body, context);
+    const request = decodeGatewayRequest(input.protocol, requestBody, context);
     this.trace.start(traceId, `${traceId}:ingress`, "ingress", { agentId: input.agentId, protocol: input.protocol });
     this.trace.finish(`${traceId}:ingress`, { model: input.model });
 
-    const requestedModel = input.model;
     const route = resolveRoute(this.options.candidates, this.options.groups, {
       requestedModel,
       protocol: input.protocol,
@@ -161,7 +183,7 @@ export class GatewayRuntime {
       const quota = this.ledger.quota(this.options.quotaPolicy, { environmentId: input.environmentId, providerId: route.route.providerId, agentId: input.agentId }, startedAt);
       if (!quota.allowed) throw new Error(`Gateway quota exceeded: ${quota.reason ?? "unknown"}`);
     }
-    return this.materializeDispatch(request, input.body, route, traceId, startedAt, "route");
+    return this.materializeDispatch(request, requestBody, route, traceId, startedAt, "route", middlewareContext);
   }
 
   async dispatchWithFallback<T>(
@@ -178,6 +200,7 @@ export class GatewayRuntime {
         primary.traceId,
         primary.startedAt,
         `fallback:${index + 1}`,
+        primary.middlewareContext,
       ))),
     ];
     const attempts: GatewayFallbackAttempt[] = [];
@@ -223,6 +246,7 @@ export class GatewayRuntime {
     traceId: string,
     startedAt: number,
     spanSuffix: string,
+    middlewareContext?: GatewayMiddlewareContext,
   ): Promise<GatewayDispatchResult> {
     const provider = this.providerRegistry.get(route.route.providerId);
     if (!provider.endpoints.some((endpoint) => endpoint.protocol === route.route.protocol)) {
@@ -253,6 +277,7 @@ export class GatewayRuntime {
       conversion,
       traceId,
       startedAt,
+      ...(middlewareContext ? { middlewareContext } : {}),
     };
   }
 
@@ -269,6 +294,12 @@ export class GatewayRuntime {
         upstreamModelName: input.dispatch.request.context.logicalModelId,
       },
     ) : undefined;
+    let responseBody = responseConversion?.value;
+    if (responseBody && this.options.middleware) {
+      const middlewareResponse = await this.options.middleware.runResponse(responseBody, input.dispatch.middlewareContext ?? this.createMiddlewareContextFromDispatch(input.dispatch));
+      if (middlewareResponse.reject) throw new GatewayMiddlewareRejectedError(middlewareResponse.reject.message, middlewareResponse.reject.status, middlewareResponse.reject.code);
+      responseBody = middlewareResponse.body;
+    }
     const rawUsage = input.upstreamBody ? decodeUsage(input.dispatch.upstreamProtocol, input.upstreamBody) : undefined;
     const status = input.status ?? (input.upstreamBody?.error ? "error" : "success");
     const profile = this.options.pricingProfiles?.find((candidate) => candidate.providerId === input.dispatch.route.route.providerId && new RegExp(candidate.modelPattern).test(input.dispatch.route.route.upstreamModelId));
@@ -304,13 +335,13 @@ export class GatewayRuntime {
     this.trace.start(input.dispatch.traceId, `${input.dispatch.traceId}:usage`, "usage", { status, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens });
     this.trace.finish(`${input.dispatch.traceId}:usage`, { cost: standardCost ?? 0 });
     return {
-      ...(responseConversion ? { responseBody: responseConversion.value } : {}),
+      ...(responseBody ? { responseBody } : {}),
       usage,
     };
   }
 
   createResponseStream(dispatch: GatewayDispatchResult, options: ConversionOptions = {}): ResponseStreamState {
-    return createResponseStreamState(
+    const state = createResponseStreamState(
       dispatch.upstreamProtocol,
       dispatch.request.context.protocol,
       {
@@ -321,10 +352,22 @@ export class GatewayRuntime {
       },
       options,
     );
+    if (this.options.middleware) this.streamMiddlewareContexts.set(state, dispatch.middlewareContext ?? this.createMiddlewareContextFromDispatch(dispatch));
+    return state;
   }
 
   convertStreamChunk(state: ResponseStreamState, upstreamBody: JsonObject): Promise<GatewayStreamResult> {
-    return convertStreamChunk(state, upstreamBody);
+    return convertStreamChunk(state, upstreamBody).then(async (result) => {
+      if (!this.options.middleware) return result;
+      const context = this.streamMiddlewareContexts.get(state) ?? this.createMiddlewareContextFromStream(state);
+      const nextEvents: JsonObject[] = [];
+      for (const event of result.value) {
+        const next = await this.options.middleware.runEvent(event, context);
+        if (next.reject) throw new GatewayMiddlewareRejectedError(next.reject.message, next.reject.status, next.reject.code);
+        if (next.event) nextEvents.push(next.event);
+      }
+      return { ...result, value: nextEvents };
+    });
   }
 
   finalizeStream(state: ResponseStreamState, reason?: string): Promise<GatewayStreamResult> {
@@ -333,6 +376,43 @@ export class GatewayRuntime {
 
   failStream(state: ResponseStreamState, code: string, message: string): Promise<GatewayStreamResult> {
     return failResponseStream(state, code, message);
+  }
+
+  private createMiddlewareContext(input: { requestId: string; traceId: string; input: GatewayDispatchInput; model: string }): GatewayMiddlewareContext {
+    return {
+      requestId: input.requestId,
+      traceId: input.traceId,
+      protocol: input.input.protocol,
+      model: input.model,
+      stream: input.input.body.stream === true,
+      agentId: input.input.agentId,
+      environmentId: input.input.environmentId,
+      state: {},
+    };
+  }
+
+  private createMiddlewareContextFromDispatch(dispatch: GatewayDispatchResult): GatewayMiddlewareContext {
+    return {
+      requestId: dispatch.request.context.requestId,
+      traceId: dispatch.traceId,
+      protocol: dispatch.request.context.protocol,
+      model: dispatch.request.context.logicalModelId,
+      stream: dispatch.request.stream,
+      agentId: dispatch.request.context.agentId,
+      environmentId: dispatch.request.context.environmentId,
+      state: {},
+    };
+  }
+
+  private createMiddlewareContextFromStream(state: ResponseStreamState): GatewayMiddlewareContext {
+    return {
+      requestId: state.metadata.requestId ?? state.id,
+      traceId: state.metadata.traceId ?? state.id,
+      protocol: state.target,
+      model: state.metadata.originModelName ?? state.metadata.upstreamModelName ?? "",
+      stream: true,
+      state: {},
+    };
   }
 }
 

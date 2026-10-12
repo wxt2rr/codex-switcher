@@ -1,7 +1,7 @@
 {
   "name": "appsdesktop",
   "private": true,
-  "version": "0.1.52",
+  "version": "0.1.53",
   "description": "Electron desktop shell for codex-switcher",
   "author": "wangxt",
   "homepage": "https://github.com/wxt2rr/codex-switcher",
@@ -91,6 +91,10 @@
       {
         "from": "../../plugins/codex-switcher/scripts",
         "to": "plugins/codex-switcher/scripts"
+      },
+      {
+        "from": "../../plugins/csw-our-free-model",
+        "to": "plugins/csw-our-free-model"
       },
       {
         "from": "../../scripts/bin",

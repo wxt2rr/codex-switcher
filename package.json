@@ -27,6 +27,9 @@
     "apps/*"
   ],
   "files": [
+    "packages/plugin-sdk/**",
+    "examples/plugins/**",
+    "plugins/csw-our-free-model/**",
     "packages/gateway/**",
     "plugins/codex-switcher/**",
     "!plugins/codex-switcher/**/__pycache__/**",
@@ -64,6 +67,10 @@
     "gateway:test": "npm run test --workspace ./packages/gateway",
     "core:build": "tsc -p packages/core/tsconfig.json",
     "gateway:build": "tsc -p packages/gateway/tsconfig.json",
+    "plugin-sdk:build": "npm run build --workspace ./packages/plugin-sdk",
+    "plugin-sdk:test": "npm run test --workspace ./packages/plugin-sdk",
+    "plugin-sdk:example:test": "node --test scripts/plugin-sdk-example.test.mjs",
+    "our-free-model:test": "node --test plugins/csw-our-free-model/plugin-core.test.mjs",
     "core:cli": "tsx scripts/core-cli.ts",
     "desktop:build": "npm run build --workspace ./apps/desktop",
     "desktop:dev": "npm run electron:dev --workspace ./apps/desktop",

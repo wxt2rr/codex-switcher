@@ -7,6 +7,7 @@ import { join } from "node:path";
 import {
   createModelCatalogStore,
   filterModelCatalogBindings,
+  formatCodexModelDisplayName,
   normalizeCustomModelInput,
 } from "./model-catalog-store.js";
 
@@ -60,6 +61,18 @@ test("normalizer preserves advanced JSON fields and creates stable defaults", ()
 test("normalizer rejects unsupported protocols and invalid context windows", () => {
   assert.throws(() => normalizeCustomModelInput({ slug: "bad-protocol", display_name: "Bad", protocol: "xml" }), /must be one of/);
   assert.throws(() => normalizeCustomModelInput({ slug: "bad-context", display_name: "Bad", context_window: 0 }), /positive number/);
+});
+
+test("Codex model labels include the provider alias without changing the model identity", () => {
+  assert.equal(
+    formatCodexModelDisplayName({ display_name: "GPT-5.5", provider_display_name: "ckt-aicode" }),
+    "ckt-aicode:5.5",
+  );
+  assert.equal(
+    formatCodexModelDisplayName({ display_name: "Claude Sonnet", provider_display_name: "relay" }),
+    "relay:Claude Sonnet",
+  );
+  assert.equal(formatCodexModelDisplayName({ display_name: "GPT-5.5" }), "GPT-5.5");
 });
 
 test("model bindings replace all account relations in one atomic update", async () => {

@@ -31,7 +31,7 @@ export type PluginInstallSource = {
 } | {
     kind: "git";
     url: string;
-    ref?: string;
+    ref: string;
 };
 export interface PluginCommandResult {
     code: number;
