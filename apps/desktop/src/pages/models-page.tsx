@@ -358,19 +358,24 @@ export function ModelsPage({
         description={zh ? "表单填写核心字段，JSON 可编辑完整目录配置" : "Use the form for core fields or JSON for the complete catalog entry"}
         onClose={() => setEditorOpen(false)}
         closeLabel={zh ? "关闭" : "Close"}
+        scrollable={false}
       >
-        <div className="mb-5 flex items-center gap-1 rounded-lg bg-neutral-100 p-1">
-          <button type="button" onClick={() => changeMode("form")} aria-pressed={mode === "form"} className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border text-[12px] ${mode === "form" ? "ui-selected-control" : "border-transparent text-slate-500"}`}><FilePenLine className="size-3.5" />{zh ? "表单" : "Form"}</button>
-          <button type="button" onClick={() => changeMode("json")} aria-pressed={mode === "json"} className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border text-[12px] ${mode === "json" ? "ui-selected-control" : "border-transparent text-slate-500"}`}><Braces className="size-3.5" />JSON</button>
-        </div>
-        {mode === "form" ? (
-          <ModelCatalogForm value={draft} language={language} onChange={updateDraft} />
-        ) : (
-          <Field label="model-catalogs.json"><Textarea className="min-h-[420px] font-mono text-[12px] leading-5" value={jsonDraft} onChange={(event) => setJsonDraft(event.target.value)} spellCheck={false} /></Field>
-        )}
-        <div className="mt-6 flex justify-end gap-2">
-          <Button variant="outline" onClick={() => setEditorOpen(false)}>{zh ? "取消" : "Cancel"}</Button>
-          <Button onClick={() => void saveModel()} disabled={busy}><Save className="size-4" />{zh ? "保存" : "Save"}</Button>
+        <div className="flex min-h-0 flex-1 flex-col gap-4">
+          <div className="flex shrink-0 items-center gap-1 rounded-lg bg-neutral-100 p-1">
+            <button type="button" onClick={() => changeMode("form")} aria-pressed={mode === "form"} className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border text-[12px] ${mode === "form" ? "ui-selected-control" : "border-transparent text-slate-500"}`}><FilePenLine className="size-3.5" />{zh ? "表单" : "Form"}</button>
+            <button type="button" onClick={() => changeMode("json")} aria-pressed={mode === "json"} className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border text-[12px] ${mode === "json" ? "ui-selected-control" : "border-transparent text-slate-500"}`}><Braces className="size-3.5" />JSON</button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            {mode === "form" ? (
+              <ModelCatalogForm value={draft} language={language} onChange={updateDraft} />
+            ) : (
+              <Field label="model-catalogs.json"><Textarea className="min-h-[420px] font-mono text-[12px] leading-5" value={jsonDraft} onChange={(event) => setJsonDraft(event.target.value)} spellCheck={false} /></Field>
+            )}
+          </div>
+          <div className="flex shrink-0 justify-end gap-2 border-t border-black/[0.06] pt-4">
+            <Button variant="outline" onClick={() => setEditorOpen(false)}>{zh ? "取消" : "Cancel"}</Button>
+            <Button onClick={() => void saveModel()} disabled={busy}><Save className="size-4" />{zh ? "保存" : "Save"}</Button>
+          </div>
         </div>
       </SidePanel>
 
