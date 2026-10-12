@@ -33,6 +33,7 @@ const DEEPSEEK_OFFICIAL_BASE_URL = "https://api.deepseek.com";
 const MIMO_OFFICIAL_BASE_URL = "https://api.xiaomimimo.com/v1";
 const KIMI_OFFICIAL_BASE_URL = "https://api.moonshot.ai/v1";
 const ZAI_OFFICIAL_BASE_URL = "https://open.bigmodel.cn/api/paas/v4";
+const SKIPPED_UPDATE_VERSION_KEY = "codex-switcher-skipped-update-version";
 
 function resolveInitialView(): NavView {
   if (typeof window === "undefined") {
@@ -106,6 +107,11 @@ export function App() {
   const [routeStatuses, setRouteStatuses] = useState<EnvironmentRouteStatus[]>([]);
   const [accountPools, setAccountPools] = useState<AccountPoolStatus[]>([]);
   const [autoUpdateStatus, setAutoUpdateStatus] = useState<DesktopAutoUpdateStatus>({ enabled: false, state: "disabled" });
+  const [skippedUpdateVersion, setSkippedUpdateVersion] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return window.localStorage.getItem(SKIPPED_UPDATE_VERSION_KEY);
+  });
+  const [autoUpdateActionBusy, setAutoUpdateActionBusy] = useState(false);
   const authMetricsRequestRef = useRef(0);
   const authMetricsInFlightRef = useRef(false);
   const proxyDraftDirtyRef = useRef(false);
@@ -213,7 +219,6 @@ export function App() {
   }, [view]);
 
   useEffect(() => {
-    if (view !== "operations") return;
     let stopped = false;
     const refreshUpdateStatus = () => {
       void bridge.getAutoUpdateStatus().then((status) => {
@@ -222,12 +227,13 @@ export function App() {
         if (!stopped) setErrorMessage(error);
       });
     };
-    const interval = window.setInterval(refreshUpdateStatus, 1500);
+    void refreshUpdateStatus();
+    const interval = window.setInterval(refreshUpdateStatus, 5000);
     return () => {
       stopped = true;
       window.clearInterval(interval);
     };
-  }, [view]);
+  }, []);
 
   useEffect(() => {
     if (view !== "operations") return;
@@ -570,6 +576,35 @@ export function App() {
 
   function setErrorMessage(error: unknown) {
     setMessage(buildDesktopNotice(language, "error", error instanceof Error ? error.message : String(error)));
+  }
+
+  async function handleCheckForAutoUpdate() {
+    setAutoUpdateActionBusy(true);
+    try {
+      setAutoUpdateStatus(await bridge.checkForAutoUpdate());
+    } catch (error) {
+      setErrorMessage(error);
+    } finally {
+      setAutoUpdateActionBusy(false);
+    }
+  }
+
+  async function handleInstallDownloadedUpdate() {
+    setAutoUpdateActionBusy(true);
+    try {
+      setAutoUpdateStatus(await bridge.installDownloadedUpdate());
+    } catch (error) {
+      setErrorMessage(error);
+    } finally {
+      setAutoUpdateActionBusy(false);
+    }
+  }
+
+  function handleSkipAutoUpdate() {
+    const version = autoUpdateStatus.version;
+    if (!version) return;
+    window.localStorage.setItem(SKIPPED_UPDATE_VERSION_KEY, version);
+    setSkippedUpdateVersion(version);
   }
 
   async function loadLanguage() {
@@ -1220,6 +1255,22 @@ export function App() {
     );
   }
 
+  const updatePrompt = autoUpdateStatus.enabled
+    && autoUpdateStatus.state === "downloaded"
+    && autoUpdateStatus.version
+    && autoUpdateStatus.version !== skippedUpdateVersion
+    ? {
+      version: autoUpdateStatus.version,
+      title: language === "zh" ? "发现新版本" : language === "ja" ? "新しいバージョン" : "New version available",
+      description: language === "zh" ? `版本 ${autoUpdateStatus.version} 已下载完成。` : language === "ja" ? `バージョン ${autoUpdateStatus.version} をダウンロードしました。` : `Version ${autoUpdateStatus.version} is ready to install.`,
+      installLabel: language === "zh" ? "立即更新" : language === "ja" ? "今すぐ更新" : "Update now",
+      skipLabel: language === "zh" ? "跳过此版本" : language === "ja" ? "このバージョンをスキップ" : "Skip this version",
+      onInstall: () => void handleInstallDownloadedUpdate(),
+      onSkip: handleSkipAutoUpdate,
+      busy: autoUpdateActionBusy,
+    }
+    : undefined;
+
   return (
     <DesktopShell
       brand={copy.brand}
@@ -1238,6 +1289,7 @@ export function App() {
       message={message}
       noticeVisible={noticeVisible}
       onNoticePauseChange={setNoticePaused}
+      updatePrompt={updatePrompt}
     >
       {view === "environments" ? (
         <EnvironmentsPage
@@ -1422,8 +1474,8 @@ export function App() {
           appPresenceSaving={appPresenceSaving}
           onAppPresenceChange={(next) => void handleAppPresenceChange(next)}
           autoUpdateStatus={autoUpdateStatus}
-          onCheckForAutoUpdate={() => void bridge.checkForAutoUpdate().then(setAutoUpdateStatus).catch(setErrorMessage)}
-          onInstallDownloadedUpdate={() => void bridge.installDownloadedUpdate().then(setAutoUpdateStatus).catch(setErrorMessage)}
+          onCheckForAutoUpdate={() => void handleCheckForAutoUpdate()}
+          onInstallDownloadedUpdate={() => void handleInstallDownloadedUpdate()}
         />
       ) : null}
 

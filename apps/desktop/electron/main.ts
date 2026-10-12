@@ -240,7 +240,7 @@ function startDesktopUpdateSchedule(controller: ReturnType<typeof createDesktopA
   };
   const initialCheckTimer = setTimeout(check, 5000);
   initialCheckTimer.unref?.();
-  desktopUpdateScheduleTimer = setInterval(check, 6 * 60 * 60 * 1000);
+  desktopUpdateScheduleTimer = setInterval(check, 60 * 60 * 1000);
   desktopUpdateScheduleTimer.unref?.();
 }
 

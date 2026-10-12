@@ -5,6 +5,7 @@ import {
   CircleX,
   Gauge,
   Boxes,
+  Download,
   Globe2,
   Info,
   PanelLeftClose,
@@ -44,6 +45,7 @@ export function DesktopShell({
   message,
   noticeVisible = true,
   onNoticePauseChange,
+  updatePrompt,
 }: {
   brand: string;
   nav: Array<{ view: Exclude<NavView, "overview">; label: string }>;
@@ -53,6 +55,16 @@ export function DesktopShell({
   message?: DesktopNotice | null;
   noticeVisible?: boolean;
   onNoticePauseChange?: (paused: boolean) => void;
+  updatePrompt?: {
+    version: string;
+    title: string;
+    description: string;
+    installLabel: string;
+    skipLabel: string;
+    onInstall: () => void;
+    onSkip: () => void;
+    busy?: boolean;
+  };
 }) {
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const platform = globalThis.navigator?.platform;
@@ -206,6 +218,45 @@ export function DesktopShell({
               </section>
             </div>
           )}
+
+          {updatePrompt ? (
+            <section
+              className="fixed bottom-5 right-5 z-[60] w-[min(360px,calc(100vw-2rem))] rounded-2xl border border-emerald-200/80 bg-white p-4 shadow-[0_12px_36px_rgba(15,23,42,0.16)] dark:border-emerald-900/70 dark:bg-[#171b21]"
+              role="status"
+              aria-live="polite"
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-300">
+                  <Download className="size-[18px]" aria-hidden="true" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-3">
+                    <h2 className="text-[13px] font-semibold text-neutral-950 dark:text-white">{updatePrompt.title}</h2>
+                    <span className="shrink-0 rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">v{updatePrompt.version}</span>
+                  </div>
+                  <p className="mt-1 text-[11px] leading-5 text-slate-500 dark:text-slate-400">{updatePrompt.description}</p>
+                </div>
+              </div>
+              <div className="mt-3 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-white/[0.07] dark:hover:text-slate-200"
+                  onClick={updatePrompt.onSkip}
+                  disabled={updatePrompt.busy}
+                >
+                  {updatePrompt.skipLabel}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg bg-primary px-3 py-1.5 text-[11px] font-semibold text-primary-foreground shadow-sm transition-opacity hover:opacity-90 disabled:cursor-wait disabled:opacity-55"
+                  onClick={updatePrompt.onInstall}
+                  disabled={updatePrompt.busy}
+                >
+                  {updatePrompt.installLabel}
+                </button>
+              </div>
+            </section>
+          ) : null}
 
           <main className="relative z-10 min-h-0 flex-1 overflow-hidden">{children}</main>
         </div>
