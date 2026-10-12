@@ -72,6 +72,10 @@ test("Codex model labels include the provider alias without changing the model i
     formatCodexModelDisplayName({ display_name: "Claude Sonnet", provider_display_name: "relay" }),
     "relay:Claude Sonnet",
   );
+  assert.equal(
+    formatCodexModelDisplayName({ display_name: "deepseek-v4-pro", provider_display_name: "Our Free Model" }, undefined, "ourfree1"),
+    "ourfree1:deepseek-v4-pro",
+  );
   assert.equal(formatCodexModelDisplayName({ display_name: "GPT-5.5" }), "GPT-5.5");
 });
 

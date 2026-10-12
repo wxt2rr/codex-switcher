@@ -7,6 +7,8 @@ export interface PluginSandboxOptions {
     sandboxExecutable?: string;
     windowsSandboxExecutable?: string;
     nodeExecutable?: string;
+    /** Additional plugin-owned directories that may be read and written. */
+    writablePaths?: readonly string[];
 }
 export interface PluginLaunchSpec {
     command: string;

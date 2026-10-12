@@ -1,9 +1,9 @@
 {
   "name": "@codex-switcher/csw-our-free-model",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "private": false,
   "type": "module",
   "description": "Official public/free model provider plugin for Codex Switcher",
   "main": "./plugin.mjs",
-  "files": ["plugin.mjs", "plugin-core.mjs", "plugin.json", "README.md"]
+  "files": ["plugin.mjs", "plugin-core.mjs", "managed-runtime.mjs", "plugin.json", "README.md", "OFM-NOTICE.md", "vendor/ofm/**"]
 }

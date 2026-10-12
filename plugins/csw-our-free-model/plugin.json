@@ -1,12 +1,12 @@
 {
   "id": "csw-our-free-model",
   "name": "CSW Our Free Model",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "apiVersion": 2,
   "entry": "plugin.mjs",
-  "permissions": ["provider", "network"],
+  "permissions": ["provider", "network", "filesystem"],
   "kind": ["provider"],
-  "description": "An official provider plugin for public/free model pools with dynamic discovery and safe fallback caching.",
+  "description": "A managed Our Free Model provider that starts a loopback service automatically, with dynamic discovery and built-in account management.",
   "author": "codex-switcher",
   "homepage": "https://github.com/wangxt/codex-switcher",
   "trust": "official",
@@ -14,15 +14,6 @@
     "id": "our-free-model",
     "displayName": "Our Free Model",
     "authMethods": ["none"],
-    "protocols": ["responses", "chat_completions"]
-  }],
-  "settingsSchema": {
-    "type": "object",
-    "properties": {
-      "baseUrl": { "type": "string", "title": "Base URL", "description": "OpenAI-compatible upstream base URL." },
-      "modelsUrl": { "type": "string", "title": "Models URL", "description": "Optional dynamic model catalogue URL." },
-      "quotaUrl": { "type": "string", "title": "Quota URL", "description": "Optional quota endpoint." },
-      "fallbackModels": { "type": "string", "title": "Fallback models", "description": "Comma-separated model ids used when discovery is unavailable." }
-    }
-  }
+    "protocols": ["responses", "chat_completions", "anthropic"]
+  }]
 }

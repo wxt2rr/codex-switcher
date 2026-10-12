@@ -60,6 +60,7 @@ export declare class PluginInstallationStore {
     list(): Promise<InstalledPlugin[]>;
     rollback(id: string): Promise<InstalledPlugin>;
     remove(id: string): Promise<void>;
+    private removeVersionFiles;
     private readActive;
     private readManifest;
     private readVersionChecksum;

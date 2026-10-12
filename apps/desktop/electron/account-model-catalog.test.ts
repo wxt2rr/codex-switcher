@@ -65,6 +65,32 @@ test("account catalog prefixes discovered provider aliases in Codex display name
   assert.equal(generated.models[0]?.upstream_model_id, "gpt-5.5");
 });
 
+test("account catalog prefixes managed provider models to avoid bundled collisions", async () => {
+  const root = await mkdtemp(join(tmpdir(), "account-model-catalog-managed-label-"));
+  const store = createModelCatalogStore(join(root, "custom-models.json"));
+  const custom = await store.saveModel({
+    entry: {
+      slug: "our-free-model:kimi-k3",
+      display_name: "kimi-k3",
+      provider_id: "our-free-model",
+      provider_display_name: "Our Free Model",
+      upstream_model_id: "kimi-k3",
+    },
+  });
+  await store.setAccountBindings("test/ourfree1", [custom.id]);
+
+  const result = await synchronizeAccountModelCatalog({
+    envName: "test",
+    accountName: "ourfree1",
+    homePath: join(root, "home"),
+    store,
+    loadBundledCatalog: async () => ({ models: [{ slug: "kimi-k3", display_name: "Kimi K3" }] }),
+  });
+  const generated = JSON.parse(await readFile(result.catalogPath!, "utf8")) as { models: Array<Record<string, unknown>> };
+  assert.equal(generated.models.find((model) => model.slug === "our-free-model:kimi-k3")?.display_name, "ourfree1:kimi-k3");
+  assert.equal(generated.models.find((model) => model.slug === "kimi-k3")?.display_name, "Kimi K3");
+});
+
 test("account catalog removes model_catalog_json when the account has no bindings", async () => {
   const root = await mkdtemp(join(tmpdir(), "account-model-catalog-clear-"));
   const homePath = join(root, "home");

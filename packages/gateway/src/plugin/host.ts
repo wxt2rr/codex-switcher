@@ -292,6 +292,9 @@ export class ProcessPluginTransport implements PluginTransport {
   private pendingBytes = 0;
   private buffer = "";
   private writeChain: Promise<void> = Promise.resolve();
+  private closePromise: Promise<void> | undefined;
+  private closing = false;
+  private stderrTail = "";
 
   constructor(
     private readonly child: ChildProcessWithoutNullStreams,
@@ -305,10 +308,16 @@ export class ProcessPluginTransport implements PluginTransport {
     child.stdout.on("data", (chunk: string) => this.consume(chunk));
     child.stderr.on("data", (chunk: string) => {
       const sanitized = redactPluginLog(chunk);
-      if (sanitized) this.log?.(sanitized);
+      if (!sanitized) return;
+      this.stderrTail = `${this.stderrTail} ${sanitized}`.trim().slice(-4096);
+      this.log?.(sanitized);
     });
     child.on("error", (error) => this.failAll(error));
-    child.on("exit", (code) => this.failAll(new Error(`Plugin process exited with code ${String(code)}`)));
+    child.on("exit", (code, signal) => {
+      const reason = signal ? `signal ${signal}` : `code ${String(code)}`;
+      const detail = this.stderrTail ? `: ${this.stderrTail}` : "";
+      this.failAll(new Error(this.closing ? "Plugin process closed" : `Plugin process exited with ${reason}${detail}`));
+    });
   }
 
   static start(
@@ -360,8 +369,58 @@ export class ProcessPluginTransport implements PluginTransport {
   }
 
   async close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    this.closing = true;
     this.failAll(new Error("Plugin transport closed"));
-    if (!this.child.killed) this.child.kill();
+
+    // Closing stdin lets a well-behaved plugin run its async cleanup handler
+    // (including releasing managed-service locks) before the next version is
+    // started. The old implementation sent SIGTERM and returned immediately,
+    // which made plugin updates race the previous process' shutdown.
+    this.closePromise = new Promise<void>((resolve) => {
+      const child = this.child;
+      const hasEventApi = typeof (child as ChildProcessWithoutNullStreams & { once?: unknown }).once === "function";
+      if (!hasEventApi) {
+        if (!child.killed) child.kill();
+        resolve();
+        return;
+      }
+
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let forceTimer: ReturnType<typeof setTimeout> | undefined;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        if (forceTimer) clearTimeout(forceTimer);
+        child.off("exit", finish);
+        child.off("error", finish);
+        resolve();
+      };
+
+      if (child.exitCode !== null || child.signalCode !== null) {
+        finish();
+        return;
+      }
+      child.once("exit", finish);
+      child.once("error", finish);
+      try {
+        child.stdin.end();
+      } catch {
+        // A closed stdin is equivalent to an already-closing child. The
+        // timeout below still guarantees that a misbehaving plugin cannot
+        // block an update forever.
+      }
+      timer = setTimeout(() => {
+        if (settled) return;
+        if (!child.killed) child.kill();
+        forceTimer = setTimeout(finish, 250);
+        forceTimer.unref?.();
+      }, 2_000);
+      timer.unref?.();
+    });
+    await this.closePromise;
   }
 
   private consume(chunk: string): void {

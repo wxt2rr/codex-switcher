@@ -530,6 +530,52 @@ test("target-home writer keeps ChatGPT auth upstream-only for local gateway prov
   }
 });
 
+test("target-home writer does not require OPENAI_API_KEY for managed no-auth gateway accounts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-gateway-no-auth-"));
+  const homePath = join(root, "home");
+  const state: SwitcherState = {
+    schemaVersion: DEFAULT_SCHEMA_VERSION,
+    generatedAt: "2026-10-12T10:00:00.000Z",
+    targets: { cli: { env: "test", account: "ourfree1" }, app: { env: "test", account: "ourfree1" } },
+    envs: {
+      test: {
+        name: "test",
+        path: homePath,
+        accounts: {
+          ourfree1: {
+            name: "ourfree1",
+            authMode: "apikey",
+            runtime: {
+              providerId: "our-free-model",
+              providerAuthMethod: "none",
+              preferredAuthMethod: "apikey",
+              openaiBaseUrlMode: "custom",
+              openaiBaseUrl: "http://127.0.0.1:17832/gateways/gateway-test",
+              apiProtocol: "responses",
+            },
+          },
+        },
+      },
+    },
+    tasks: { recent: [] },
+  };
+
+  try {
+    await applyTargetHomeState({
+      state,
+      target: "cli",
+      gatewayBaseUrl: "http://127.0.0.1:17832/gateways/gateway-test",
+    });
+    await assert.rejects(readFile(join(homePath, "auth.json"), "utf8"));
+    const config = await readFile(join(homePath, "config.toml"), "utf8");
+    assert.match(config, /model_provider = "codex_switcher_router"/);
+    assert.match(config, /requires_openai_auth = false/);
+    assert.doesNotMatch(config, /env_key = "OPENAI_API_KEY"/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("target-home writer migrates a legacy compatibility provider to the built-in OpenAI provider", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-chat-migration-"));
   const homePath = join(root, "home");

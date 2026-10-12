@@ -1,3 +1,6 @@
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+
 import type { GatewayProtocol } from "../protocol.js";
 import type { ProviderAuthMethod, ProviderEndpoint } from "../provider/adapters.js";
 import { ProviderRegistry } from "../provider/registry.js";
@@ -11,6 +14,8 @@ export interface PluginProviderDescriptor {
   displayName: string;
   authMethods: ProviderAuthMethod[];
   endpoints: ProviderEndpoint[];
+  managed?: boolean;
+  managementUrl?: string;
 }
 
 export interface PluginRuntimeOptions {
@@ -22,6 +27,8 @@ export interface PluginRuntimeOptions {
   log?: PluginLogSink;
   transportFactory?: (manifest: GatewayPluginManifest, path: string, sandbox: PluginSandboxOptions) => PluginTransport | Promise<PluginTransport>;
   settings?: (pluginId: string) => Promise<Record<string, unknown>> | Record<string, unknown>;
+  /** Host-owned writable data root for managed provider plugins. */
+  pluginDataDir?: string;
 }
 
 export interface ActivePluginProvider {
@@ -42,7 +49,20 @@ export class PluginRuntimeManager {
   private readonly globalConcurrency: PluginConcurrencyLimiter;
 
   constructor(private readonly options: PluginRuntimeOptions) {
-    this.transportFactory = options.transportFactory ?? ((manifest, path, sandbox) => ProcessPluginTransport.start(manifest, path, {}, sandbox, options.log));
+    this.transportFactory = options.transportFactory ?? ((manifest, path, sandbox) => {
+      const dataDir = options.pluginDataDir ? join(options.pluginDataDir, manifest.id) : undefined;
+      if (dataDir) mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+      const launchSandbox = dataDir
+        ? { ...sandbox, writablePaths: [...(sandbox.writablePaths ?? []), dataDir] }
+        : sandbox;
+      return ProcessPluginTransport.start(
+        manifest,
+        path,
+        dataDir ? { CODEX_SWITCHER_PLUGIN_DATA_DIR: dataDir } : {},
+        launchSandbox,
+        options.log,
+      );
+    });
     this.globalConcurrency = new PluginConcurrencyLimiter(options.globalConcurrency);
   }
 
@@ -120,7 +140,9 @@ function normalizeProviderDescriptor(value: unknown, expectedIds: ReadonlySet<st
     return [{ protocol: endpoint.protocol, baseUrl: endpoint.baseUrl, modelsPath: endpoint.modelsPath, ...(typeof endpoint.quotaPath === "string" ? { quotaPath: endpoint.quotaPath } : {}) }];
   });
   if (!endpoints.length) throw new Error(`Plugin provider '${String(record.id)}' has no valid endpoint`);
-  return { id: String(record.id), displayName: record.displayName, authMethods, endpoints };
+  const managementUrl = typeof record.managementUrl === "string" && record.managementUrl.trim() ? record.managementUrl : undefined;
+  const managed = record.managed === true;
+  return { id: String(record.id), displayName: record.displayName, authMethods, endpoints, ...(managed ? { managed: true } : {}), ...(managementUrl ? { managementUrl } : {}) };
 }
 
 function isGatewayProtocol(value: unknown): value is GatewayProtocol {

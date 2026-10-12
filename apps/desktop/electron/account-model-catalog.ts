@@ -113,7 +113,7 @@ export async function synchronizeAccountModelCatalog(options: {
     if (!model) throw new Error(`Bound custom model '${id}' no longer exists`);
     return {
       ...model.entry,
-      display_name: formatCodexModelDisplayName(model.entry),
+      display_name: formatCodexModelDisplayName(model.entry, undefined, options.accountName),
     };
   });
   const bundled = options.loadBundledCatalog

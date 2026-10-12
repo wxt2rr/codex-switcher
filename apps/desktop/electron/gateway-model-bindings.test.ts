@@ -174,10 +174,38 @@ test("gateway labels aliased provider models while preserving the upstream model
   const result = applyModelCatalogBindings(env, buildLegacyGatewayEnvironmentState(env), catalog);
   const group = Object.values(result.routeGroups).find((candidate) => candidate.exposedModelId === "custom:aicode.ckt.cn:gpt-5.5");
   assert.ok(group);
-  assert.equal(group.displayName, "ckt-aicode:5.5");
+  assert.equal(group.displayName, "alpha:5.5");
   const model = Object.values(result.models).find((candidate) => candidate.id === group.members[0]?.modelId);
-  assert.equal(model?.displayName, "ckt-aicode:5.5");
+  assert.equal(model?.displayName, "alpha:5.5");
   assert.equal(model?.upstreamModelId, "gpt-5.5");
+});
+
+test("gateway labels every account-bound model with its account alias", () => {
+  const env = environment();
+  const catalog: ModelCatalogSnapshot = {
+    version: 1,
+    models: [{
+      id: "model-our-free",
+      entry: {
+        slug: "our-free-model:deepseek-v4-pro",
+        upstream_model_id: "deepseek-v4-pro",
+        display_name: "deepseek-v4-pro",
+        provider_display_name: "Our Free Model",
+        provider_id: "our-free-model",
+        provider_model_key: "our-free-model:deepseek-v4-pro",
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }],
+    accountBindings: { "wangxt/alpha": ["model-our-free"] },
+  };
+
+  const result = applyModelCatalogBindings(env, buildLegacyGatewayEnvironmentState(env), catalog);
+  const group = Object.values(result.routeGroups).find((candidate) => candidate.exposedModelId === "our-free-model:deepseek-v4-pro");
+  assert.ok(group);
+  assert.equal(group.displayName, "alpha:deepseek-v4-pro");
+  const model = Object.values(result.models).find((candidate) => candidate.id === group.members[0]?.modelId);
+  assert.equal(model?.displayName, "alpha:deepseek-v4-pro");
 });
 
 test("explicitly disabled tool models remain incompatible with tool requests", () => {

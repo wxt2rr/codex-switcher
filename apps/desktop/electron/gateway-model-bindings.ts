@@ -164,6 +164,7 @@ function addModelBinding(
   const displayName = formatCodexModelDisplayName(
     model.entry,
     isCustomOpenAIProvider(providerId) ? accountName : undefined,
+    accountName,
   );
   const internalModelId = createCatalogModelId(model.id, providerId, binding.upstreamModelId);
   const configuredProtocol: GatewayProtocol = account.authMode === "auth" ? "responses" : account.runtime.apiProtocol ?? "responses";

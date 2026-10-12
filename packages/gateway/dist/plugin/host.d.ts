@@ -143,6 +143,9 @@ export declare class ProcessPluginTransport implements PluginTransport {
     private pendingBytes;
     private buffer;
     private writeChain;
+    private closePromise;
+    private closing;
+    private stderrTail;
     constructor(child: ChildProcessWithoutNullStreams, maxPending?: number, maxPendingBytes?: number, log?: PluginLogSink | undefined);
     static start(manifest: GatewayPluginManifest, cwd: string, environment?: Record<string, string>, sandboxOptions?: PluginSandboxOptions, log?: PluginLogSink): ProcessPluginTransport;
     send(request: PluginRpcRequest): Promise<PluginRpcResponse>;

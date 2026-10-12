@@ -10,9 +10,12 @@ test("account model exposure panel keeps discovery, manual models, retry, and ex
   assert.match(source, /discoverAccountModels/);
   assert.match(source, /model_source/);
   assert.match(source, /setAccountModelBindings/);
-  assert.match(source, /Select visible/);
+  assert.match(source, /Select all visible/);
   assert.match(source, /stale/);
   assert.match(source, /providerFilter/);
+  assert.match(source, /modelFilter/);
+  assert.match(source, /已选择/);
+  assert.match(source, /scrollable=\{false\}/);
   assert.match(source, /全部服务商/);
   assert.match(source, /providerOptions/);
   assert.match(source, /<Select/);

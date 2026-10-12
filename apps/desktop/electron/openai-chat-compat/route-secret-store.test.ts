@@ -27,3 +27,11 @@ test("route secret store rejects incomplete secrets", () => {
   assert.throws(() => store.set({ routeId: "route", upstreamApiKey: "", localRouteToken: "token", hydratedAt: 1 }));
   assert.throws(() => store.set({ routeId: "route", upstreamApiKey: "key", localRouteToken: "", hydratedAt: 1 }));
 });
+
+test("route secret store accepts provider-owned credentials without an upstream key", () => {
+  const store = new RouteSecretStore();
+  store.set({ routeId: "managed-route", upstreamApiKey: "", localRouteToken: "local-token", authMode: "none", hydratedAt: 1 });
+  assert.deepEqual(store.get("managed-route"), {
+    routeId: "managed-route", upstreamApiKey: "", localRouteToken: "local-token", authMode: "none", hydratedAt: 1,
+  });
+});

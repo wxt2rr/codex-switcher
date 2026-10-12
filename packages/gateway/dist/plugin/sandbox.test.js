@@ -20,6 +20,15 @@ test("macOS plugin launch uses sandbox-exec and denies network by default", () =
     assert.doesNotMatch(launch.args[1] ?? "", /\(allow network-outbound\)/);
     assert.doesNotMatch(launch.args[1] ?? "", /\(allow file-write\*/);
 });
+test("macOS Electron child launch can read its bundled runtime", () => {
+    const launch = buildPluginLaunchSpec(manifest, "/tmp/plugin", {
+        platform: "darwin",
+        sandboxExecutable: "/test/sandbox-exec",
+        nodeExecutable: "/Applications/Codex Switcher.app/Contents/MacOS/codex-switcher",
+    });
+    assert.match(launch.args[1] ?? "", /Contents\/Frameworks/);
+    assert.match(launch.args[1] ?? "", /Contents\/Resources/);
+});
 test("Linux plugin launch uses bubblewrap and isolates the network without the permission", () => {
     const launch = buildPluginLaunchSpec(manifest, "/tmp/plugin", { platform: "linux", sandboxExecutable: "/usr/bin/bwrap", nodeExecutable: "/usr/bin/node" });
     assert.equal(launch.command, "/usr/bin/bwrap");

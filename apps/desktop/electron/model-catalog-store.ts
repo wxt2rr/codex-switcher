@@ -458,25 +458,27 @@ export function normalizeCustomModelInput(value: Record<string, unknown>): Model
 }
 
 /**
- * Adds the account/provider alias to the Codex-facing label while keeping the
+ * Adds an account/provider alias to the Codex-facing label while keeping the
  * catalog slug and upstream model id unchanged for routing.
  *
  * Codex commonly renders official names such as "GPT-5.5" as "5.5". Keep
- * that compact convention for aliased models too, so a custom account appears
- * as "ckt-aicode:5.5" instead of duplicating the longer provider name.
+ * that compact convention for aliased models too, so an account can appear as
+ * "ckt-aicode:5.5" without changing the model slug sent to the provider.
  */
 export function formatCodexModelDisplayName(
   entry: { display_name: string; provider_display_name?: unknown },
   fallbackProviderDisplayName?: string,
+  accountAlias?: string,
 ): string {
   const displayName = entry.display_name.trim();
   const providerDisplayName = (typeof entry.provider_display_name === "string"
     ? entry.provider_display_name
     : fallbackProviderDisplayName ?? "").trim();
-  if (!displayName || !providerDisplayName) return displayName;
-  if (displayName.startsWith(`${providerDisplayName}:`)) return displayName;
+  const alias = accountAlias?.trim() || providerDisplayName;
+  if (!displayName || !alias) return displayName;
+  if (displayName.startsWith(`${alias}:`)) return displayName;
   const compactName = displayName.replace(/^GPT[-\s]+(?=\d)/i, "").trim() || displayName;
-  return `${providerDisplayName}:${compactName}`;
+  return `${alias}:${compactName}`;
 }
 
 function isSupportedModelProtocol(value: string): boolean {
@@ -661,8 +663,9 @@ export function resolveModelBinding(
 
 /**
  * A successful refresh with an empty or changed provider list marks removed
- * entries unavailable. Keep stale entries routeable for recovery, but never
- * publish an explicitly unavailable model to Codex or the gateway.
+ * entries unavailable. Keep stale entries routeable for recovery while
+ * discovery is unavailable, but never publish an explicitly unavailable or
+ * no-longer-advertised model after a successful refresh.
  */
 export function isModelAvailableForAccount(
   snapshot: ModelCatalogSnapshot,
@@ -676,7 +679,13 @@ export function isModelAvailableForAccount(
   const discovery = snapshot.accountModelDiscoveries?.[accountKey];
   if (!discovery) return true;
   const discovered = discovery.models.find((candidate) => candidate.providerModelKey === providerModelKey);
-  return discovered?.status !== "unavailable";
+  if (discovered) return discovered.status !== "unavailable";
+
+  // A successful discovery is authoritative. A model that was manually
+  // selected from an older provider response must not keep producing a route
+  // after the provider stops advertising it. Failed or in-progress discovery
+  // intentionally keeps the old binding as a recovery fallback.
+  return discovery.state !== "ready";
 }
 
 export function filterModelCatalogBindings(

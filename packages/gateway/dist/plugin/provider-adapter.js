@@ -11,6 +11,11 @@ export function createPluginProviderAdapter(options) {
     if (!options.endpoints.length)
         throw new Error(`Plugin provider '${options.id}' must expose at least one endpoint`);
     const random = options.random ?? randomUUID;
+    // A managed provider with `authMethods: ["none"]` owns its credentials
+    // internally. Existing accounts may still carry a legacy API key, but that
+    // value must not be forwarded to the plugin or require the stronger
+    // `secrets` permission.
+    const acceptsSecrets = options.authMethods.some((method) => method !== "none");
     return {
         id: options.id,
         displayName: options.displayName,
@@ -37,10 +42,12 @@ export function createPluginProviderAdapter(options) {
             return normalizeCredentialResult(await callPlugin(options.host, "provider.refresh", { account, refreshToken, ...(await pluginSettings(options)) }, true), account);
         },
         async revoke(_client, account, secret = "") {
-            await callPlugin(options.host, "provider.revoke", { account, ...(secret ? { secret } : {}), ...(await pluginSettings(options)) }, Boolean(secret));
+            const effectiveSecret = acceptsSecrets ? secret : "";
+            await callPlugin(options.host, "provider.revoke", { account, ...(effectiveSecret ? { secret: effectiveSecret } : {}), ...(await pluginSettings(options)) }, Boolean(effectiveSecret));
         },
         async discoverModels(_client, account, secret) {
-            const models = normalizeModels(await callPlugin(options.host, "provider.models", { account, secretRef: account.secretRef, ...(secret !== undefined ? { secret } : {}), ...(await pluginSettings(options)) }, secret !== undefined), options.id);
+            const effectiveSecret = acceptsSecrets ? secret : undefined;
+            const models = normalizeModels(await callPlugin(options.host, "provider.models", { account, secretRef: account.secretRef, ...(effectiveSecret !== undefined ? { secret: effectiveSecret } : {}), ...(await pluginSettings(options)) }, effectiveSecret !== undefined), options.id);
             if (!account.allowedModelIds)
                 return models;
             const allowed = new Set(account.allowedModelIds);
@@ -50,7 +57,8 @@ export function createPluginProviderAdapter(options) {
             return this.discoverModels(client, account, secret);
         },
         async readQuota(_client, account, secret) {
-            const result = await callPlugin(options.host, "provider.quota", { account, secretRef: account.secretRef, ...(secret !== undefined ? { secret } : {}), ...(await pluginSettings(options)) }, secret !== undefined);
+            const effectiveSecret = acceptsSecrets ? secret : undefined;
+            const result = await callPlugin(options.host, "provider.quota", { account, secretRef: account.secretRef, ...(effectiveSecret !== undefined ? { secret: effectiveSecret } : {}), ...(await pluginSettings(options)) }, effectiveSecret !== undefined);
             return result == null ? null : normalizeQuota(result, options.id, account.accountId);
         },
         async fetchQuota(client, account, secret) {
@@ -60,6 +68,8 @@ export function createPluginProviderAdapter(options) {
             const headers = new Headers(account.requestHeaders);
             if (!headers.has("accept"))
                 headers.set("accept", "application/json");
+            if (!acceptsSecrets)
+                return headers;
             if (protocol === "anthropic") {
                 headers.set("x-api-key", secret);
                 headers.set("anthropic-version", "2023-06-01");
@@ -81,17 +91,18 @@ export function createPluginProviderAdapter(options) {
             return { url: input.url, init: { method: input.method, headers, ...(input.body !== undefined ? { body: input.body } : {}) } };
         },
         async request(input) {
+            const effectiveSecret = acceptsSecrets ? input.secret : "";
             const result = await callPlugin(options.host, "provider.request", {
                 account: input.account,
                 secretRef: input.account.secretRef,
-                secret: input.secret,
+                secret: effectiveSecret,
                 protocol: input.protocol,
                 url: input.url,
                 method: input.method,
                 headers: Object.fromEntries(new Headers(input.headers).entries()),
                 ...(input.body !== undefined ? { body: input.body } : {}),
                 ...(await pluginSettings(options)),
-            }, Boolean(input.secret));
+            }, Boolean(effectiveSecret));
             return normalizeRequestResult(result);
         },
         classifyError(input) {

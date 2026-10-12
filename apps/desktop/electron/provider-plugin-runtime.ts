@@ -28,6 +28,8 @@ export interface ProviderPluginSnapshot {
     id: string;
     displayName: string;
     authMethods: string[];
+    managed?: boolean;
+    managementUrl?: string;
     endpoints: Array<{ protocol: string; baseUrl: string; modelsPath: string; quotaPath?: string }>;
   };
   error?: string;
@@ -122,6 +124,7 @@ async function getManager(stateDir: string) {
     const next = new runtime.ProviderPluginManager({
       rootDir: join(stateDir, "provider-plugins"),
       settingsDir: join(stateDir, "provider-plugin-settings"),
+      pluginDataDir: join(stateDir, "provider-plugin-data"),
       ...(verifySignature ? { verifySignature } : {}),
       log: (line: string) => {
         recordPluginDiagnostic({ level: "info", phase: "runtime", message: line });

@@ -1,23 +1,25 @@
 # CSW Our Free Model
 
-Official Codex Switcher Provider plugin for public/free model pools.
+Official Codex Switcher provider plugin for Our Free Model.
 
-The plugin has no required credential. Configure the upstream with:
+The plugin follows the managed-provider design used by
+[`magpie-our-free-model`](https://github.com/mu-zi-lee/magpie-our-free-model):
 
-- `CSW_OUR_FREE_MODEL_BASE_URL`: OpenAI-compatible base URL.
-- `CSW_OUR_FREE_MODEL_MODELS_URL`: optional model catalogue endpoint.
-- `CSW_OUR_FREE_MODEL_FALLBACK_MODELS`: comma-separated ids or a JSON model array used when discovery is unavailable.
-- `CSW_OUR_FREE_MODEL_QUOTA_URL`: optional quota endpoint.
-- `CSW_OUR_FREE_MODEL_TIMEOUT_MS`: discovery/quota timeout, default 10000ms.
+- enabling the plugin starts the embedded Our Free Model service;
+- the service listens on `127.0.0.1` and chooses the configured or default
+  local port (`18900`);
+- the forward API key is generated and stored by the embedded service;
+- model discovery is read from the local service and is refreshed by it;
+- Responses, Chat Completions, and Anthropic Messages requests are forwarded
+  through the managed service;
+- the plugin details page opens the local Our Free Model management console;
+- stopping or restarting the plugin stops and recreates the local service.
 
-Model discovery is dynamic per account identity, deduplicated, and retains the last successful result. If the endpoint is unavailable, the last successful catalogue is returned; on first use the configured fallback catalogue is returned instead. The gateway still owns protocol conversion, account binding, routing, retries, and usage accounting.
+No Base URL, Models URL, quota URL, or API key is required from the user. The
+Codex Switcher host gives the plugin a private data directory, so service
+state is kept outside the installed package and survives plugin restarts.
+`CSW_OUR_FREE_MODEL_DATA_DIR` and `CSW_OUR_FREE_MODEL_PORT` are
+developer/packaging overrides only; they are not part of normal setup.
 
-The same values can be configured from the plugin details panel without
-environment variables: `baseUrl`, `modelsUrl`, `quotaUrl`, and
-`fallbackModels`. The host encrypts plugin settings at rest and does not
-echo secret fields back to the renderer.
-
-The plugin also implements the Provider custom-request hook. It forwards
-JSON responses as objects and normalizes JSON Server-Sent Events into the
-host's event list, so the gateway still owns the client-facing SSE framing,
-protocol conversion, retries, and usage accounting.
+The embedded upstream is vendored from the Our Free Model standalone service;
+see `OFM-NOTICE.md` and `vendor/ofm/LICENSE` for attribution and licensing.

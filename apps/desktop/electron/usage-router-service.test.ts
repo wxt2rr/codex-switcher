@@ -10,7 +10,12 @@ import { extractRouterErrorDiagnostics, extractSafeErrorMessage, sanitizeRouterE
 import type { RouteTarget } from "./usage-routing-model.js";
 import { ProviderPluginManager } from "../../../packages/gateway/dist/plugin/manager.js";
 
-async function installTestProviderPlugin(stateDir: string): Promise<void> {
+async function installTestProviderPlugin(
+  stateDir: string,
+  options: { authMethods?: Array<"api_key" | "none">; permissions?: Array<"provider" | "secrets"> } = {},
+): Promise<void> {
+  const authMethods = options.authMethods ?? ["api_key"];
+  const permissions = options.permissions ?? ["provider", "secrets"];
   const source = join(stateDir, "test-provider-source");
   await mkdir(source, { recursive: true });
   await writeFile(join(source, "plugin.mjs"), [
@@ -19,7 +24,7 @@ async function installTestProviderPlugin(stateDir: string): Promise<void> {
     "const send = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n');",
     "rl.on('line', (line) => {",
     "  const request = JSON.parse(line);",
-    "  if (request.method === 'provider.describe') return send(request.id, { provider: { id: 'test-provider', displayName: 'Test Provider', authMethods: ['api_key'], endpoints: [{ protocol: 'responses', baseUrl: 'https://upstream.invalid/v1', modelsPath: '/models' }] } });",
+    `  if (request.method === 'provider.describe') return send(request.id, { provider: { id: 'test-provider', displayName: 'Test Provider', authMethods: ${JSON.stringify(authMethods)}, endpoints: [{ protocol: 'responses', baseUrl: 'https://upstream.invalid/v1', modelsPath: '/models' }] } });`,
     "  if (request.method === 'provider.request') return send(request.id, { status: 200, headers: { 'content-type': 'application/json' }, body: { id: 'plugin-routed-response', model: 'plugin-model', authorization: request.params.headers.authorization } });",
     "  if (request.method === 'provider.models') return send(request.id, { models: [{ id: 'plugin-model', protocols: ['responses'] }] });",
     "  return send(request.id, {});",
@@ -36,8 +41,8 @@ async function installTestProviderPlugin(stateDir: string): Promise<void> {
       version: "1.0.0",
       apiVersion: 2,
       entry: "plugin.mjs",
-      permissions: ["provider", "secrets"],
-      providers: [{ id: "test-provider", displayName: "Test Provider", authMethods: ["api_key"], protocols: ["responses"] }],
+      permissions,
+      providers: [{ id: "test-provider", displayName: "Test Provider", authMethods, protocols: ["responses"] }],
     }, { kind: "local", path: source });
   } finally {
     await manager.close();
@@ -724,6 +729,63 @@ test("environment gateway delegates an installed provider plugin request before 
     });
     assert.equal(pooled.status, 200);
     assert.equal((await pooled.json()).id, "plugin-routed-response");
+  } finally {
+    await service.close();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("environment gateway delegates managed no-auth provider requests without an API key", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-gateway-provider-no-auth-"));
+  await installTestProviderPlugin(stateDir, { authMethods: ["none"], permissions: ["provider"] });
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret", providerPluginSandboxMode: "disabled" });
+  const now = Date.now();
+  const route = {
+    routeId: "route-provider-no-auth",
+    envName: "test",
+    accountName: "ourfree1",
+    providerId: "test-provider",
+    upstreamBaseUrl: "https://upstream.invalid/v1",
+    originalBaseUrl: "https://upstream.invalid/v1",
+    protocol: "responses" as const,
+    exposedModelId: "plugin-model",
+    upstreamModel: "plugin-model",
+    reasoningProfile: "auto" as const,
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const gateway = {
+    gatewayId: "gateway-provider-no-auth",
+    envName: "test",
+    routeIds: [route.routeId],
+    defaultRouteId: route.routeId,
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  try {
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify(route),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}/secret`, {
+      method: "PUT", headers: adminHeaders,
+      body: JSON.stringify({ upstreamApiKey: "", localRouteToken: "local-provider-no-auth", authMode: "none" }),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway),
+    })).status, 204);
+    const response = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "plugin-model", input: "hello" }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      id: "plugin-routed-response",
+      model: "plugin-model",
+    });
   } finally {
     await service.close();
     await rm(stateDir, { recursive: true, force: true });

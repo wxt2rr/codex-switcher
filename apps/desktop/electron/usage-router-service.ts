@@ -66,7 +66,7 @@ export interface RunningUsageRouterService {
 
 interface PoolRuntimeSecret {
   upstreamBearerToken: string;
-  authMode: "auth" | "apikey";
+  authMode: "auth" | "apikey" | "none";
   accountId?: string;
   hydratedAt: number;
 }
@@ -84,8 +84,8 @@ interface RouterPortStateFile {
 }
 
 interface RuntimeProviderAdapter {
-  authorizationHeaders(account: { accountId: string; displayName: string; authMethod: "api_key" | "subscription"; secretRef: string; status: "active" }, secret: string, protocol: RouteProtocol): Headers;
-  request?(input: { account: { accountId: string; displayName: string; authMethod: "api_key" | "subscription"; secretRef: string; status: "active" }; secret: string; protocol: RouteProtocol; url: string; method: string; headers: HeadersInit; body?: string }): Promise<{ status: number; headers?: Readonly<Record<string, string>>; body?: Record<string, unknown>; events?: Array<Record<string, unknown>> }>;
+  authorizationHeaders(account: { accountId: string; displayName: string; authMethod: "api_key" | "subscription" | "none"; secretRef: string; status: "active" }, secret: string, protocol: RouteProtocol): Headers;
+  request?(input: { account: { accountId: string; displayName: string; authMethod: "api_key" | "subscription" | "none"; secretRef: string; status: "active" }; secret: string; protocol: RouteProtocol; url: string; method: string; headers: HeadersInit; body?: string }): Promise<{ status: number; headers?: Readonly<Record<string, string>>; body?: Record<string, unknown>; events?: Array<Record<string, unknown>> }>;
 }
 
 interface RuntimePluginManager {
@@ -151,6 +151,15 @@ export const USAGE_ROUTER_API_VERSION = 10;
 
 function isValidPort(value: unknown): value is number {
   return Number.isInteger(value) && Number(value) >= 1024 && Number(value) <= 65535;
+}
+
+async function hasInstalledProviderPlugins(stateDir: string): Promise<boolean> {
+  try {
+    const installedDir = await stat(join(stateDir, "provider-plugins", "installed"));
+    return installedDir.isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 function isValidGatewayRouteRule(value: unknown): boolean {
@@ -892,7 +901,7 @@ async function proxyAccountPoolRequest(
     const providerAccount = providerAdapter ? {
       accountId: secret.accountId ?? effectiveRoute.accountName,
       displayName: effectiveRoute.accountName,
-      authMethod: secret.authMode === "auth" ? "subscription" as const : "api_key" as const,
+      authMethod: secret.authMode === "auth" ? "subscription" as const : secret.authMode === "none" ? "none" as const : "api_key" as const,
       secretRef: `route/${effectiveRoute.routeId}`,
       status: "active" as const,
     } : undefined;
@@ -1105,7 +1114,7 @@ async function proxyRequest(
       const providerAccount = candidateSecret ? {
         accountId: candidateSecret.accountId ?? candidate.accountName,
         displayName: candidate.accountName,
-        authMethod: candidateSecret.authMode === "auth" ? "subscription" as const : "api_key" as const,
+        authMethod: candidateSecret.authMode === "auth" ? "subscription" as const : candidateSecret.authMode === "none" ? "none" as const : "api_key" as const,
         secretRef: `route/${candidate.routeId}`,
         status: "active" as const,
       } : undefined;
@@ -1407,10 +1416,34 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
   try {
     const pluginRuntime = await loadGatewayPluginRuntime();
     const trustedPublicKeyPem = process.env.CODEX_SWITCHER_PLUGIN_TRUSTED_PUBLIC_KEY?.trim();
+    // The router is stored below the desktop state directory, while plugin
+    // installations and their managed credentials belong to the desktop
+    // state directory itself. Reuse that shared directory when it exists;
+    // direct service/test hosts can still keep an isolated router-local one.
+    const parentStateDir = dirname(options.stateDir);
+    const pluginStateDir = await hasInstalledProviderPlugins(options.stateDir)
+      ? options.stateDir
+      : await hasInstalledProviderPlugins(parentStateDir) ? parentStateDir : options.stateDir;
+    // The packaged desktop process is Electron itself. On macOS, launching
+    // that embedded Electron executable through sandbox-exec makes dyld load
+    // the Electron Framework from inside the app bundle, which the child
+    // sandbox rejects before the plugin can start. Keep the secure sandbox
+    // default for standalone Node hosts, but use the host-level RPC and
+    // permission checks in the packaged Electron router unless callers
+    // explicitly provide a sandbox mode.
+    const pluginSandboxMode = options.providerPluginSandboxMode
+      ?? (process.versions.electron ? "disabled" : "required");
     const candidate = new pluginRuntime.ProviderPluginManager({
-      rootDir: join(options.stateDir, "provider-plugins"),
-      settingsDir: join(options.stateDir, "provider-plugin-settings"),
-      sandbox: { mode: options.providerPluginSandboxMode ?? "required" },
+      rootDir: join(pluginStateDir, "provider-plugins"),
+      settingsDir: join(pluginStateDir, "provider-plugin-settings"),
+      // The usage router runs in a separate process from the desktop host. It
+      // must point provider plugins at the same persistent data directory as
+      // the host-side plugin manager; otherwise managed plugins fall back to
+      // a process-local directory and lose their generated credentials and
+      // runtime settings. In that state the route silently falls back to a
+      // raw upstream request and Our Free Model returns 401.
+      pluginDataDir: join(pluginStateDir, "provider-plugin-data"),
+      sandbox: { mode: pluginSandboxMode },
       ...(trustedPublicKeyPem ? {
         verifySignature: (manifest: import("../../../packages/gateway/dist/plugin/host.js").GatewayPluginManifest, checksum: string) =>
           pluginRuntime.verifyPluginManifestSignature(manifest, trustedPublicKeyPem, checksum),
@@ -1666,11 +1699,12 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           const payload = await readJson(request) as { upstreamBearerToken?: unknown; upstreamApiKey?: unknown; authMode?: unknown; accountId?: unknown };
           const upstreamBearerToken = typeof payload.upstreamBearerToken === "string"
             ? payload.upstreamBearerToken : typeof payload.upstreamApiKey === "string" ? payload.upstreamApiKey : "";
-          if (!upstreamBearerToken.trim()) return sendJson(response, 400, { error: "Upstream bearer credential is required" });
           const secrets = poolSecrets.get(poolId) ?? new Map<string, PoolRuntimeSecret>();
+          const authMode = payload.authMode === "auth" ? "auth" : payload.authMode === "none" ? "none" : "apikey";
+          if (authMode !== "none" && !upstreamBearerToken.trim()) return sendJson(response, 400, { error: "Upstream bearer credential is required" });
           secrets.set(accountName, {
             upstreamBearerToken,
-            authMode: payload.authMode === "auth" ? "auth" : "apikey",
+            authMode,
             accountId: typeof payload.accountId === "string" && payload.accountId.trim() ? payload.accountId.trim() : undefined,
             hydratedAt: Date.now(),
           });
@@ -1736,7 +1770,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
             routeId,
             upstreamApiKey: typeof payload.upstreamApiKey === "string" ? payload.upstreamApiKey : "",
             localRouteToken: typeof payload.localRouteToken === "string" ? payload.localRouteToken : "",
-            authMode: payload.authMode === "auth" ? "auth" : "apikey",
+            authMode: payload.authMode === "auth" ? "auth" : payload.authMode === "none" ? "none" : "apikey",
             accountId: typeof payload.accountId === "string" && payload.accountId.trim() ? payload.accountId.trim() : undefined,
             hydratedAt: Date.now(),
             });

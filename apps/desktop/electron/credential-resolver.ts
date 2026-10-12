@@ -6,6 +6,7 @@ export interface CredentialAccountInput {
   authMode: string;
   protocol?: RouteProtocol;
   providerId?: string;
+  providerAuthMethod?: "api_key" | "oauth" | "subscription" | "plugin" | "none";
   apiKey?: string;
   authAccountId?: string;
   baseUrl: string;

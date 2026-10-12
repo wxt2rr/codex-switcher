@@ -23,6 +23,7 @@ import {
   type UsageTraceEvent,
   type UsageTraceQuery,
   type RouteCapabilities,
+  type RouteProtocol,
 } from "./usage-routing-model.js";
 import {
   buildLocalPoolBaseUrl,
@@ -60,6 +61,7 @@ export interface RoutableAccount {
   accountName: string;
   authMode: string;
   providerId?: string;
+  providerAuthMethod?: "api_key" | "oauth" | "subscription" | "plugin" | "none";
   baseUrl: string;
   protocol?: RouteTarget["protocol"];
   apiKey?: string;
@@ -126,6 +128,23 @@ export interface AccountRouteStatus {
 }
 
 export interface CompatibilityCheckResult extends StagedCompatibilityResult { ok: boolean; status: number; message: string; }
+
+export interface ModelRequestTestInput {
+  envName: string;
+  accountName: string;
+  model: string;
+  upstreamModel?: string;
+  prompt?: string;
+}
+
+export interface ModelRequestTestResult {
+  ok: boolean;
+  status: number;
+  message: string;
+  responseText?: string;
+  latencyMs: number;
+  model: string;
+}
 
 interface RouteTokenFile { routes: Record<string, string>; pools?: Record<string, string>; }
 
@@ -359,7 +378,7 @@ export class UsageRouterManager {
       protocol: input.protocol,
     }).candidates.filter((account) => input.accountNames.includes(account.accountName));
     if (!selected.length) throw new Error(`Environment '${input.envName}' has no compatible selected credentials`);
-    if (selected.some((account) => !account.apiKey?.trim())) throw new Error("Account pool members require a bearer credential");
+    if (selected.some((account) => !account.apiKey?.trim() && account.providerAuthMethod !== "none")) throw new Error("Account pool members require a bearer credential");
     if (selected.some((account) => account.protocol && account.protocol !== input.protocol)) throw new Error("Pool members must use the same API protocol");
     const state = await this.ensureService();
     const poolId = createAccountPoolId(input.envName);
@@ -409,8 +428,8 @@ export class UsageRouterManager {
         }
         await this.admin<void>(`/admin/pools/${encodeURIComponent(poolId)}/members/${encodeURIComponent(member.accountName)}/secret`, {
           method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({
-            upstreamBearerToken: account.apiKey,
-            authMode: account.authMode === "auth" ? "auth" : "apikey",
+            upstreamBearerToken: account.apiKey ?? "",
+            authMode: resolveRouteAuthMode(account),
             accountId: account.authAccountId,
           }),
         });
@@ -613,13 +632,13 @@ export class UsageRouterManager {
           method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(modelRoute),
         });
         const localRouteToken = tokens.routes[routeId] || randomBytes(32).toString("hex");
-        if (account.apiKey?.trim()) {
+        if (shouldHydrateRouteSecret(account)) {
           await this.admin<void>(`/admin/routes/${encodeURIComponent(routeId)}/secret`, {
             method: "PUT", headers: { "content-type": "application/json" },
             body: JSON.stringify({
-              upstreamApiKey: account.apiKey,
+              upstreamApiKey: account.apiKey ?? "",
               localRouteToken,
-              authMode: account.authMode === "auth" ? "auth" : "apikey",
+              authMode: resolveRouteAuthMode(account),
               accountId: account.authAccountId,
             }),
           });
@@ -852,6 +871,94 @@ export class UsageRouterManager {
         ? "Core compatibility passed with optional limitations" : "A required compatibility check failed" };
   }
 
+  async testModelRequest(input: ModelRequestTestInput): Promise<ModelRequestTestResult> {
+    const envName = input.envName.trim();
+    const accountName = input.accountName.trim();
+    const requestedModel = input.model.trim();
+    const upstreamModel = input.upstreamModel?.trim() || requestedModel;
+    const prompt = input.prompt?.trim() || "你是什么模型";
+    if (!envName || !accountName || !requestedModel) {
+      return { ok: false, status: 400, message: "Environment, account, and model are required", latencyMs: 0, model: requestedModel };
+    }
+
+    const state = await this.ensureService();
+    const [gateways, routes] = await Promise.all([
+      this.listEnvironmentGateways(),
+      this.listRoutes(),
+    ]);
+    const gateway = gateways.find((candidate) => candidate.envName === envName && candidate.enabled);
+    const routeCandidates = routes
+      .filter((candidate) => candidate.envName === envName && candidate.accountName === accountName && candidate.enabled)
+      .sort((left, right) => Number(right.upstreamModel === upstreamModel) - Number(left.upstreamModel === upstreamModel));
+    const route = routeCandidates[0];
+    if (!gateway && !route) {
+      return { ok: false, status: 404, message: `No active route for account '${envName}/${accountName}'`, latencyMs: 0, model: requestedModel };
+    }
+
+    const headers = new Headers({ "content-type": "application/json" });
+    let endpoint: string;
+    let body: Record<string, unknown>;
+    if (gateway) {
+      endpoint = `${buildLocalGatewayBaseUrl(state.port, gateway.gatewayId)}/responses`;
+      headers.set("x-codex-account", accountName);
+      body = { model: requestedModel, input: prompt, max_output_tokens: 64 };
+    } else {
+      const protocol: RouteProtocol = route!.protocol;
+      const routeBase = buildLocalRouteBaseUrl(state.port, route!.routeId);
+      if (protocol === "anthropic") {
+        endpoint = `${routeBase}/messages`;
+        body = { model: upstreamModel, max_tokens: 64, messages: [{ role: "user", content: prompt }] };
+      } else if (protocol === "gemini") {
+        endpoint = `${routeBase}/v1beta/models/${encodeURIComponent(upstreamModel)}:generateContent`;
+        body = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+      } else {
+        endpoint = `${routeBase}/responses`;
+        body = { model: upstreamModel, input: prompt, max_output_tokens: 64 };
+        if (protocol === "chat_completions") {
+          const token = (await this.readRouteTokens()).routes[route!.routeId];
+          if (token) headers.set("authorization", `Bearer ${token}`);
+        }
+      }
+    }
+
+    const startedAt = Date.now();
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(30_000),
+      });
+      const raw = await response.text();
+      let parsed: Record<string, unknown> | undefined;
+      try {
+        const value = JSON.parse(raw) as unknown;
+        if (value && typeof value === "object" && !Array.isArray(value)) parsed = value as Record<string, unknown>;
+      } catch {
+        // Some providers return plain text or an SSE body. Keep a short excerpt.
+      }
+      const outputText = typeof parsed?.output_text === "string"
+        ? parsed.output_text
+        : typeof parsed?.response === "string"
+          ? parsed.response
+          : typeof parsed?.text === "string"
+            ? parsed.text
+            : Array.isArray(parsed?.choices) && typeof parsed.choices[0] === "object" && parsed.choices[0]
+              ? String((parsed.choices[0] as Record<string, unknown>).message && typeof (parsed.choices[0] as Record<string, unknown>).message === "object"
+                ? ((parsed.choices[0] as Record<string, unknown>).message as Record<string, unknown>).content ?? ""
+                : "")
+              : raw;
+      const excerpt = outputText.replace(/\s+/g, " ").trim().slice(0, 500);
+      if (!response.ok) {
+        const errorText = excerpt || `HTTP ${response.status}`;
+        return { ok: false, status: response.status, message: errorText, responseText: excerpt || undefined, latencyMs: Date.now() - startedAt, model: requestedModel };
+      }
+      return { ok: true, status: response.status, message: excerpt || "Model responded successfully", responseText: excerpt || undefined, latencyMs: Date.now() - startedAt, model: requestedModel };
+    } catch (error) {
+      return { ok: false, status: 502, message: error instanceof Error ? error.message : String(error), latencyMs: Date.now() - startedAt, model: requestedModel };
+    }
+  }
+
   async enableEnvironment(
     envName: string,
     accounts: RoutableAccount[],
@@ -905,15 +1012,15 @@ export class UsageRouterManager {
         await this.admin<void>(`/admin/routes/${encodeURIComponent(routeId)}`, {
           method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(route),
         });
-        if (account.apiKey?.trim()) {
+        if (shouldHydrateRouteSecret(account)) {
           const localRouteToken = tokens.routes[routeId] || randomBytes(32).toString("hex");
           await this.admin<void>(`/admin/routes/${encodeURIComponent(routeId)}/secret`, {
             method: "PUT",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
-              upstreamApiKey: account.apiKey,
+              upstreamApiKey: account.apiKey ?? "",
               localRouteToken,
-              authMode: account.authMode === "auth" ? "auth" : "apikey",
+              authMode: resolveRouteAuthMode(account),
               accountId: account.authAccountId,
             }),
           });
@@ -1016,4 +1123,13 @@ function createGatewayModelRouteId(
     .update(`gateway-model\0${envName}\0${accountName}\0${normalizeUpstreamBaseUrl(upstreamBaseUrl)}\0${providerId}\0${modelId}`)
     .digest("hex")
     .slice(0, 20);
+}
+
+function resolveRouteAuthMode(account: RoutableAccount): "auth" | "apikey" | "none" {
+  if (account.providerAuthMethod === "none") return "none";
+  return account.authMode === "auth" ? "auth" : "apikey";
+}
+
+function shouldHydrateRouteSecret(account: RoutableAccount): boolean {
+  return account.providerAuthMethod === "none" || Boolean(account.apiKey?.trim());
 }

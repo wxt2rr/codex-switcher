@@ -248,6 +248,7 @@ export function SidePanel({
   description,
   onClose,
   closeLabel = "Close",
+  scrollable = true,
   children,
 }: {
   open: boolean;
@@ -255,6 +256,7 @@ export function SidePanel({
   description?: string;
   onClose: () => void;
   closeLabel?: string;
+  scrollable?: boolean;
   children: ReactNode;
 }) {
   const mounted = useDelayedUnmount(open);
@@ -268,6 +270,7 @@ export function SidePanel({
           className={cn(
             dialogSurfaceClass,
             "flex max-h-[min(720px,calc(100dvh-2rem))] max-w-[520px] flex-col overflow-hidden rounded-[16px]",
+            !scrollable && "h-[min(720px,calc(100dvh-2rem))]",
           )}
         >
           <div className="flex items-start justify-between gap-4">
@@ -279,7 +282,9 @@ export function SidePanel({
               <X className="size-4" />
             </button>
           </div>
-          <div className="mt-6 min-h-0 overflow-y-auto pr-1">{children}</div>
+          <div className={cn("mt-6 pr-1", scrollable ? "min-h-0 overflow-y-auto" : "min-h-0 flex flex-1 flex-col overflow-hidden")}>
+            {children}
+          </div>
         </div>
       </div>
     </DialogPortal>

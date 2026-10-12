@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
-import { dirname, isAbsolute, join, win32 } from "node:path";
+import { basename, dirname, isAbsolute, join, win32 } from "node:path";
 
 import type { GatewayPluginManifest } from "./host.js";
 
@@ -13,6 +13,8 @@ export interface PluginSandboxOptions {
   sandboxExecutable?: string;
   windowsSandboxExecutable?: string;
   nodeExecutable?: string;
+  /** Additional plugin-owned directories that may be read and written. */
+  writablePaths?: readonly string[];
 }
 
 export interface PluginLaunchSpec {
@@ -62,7 +64,7 @@ export function buildPluginLaunchSpec(
     }
     return {
       command: executable,
-      args: ["-p", buildMacSandboxProfile(manifest, cwd), nodeExecutable, entry],
+      args: ["-p", buildMacSandboxProfile(manifest, cwd, options.writablePaths ?? [], nodeExecutable), nodeExecutable, entry],
       cwd,
       sandbox: { mode, kind: "macos-sandbox-exec", executable },
     };
@@ -76,7 +78,7 @@ export function buildPluginLaunchSpec(
     }
     return {
       command: executable,
-      args: buildBubblewrapArgs(manifest, cwd, nodeExecutable, entry),
+      args: buildBubblewrapArgs(manifest, cwd, nodeExecutable, entry, options.writablePaths ?? []),
       cwd,
       sandbox: { mode, kind: "linux-bubblewrap", executable },
     };
@@ -134,8 +136,9 @@ function findWindowsSandboxExecutable(): string | undefined {
   return candidates.find(isAvailable);
 }
 
-function buildMacSandboxProfile(manifest: GatewayPluginManifest, cwd: string): string {
+function buildMacSandboxProfile(manifest: GatewayPluginManifest, cwd: string, writablePaths: readonly string[] = [], nodeExecutable = process.execPath): string {
   const home = homedir();
+  const runtimeReadPaths = macRuntimeReadPaths(nodeExecutable);
   const lines = [
     "(version 1)",
     "(allow default)",
@@ -145,14 +148,32 @@ function buildMacSandboxProfile(manifest: GatewayPluginManifest, cwd: string): s
     `(deny file-read* (subpath \"${escapeProfilePath(home)}\"))`,
     `(allow file-read-metadata (subpath \"${escapeProfilePath(home)}\"))`,
     `(allow file-read* (subpath \"${escapeProfilePath(cwd)}\"))`,
-    "(deny file-write*)",
+    ...runtimeReadPaths.map((path) => `(allow file-read* (subpath \"${escapeProfilePath(path)}\"))`),
+    ...(manifest.permissions.includes("filesystem") ? [] : ["(deny file-write*)"]),
   ];
   if (manifest.permissions.includes("filesystem")) lines.push(`(allow file-write* (subpath \"${escapeProfilePath(cwd)}\"))`);
+  if (manifest.permissions.includes("filesystem")) {
+    for (const writablePath of writablePaths) {
+      lines.push(`(allow file-read* (subpath \"${escapeProfilePath(writablePath)}\"))`);
+      lines.push(`(allow file-write* (subpath \"${escapeProfilePath(writablePath)}\"))`);
+    }
+  }
   if (!manifest.permissions.includes("network")) lines.push("(deny network-outbound)");
   return lines.join(" ");
 }
 
-function buildBubblewrapArgs(manifest: GatewayPluginManifest, cwd: string, nodeExecutable: string, entry: string): string[] {
+function macRuntimeReadPaths(nodeExecutable: string): string[] {
+  // Electron's process.execPath lives at Contents/MacOS/<app> and its dynamic
+  // loader resolves Electron Framework plus V8 snapshots from sibling
+  // Contents/Frameworks and Contents/Resources directories. The home-directory
+  // deny rule above otherwise blocks those reads in packaged macOS builds.
+  const macosDir = dirname(nodeExecutable);
+  const contentsDir = dirname(macosDir);
+  if (basename(macosDir) !== "MacOS" || basename(contentsDir) !== "Contents") return [];
+  return [macosDir, join(contentsDir, "Frameworks"), join(contentsDir, "Resources")];
+}
+
+function buildBubblewrapArgs(manifest: GatewayPluginManifest, cwd: string, nodeExecutable: string, entry: string, writablePaths: readonly string[] = []): string[] {
   const args = [
     "--die-with-parent",
     "--new-session",
@@ -177,6 +198,9 @@ function buildBubblewrapArgs(manifest: GatewayPluginManifest, cwd: string, nodeE
     args.splice(args.lastIndexOf("--ro-bind"), 3, "--ro-bind", cwd, cwd);
   } else {
     args.splice(args.lastIndexOf("--ro-bind"), 3, "--bind", cwd, cwd);
+  }
+  if (manifest.permissions.includes("filesystem")) {
+    for (const writablePath of writablePaths) args.push("--bind", writablePath, writablePath);
   }
   if (!manifest.permissions.includes("network")) args.push("--unshare-net");
   args.push("--", nodeExecutable, entry);

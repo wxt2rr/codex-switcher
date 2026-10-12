@@ -49,6 +49,9 @@ test("plugin installation store keeps an active version and rolls back a failed 
     await assert.rejects(store.install(manifestTwo, sourceTwo), /already installed/);
     assert.equal((await store.list())[0]?.version, "1.1.0");
     assert.equal((await store.rollback("provider-demo")).version, "1.0.0");
+    const retried = await store.install(manifestTwo, sourceTwo);
+    assert.equal(retried.previousVersion, "1.0.0");
+    assert.equal((await store.list())[0]?.version, "1.1.0");
     await store.remove("provider-demo");
     assert.equal((await store.list()).length, 0);
   } finally {

@@ -143,6 +143,23 @@ export interface CompatibilityCheckResult {
   capabilities?: { text: boolean; streaming: boolean; sequentialTools: boolean; parallelTools: boolean; reasoning: boolean };
 }
 
+export interface ModelRequestTestRequest {
+  envName: string;
+  accountName: string;
+  model: string;
+  upstreamModel?: string;
+  prompt?: string;
+}
+
+export interface ModelRequestTestResult {
+  ok: boolean;
+  status: number;
+  message: string;
+  responseText?: string;
+  latencyMs: number;
+  model: string;
+}
+
 export interface UsageTraceEvent {
   event: string;
   at: number;
@@ -227,6 +244,8 @@ export interface ProviderPluginSnapshot {
     id: string;
     displayName: string;
     authMethods: string[];
+    managed?: boolean;
+    managementUrl?: string;
     endpoints: Array<{ protocol: string; baseUrl: string; modelsPath: string; quotaPath?: string }>;
   };
   error?: string;
@@ -253,6 +272,7 @@ export interface ProviderCatalogItem {
   iconKey: string;
   iconUrl?: string;
   pluginId?: string;
+  managed?: boolean;
   defaultBaseUrl?: string;
   aliasOf?: string;
   authMethods: string[];
@@ -524,6 +544,7 @@ export interface DesktopElectronApi {
   toggleAccountCompatibility(input: AccountCompatibilityRequest): Promise<AccountCompatibilityStatus>;
   getAccountCompatibilityStatuses(accountKeys: string[]): Promise<AccountCompatibilityStatus[]>;
   checkAccountCompatibility(envName: string, accountName: string): Promise<CompatibilityCheckResult>;
+  testModelRequest(input: ModelRequestTestRequest): Promise<ModelRequestTestResult>;
   loadUsageSnapshot(filter: UsageFilter): Promise<UsageSnapshot>;
   loadUsageRequests(query: UsageRequestQuery): Promise<UsageRequestPage>;
   loadUsageTrace(query?: UsageTraceQuery): Promise<UsageTraceEvent[]>;
@@ -653,6 +674,7 @@ export interface DesktopBridge {
   toggleAccountCompatibility(input: AccountCompatibilityRequest): Promise<AccountCompatibilityStatus>;
   getAccountCompatibilityStatuses(accountKeys: string[]): Promise<AccountCompatibilityStatus[]>;
   checkAccountCompatibility(envName: string, accountName: string): Promise<CompatibilityCheckResult>;
+  testModelRequest(input: ModelRequestTestRequest): Promise<ModelRequestTestResult>;
   loadUsageSnapshot(filter: UsageFilter): Promise<UsageSnapshot>;
   loadUsageRequests(query: UsageRequestQuery): Promise<UsageRequestPage>;
   loadUsageTrace(query?: UsageTraceQuery): Promise<UsageTraceEvent[]>;
@@ -778,6 +800,7 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       toggleAccountCompatibility: unavailable,
       getAccountCompatibilityStatuses: unavailable,
       checkAccountCompatibility: unavailable,
+      testModelRequest: unavailable,
       loadUsageSnapshot: unavailable,
       loadUsageRequests: unavailable,
       loadUsageTrace: unavailable,
@@ -1023,6 +1046,7 @@ function createBrowserPreviewBridge(): DesktopBridge {
       const [envName, ...rest] = key.split("/"); return { envName, accountName: rest.join("/"), enabled: false, state: "disabled" as const };
     }),
     checkAccountCompatibility: async () => ({ ok: true, status: 200, message: "Compatibility check passed" }),
+    testModelRequest: async (input) => ({ ok: false, status: 501, message: "Model testing is unavailable in browser preview", latencyMs: 0, model: input.model }),
     loadUsageSnapshot: async () => ({
       generatedAt: Date.now(),
       summary: { requests: 267, inputTokens: 1_450_000, outputTokens: 60_490,

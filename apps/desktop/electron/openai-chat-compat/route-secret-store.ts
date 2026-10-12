@@ -9,7 +9,7 @@ export class RouteSecretStore {
 
   set(secret: RouteRuntimeSecret): void {
     if (!secret.routeId.trim()) throw new Error("Route ID is required");
-    if (!secret.upstreamApiKey.trim()) throw new Error("Upstream API key is required");
+    if (secret.authMode !== "none" && !secret.upstreamApiKey.trim()) throw new Error("Upstream API key is required");
     if (!secret.localRouteToken.trim()) throw new Error("Local route token is required");
     if (!Number.isFinite(secret.hydratedAt)) throw new Error("Hydration timestamp is invalid");
     this.secrets.set(secret.routeId, cloneSecret(secret));

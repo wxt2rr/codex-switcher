@@ -137,7 +137,13 @@ export async function applyTargetHomeState(
     await rm(join(env.path, "auth.json"), { force: true });
   }
 
-  await writeManagedConfig(join(env.path, "config.toml"), targetRuntime);
+  await writeManagedConfig(join(env.path, "config.toml"), targetRuntime, {
+    // A managed provider with authMethods=["none"] owns authentication inside
+    // the gateway/plugin. Do not make Codex look up a nonexistent API key just
+    // because the legacy account runtime uses preferred_auth_method="apikey".
+    localRouterAuthEnabled: targetRuntime.providerAuthMethod !== "none"
+      && Boolean(readAuthApiKey(targetAuthData)),
+  });
 }
 
 export async function clearTargetHomeState(homePath: string): Promise<void> {
@@ -148,6 +154,7 @@ export async function clearTargetHomeState(homePath: string): Promise<void> {
 async function writeManagedConfig(
   configPath: string,
   runtime: SwitcherState["envs"][string]["accounts"][string]["runtime"],
+  options: { localRouterAuthEnabled?: boolean } = {},
 ) {
   const existing = await readText(configPath);
   const managedModelSlug = resolveManagedModelSlug(runtime);
@@ -197,8 +204,10 @@ async function writeManagedConfig(
       // provider: requires_openai_auth=true makes Codex apply ChatGPT's native
       // model entitlement check before the request can reach the gateway.
       managedLines.push("requires_openai_auth = false");
-    } else {
+    } else if (options.localRouterAuthEnabled !== false) {
       managedLines.push('env_key = "OPENAI_API_KEY"');
+      managedLines.push("requires_openai_auth = false");
+    } else {
       managedLines.push("requires_openai_auth = false");
     }
   } else if (runtime.independentModelEnabled && runtime.preferredAuthMethod === "chatgpt") {

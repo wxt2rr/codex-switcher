@@ -111,6 +111,13 @@ function getAccountProviderHint(providerId: AccountProviderId, language: UiLangu
         : "Uses Z.AI GLM's official Chat Completions preset with automatic compatibility routing.";
   }
   const provider = catalog.find((item) => item.id === providerId);
+  if (provider?.managed) {
+    return language === "zh"
+      ? `${provider.displayName} 会自动启动本机服务并管理模型，无需填写 Base URL 或 API Key。`
+      : language === "ja"
+        ? `${provider.displayName} はローカルサービスとモデルを自動管理します。Base URL と API Key は不要です。`
+        : `${provider.displayName} starts and manages its local service automatically; no Base URL or API key is required.`;
+  }
   if (provider) {
     return language === "zh"
       ? `使用 ${provider.displayName} 的服务商配置；凭据属于当前环境账号。`
@@ -136,7 +143,9 @@ function getAccountModeItems(providerId: AccountProviderId, language: UiLanguage
     items.push({ value: "cpa", label: localizeAuthMode("cpa", language) });
   }
   if (provider && (provider.authMethods.some((method) => ["oauth", "subscription", "plugin", "none"].includes(method)) || !items.length)) {
-    items.push({ value: "provider", label: language === "zh" ? "服务商凭据" : language === "ja" ? "プロバイダー資格情報" : "Provider credential" });
+    items.push({ value: "provider", label: provider.managed
+      ? language === "zh" ? "托管服务" : language === "ja" ? "管理サービス" : "Managed service"
+      : language === "zh" ? "服务商凭据" : language === "ja" ? "プロバイダー資格情報" : "Provider credential" });
   }
   return items.length ? items : [{ value: "apikey", label: localizeAuthMode("apikey", language) }];
 }
@@ -348,6 +357,7 @@ export function AccountsPage({
   const runtimeAccounts = overview.accounts.filter((account) => account.envName === runtimeEnvDraft.trim());
 
   const selectedProvider = providerCatalog.find((provider) => provider.id === accountProviderDraft);
+  const managedProvider = selectedProvider?.managed === true;
   const providerMode = accountModeDraft === "provider";
   const loginModeNeedsApiKey = accountModeDraft === "apikey" || (providerMode && providerCredentialAuthMethodDraft !== "none");
   const legacyProviderBaseUrl = accountProviderDraft === "deepseek"
@@ -424,11 +434,11 @@ export function AccountsPage({
     if (providerMode && selectedProvider.protocols.includes("chat_completions") && !selectedProvider.protocols.includes("responses")) {
       setApiProtocolDraft("chat_completions");
     }
-    if (providerMode && !accountBaseUrlDraft.trim() && selectedProvider.defaultBaseUrl) {
+    if (providerMode && !managedProvider && !accountBaseUrlDraft.trim() && selectedProvider.defaultBaseUrl) {
       onAccountBaseUrlModeDraftChange("custom");
       onAccountBaseUrlDraftChange(selectedProvider.defaultBaseUrl);
     }
-  }, [accountBaseUrlDraft, accountProviderDraft, onAccountBaseUrlDraftChange, providerCredentialAuthMethodDraft, providerMode, selectedAccount, selectedProvider]);
+  }, [accountBaseUrlDraft, accountProviderDraft, managedProvider, onAccountBaseUrlDraftChange, providerCredentialAuthMethodDraft, providerMode, selectedAccount, selectedProvider]);
 
   useEffect(() => {
     if (isPresetApiKeyProvider) {
@@ -798,7 +808,7 @@ export function AccountsPage({
               />
             </Field>
           </div>
-          {providerMode ? (
+          {providerMode && !managedProvider ? (
             <Field
               label={language === "zh" ? "凭据类型" : language === "ja" ? "資格情報の種類" : "Credential type"}
               hint={language === "zh" ? "服务商类型决定凭据如何保存和刷新；账号仍然属于当前环境。" : "The provider credential type controls storage and refresh; the account remains scoped to this environment."}
@@ -810,6 +820,11 @@ export function AccountsPage({
                 items={(selectedProvider?.authMethods ?? ["api_key"]).map((method) => ({ value: method, label: method }))}
               />
             </Field>
+          ) : null}
+          {providerMode && managedProvider ? (
+            <div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800 dark:bg-emerald-950/20 dark:text-emerald-300">
+              {language === "zh" ? "插件会自动启动本机服务、发现模型并注入连接密钥。" : language === "ja" ? "プラグインがローカルサービスを起動し、モデルと接続キーを自動管理します。" : "The plugin starts the local service and manages model discovery and connection keys automatically."}
+            </div>
           ) : null}
           {loginModeNeedsApiKey ? (
             <Field label={pageCopy.accounts.apiKey}>
@@ -862,7 +877,7 @@ export function AccountsPage({
               <Input type="password" value={providerRefreshTokenDraft} onChange={(event) => setProviderRefreshTokenDraft(event.target.value)} autoComplete="off" />
             </Field>
           ) : null}
-          {!credentialImportSource && !isPresetApiKeyProvider ? (
+          {!credentialImportSource && !isPresetApiKeyProvider && !managedProvider ? (
             <>
               <Field label={pageCopy.accounts.baseUrlMode}>
                 <Select
@@ -984,7 +999,7 @@ export function AccountsPage({
               />
             </Field>
           ) : null}
-          {providerMode ? (
+          {providerMode && !managedProvider ? (
             <Field
               label={language === "zh" ? "额外请求头（可选 JSON）" : language === "ja" ? "追加ヘッダー（任意 JSON）" : "Extra request headers (optional JSON)"}
               hint={language === "zh" ? "用于租户、版本等非认证头；敏感认证头不会被保存。" : "For tenant/version headers; sensitive authentication headers are not persisted."}
@@ -1011,10 +1026,10 @@ export function AccountsPage({
                       account: accountNameDraft.trim(),
                       envName: accountEnvDraft.trim(),
                       target: "none",
-                      authMethod: providerCredentialAuthMethodDraft,
+                      authMethod: managedProvider ? "none" : providerCredentialAuthMethodDraft,
                       accessToken: accountApiKeyDraft.trim() || undefined,
                       refreshToken: providerRefreshTokenDraft.trim() || undefined,
-                      baseUrl: accountBaseUrlDraft.trim() || selectedProvider?.defaultBaseUrl,
+                      baseUrl: managedProvider ? selectedProvider?.defaultBaseUrl : accountBaseUrlDraft.trim() || selectedProvider?.defaultBaseUrl,
                       apiProtocol: apiProtocolDraft,
                       ...(requestHeaders ? { requestHeaders } : {}),
                     });

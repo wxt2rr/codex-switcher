@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import test from "node:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -185,6 +185,30 @@ test("process plugin transport completes a real JSONL child-process round trip",
     const response = await transport.send({ jsonrpc: "2.0", id: "round-trip", method: "provider.describe" });
     assert.deepEqual(response.result, { method: "provider.describe" });
     await transport.close();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("process plugin transport waits for graceful child shutdown", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-plugin-host-close-"));
+  try {
+    const marker = join(root, "closed.marker");
+    await writeFile(join(root, "plugin.mjs"), [
+      "import { writeFileSync } from 'node:fs';",
+      "import readline from 'node:readline';",
+      "const input = readline.createInterface({ input: process.stdin });",
+      "input.on('line', (line) => {",
+      "  const request = JSON.parse(line);",
+      "  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: {} }) + '\\n');",
+      "});",
+      `input.once('close', () => { writeFileSync(${JSON.stringify(marker)}, 'closed'); process.exit(0); });`,
+    ].join("\n"), "utf8");
+    const manifest = { id: "graceful-close", name: "Graceful Close", version: "1.0.0", apiVersion: 1 as const, entry: "plugin.mjs", permissions: ["provider" as const] };
+    const transport = ProcessPluginTransport.start(manifest, root, {}, { mode: "disabled" });
+    await transport.send({ jsonrpc: "2.0", id: "round-trip", method: "provider.describe" });
+    await transport.close();
+    assert.equal(await readFile(marker, "utf8"), "closed");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

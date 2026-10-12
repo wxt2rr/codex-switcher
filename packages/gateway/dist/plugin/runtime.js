@@ -1,3 +1,5 @@
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { PluginConcurrencyLimiter, PluginHost, ProcessPluginTransport, RestartingPluginTransport, validatePluginManifest } from "./host.js";
 import { createPluginProviderAdapter } from "./provider-adapter.js";
 /**
@@ -12,7 +14,15 @@ export class PluginRuntimeManager {
     globalConcurrency;
     constructor(options) {
         this.options = options;
-        this.transportFactory = options.transportFactory ?? ((manifest, path, sandbox) => ProcessPluginTransport.start(manifest, path, {}, sandbox, options.log));
+        this.transportFactory = options.transportFactory ?? ((manifest, path, sandbox) => {
+            const dataDir = options.pluginDataDir ? join(options.pluginDataDir, manifest.id) : undefined;
+            if (dataDir)
+                mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+            const launchSandbox = dataDir
+                ? { ...sandbox, writablePaths: [...(sandbox.writablePaths ?? []), dataDir] }
+                : sandbox;
+            return ProcessPluginTransport.start(manifest, path, dataDir ? { CODEX_SWITCHER_PLUGIN_DATA_DIR: dataDir } : {}, launchSandbox, options.log);
+        });
         this.globalConcurrency = new PluginConcurrencyLimiter(options.globalConcurrency);
     }
     async activate(manifest, path) {
@@ -93,7 +103,9 @@ function normalizeProviderDescriptor(value, expectedIds) {
     });
     if (!endpoints.length)
         throw new Error(`Plugin provider '${String(record.id)}' has no valid endpoint`);
-    return { id: String(record.id), displayName: record.displayName, authMethods, endpoints };
+    const managementUrl = typeof record.managementUrl === "string" && record.managementUrl.trim() ? record.managementUrl : undefined;
+    const managed = record.managed === true;
+    return { id: String(record.id), displayName: record.displayName, authMethods, endpoints, ...(managed ? { managed: true } : {}), ...(managementUrl ? { managementUrl } : {}) };
 }
 function isGatewayProtocol(value) {
     return value === "responses" || value === "chat_completions" || value === "anthropic" || value === "gemini";

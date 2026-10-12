@@ -394,6 +394,7 @@ function getEnvironmentRouteAccounts(
       accountName,
       authMode: account.authMode,
       providerId,
+      providerAuthMethod: account.runtime.providerAuthMethod,
       apiKey: account.authMode === "auth"
         ? extractAccessTokenFromAuthData(account.authData)
         : extractProviderAccessTokenFromAuthData(account.authData),
@@ -975,6 +976,10 @@ async function restoreEnabledRoutes(): Promise<void> {
         ? () => loadBundledModelCatalog(cliStatus.path)
         : undefined,
     });
+    // Reapply the target home after restoring the gateway. This also migrates
+    // an older config.toml that still declared OPENAI_API_KEY for a managed
+    // authMethods=["none"] provider.
+    await reapplyEnvironmentTargetHomes(runtime, initialState, environment.name, "restore");
   }
 }
 
@@ -1994,6 +1999,16 @@ export async function checkAccountCompatibility(envName: string, accountName: st
   return getUsageRouterManager().checkAccountCompatibility(envName, accountName);
 }
 
+export async function testModelRequest(input: {
+  envName: string;
+  accountName: string;
+  model: string;
+  upstreamModel?: string;
+  prompt?: string;
+}) {
+  return getUsageRouterManager().testModelRequest(input);
+}
+
 export async function listAccountProjects(envName: string, _accountName: string): Promise<CodexProject[]> {
   const runtime = await loadCoreRuntime();
   const state = await runtime.readLegacyState(getLegacyOptions());
@@ -2998,6 +3013,7 @@ export async function listProviderCatalog() {
       iconKey: iconUrl ? "custom" : provider.id,
       ...(iconUrl ? { iconUrl } : {}),
       pluginId: plugin.id,
+      ...(provider.managed ? { managed: true } : {}),
       ...(provider.endpoints[0]?.baseUrl ? { defaultBaseUrl: provider.endpoints[0].baseUrl } : {}),
       authMethods: [...provider.authMethods],
       protocols,

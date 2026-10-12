@@ -134,7 +134,8 @@ export interface RouteRuntimeSecret {
   routeId: string;
   upstreamApiKey: string;
   localRouteToken: string;
-  authMode?: "auth" | "apikey";
+  /** The provider owns credentials and does not require an upstream bearer key. */
+  authMode?: "auth" | "apikey" | "none";
   accountId?: string;
   hydratedAt: number;
 }

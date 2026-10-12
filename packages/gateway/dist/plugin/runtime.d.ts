@@ -8,6 +8,8 @@ export interface PluginProviderDescriptor {
     displayName: string;
     authMethods: ProviderAuthMethod[];
     endpoints: ProviderEndpoint[];
+    managed?: boolean;
+    managementUrl?: string;
 }
 export interface PluginRuntimeOptions {
     registry: ProviderRegistry;
@@ -21,6 +23,8 @@ export interface PluginRuntimeOptions {
     log?: PluginLogSink;
     transportFactory?: (manifest: GatewayPluginManifest, path: string, sandbox: PluginSandboxOptions) => PluginTransport | Promise<PluginTransport>;
     settings?: (pluginId: string) => Promise<Record<string, unknown>> | Record<string, unknown>;
+    /** Host-owned writable data root for managed provider plugins. */
+    pluginDataDir?: string;
 }
 export interface ActivePluginProvider {
     manifest: GatewayPluginManifest;

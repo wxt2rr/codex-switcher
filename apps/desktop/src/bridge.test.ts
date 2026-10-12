@@ -291,6 +291,10 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       calls.push(`checkAccountCompatibility:${envName}:${accountName}`);
       return { ok: true, status: 200, message: "ok" };
     },
+    testModelRequest: async (input) => {
+      calls.push(`testModelRequest:${input.envName}:${input.accountName}:${input.model}`);
+      return { ok: true, status: 200, message: "ok", latencyMs: 1, model: input.model };
+    },
     loadUsageSnapshot: async () => ({ generatedAt: Date.now(), summary: { requests: 0, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 0, actualCost: null, standardCost: null, requestsWithoutUsage: 0, cacheHitRate: null }, models: [], baseUrls: [], trend: [] }),
     loadUsageRequests: async (query) => {
       calls.push(`loadUsageRequests:${query.baseUrl}:${query.page}:${query.pageSize}`);

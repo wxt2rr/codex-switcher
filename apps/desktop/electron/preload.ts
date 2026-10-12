@@ -174,6 +174,13 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     ipcRenderer.invoke("desktop:getAccountCompatibilityStatuses", accountKeys),
   checkAccountCompatibility: (envName: string, accountName: string) =>
     ipcRenderer.invoke("desktop:checkAccountCompatibility", envName, accountName),
+  testModelRequest: (input: {
+    envName: string;
+    accountName: string;
+    model: string;
+    upstreamModel?: string;
+    prompt?: string;
+  }) => ipcRenderer.invoke("desktop:testModelRequest", input),
   loadUsageSnapshot: (filter: unknown) => ipcRenderer.invoke("desktop:loadUsageSnapshot", filter),
   loadUsageRequests: (query: unknown) => ipcRenderer.invoke("desktop:loadUsageRequests", query),
   loadUsageTrace: (query?: unknown) => ipcRenderer.invoke("desktop:loadUsageTrace", query),

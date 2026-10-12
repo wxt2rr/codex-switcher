@@ -18,6 +18,7 @@ import { Field, Select, Textarea } from "../components/form-primitives";
 import { Button } from "../components/ui/button";
 import { ProviderIcon } from "../components/provider-icon";
 import { ModelCatalogForm } from "../components/model-catalog-form";
+import { ModelTestButton } from "../components/model-test-button";
 import {
   createDefaultModelEntry,
   normalizeModelEntryForEditor,
@@ -130,7 +131,7 @@ export function ModelsPage({
   }, [knownAccountKeys, snapshot.accountBindings]);
 
   const discoveryByModelKey = useMemo(() => {
-    const result = new Map<string, { providerId: string; status: string; accountKeys: string[] }>();
+    const result = new Map<string, { providerId: string; status: string; accountKeys: string[]; upstreamModelId?: string }>();
     for (const [accountKey, discovery] of Object.entries(snapshot.accountModelDiscoveries ?? {})) {
       for (const model of discovery.models) {
         const current = result.get(model.providerModelKey);
@@ -141,6 +142,7 @@ export function ModelsPage({
           providerId: current?.providerId ?? model.providerId,
           status: current?.status === "available" || model.status !== "available" ? (current?.status ?? model.status) : model.status,
           accountKeys,
+          upstreamModelId: current?.upstreamModelId ?? model.upstreamModelId,
         });
       }
     }
@@ -296,10 +298,13 @@ export function ModelsPage({
         ) : visibleModels.map((model) => {
           const providerKey = typeof model.entry.provider_model_key === "string" ? model.entry.provider_model_key : undefined;
           const discoveryInfo = providerKey ? discoveryByModelKey.get(providerKey) : undefined;
+          const fallbackUpstreamModel = providerKey?.includes(":") ? providerKey.slice(providerKey.indexOf(":") + 1) : undefined;
           const providerId = String(model.entry.provider_id ?? discoveryInfo?.providerId ?? "custom");
           const sourceAccountLabels = (discoveryInfo?.accountKeys ?? []).map((key) => accountLabel(key, accountsByKey));
           const exposedAccountLabels = (exposedAccountKeysByModel.get(model.id) ?? []).map((key) => accountLabel(key, accountsByKey));
           const statusTone = discoveryInfo?.status === "available" ? "success" : discoveryInfo ? "warn" : "neutral";
+          const testAccountKey = exposedAccountKeysByModel.get(model.id)?.[0] ?? discoveryInfo?.accountKeys?.[0];
+          const testAccount = testAccountKey ? accountsByKey.get(testAccountKey) : undefined;
           return (
             <ListCard key={model.id} className="flex min-h-[226px] flex-col gap-4 p-5">
               <div className="flex items-start justify-between gap-3">
@@ -322,6 +327,18 @@ export function ModelsPage({
                 </div>
               </div>
                 <div className="responsive-actions shrink-0">
+                <ModelTestButton
+                  bridge={bridge}
+                  language={language}
+                  request={testAccount ? {
+                    envName: testAccount.envName,
+                    accountName: testAccount.name,
+                    model: model.entry.slug,
+                    ...(discoveryInfo?.upstreamModelId || fallbackUpstreamModel
+                      ? { upstreamModel: discoveryInfo?.upstreamModelId ?? fallbackUpstreamModel }
+                      : {}),
+                  } : undefined}
+                />
                 <IconActionButton icon={<Pencil className="size-4" />} label={zh ? "编辑" : "Edit"} onClick={() => openEditor(model)} />
                 <IconActionButton icon={<Trash2 className="size-4" />} label={zh ? "删除" : "Delete"} onClick={() => openDelete(model)} tone="danger" />
                 </div>

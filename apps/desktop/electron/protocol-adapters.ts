@@ -11,7 +11,7 @@ import type { RouteProtocol } from "./usage-routing-model.js";
 
 export interface ProtocolCredential {
   upstreamApiKey?: string;
-  authMode?: "auth" | "apikey";
+  authMode?: "auth" | "apikey" | "none";
   accountId?: string;
 }
 

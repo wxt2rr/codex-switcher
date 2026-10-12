@@ -99,7 +99,13 @@ export class PluginInstallationStore {
         const previous = await this.readActive(manifest.id);
         await mkdir(pluginRoot, { recursive: true });
         if (await stat(target).then(() => true).catch(() => false)) {
-            throw new Error(`Plugin '${manifest.id}' version '${manifest.version}' is already installed`);
+            if (previous?.version === manifest.version) {
+                throw new Error(`Plugin '${manifest.id}' version '${manifest.version}' is already installed`);
+            }
+            // A failed activation can roll active.json back while leaving the
+            // candidate directory behind. Replace that inactive candidate on an
+            // explicit retry while preserving the active version.
+            await this.removeVersionFiles(pluginRoot, manifest.version);
         }
         try {
             await cp(sourceDirectory, target, { recursive: true, force: false, errorOnExist: true });
@@ -112,10 +118,7 @@ export class PluginInstallationStore {
         catch (error) {
             // A failed copy or activation must not leave a directory that blocks the
             // next retry or looks installable to a later runtime scan.
-            await rm(target, { recursive: true, force: true }).catch(() => undefined);
-            await rm(join(pluginRoot, `${manifest.version}.manifest.json`), { force: true }).catch(() => undefined);
-            await rm(join(pluginRoot, `${manifest.version}.manifest.sha256`), { force: true }).catch(() => undefined);
-            await rm(join(pluginRoot, `${manifest.version}.checksum`), { force: true }).catch(() => undefined);
+            await this.removeVersionFiles(pluginRoot, manifest.version);
             throw error;
         }
         return { id: manifest.id, version: manifest.version, path: target, active: true, checksum, ...(previous ? { previousVersion: previous.version } : {}) };
@@ -166,6 +169,12 @@ export class PluginInstallationStore {
     }
     async remove(id) {
         await rm(join(this.root, id), { recursive: true, force: true });
+    }
+    async removeVersionFiles(pluginRoot, version) {
+        await rm(join(pluginRoot, version), { recursive: true, force: true }).catch(() => undefined);
+        await rm(join(pluginRoot, `${version}.manifest.json`), { force: true }).catch(() => undefined);
+        await rm(join(pluginRoot, `${version}.manifest.sha256`), { force: true }).catch(() => undefined);
+        await rm(join(pluginRoot, `${version}.checksum`), { force: true }).catch(() => undefined);
     }
     async readActive(id) {
         try {

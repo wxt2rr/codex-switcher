@@ -82,13 +82,19 @@ export async function applyTargetHomeState(options) {
     else {
         await rm(join(env.path, "auth.json"), { force: true });
     }
-    await writeManagedConfig(join(env.path, "config.toml"), targetRuntime);
+    await writeManagedConfig(join(env.path, "config.toml"), targetRuntime, {
+        // A managed provider with authMethods=["none"] owns authentication inside
+        // the gateway/plugin. Do not make Codex look up a nonexistent API key just
+        // because the legacy account runtime uses preferred_auth_method="apikey".
+        localRouterAuthEnabled: targetRuntime.providerAuthMethod !== "none"
+            && Boolean(readAuthApiKey(targetAuthData)),
+    });
 }
 export async function clearTargetHomeState(homePath) {
     await rm(join(homePath, "auth.json"), { force: true });
     await clearManagedConfig(join(homePath, "config.toml"));
 }
-async function writeManagedConfig(configPath, runtime) {
+async function writeManagedConfig(configPath, runtime, options = {}) {
     const existing = await readText(configPath);
     const managedModelSlug = resolveManagedModelSlug(runtime);
     const managedModelCatalogPath = resolveManagedModelCatalogPath(configPath, runtime);
@@ -135,8 +141,11 @@ async function writeManagedConfig(configPath, runtime) {
             // model entitlement check before the request can reach the gateway.
             managedLines.push("requires_openai_auth = false");
         }
-        else {
+        else if (options.localRouterAuthEnabled !== false) {
             managedLines.push('env_key = "OPENAI_API_KEY"');
+            managedLines.push("requires_openai_auth = false");
+        }
+        else {
             managedLines.push("requires_openai_auth = false");
         }
     }

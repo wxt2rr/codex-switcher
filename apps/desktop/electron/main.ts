@@ -54,6 +54,7 @@ import {
   disableAccountCompatibility,
   getAccountCompatibilityStatuses,
   checkAccountCompatibility,
+  testModelRequest,
   updateRuntime,
   getEnvironmentRouteStatuses,
   getCodexToolPaths,
@@ -662,6 +663,7 @@ function registerHandlers() {
     getAccountCompatibilityStatuses(accountKeys));
   ipcMain.handle("desktop:checkAccountCompatibility", (_event: IpcMainInvokeEvent, envName: string, accountName: string) =>
     checkAccountCompatibility(envName, accountName));
+  ipcMain.handle("desktop:testModelRequest", (_event: IpcMainInvokeEvent, input) => testModelRequest(input));
   ipcMain.handle("desktop:loadUsageSnapshot", (_event: IpcMainInvokeEvent, filter) => loadUsageSnapshot(filter));
   ipcMain.handle("desktop:loadUsageRequests", (_event: IpcMainInvokeEvent, query) => loadUsageRequests(query));
   ipcMain.handle("desktop:loadUsageTrace", (_event: IpcMainInvokeEvent, query) => loadUsageTrace(query));

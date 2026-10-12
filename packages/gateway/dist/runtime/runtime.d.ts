@@ -78,8 +78,8 @@ export interface GatewayFallbackResult<T> {
 }
 export declare class GatewayFallbackError extends Error {
     readonly attempts: GatewayFallbackAttempt[];
-    readonly lastError?: unknown | undefined;
-    constructor(message: string, attempts: GatewayFallbackAttempt[], lastError?: unknown | undefined);
+    readonly lastError?: unknown;
+    constructor(message: string, attempts: GatewayFallbackAttempt[], lastError?: unknown);
 }
 export declare class GatewayMiddlewareRejectedError extends Error {
     readonly status: number;

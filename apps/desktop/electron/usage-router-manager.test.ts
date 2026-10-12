@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -65,6 +65,32 @@ test("environment routing includes AUTH credentials and restores exact upstream 
     assert.equal(values.get("login"), "default");
   } finally {
     await service?.close();
+  }
+});
+
+test("environment routing hydrates managed no-auth provider accounts without an API key", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-manager-no-auth-provider-"));
+  let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
+  const manager = new UsageRouterManager({
+    stateDir, serviceEntryPath: "unused",
+    launchService: async () => { service = await startUsageRouterService({ stateDir: join(stateDir, "usage-router") }); },
+  });
+  try {
+    await manager.enableEnvironment("test", [{
+      envName: "test", accountName: "ourfree1", authMode: "apikey",
+      providerId: "our-free-model", providerAuthMethod: "none",
+      baseUrl: "https://our-free-model.invalid/v1",
+    }], async () => undefined);
+    const route = (await manager.listRoutes()).find((item) => item.accountName === "ourfree1");
+    assert(route);
+    const status = await fetch(`${service!.origin}/admin/routes/${encodeURIComponent(route.routeId)}/status`, {
+      headers: { authorization: `Bearer ${service!.adminToken}` },
+    });
+    assert.equal(status.status, 200);
+    assert.deepEqual(await status.json(), { routeId: route.routeId, hydrated: true });
+  } finally {
+    await service?.close();
+    await rm(stateDir, { recursive: true, force: true });
   }
 });
 

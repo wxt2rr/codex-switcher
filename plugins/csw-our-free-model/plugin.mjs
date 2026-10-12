@@ -4,6 +4,15 @@ import { createOurFreeModelProvider } from "./plugin-core.mjs";
 const provider = createOurFreeModelProvider();
 const rl = readline.createInterface({ input: process.stdin });
 
+let closing;
+async function close() {
+  if (!closing) closing = provider.close().catch(() => undefined);
+  await closing;
+}
+process.once("SIGINT", () => { void close().finally(() => process.exit(0)); });
+process.once("SIGTERM", () => { void close().finally(() => process.exit(0)); });
+rl.once("close", () => { void close().finally(() => process.exit(0)); });
+
 function send(id, result, error) {
   process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, ...(error ? { error: { code: -32000, message: error } } : { result }) })}\n`);
 }
@@ -20,10 +29,11 @@ rl.on("line", async (line) => {
   try {
     const params = request.params ?? {};
     if (request.method === "plugin.describe") return send(request.id, { kinds: ["provider"] });
-    if (request.method === "provider.describe") return send(request.id, { provider: provider.describe() });
+    if (request.method === "provider.describe") return send(request.id, { provider: await provider.describe() });
     if (request.method === "provider.models") return send(request.id, { models: await provider.models({ account: object(params.account, "account"), secret: params.secret, secretRef: params.secretRef, settings: object(params.settings ?? {}, "settings") }) });
     if (request.method === "provider.quota") return send(request.id, await provider.quota({ account: object(params.account, "account"), secret: params.secret, secretRef: params.secretRef, settings: object(params.settings ?? {}, "settings") }));
     if (request.method === "provider.request") return send(request.id, await provider.request({ account: object(params.account, "account"), secret: String(params.secret ?? ""), protocol: params.protocol, url: String(params.url ?? ""), method: String(params.method ?? "GET"), headers: object(params.headers ?? {}, "headers"), body: params.body, settings: object(params.settings ?? {}, "settings") }));
+    if (request.method === "provider.management") return send(request.id, await provider.management());
     if (request.method === "provider.refresh") return send(request.id, await provider.refresh(params));
     if (request.method === "provider.revoke") return send(request.id, await provider.revoke(params));
     throw new Error(`Unknown plugin method '${request.method}'`);

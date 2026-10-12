@@ -60,6 +60,34 @@ test("plugin provider secrets require the explicit secrets permission", async ()
   await assert.rejects(adapter.discoverModels({} as never, { accountId: "a", displayName: "A", authMethod: "api_key", secretRef: "secure:a", status: "active" }, "secret"), /secrets/);
 });
 
+test("managed no-auth providers ignore legacy account secrets", async () => {
+  const requests: PluginRpcRequest[] = [];
+  const transport: PluginTransport = {
+    async send(request) {
+      requests.push(request);
+      return { jsonrpc: "2.0", id: request.id, result: request.method === "provider.models" ? { models: [{ id: "managed-model" }] } : { status: 200 } };
+    },
+    async close() {},
+  };
+  const host = new PluginHost(transport, {
+    manifest: { id: "managed-plugin", name: "Managed Plugin", version: "1.0.0", apiVersion: 1, entry: "index.js", permissions: ["provider"] },
+  });
+  const adapter = createPluginProviderAdapter({
+    id: "managed-plugin",
+    displayName: "Managed Plugin",
+    authMethods: ["none"],
+    endpoints: [{ protocol: "responses", baseUrl: "http://127.0.0.1:1/v1", modelsPath: "/models" }],
+    host,
+  });
+  const account = { accountId: "legacy", displayName: "Legacy", authMethod: "api_key" as const, secretRef: "secure:legacy", status: "active" as const };
+  const models = await adapter.discoverModels({} as never, account, "stale-secret");
+  assert.equal(models[0]?.id, "managed-model");
+  assert.equal(requests[0]?.params?.secret, undefined);
+  assert.equal(adapter.authorizationHeaders(account, "stale-secret", "responses").get("authorization"), null);
+  await adapter.request?.({ account, secret: "stale-secret", protocol: "responses", url: "http://127.0.0.1:1/v1/responses", method: "POST", headers: {} });
+  assert.equal(requests.at(-1)?.params?.secret, "");
+});
+
 test("plugin provider adapter keeps login and signing compatible with built-in providers", () => {
   const { adapter } = fixture();
   const login = adapter.beginLogin("http://127.0.0.1/callback", 100);

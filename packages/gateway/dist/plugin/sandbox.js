@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
-import { dirname, isAbsolute, join, win32 } from "node:path";
+import { basename, dirname, isAbsolute, join, win32 } from "node:path";
 export class PluginSandboxUnavailableError extends Error {
     constructor(platform, detail) {
         super(`Plugin OS sandbox is unavailable on ${platform}: ${detail}`);
@@ -30,7 +30,7 @@ export function buildPluginLaunchSpec(manifest, cwd, options = {}) {
         }
         return {
             command: executable,
-            args: ["-p", buildMacSandboxProfile(manifest, cwd), nodeExecutable, entry],
+            args: ["-p", buildMacSandboxProfile(manifest, cwd, options.writablePaths ?? [], nodeExecutable), nodeExecutable, entry],
             cwd,
             sandbox: { mode, kind: "macos-sandbox-exec", executable },
         };
@@ -44,7 +44,7 @@ export function buildPluginLaunchSpec(manifest, cwd, options = {}) {
         }
         return {
             command: executable,
-            args: buildBubblewrapArgs(manifest, cwd, nodeExecutable, entry),
+            args: buildBubblewrapArgs(manifest, cwd, nodeExecutable, entry, options.writablePaths ?? []),
             cwd,
             sandbox: { mode, kind: "linux-bubblewrap", executable },
         };
@@ -101,8 +101,9 @@ function findWindowsSandboxExecutable() {
     ];
     return candidates.find(isAvailable);
 }
-function buildMacSandboxProfile(manifest, cwd) {
+function buildMacSandboxProfile(manifest, cwd, writablePaths = [], nodeExecutable = process.execPath) {
     const home = homedir();
+    const runtimeReadPaths = macRuntimeReadPaths(nodeExecutable);
     const lines = [
         "(version 1)",
         "(allow default)",
@@ -112,15 +113,33 @@ function buildMacSandboxProfile(manifest, cwd) {
         `(deny file-read* (subpath \"${escapeProfilePath(home)}\"))`,
         `(allow file-read-metadata (subpath \"${escapeProfilePath(home)}\"))`,
         `(allow file-read* (subpath \"${escapeProfilePath(cwd)}\"))`,
-        "(deny file-write*)",
+        ...runtimeReadPaths.map((path) => `(allow file-read* (subpath \"${escapeProfilePath(path)}\"))`),
+        ...(manifest.permissions.includes("filesystem") ? [] : ["(deny file-write*)"]),
     ];
     if (manifest.permissions.includes("filesystem"))
         lines.push(`(allow file-write* (subpath \"${escapeProfilePath(cwd)}\"))`);
+    if (manifest.permissions.includes("filesystem")) {
+        for (const writablePath of writablePaths) {
+            lines.push(`(allow file-read* (subpath \"${escapeProfilePath(writablePath)}\"))`);
+            lines.push(`(allow file-write* (subpath \"${escapeProfilePath(writablePath)}\"))`);
+        }
+    }
     if (!manifest.permissions.includes("network"))
         lines.push("(deny network-outbound)");
     return lines.join(" ");
 }
-function buildBubblewrapArgs(manifest, cwd, nodeExecutable, entry) {
+function macRuntimeReadPaths(nodeExecutable) {
+    // Electron's process.execPath lives at Contents/MacOS/<app> and its dynamic
+    // loader resolves Electron Framework plus V8 snapshots from sibling
+    // Contents/Frameworks and Contents/Resources directories. The home-directory
+    // deny rule above otherwise blocks those reads in packaged macOS builds.
+    const macosDir = dirname(nodeExecutable);
+    const contentsDir = dirname(macosDir);
+    if (basename(macosDir) !== "MacOS" || basename(contentsDir) !== "Contents")
+        return [];
+    return [macosDir, join(contentsDir, "Frameworks"), join(contentsDir, "Resources")];
+}
+function buildBubblewrapArgs(manifest, cwd, nodeExecutable, entry, writablePaths = []) {
     const args = [
         "--die-with-parent",
         "--new-session",
@@ -147,6 +166,10 @@ function buildBubblewrapArgs(manifest, cwd, nodeExecutable, entry) {
     }
     else {
         args.splice(args.lastIndexOf("--ro-bind"), 3, "--bind", cwd, cwd);
+    }
+    if (manifest.permissions.includes("filesystem")) {
+        for (const writablePath of writablePaths)
+            args.push("--bind", writablePath, writablePath);
     }
     if (!manifest.permissions.includes("network"))
         args.push("--unshare-net");
