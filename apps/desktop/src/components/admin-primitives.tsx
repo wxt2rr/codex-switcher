@@ -167,7 +167,7 @@ export function DataRow({
       className={cn(
         "transition-colors duration-100",
         active
-          ? "bg-sky-50/60"
+          ? "bg-emerald-50/60"
           : "odd:bg-white even:bg-[#fcfcfd] hover:bg-neutral-50/80",
       )}
     >

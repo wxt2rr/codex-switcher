@@ -169,7 +169,7 @@ export function GatewayAdminStructuredEditor({ value, onChange, language }: {
       </div>
       <div className="flex gap-2">
         <Input value={newId} onChange={(event) => setNewId(event.target.value)} placeholder={language === "zh" ? "新记录 ID" : "New record ID"} className="h-8 flex-1 bg-white text-[11px]" />
-        <button type="button" className="rounded-md bg-[#34C759] px-3 py-1.5 text-[11px] font-medium text-white disabled:opacity-50" disabled={!newId.trim()} onClick={addEntity}>{language === "zh" ? "新增" : "Add"}</button>
+        <button type="button" className="rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground disabled:opacity-50" disabled={!newId.trim()} onClick={addEntity}>{language === "zh" ? "新增" : "Add"}</button>
       </div>
       {entities.length ? entities.map(([id, entity]) => <div key={id} className="space-y-2 rounded-lg border border-black/[0.06] bg-white p-3">
         <div className="flex items-center justify-between"><span className="font-mono text-[11px] font-semibold text-neutral-800">{id}</span><span className="text-[10px] text-slate-400">{section === "agentBindings" ? "agent binding" : section}</span></div>

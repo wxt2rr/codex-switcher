@@ -248,7 +248,7 @@ export function AccountModelExposurePanel({
             const historicalBinding = !catalogFallback && Boolean(providerModelKey && !discovered && checked);
             return (
               <label key={model.id} className={cn("flex cursor-pointer items-start gap-3 rounded-xl border px-3.5 py-3 transition-colors", historicalBinding ? "border-amber-200 bg-amber-50/40" : checked ? "border-neutral-300 bg-neutral-50" : "border-black/[0.07] bg-white hover:bg-neutral-50")}>
-                <input type="checkbox" checked={checked} onChange={(event) => toggleModel(model.id, event.target.checked)} className="mt-1 size-4 accent-[#34C759]" />
+                <input type="checkbox" checked={checked} onChange={(event) => toggleModel(model.id, event.target.checked)} className="mt-1 size-4 accent-primary" />
                 <ProviderIcon
                   providerId={providerCatalog.find((item) => item.id === providerId)?.iconKey ?? providerId}
                   displayName={providerLabel(providerId, providerCatalog, zh, String(model.entry.provider_display_name ?? ""))}

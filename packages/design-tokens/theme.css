@@ -6,9 +6,10 @@
   --cs-muted: oklch(0.965 0 0);
   --cs-muted-foreground: oklch(0.495 0.005 85);
   --cs-border: oklch(0.9 0 0);
-  --cs-primary: oklch(0.623 0.214 259.815);
-  --cs-primary-foreground: oklch(0.99 0 0);
-  --cs-selected-background: oklch(0.951 0.026 236.824);
+  --cs-primary: rgb(52 199 89);
+  --cs-primary-foreground: rgb(255 255 255);
+  --cs-selected-background: rgb(220 252 231);
+  --cs-selected-foreground: rgb(22 101 52);
   --cs-selected-border: rgb(148 163 184 / 0.55);
   --cs-success: oklch(0.596 0.145 163.225);
   --cs-success-background: oklch(0.979 0.021 166.113);
@@ -32,7 +33,9 @@
   --cs-muted: oklch(0.22 0.01 250);
   --cs-muted-foreground: oklch(0.72 0 0);
   --cs-border: oklch(0.3 0.01 250);
-  --cs-primary: oklch(0.707 0.165 254.624);
-  --cs-primary-foreground: oklch(0.16 0 0);
+  --cs-primary: rgb(52 199 89);
+  --cs-primary-foreground: rgb(20 35 23);
+  --cs-selected-background: rgb(20 83 45 / 0.72);
+  --cs-selected-foreground: rgb(134 239 172);
   --cs-selected-border: rgb(100 116 139 / 0.8);
 }

@@ -232,7 +232,7 @@ export function OperationsPage({
             {autoUpdateStatus.message ? <span className="text-[11px] text-slate-400">{autoUpdateStatus.message}</span> : null}
             <div className="ml-auto flex gap-2">
               <button type="button" className="rounded-md bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 ring-1 ring-black/[0.06] disabled:opacity-50" disabled={!autoUpdateStatus.enabled || ["checking", "downloading", "installing"].includes(autoUpdateStatus.state)} onClick={onCheckForAutoUpdate}>{language === "zh" ? "检查并下载" : "Check & download"}</button>
-              <button type="button" className="rounded-md bg-[#34C759] px-3 py-1.5 text-[11px] font-medium text-white disabled:opacity-50" disabled={autoUpdateStatus.state !== "downloaded"} onClick={onInstallDownloadedUpdate}>{autoUpdateStatus.installMode === "manual" ? (language === "zh" ? "打开安装包" : "Open installer") : autoUpdateStatus.installMode === "unsupported" ? (language === "zh" ? "打开发布页" : "Open release page") : (language === "zh" ? "安装并重启" : "Install & restart")}</button>
+              <button type="button" className="rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground disabled:opacity-50" disabled={autoUpdateStatus.state !== "downloaded"} onClick={onInstallDownloadedUpdate}>{autoUpdateStatus.installMode === "manual" ? (language === "zh" ? "打开安装包" : "Open installer") : autoUpdateStatus.installMode === "unsupported" ? (language === "zh" ? "打开发布页" : "Open release page") : (language === "zh" ? "安装并重启" : "Install & restart")}</button>
             </div>
           </div>
         </OperationCard>
@@ -287,7 +287,7 @@ export function OperationsPage({
               aria-checked={envHistoryRetention.enabled}
               disabled={envHistoryRetentionSaving}
               onClick={() => onEnvHistoryRetentionChange({ ...envHistoryRetention, enabled: !envHistoryRetention.enabled })}
-              className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:cursor-wait disabled:opacity-60 ${envHistoryRetention.enabled ? "bg-[#34C759]" : "bg-[#d1d1d6] dark:bg-slate-700"}`}
+              className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:cursor-wait disabled:opacity-60 ${envHistoryRetention.enabled ? "bg-primary" : "bg-[#d1d1d6] dark:bg-slate-700"}`}
             >
               <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${envHistoryRetention.enabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
             </button>
@@ -318,7 +318,7 @@ export function OperationsPage({
               aria-checked={generatedImageRecovery.enabled}
               disabled={generatedImageRecoverySaving}
               onClick={() => onGeneratedImageRecoveryChange(!generatedImageRecovery.enabled)}
-              className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:cursor-wait disabled:opacity-60 ${generatedImageRecovery.enabled ? "bg-[#34C759]" : "bg-[#d1d1d6] dark:bg-slate-700"}`}
+              className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:cursor-wait disabled:opacity-60 ${generatedImageRecovery.enabled ? "bg-primary" : "bg-[#d1d1d6] dark:bg-slate-700"}`}
             >
               <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${generatedImageRecovery.enabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
             </button>
@@ -353,7 +353,7 @@ export function OperationsPage({
                 }
                 onAppEnvironmentBadgesChange(!appEnvironmentBadges.enabled);
               }}
-              className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:cursor-not-allowed disabled:opacity-50 ${appEnvironmentBadges.enabled ? "bg-[#34C759]" : "bg-[#d1d1d6] dark:bg-slate-700"}`}
+              className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:cursor-not-allowed disabled:opacity-50 ${appEnvironmentBadges.enabled ? "bg-primary" : "bg-[#d1d1d6] dark:bg-slate-700"}`}
             >
               <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${appEnvironmentBadges.enabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
             </button>
@@ -385,7 +385,7 @@ export function OperationsPage({
                       aria-checked={enabled}
                       disabled={appPresenceSaving || !appPresence.supported || isLastVisibleIcon}
                       onClick={() => onAppPresenceChange({ ...appPresence, [key]: !enabled })}
-                      className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:cursor-not-allowed disabled:opacity-50 ${enabled ? "bg-[#34C759]" : "bg-[#d1d1d6] dark:bg-slate-700"}`}
+                      className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:cursor-not-allowed disabled:opacity-50 ${enabled ? "bg-primary" : "bg-[#d1d1d6] dark:bg-slate-700"}`}
                     >
                       <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${enabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
                     </button>
@@ -413,7 +413,7 @@ export function OperationsPage({
               <div className="flex items-center gap-3 rounded-lg bg-[#f7f8fa] px-4 py-3">
                 <div className="min-w-0 flex-1"><div className="text-[12px] font-medium text-neutral-800">{language === "zh" ? "自动恢复对话" : language === "ja" ? "会話を自動再開" : "Auto resume"}</div><div className="mt-0.5 text-[11px] text-slate-400">{language === "zh" ? "启动CLI时自动恢复最近第N次对话" : language === "ja" ? "CLI 起動時に直近 N 番目の会話を自動再開" : "Resume the Nth most recent conversation when launching CLI"}</div></div>
                 {cliAutoResume.enabled ? <label className="flex items-center gap-1.5 text-[11px] text-slate-500"><span>{language === "zh" ? "第" : "#"}</span><Input type="number" min={1} step={1} value={sessionNumberDraft} onChange={(event) => setSessionNumberDraft(event.target.value)} onBlur={commitSessionNumber} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} disabled={autoResumeSaving} className="h-8 w-14 rounded-md bg-[#f7f8fa] px-2 text-center tabular-nums" /><span>{language === "zh" ? "个" : ""}</span></label> : null}
-                <button type="button" role="switch" aria-label={language === "zh" ? "启用 CLI 自动恢复对话" : "Enable CLI auto resume"} aria-checked={cliAutoResume.enabled} disabled={autoResumeSaving} onClick={() => onCliAutoResumeChange({ ...cliAutoResume, enabled: !cliAutoResume.enabled })} className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:cursor-wait disabled:opacity-60 ${cliAutoResume.enabled ? "bg-[#34C759]" : "bg-[#d1d1d6] dark:bg-slate-700"}`}><span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${cliAutoResume.enabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} /></button>
+                <button type="button" role="switch" aria-label={language === "zh" ? "启用 CLI 自动恢复对话" : "Enable CLI auto resume"} aria-checked={cliAutoResume.enabled} disabled={autoResumeSaving} onClick={() => onCliAutoResumeChange({ ...cliAutoResume, enabled: !cliAutoResume.enabled })} className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:cursor-wait disabled:opacity-60 ${cliAutoResume.enabled ? "bg-primary" : "bg-[#d1d1d6] dark:bg-slate-700"}`}><span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${cliAutoResume.enabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} /></button>
               </div>
             </div>
           </div>
@@ -455,7 +455,7 @@ export function OperationsPage({
                 aria-checked={routerLifecycle.stopOnAppQuit}
                 disabled={routerLifecycleSaving}
                 onClick={() => onRouterLifecycleChange({ stopOnAppQuit: !routerLifecycle.stopOnAppQuit })}
-                className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:cursor-wait disabled:opacity-60 ${routerLifecycle.stopOnAppQuit ? "bg-[#34C759]" : "bg-[#d1d1d6] dark:bg-slate-700"}`}
+                className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:cursor-wait disabled:opacity-60 ${routerLifecycle.stopOnAppQuit ? "bg-primary" : "bg-[#d1d1d6] dark:bg-slate-700"}`}
               >
                 <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${routerLifecycle.stopOnAppQuit ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
               </button>
@@ -479,7 +479,7 @@ export function OperationsPage({
               aria-checked={launchAtLogin.enabled}
               disabled={launchAtLoginSaving || !launchAtLogin.supported}
               onClick={() => onLaunchAtLoginChange(!launchAtLogin.enabled)}
-              className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:cursor-not-allowed disabled:opacity-50 ${launchAtLogin.enabled ? "bg-[#34C759]" : "bg-[#d1d1d6] dark:bg-slate-700"}`}
+              className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:cursor-not-allowed disabled:opacity-50 ${launchAtLogin.enabled ? "bg-primary" : "bg-[#d1d1d6] dark:bg-slate-700"}`}
             >
               <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${launchAtLogin.enabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
             </button>

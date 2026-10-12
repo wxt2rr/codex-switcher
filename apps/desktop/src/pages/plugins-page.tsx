@@ -239,7 +239,7 @@ export function PluginsPage({
 }
 
 function InstalledPluginCard({ plugin, update, zh, busy, onToggle, onSelect, onRollback, onRemove, onUpdate }: { plugin: ProviderPluginSnapshot; update?: ProviderPluginMarketEntry; zh: boolean; busy: boolean; onToggle: () => void; onSelect: () => void; onRollback: () => void; onRemove: () => void; onUpdate: (entry: ProviderPluginMarketEntry) => void }) {
-  return <ListCard className="group cursor-pointer transition-[border-color,box-shadow] hover:border-sky-200 hover:shadow-[0_8px_24px_rgba(15,23,42,0.06)]" onClick={onSelect}>
+  return <ListCard className="group cursor-pointer transition-[border-color,box-shadow] hover:border-emerald-200 hover:shadow-[0_8px_24px_rgba(15,23,42,0.06)]" onClick={onSelect}>
     <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
       <div className="flex min-w-0 items-start gap-3">
         <PluginIcon plugin={plugin} />
@@ -261,7 +261,7 @@ function InstalledPluginCard({ plugin, update, zh, busy, onToggle, onSelect, onR
 }
 
 function MarketPluginCard({ plugin, zh, busy, onInstall, onSelect }: { plugin: ProviderPluginMarketEntry; zh: boolean; busy: boolean; onInstall: () => void; onSelect: () => void }) {
-  return <ListCard className="cursor-pointer transition-[border-color,box-shadow] hover:border-sky-200 hover:shadow-[0_8px_24px_rgba(15,23,42,0.06)]" onClick={onSelect}>
+  return <ListCard className="cursor-pointer transition-[border-color,box-shadow] hover:border-emerald-200 hover:shadow-[0_8px_24px_rgba(15,23,42,0.06)]" onClick={onSelect}>
     <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between"><div className="flex min-w-0 items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 dark:bg-[#202733]"><PackageCheck className="size-5" /></div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-[15px] font-semibold text-neutral-900 dark:text-white">{plugin.name}</h3><SoftBadge label={`v${plugin.version}`} /><SoftBadge label={trustLabel(plugin.trust, zh)} tone={plugin.trust === "official" || plugin.trust === "verified" ? "success" : "neutral"} /></div><div className="mt-1 font-mono text-[11px] text-slate-400">{plugin.id}</div><p className="mt-2 max-w-2xl text-[12px] leading-5 text-slate-500">{plugin.description ?? (zh ? "暂无插件描述" : "No description")}</p><div className="mt-2 flex flex-wrap gap-1.5">{plugin.permissions.map((permission) => <SoftBadge key={permission} label={permission} />)}</div></div></div><Button className="h-8 shrink-0 rounded-lg px-3 text-[12px]" onClick={(event) => { event.stopPropagation(); onInstall(); }} disabled={busy || !plugin.source}><Download className="mr-1.5 size-3.5" />{zh ? "安装" : "Install"}</Button></div>
   </ListCard>;
 }

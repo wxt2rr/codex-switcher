@@ -569,7 +569,7 @@ function CodexEnvironmentBinding({ scope, language }: { scope: SkillScope; langu
               {zh ? `主存储 · ${scope.skills.length} 个 Skill` : ja ? `メインストレージ · ${scope.skills.length} Skill` : `Primary store · ${scope.skills.length} skills`}
             </div>
           </div>
-        <label className="motion-toggle relative inline-flex h-[22px] w-[38px] shrink-0 cursor-default items-center rounded-full bg-[#34C759]" title={zh ? "Codex 环境默认开启" : "Codex environments are always enabled"}>
+        <label className="motion-toggle relative inline-flex h-[22px] w-[38px] shrink-0 cursor-default items-center rounded-full bg-primary" title={zh ? "Codex 环境默认开启" : "Codex environments are always enabled"}>
           <input type="checkbox" checked disabled readOnly aria-label={`${scope.name} ${zh ? "默认开启" : "always enabled"}`} className="peer sr-only" />
           <span className="motion-toggle-thumb absolute left-0 top-[2px] size-[18px] translate-x-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)]" />
         </label>
@@ -593,7 +593,7 @@ function ProviderBindingEditor({ binding, draft, codexScopes, language, onChange
         <div className="flex shrink-0 items-center gap-2">
           {onDelete ? <Button type="button" variant="ghost" size="icon" className="size-8 text-slate-400 hover:bg-rose-50 hover:text-rose-600" onClick={onDelete}
             title={zh ? "删除自定义服务商" : "Delete custom provider"} aria-label={zh ? `删除 ${binding.name}` : `Delete ${binding.name}`}><Trash2 className="size-4" /></Button> : null}
-          <label className={`motion-toggle relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer items-center rounded-full ${value.enabled ? "bg-[#34C759]" : "bg-[#d1d1d6] dark:bg-slate-700"}`}>
+          <label className={`motion-toggle relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer items-center rounded-full ${value.enabled ? "bg-primary" : "bg-[#d1d1d6] dark:bg-slate-700"}`}>
             <input type="checkbox" checked={value.enabled} onChange={(event) => onChange({ enabled: event.target.checked,
               sourceEnv: event.target.checked ? value.sourceEnv ?? codexScopes[0]?.envName : value.sourceEnv })} className="peer sr-only" />
             <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${value.enabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />

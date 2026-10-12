@@ -97,10 +97,12 @@
   --background: oklch(0.975 0.004 85);
   --foreground: oklch(0.18 0 0);
 
-  /* Primary: codex-switcher blue */
-  --primary: oklch(0.623 0.214 259.815);
-  --primary-foreground: oklch(0.99 0 0);
-  --ring: oklch(0.623 0.214 259.815);
+  /* Primary theme color: Apple green */
+  --primary: var(--cs-primary);
+  --primary-foreground: var(--cs-primary-foreground);
+  --ring: var(--cs-primary);
+  --selected-control-background: var(--cs-selected-background);
+  --selected-control-foreground: var(--cs-selected-foreground);
 
   --secondary: oklch(0.965 0 0);
   --secondary-foreground: oklch(0.24 0 0);
@@ -125,9 +127,9 @@
 .dark {
   --background: oklch(0.16 0.01 250);
   --foreground: oklch(0.96 0 0);
-  --primary: oklch(0.707 0.165 254.624);
-  --primary-foreground: oklch(0.16 0 0);
-  --ring: oklch(0.707 0.165 254.624);
+  --primary: var(--cs-primary);
+  --primary-foreground: var(--cs-primary-foreground);
+  --ring: var(--cs-primary);
   --secondary: oklch(0.24 0.01 250);
   --secondary-foreground: oklch(0.94 0 0);
   --muted: oklch(0.22 0.01 250);
@@ -496,8 +498,8 @@ body {
 /* Shared selected state for navigation, segmented controls, and active targets. */
 .ui-selected-control {
   border-color: var(--selected-border-color);
-  background-color: rgb(224 242 254);
-  color: rgb(3 105 161);
+  background-color: var(--selected-control-background);
+  color: var(--selected-control-foreground);
 }
 
 .page-scroll-gutter {
@@ -530,8 +532,8 @@ body {
 }
 
 .dark .ui-selected-control {
-  background-color: rgb(8 47 73 / 0.72);
-  color: rgb(125 211 252);
+  background-color: var(--selected-control-background);
+  color: var(--selected-control-foreground);
 }
 
 /* ===== Selection ===== */

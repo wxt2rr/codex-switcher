@@ -913,7 +913,7 @@ export function AccountsPage({
                 </div>
                 <button type="button" role="switch" aria-checked={compatibilityEnabled} disabled={compatibilityBusy}
                   onClick={toggleCompatibility}
-                  className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:opacity-60 ${compatibilityEnabled ? "bg-[#34C759]" : "bg-[#d1d1d6]"}`}>
+                  className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:opacity-60 ${compatibilityEnabled ? "bg-primary" : "bg-[#d1d1d6]"}`}>
                   <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${compatibilityEnabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
                 </button>
               </div>
@@ -1656,7 +1656,7 @@ function SoftBadge({ label, tone, title }: { label: string; tone: "brand" | "neu
     <span
       className={cn(
         "inline-flex h-5 items-center rounded-md px-2 text-[10px] font-medium",
-        tone === "brand" ? "bg-sky-50 text-sky-700" : "bg-slate-100 text-slate-500",
+        tone === "brand" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500",
       )}
       title={title}
     >

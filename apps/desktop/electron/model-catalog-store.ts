@@ -414,7 +414,7 @@ export function normalizeCustomModelInput(value: Record<string, unknown>): Model
       throw new Error(`Model ${field} must be a positive number`);
     }
   }
-  return {
+  const normalized: ModelCatalogEntry = {
     default_reasoning_level: "medium",
     supported_reasoning_levels: [
       { effort: "low", description: "Fast responses" },
@@ -447,6 +447,14 @@ export function normalizeCustomModelInput(value: Record<string, unknown>): Model
     slug,
     display_name: displayName,
   };
+  // A hand-authored catalog entry has no discovery response to establish a
+  // narrower capability set. Keep image input enabled when the field is
+  // missing or accidentally saved as an empty array; discovered entries that
+  // explicitly report text-only continue to retain that capability.
+  if (!Array.isArray(normalized.input_modalities) || normalized.input_modalities.length === 0) {
+    normalized.input_modalities = ["text", "image"];
+  }
+  return normalized;
 }
 
 /**

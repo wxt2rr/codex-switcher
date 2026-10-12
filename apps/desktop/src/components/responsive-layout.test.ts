@@ -196,9 +196,9 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.match(css, /\.responsive-record-row:focus-within/);
 });
 
-test("selected controls share the environment route blue treatment", () => {
+test("selected controls share the green theme treatment", () => {
   assert.match(css, /--selected-border-color:\s*rgb\(148 163 184 \/ 0\.55\)/);
-  assert.match(css, /\.ui-selected-control\s*\{[^}]*border-color:\s*var\(--selected-border-color\);[^}]*background-color:\s*rgb\(224 242 254\);[^}]*color:\s*rgb\(3 105 161\);/s);
+  assert.match(css, /\.ui-selected-control\s*\{[^}]*border-color:\s*var\(--selected-border-color\);[^}]*background-color:\s*var\(--selected-control-background\);[^}]*color:\s*var\(--selected-control-foreground\);/s);
   assert.match(css, /\.management-list-card:hover\s*\{[^}]*border-color:\s*var\(--selected-border-color\)/s);
   assert.match(primitives, /active\s*\?\s*"ui-selected-control"/);
   assert.match(accounts, /active \? "ui-selected-control"/);
@@ -441,7 +441,7 @@ test("system tools use clear navigation and page naming", () => {
   assert.doesNotMatch(desktopShell, /Languages/);
   assert.doesNotMatch(desktopShell, /languageOptions/);
   assert.match(operations, /Codex 安装/);
-  assert.match(operations, /bg-\[#34C759\]/);
+  assert.match(operations, /bg-primary/);
   assert.match(operations, /absolute left-0 top-\[2px\]/);
   assert.match(operations, /iconUrl: terminal\.iconUrl/);
   assert.match(operations, /openOnHover=\{false\}/);
@@ -477,11 +477,11 @@ test("usage analytics uses semantic colors and destructive actions stay red", ()
   assert.match(environments, /variant="destructive"/);
   assert.match(accounts, /text-rose-600 hover:bg-rose-50/);
   assert.match(models, /tone="danger"/);
-  assert.match(primitives, /bg-sky-50 text-sky-700/);
+  assert.match(primitives, /bg-emerald-50 text-emerald-700/);
   assert.match(primitives, /bg-emerald-50 text-emerald-700/);
   assert.match(primitives, /bg-amber-50 text-amber-700/);
   assert.match(css, /--color-rose-600: oklch\(0\.586 0\.253 17\.585\)/);
-  assert.match(css, /--primary: oklch\(0\.623 0\.214 259\.815\)/);
+  assert.match(css, /--primary: var\(--cs-primary\)/);
 });
 
 test("usage visualizations draw in once without replaying on background refresh", () => {

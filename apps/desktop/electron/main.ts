@@ -175,7 +175,18 @@ function resolveUpdateRollbackTarget(): string {
 function installDownloadedUpdatePackage(downloaded: import("./github-update.js").DownloadedUpdate): UpdateInstallResult {
   const mode = resolveUpdateInstallMode(downloaded.candidate.artifact.kind, process.platform);
   if (mode === "manual") {
-    void shell.openPath(downloaded.path);
+    // macOS packages are installed through Finder. Wait until Electron has
+    // handed the DMG/ZIP to the system before quitting so the current app
+    // does not remain open after the installer is launched.
+    void shell.openPath(downloaded.path).then((error) => {
+      if (error) {
+        console.warn(`Failed to open downloaded update: ${error}`);
+        return;
+      }
+      app.quit();
+    }).catch((error) => {
+      console.warn("Failed to open downloaded update", error);
+    });
     const message = downloaded.candidate.artifact.kind === "mac-dmg"
       ? "已打开 DMG，请将新版本拖入 Applications 替换旧版本"
       : "更新包已下载，请打开安装包完成更新";

@@ -14,11 +14,13 @@ import {
   SoftBadge,
 } from "../components/account-list-primitives";
 import { ConfirmDialog, SidePanel } from "../components/admin-primitives";
-import { Field, Input, Select, Textarea } from "../components/form-primitives";
+import { Field, Select, Textarea } from "../components/form-primitives";
 import { Button } from "../components/ui/button";
 import { ProviderIcon } from "../components/provider-icon";
+import { ModelCatalogForm } from "../components/model-catalog-form";
 import {
   createDefaultModelEntry,
+  normalizeModelEntryForEditor,
   parseSingleModelCatalog,
   serializeSingleModelCatalog,
 } from "../model-editor";
@@ -185,7 +187,7 @@ export function ModelsPage({
   }
 
   function openEditor(model?: CustomModelRecord) {
-    const entry = model?.entry ?? createDefaultModelEntry();
+    const entry = normalizeModelEntryForEditor(model?.entry ?? createDefaultModelEntry());
     setActiveModelId(model?.id);
     setDraft(entry);
     setJsonDraft(serializeSingleModelCatalog(entry));
@@ -206,7 +208,7 @@ export function ModelsPage({
   function changeMode(nextMode: "form" | "json") {
     if (nextMode === "form") {
       try {
-        setDraft(parseSingleModelCatalog(jsonDraft));
+        setDraft(normalizeModelEntryForEditor(parseSingleModelCatalog(jsonDraft)));
       } catch (error) {
         onError(error);
         return;
@@ -345,10 +347,7 @@ export function ModelsPage({
           <button type="button" onClick={() => changeMode("json")} aria-pressed={mode === "json"} className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border text-[12px] ${mode === "json" ? "ui-selected-control" : "border-transparent text-slate-500"}`}><Braces className="size-3.5" />JSON</button>
         </div>
         {mode === "form" ? (
-          <div className="space-y-4">
-            <Field label={zh ? "模型标识（slug）" : "Model slug"}><Input value={draft.slug} onChange={(event) => updateDraft({ ...draft, slug: event.target.value })} placeholder="mimo-v2.5-pro" /></Field>
-            <Field label={zh ? "展示名称" : "Display name"}><Input value={draft.display_name} onChange={(event) => updateDraft({ ...draft, display_name: event.target.value })} placeholder="MiMo V2.5 Pro" /></Field>
-          </div>
+          <ModelCatalogForm value={draft} language={language} onChange={updateDraft} />
         ) : (
           <Field label="model-catalogs.json"><Textarea className="min-h-[420px] font-mono text-[12px] leading-5" value={jsonDraft} onChange={(event) => setJsonDraft(event.target.value)} spellCheck={false} /></Field>
         )}

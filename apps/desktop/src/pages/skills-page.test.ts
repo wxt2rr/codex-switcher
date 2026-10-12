@@ -49,7 +49,7 @@ test("provider sync is global and each provider selects one Codex source environ
   assert.match(source, /data-codex-environment=\{scope\.envName\}/);
   assert.match(source, /scope\.path/);
   assert.match(source, /checked disabled readOnly/);
-  assert.match(source, /bg-\[#34C759\]/);
+  assert.match(source, /bg-primary/);
   assert.doesNotMatch(source, /data-codex-environment=\{scope\.envName\}[\s\S]{0,500}<PackageOpen/);
   assert.match(source, /Primary store · \$\{scope\.skills\.length\} skills/);
   assert.match(source, /Source environment/);

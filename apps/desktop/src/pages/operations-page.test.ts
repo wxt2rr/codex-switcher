@@ -9,7 +9,7 @@ test("settings page exposes the opt-in environment badge flow", async () => {
   assert.match(source, /Codex App 环境标识/);
   assert.match(source, /需要辅助功能权限/);
   assert.match(source, /不会自动重启/);
-  assert.match(source, /bg-\[#34C759\]/);
+  assert.match(source, /bg-primary/);
 });
 
 test("permission flow rechecks after returning from System Settings", async () => {

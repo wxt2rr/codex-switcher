@@ -149,7 +149,7 @@ export function SoftBadge({
     <span
       className={cn(
         "inline-flex h-6 items-center rounded-md px-2.5 text-[13px] font-medium",
-        tone === "brand" && "bg-sky-50 text-sky-700 dark:bg-sky-950/50 dark:text-sky-300",
+        tone === "brand" && "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300",
         tone === "success" && "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300",
         tone === "warn" && "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300",
         tone === "neutral" && "bg-slate-100 text-slate-500 dark:bg-[#202733] dark:text-slate-300",

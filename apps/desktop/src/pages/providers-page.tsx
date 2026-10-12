@@ -111,14 +111,16 @@ export function ProvidersPage({
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
                             <h2 className="truncate text-[14px] font-semibold text-neutral-950 dark:text-white">{item.displayName}</h2>
-                            <SoftBadge label={item.authMethods.includes("subscription") ? (zh ? "订阅" : "Subscription") : item.category === "local" ? (zh ? "本地" : "Local") : (zh ? "API" : "API")} />
+                            <span className="inline-flex h-5 items-center rounded-md bg-slate-100/80 px-2 text-[10px] font-medium text-slate-500 dark:bg-[#202733]/80 dark:text-slate-400">
+                              {item.authMethods.includes("subscription") ? (zh ? "订阅" : "Subscription") : item.category === "local" ? (zh ? "本地" : "Local") : (zh ? "API" : "API")}
+                            </span>
                           </div>
                           <p className="mt-1 truncate font-mono text-[11px] text-slate-400">{item.id}</p>
-                          <div className="mt-3 flex flex-wrap gap-1.5">
-                            <SoftBadge label={zh ? "Codex: Responses" : "Codex: Responses"} tone="brand" />
-                            {item.protocols.map((protocol) => <SoftBadge key={protocol} label={`${zh ? "上游: " : "Upstream: "}${protocolLabel(protocol)}`} />)}
-                            {item.capabilities.modelDiscovery ? <SoftBadge label={zh ? "自动发现模型" : "Model discovery"} /> : null}
-                            {conversionLabel(item, zh) ? <SoftBadge label={conversionLabel(item, zh)!} tone={item.capabilities.protocolConversion ? "success" : "neutral"} /> : null}
+                          <div className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] leading-4 text-slate-400">
+                            <span className="font-medium text-slate-500 dark:text-slate-300">Responses</span>
+                            {item.protocols.map((protocol) => <span key={protocol}>{zh ? "上游" : "Upstream"}: {protocolLabel(protocol)}</span>)}
+                            {item.capabilities.modelDiscovery ? <span>{zh ? "自动发现模型" : "Model discovery"}</span> : null}
+                            {conversionLabel(item, zh) ? <span className={item.capabilities.protocolConversion ? "font-medium text-emerald-600/80 dark:text-emerald-400/80" : undefined}>{conversionLabel(item, zh)}</span> : null}
                           </div>
                           <div className="mt-4 flex items-center justify-between gap-2">
                             <span className="text-[11px] text-slate-400">{accountCount} {zh ? "个账号" : "accounts"}</span>
