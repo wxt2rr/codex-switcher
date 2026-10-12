@@ -165,6 +165,25 @@ export function App() {
     }
   }, [view]);
 
+  // Provider plugins can be installed or activated while the app is open.
+  // Refresh the shared catalog whenever a view that consumes it becomes
+  // visible so the Accounts provider picker does not keep a stale startup
+  // snapshot after returning from the Plugins page.
+  useEffect(() => {
+    if (view !== "accounts" && view !== "models" && view !== "providers") return;
+    let active = true;
+    void bridge.listProviderCatalog()
+      .then((next) => {
+        if (active) setProviderCatalog(next);
+      })
+      .catch((error) => {
+        if (active) setErrorMessage(error);
+      });
+    return () => {
+      active = false;
+    };
+  }, [view]);
+
   useEffect(() => {
     if (view !== "environments" || !overview) return;
     const refreshPools = () => bridge.listAccountPools().then(setAccountPools).catch(setErrorMessage);
