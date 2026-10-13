@@ -169,26 +169,29 @@ export function PluginsPage({
         searchPlaceholder={zh ? "搜索插件、服务商或能力" : "Search plugins, providers, or capabilities"}
         onSearchChange={setQuery}
         actions={(
-          <div className="flex items-center gap-2">
-            <Button variant="outline" className="h-8 rounded-lg px-3 text-[12px]" onClick={() => setLocalOpen(true)}>
-              <FileCode2 className="mr-1.5 size-3.5" />{zh ? "本地安装" : "Install"}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <span className="hidden text-[11px] text-slate-400 xl:inline">{(tab === "installed" ? filteredInstalled.length : filteredMarket.length)} / {tab === "installed" ? installed.length : market.length}</span>
+            <Button size="sm" variant="outline" onClick={() => setLocalOpen(true)}>
+              <FileCode2 className="size-3.5" />{zh ? "本地安装" : "Install"}
             </Button>
-            <Button variant="outline" className="h-8 rounded-lg px-3 text-[12px]" onClick={() => void refreshMarket()} disabled={busyId === "market"}>
-              <RefreshCw className={cn("mr-1.5 size-3.5", busyId === "market" && "animate-spin")} />{zh ? "刷新市场" : "Refresh market"}
+            <Button size="sm" variant="outline" onClick={() => void refreshMarket()} disabled={busyId === "market"}>
+              <RefreshCw className={cn("size-3.5", busyId === "market" && "animate-spin")} />{zh ? "刷新市场" : "Refresh market"}
             </Button>
           </div>
         )}
       />
 
-      <div className="flex items-center gap-1 rounded-xl bg-[#eef1f5] p-1 dark:bg-[#1b2129]" role="tablist">
-        {(["installed", "market"] as const).map((item) => (
-          <button key={item} type="button" role="tab" aria-selected={tab === item} onClick={() => setTab(item)}
-            className={cn("rounded-lg px-3 py-1.5 text-[12px] font-medium transition-colors", tab === item ? "bg-white text-neutral-900 shadow-sm dark:bg-[#2a333f] dark:text-white" : "text-slate-500 hover:text-neutral-900 dark:text-slate-400 dark:hover:text-white")}>
-            {item === "installed" ? (zh ? "已安装" : "Installed") : (zh ? "插件市场" : "Market")}
-          </button>
-        ))}
+      <div className="flex items-center justify-between gap-3" role="tablist">
+        <div className="inline-flex items-center gap-1 rounded-lg bg-[#eef1f5] p-1 dark:bg-[#1b2129]">
+          {(["installed", "market"] as const).map((item) => (
+            <button key={item} type="button" role="tab" aria-selected={tab === item} onClick={() => setTab(item)}
+              className={cn("rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors", tab === item ? "bg-white text-neutral-900 shadow-sm dark:bg-[#2a333f] dark:text-white" : "text-slate-500 hover:text-neutral-900 dark:text-slate-400 dark:hover:text-white")}>
+              {item === "installed" ? (zh ? "已安装" : "Installed") : (zh ? "插件市场" : "Market")}
+            </button>
+          ))}
+        </div>
         {tab === "market" ? (
-          <div className="ml-auto hidden items-center gap-2 md:flex">
+          <div className="hidden items-center gap-2 md:flex">
             <Input value={marketUrl} onChange={(event) => setMarketUrl(event.target.value)} placeholder={zh ? "市场索引 URL（可选）" : "Market index URL (optional)"} className="h-7 w-[250px] rounded-lg bg-white/70 text-[11px] dark:bg-[#222a34]" />
           </div>
         ) : null}
@@ -196,17 +199,21 @@ export function PluginsPage({
 
       {loading ? <ListLoadingState rows={4} /> : tab === "installed" ? (
         <ListStack>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
           {filteredInstalled.length ? filteredInstalled.map((plugin) => (
             <InstalledPluginCard key={plugin.id} plugin={plugin} zh={zh} busy={busyId === plugin.id}
               update={latestMarketById.get(plugin.id) && comparePluginVersions(latestMarketById.get(plugin.id)!.version, plugin.version) > 0 ? latestMarketById.get(plugin.id) : undefined}
               onToggle={() => void togglePlugin(plugin)} onSelect={() => setSelected(plugin)} onRollback={() => setPendingAction({ kind: "rollback", plugin })} onRemove={() => setPendingAction({ kind: "remove", plugin })} onUpdate={(entry) => setPendingInstall(entry)} />
-          )) : <EmptyState label={zh ? "还没有安装插件" : "No plugins installed"} />}
+          )) : <div className="col-span-full"><EmptyState label={zh ? "还没有安装插件" : "No plugins installed"} /></div>}
+          </div>
         </ListStack>
       ) : (
         <ListStack>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
           {filteredMarket.length ? filteredMarket.map((plugin) => (
             <MarketPluginCard key={`${plugin.id}@${plugin.version}`} plugin={plugin} zh={zh} busy={busyId === plugin.id} onInstall={() => setPendingInstall(plugin)} onSelect={() => setSelected({ ...plugin, active: false, permissions: plugin.permissions, kind: plugin.kind })} />
-          )) : <EmptyState label={zh ? "市场为空，请先刷新索引" : "The market is empty; refresh an index first"} />}
+          )) : <div className="col-span-full"><EmptyState label={zh ? "市场为空，请先刷新索引" : "The market is empty; refresh an index first"} /></div>}
+          </div>
         </ListStack>
       )}
 
@@ -239,30 +246,38 @@ export function PluginsPage({
 }
 
 function InstalledPluginCard({ plugin, update, zh, busy, onToggle, onSelect, onRollback, onRemove, onUpdate }: { plugin: ProviderPluginSnapshot; update?: ProviderPluginMarketEntry; zh: boolean; busy: boolean; onToggle: () => void; onSelect: () => void; onRollback: () => void; onRemove: () => void; onUpdate: (entry: ProviderPluginMarketEntry) => void }) {
-  return <ListCard className="group cursor-pointer transition-[border-color,box-shadow] hover:border-emerald-200 hover:shadow-[0_8px_24px_rgba(15,23,42,0.06)]" onClick={onSelect}>
-    <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-      <div className="flex min-w-0 items-start gap-3">
-        <PluginIcon plugin={plugin} />
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-[15px] font-semibold text-neutral-900 dark:text-white">{plugin.name}</h3><SoftBadge label={`v${plugin.version}`} /><SoftBadge label={trustLabel(plugin.trust, zh)} tone={plugin.trust === "official" || plugin.trust === "verified" ? "success" : "neutral"} /></div>
-          <div className="mt-1 font-mono text-[11px] text-slate-400">{plugin.id}</div>
-          {plugin.description ? <p className="mt-2 max-w-2xl text-[12px] leading-5 text-slate-500">{plugin.description}</p> : null}
-          <div className="mt-2 flex flex-wrap gap-1.5"><SoftBadge label={plugin.kind?.includes("provider") || plugin.permissions.includes("provider") ? (zh ? "Provider" : "Provider") : ""} /><SoftBadge label={plugin.kind?.includes("middleware") || plugin.permissions.includes("middleware") ? "Middleware" : ""} />{plugin.error ? <SoftBadge label={zh ? "启动失败" : "Activation failed"} tone="warn" /> : null}</div>
-        </div>
+  return <ListCard className="group flex min-h-[208px] cursor-pointer flex-col gap-3 p-4 transition-[border-color,box-shadow] hover:border-emerald-200 hover:shadow-[0_8px_24px_rgba(15,23,42,0.06)]" onClick={onSelect}>
+    <div className="flex min-w-0 items-start gap-3">
+      <PluginIcon plugin={plugin} />
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-[14px] font-semibold text-neutral-900 dark:text-white">{plugin.name}</h3><SoftBadge label={`v${plugin.version}`} /><SoftBadge label={trustLabel(plugin.trust, zh)} tone={plugin.trust === "official" || plugin.trust === "verified" ? "success" : "neutral"} /></div>
+        <div className="mt-1 truncate font-mono text-[11px] text-slate-400">{plugin.id}</div>
       </div>
-      <div className="flex shrink-0 items-center gap-2" onClick={(event) => event.stopPropagation()}>
-        {update?.source ? <Button variant="outline" className="h-8 rounded-lg px-3 text-[12px]" onClick={() => onUpdate(update)} disabled={busy}><Download className="mr-1.5 size-3.5" />{zh ? `更新到 v${update.version}` : `Update to v${update.version}`}</Button> : null}
-        <Button variant={plugin.active ? "outline" : "default"} className="h-8 rounded-lg px-3 text-[12px]" onClick={onToggle} disabled={busy}>{plugin.active ? <><CheckCircle2 className="mr-1.5 size-3.5 text-emerald-600" />{zh ? "运行中" : "Active"}</> : <><XCircle className="mr-1.5 size-3.5" />{zh ? "已停用" : "Inactive"}</>}</Button>
-        <Button variant="ghost" className="h-8 rounded-lg px-2.5 text-[12px]" title={zh ? "回滚" : "Rollback"} onClick={onRollback}><RotateCcw className="size-3.5" /></Button>
-        <Button variant="ghost" className="h-8 rounded-lg px-2.5 text-[12px] text-rose-600 hover:text-rose-700" title={zh ? "卸载" : "Remove"} onClick={onRemove}><Trash2 className="size-3.5" /></Button>
+    </div>
+    {plugin.description ? <p className="line-clamp-2 text-[12px] leading-5 text-slate-500">{plugin.description}</p> : <p className="text-[12px] text-slate-400">{zh ? "暂无插件描述" : "No description"}</p>}
+    <div className="flex flex-wrap gap-1.5">
+      {plugin.kind?.includes("provider") || plugin.permissions.includes("provider") ? <SoftBadge label="Provider" /> : null}
+      {plugin.kind?.includes("middleware") || plugin.permissions.includes("middleware") ? <SoftBadge label="Middleware" /> : null}
+      {plugin.error ? <SoftBadge label={zh ? "启动失败" : "Activation failed"} tone="warn" /> : null}
+    </div>
+    <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-black/[0.06] pt-3 dark:border-white/[0.07]" onClick={(event) => event.stopPropagation()}>
+      <Button size="sm" variant="ghost" onClick={onSelect}>{zh ? "详情" : "Details"}</Button>
+      <div className="flex flex-wrap items-center justify-end gap-1.5">
+        {update?.source ? <Button size="sm" variant="outline" onClick={() => onUpdate(update)} disabled={busy}><Download className="size-3.5" />{zh ? "更新" : "Update"}</Button> : null}
+        <Button size="sm" variant={plugin.active ? "outline" : "default"} onClick={onToggle} disabled={busy}>{plugin.active ? <><CheckCircle2 className="size-3.5 text-emerald-600" />{zh ? "运行中" : "Active"}</> : <><XCircle className="size-3.5" />{zh ? "已停用" : "Inactive"}</>}</Button>
+        <Button size="sm" variant="ghost" className="px-2 text-slate-500" title={zh ? "回滚" : "Rollback"} aria-label={zh ? "回滚" : "Rollback"} onClick={onRollback}><RotateCcw className="size-3.5" /></Button>
+        <Button size="sm" variant="ghost" className="px-2 text-rose-600 hover:text-rose-700" title={zh ? "卸载" : "Remove"} aria-label={zh ? "卸载" : "Remove"} onClick={onRemove}><Trash2 className="size-3.5" /></Button>
       </div>
     </div>
   </ListCard>;
 }
 
 function MarketPluginCard({ plugin, zh, busy, onInstall, onSelect }: { plugin: ProviderPluginMarketEntry; zh: boolean; busy: boolean; onInstall: () => void; onSelect: () => void }) {
-  return <ListCard className="cursor-pointer transition-[border-color,box-shadow] hover:border-emerald-200 hover:shadow-[0_8px_24px_rgba(15,23,42,0.06)]" onClick={onSelect}>
-    <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between"><div className="flex min-w-0 items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 dark:bg-[#202733]"><PackageCheck className="size-5" /></div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-[15px] font-semibold text-neutral-900 dark:text-white">{plugin.name}</h3><SoftBadge label={`v${plugin.version}`} /><SoftBadge label={trustLabel(plugin.trust, zh)} tone={plugin.trust === "official" || plugin.trust === "verified" ? "success" : "neutral"} /></div><div className="mt-1 font-mono text-[11px] text-slate-400">{plugin.id}</div><p className="mt-2 max-w-2xl text-[12px] leading-5 text-slate-500">{plugin.description ?? (zh ? "暂无插件描述" : "No description")}</p><div className="mt-2 flex flex-wrap gap-1.5">{plugin.permissions.map((permission) => <SoftBadge key={permission} label={permission} />)}</div></div></div><Button className="h-8 shrink-0 rounded-lg px-3 text-[12px]" onClick={(event) => { event.stopPropagation(); onInstall(); }} disabled={busy || !plugin.source}><Download className="mr-1.5 size-3.5" />{zh ? "安装" : "Install"}</Button></div>
+  return <ListCard className="flex min-h-[190px] cursor-pointer flex-col gap-3 p-4 transition-[border-color,box-shadow] hover:border-emerald-200 hover:shadow-[0_8px_24px_rgba(15,23,42,0.06)]" onClick={onSelect}>
+    <div className="flex min-w-0 items-start gap-3"><div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 dark:bg-[#202733]"><PackageCheck className="size-4" /></div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-[14px] font-semibold text-neutral-900 dark:text-white">{plugin.name}</h3><SoftBadge label={`v${plugin.version}`} /><SoftBadge label={trustLabel(plugin.trust, zh)} tone={plugin.trust === "official" || plugin.trust === "verified" ? "success" : "neutral"} /></div><div className="mt-1 truncate font-mono text-[11px] text-slate-400">{plugin.id}</div></div></div>
+    <p className="line-clamp-2 text-[12px] leading-5 text-slate-500">{plugin.description ?? (zh ? "暂无插件描述" : "No description")}</p>
+    <div className="flex flex-wrap gap-1.5">{plugin.permissions.map((permission) => <SoftBadge key={permission} label={permission} />)}</div>
+    <div className="mt-auto flex items-center justify-between gap-2 border-t border-black/[0.06] pt-3 dark:border-white/[0.07]" onClick={(event) => event.stopPropagation()}><Button size="sm" variant="ghost" onClick={onSelect}>{zh ? "详情" : "Details"}</Button><Button size="sm" onClick={onInstall} disabled={busy || !plugin.source}><Download className="size-3.5" />{zh ? "安装" : "Install"}</Button></div>
   </ListCard>;
 }
 
@@ -302,7 +317,7 @@ function PermissionSummary({ plugin, zh }: { plugin: Pick<ProviderPluginSnapshot
 }
 
 function PluginIcon({ plugin }: { plugin: Pick<ProviderPluginSnapshot, "icon" | "name"> }) {
-  return plugin.icon ? <img src={plugin.icon} alt="" className="size-10 shrink-0 rounded-xl object-contain" /> : <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 dark:bg-[#202733]"><Puzzle className="size-5" /></div>;
+  return plugin.icon ? <img src={plugin.icon} alt="" className="size-8 shrink-0 rounded-lg object-contain" /> : <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 dark:bg-[#202733]"><Puzzle className="size-4" /></div>;
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) { return <div className="flex items-start justify-between gap-4"><span>{label}</span><span className="max-w-[280px] break-words text-right font-medium text-slate-700 dark:text-slate-200">{value}</span></div>; }

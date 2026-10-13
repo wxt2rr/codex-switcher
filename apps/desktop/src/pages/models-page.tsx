@@ -72,8 +72,8 @@ function AccountSourceSummary({
       </div>
       {preview.length ? (
         <div className="mt-1.5 flex min-w-0 flex-wrap gap-1.5">
-          {preview.map((account) => <SoftBadge key={account} label={account} className="max-w-full truncate text-[10px]" />)}
-          {remaining ? <SoftBadge label={`+${remaining}`} className="text-[10px]" /> : null}
+          {preview.map((account) => <SoftBadge key={account} label={account} className="h-5 max-w-full truncate rounded-md px-2 text-[10px]" />)}
+          {remaining ? <SoftBadge label={`+${remaining}`} className="h-5 rounded-md px-2 text-[10px]" /> : null}
         </div>
       ) : <div className="mt-1.5 text-[11px] text-slate-400">{emptyLabel}</div>}
     </div>
@@ -290,12 +290,14 @@ export function ModelsPage({
         )}
       />
 
-      <ListStack className="grid grid-cols-1 gap-3 space-y-0 lg:grid-cols-2 2xl:grid-cols-3">
-        {loading ? <ListLoadingState rows={3} /> : snapshot.models.length === 0 ? (
+      {loading ? <ListLoadingState rows={3} /> : snapshot.models.length === 0 ? (
           <ListCard className="flex min-h-[150px] items-center justify-center text-[13px] font-medium text-slate-400">
             {zh ? "暂无自定义模型" : "No custom models"}
           </ListCard>
-        ) : visibleModels.map((model) => {
+        ) : (
+        <ListStack>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {visibleModels.length ? visibleModels.map((model) => {
           const providerKey = typeof model.entry.provider_model_key === "string" ? model.entry.provider_model_key : undefined;
           const discoveryInfo = providerKey ? discoveryByModelKey.get(providerKey) : undefined;
           const fallbackUpstreamModel = providerKey?.includes(":") ? providerKey.slice(providerKey.indexOf(":") + 1) : undefined;
@@ -306,51 +308,51 @@ export function ModelsPage({
           const testAccountKey = exposedAccountKeysByModel.get(model.id)?.[0] ?? discoveryInfo?.accountKeys?.[0];
           const testAccount = testAccountKey ? accountsByKey.get(testAccountKey) : undefined;
           return (
-            <ListCard key={model.id} className="flex min-h-[226px] flex-col gap-4 p-5">
+            <ListCard key={model.id} className="flex min-h-[178px] flex-col gap-3 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-start gap-3">
                   <ProviderIcon
                     providerId={providerCatalog.find((item) => item.id === providerId)?.iconKey ?? providerId}
                     displayName={providerLabel(providerId, providerCatalog, zh, String(model.entry.provider_display_name ?? ""))}
-                    size={34}
+                    size={32}
                   />
-                <div className="min-w-0">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <h3 className="truncate text-[15px] font-semibold text-neutral-950 dark:text-white">{model.entry.display_name}</h3>
-                    <SoftBadge label={providerLabel(providerId, providerCatalog, zh, String(model.entry.provider_display_name ?? ""))} className="max-w-[130px] truncate text-[10px]" />
-                  </div>
-                  <p className="mt-1 truncate font-mono text-[11px] text-slate-400">{model.entry.slug}</p>
-                  <div className="mt-1 flex flex-wrap gap-1.5">
-                    <SoftBadge label={model.entry.model_source === "discovered" ? (zh ? "服务商发现" : "Discovered") : (zh ? "手动配置" : "Manual")} />
-                    {discoveryInfo ? <SoftBadge tone={statusTone} label={discoveryStatusLabel(discoveryInfo.status, zh)} /> : null}
+                  <div className="min-w-0">
+                    <h3 className="truncate text-[14px] font-semibold text-neutral-950 dark:text-white">{model.entry.display_name}</h3>
+                    <p className="mt-1 truncate font-mono text-[11px] text-slate-400">{model.entry.slug}</p>
                   </div>
                 </div>
               </div>
-                <div className="responsive-actions shrink-0">
-                <ModelTestButton
-                  bridge={bridge}
-                  language={language}
-                  request={testAccount ? {
-                    envName: testAccount.envName,
-                    accountName: testAccount.name,
-                    model: model.entry.slug,
-                    ...(discoveryInfo?.upstreamModelId || fallbackUpstreamModel
-                      ? { upstreamModel: discoveryInfo?.upstreamModelId ?? fallbackUpstreamModel }
-                      : {}),
-                  } : undefined}
-                />
-                <IconActionButton icon={<Pencil className="size-4" />} label={zh ? "编辑" : "Edit"} onClick={() => openEditor(model)} />
-                <IconActionButton icon={<Trash2 className="size-4" />} label={zh ? "删除" : "Delete"} onClick={() => openDelete(model)} tone="danger" />
-                </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <SoftBadge label={providerLabel(providerId, providerCatalog, zh, String(model.entry.provider_display_name ?? ""))} className="h-5 max-w-[150px] truncate rounded-md px-2 text-[10px]" />
+                <SoftBadge label={model.entry.model_source === "discovered" ? (zh ? "服务商发现" : "Discovered") : (zh ? "手动配置" : "Manual")} className="h-5 rounded-md px-2 text-[10px]" />
+                {discoveryInfo ? <SoftBadge tone={statusTone} label={discoveryStatusLabel(discoveryInfo.status, zh)} className="h-5 rounded-md px-2 text-[10px]" /> : null}
               </div>
-              <div className="mt-auto grid gap-3 border-t border-black/[0.06] pt-3 dark:border-white/[0.07]">
+              <div className="mt-auto grid grid-cols-2 gap-3 border-t border-black/[0.06] pt-3 dark:border-white/[0.07]">
                 <AccountSourceSummary label={zh ? "发现来源" : "Discovered by"} count={sourceAccountLabels.length} emptyLabel={zh ? "暂无已知来源账号" : "No known source account"} accountLabels={sourceAccountLabels} zh={zh} />
                 <AccountSourceSummary label={zh ? "账号暴露" : "Exposed to"} count={exposedAccountLabels.length} emptyLabel={zh ? "未暴露到账号" : "Not exposed to any account"} accountLabels={exposedAccountLabels} zh={zh} />
+                <div className="col-span-2 flex flex-wrap items-center justify-end gap-2">
+                  <ModelTestButton
+                    bridge={bridge}
+                    language={language}
+                    request={testAccount ? {
+                      envName: testAccount.envName,
+                      accountName: testAccount.name,
+                      model: model.entry.slug,
+                      ...(discoveryInfo?.upstreamModelId || fallbackUpstreamModel
+                        ? { upstreamModel: discoveryInfo?.upstreamModelId ?? fallbackUpstreamModel }
+                        : {}),
+                    } : undefined}
+                  />
+                  <Button size="sm" variant="ghost" onClick={() => openEditor(model)}><Pencil className="size-3.5" />{zh ? "编辑" : "Edit"}</Button>
+                  <IconActionButton icon={<Trash2 className="size-3.5" />} label={zh ? "删除" : "Delete"} onClick={() => openDelete(model)} tone="danger" />
+                </div>
               </div>
             </ListCard>
           );
-        })}
-      </ListStack>
+          }) : <ListCard className="col-span-full flex min-h-[150px] items-center justify-center text-[13px] font-medium text-slate-400">{zh ? "没有匹配的模型" : "No matching models"}</ListCard>}
+          </div>
+        </ListStack>
+      )}
 
       <SidePanel
         open={editorOpen}

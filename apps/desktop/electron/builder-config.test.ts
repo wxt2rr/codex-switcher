@@ -46,10 +46,10 @@ const desktopPackage = JSON.parse(
 test("desktop package defines electron packaging entrypoints", () => {
   assert.equal(desktopPackage.main, "electron-dist/electron/main.cjs");
   assert.equal(desktopPackage.build.afterPack, "scripts/after-pack.cjs");
-  assert.equal(desktopPackage.scripts["package:dir"], "electron-builder --dir");
-  assert.equal(desktopPackage.scripts["package:mac"], "electron-builder --mac dmg zip --arm64 --x64");
-  assert.equal(desktopPackage.scripts["package:mac:dir"], "electron-builder --mac dir --arm64 --x64");
-  assert.equal(desktopPackage.scripts["package:win"], "electron-builder --win nsis --x64");
+  assert.equal(desktopPackage.scripts["package:dir"], "node ./scripts/prepare-release.mjs all && electron-builder --dir");
+  assert.equal(desktopPackage.scripts["package:mac"], "node ./scripts/prepare-release.mjs mac && electron-builder --mac dmg zip --arm64 --x64");
+  assert.equal(desktopPackage.scripts["package:mac:dir"], "node ./scripts/prepare-release.mjs mac && electron-builder --mac dir --arm64 --x64");
+  assert.equal(desktopPackage.scripts["package:win"], "node ./scripts/prepare-release.mjs win && electron-builder --win nsis --x64");
   assert.equal(desktopPackage.build.appId, "com.wangxt.codex-switcher");
   assert.deepEqual(desktopPackage.build.files, ["dist/**", "electron-dist/**", "package.json"]);
   assert.deepEqual(desktopPackage.build.extraResources, [
