@@ -39,8 +39,7 @@ test("skills page reuses the shared management-page visual system", () => {
   assert.match(source, /ListPageFrame/);
   assert.match(source, /ListCard/);
   assert.match(source, /ui-selected-control/);
-  assert.match(source, /<ListCard/);
-  assert.match(source, /rounded-\[var\(--cs-radius-md\)\][^\n]*border border-border-subtle bg-card/);
+  assert.match(source, /rounded-\[14px\][^\n]*bg-white/);
 });
 
 test("provider sync is global and each provider selects one Codex source environment", () => {

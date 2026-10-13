@@ -11,32 +11,24 @@
   --font-heading: var(--font-sans);
 
   /* Semantic color aliases */
-  --color-background: var(--cs-background);
-  --color-foreground: var(--cs-foreground);
-  --color-card: var(--cs-surface);
-  --color-card-foreground: var(--cs-foreground);
-  --color-popover: var(--cs-surface-floating);
-  --color-popover-foreground: var(--cs-foreground);
-  --color-primary: var(--cs-primary);
-  --color-primary-foreground: var(--cs-primary-foreground);
-  --color-secondary: var(--cs-surface-sunken);
-  --color-secondary-foreground: var(--cs-foreground);
-  --color-muted: var(--cs-muted);
-  --color-muted-foreground: var(--cs-muted-foreground);
-  --color-foreground-secondary: var(--cs-foreground-secondary);
-  --color-border-subtle: var(--cs-border-subtle);
-  --color-border-strong: var(--cs-border-strong);
-  --color-overlay: var(--cs-overlay);
-  --color-accent: var(--cs-surface-sunken);
-  --color-accent-foreground: var(--cs-foreground);
-  --color-destructive: var(--cs-danger);
-  --color-success: var(--cs-success);
-  --color-warning: var(--cs-warning);
-  --color-info: var(--cs-info);
-  --color-danger: var(--cs-danger);
-  --color-border: var(--cs-border);
-  --color-input: var(--cs-border);
-  --color-ring: var(--cs-primary);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
 
   /* Extended palette - neutral scale */
   --color-neutral-50: oklch(0.985 0 0);
@@ -73,18 +65,18 @@
   --color-sky-600: oklch(0.588 0.158 241.966);
 
   /* Shadow scale */
-  --shadow-2xs: var(--cs-shadow-xs);
-  --shadow-xs: var(--cs-shadow-xs);
-  --shadow-sm: var(--cs-shadow-sm);
-  --shadow-md: var(--cs-shadow-md);
-  --shadow-lg: var(--cs-shadow-lg);
-  --shadow-xl: var(--cs-shadow-lg);
-  --shadow-2xl: var(--cs-shadow-lg);
+  --shadow-2xs: 0 1px 2px 0 rgb(0 0 0 / 0.03);
+  --shadow-xs: 0 1px 3px 0 rgb(0 0 0 / 0.04), 0 1px 2px -1px rgb(0 0 0 / 0.04);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.04);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.04);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.06), 0 4px 6px -4px rgb(0 0 0 / 0.04);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.07), 0 8px 10px -6px rgb(0 0 0 / 0.04);
+  --shadow-2xl: 0 25px 30px -5px rgb(0 0 0 / 0.08), 0 10px 15px -6px rgb(0 0 0 / 0.04);
 
   /* Animation durations */
-  --animate-duration-fast: var(--cs-motion-fast);
-  --animate-duration-normal: var(--cs-motion-normal);
-  --animate-duration-slow: var(--cs-motion-slow);
+  --animate-duration-fast: 160ms;
+  --animate-duration-normal: 180ms;
+  --animate-duration-slow: 220ms;
   --motion-tooltip-enter: 140ms;
   --motion-tooltip-exit: 100ms;
   --motion-popover-enter: 200ms;
@@ -96,14 +88,14 @@
   --motion-toggle: 240ms;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
-  --ease-drawer: var(--cs-ease-drawer);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 
-  --radius: var(--cs-radius-md);
+  --radius: 0.875rem;
 }
 
 :root {
-  --background: var(--cs-background);
-  --foreground: var(--cs-foreground);
+  --background: oklch(0.975 0.004 85);
+  --foreground: oklch(0.18 0 0);
 
   /* Primary theme color: Apple green */
   --primary: var(--cs-primary);
@@ -112,46 +104,46 @@
   --selected-control-background: var(--cs-selected-background);
   --selected-control-foreground: var(--cs-selected-foreground);
 
-  --secondary: var(--cs-surface-sunken);
-  --secondary-foreground: var(--cs-foreground);
+  --secondary: oklch(0.965 0 0);
+  --secondary-foreground: oklch(0.24 0 0);
 
-  --muted: var(--cs-muted);
-  --muted-foreground: var(--cs-muted-foreground);
-  --accent: var(--cs-surface-sunken);
-  --accent-foreground: var(--cs-foreground);
+  --muted: oklch(0.965 0 0);
+  --muted-foreground: oklch(0.495 0.005 85);
+  --accent: oklch(0.94 0 0);
+  --accent-foreground: oklch(0.24 0 0);
 
   --destructive: oklch(0.62 0.2 28);
 
-  --border: var(--cs-border);
-  --input: var(--cs-border);
+  --border: oklch(0.9 0 0);
+  --input: oklch(0.9 0 0);
 
-  --card: var(--cs-surface);
-  --card-foreground: var(--cs-foreground);
-  --popover: var(--cs-surface-floating);
-  --popover-foreground: var(--cs-foreground);
-  --selected-border-color: var(--cs-selected-border);
+  --card: oklch(0.99 0 0);
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.99 0 0);
+  --popover-foreground: var(--foreground);
+  --selected-border-color: rgb(148 163 184 / 0.55);
 }
 
 .dark {
-  --background: var(--cs-background);
-  --foreground: var(--cs-foreground);
+  --background: oklch(0.16 0.01 250);
+  --foreground: oklch(0.96 0 0);
   --primary: var(--cs-primary);
   --primary-foreground: var(--cs-primary-foreground);
   --ring: var(--cs-primary);
-  --secondary: var(--cs-surface-sunken);
-  --secondary-foreground: var(--cs-foreground);
-  --muted: var(--cs-muted);
-  --muted-foreground: var(--cs-muted-foreground);
-  --accent: var(--cs-surface-raised);
-  --accent-foreground: var(--cs-foreground);
+  --secondary: oklch(0.24 0.01 250);
+  --secondary-foreground: oklch(0.94 0 0);
+  --muted: oklch(0.22 0.01 250);
+  --muted-foreground: oklch(0.72 0 0);
+  --accent: oklch(0.26 0.01 250);
+  --accent-foreground: oklch(0.94 0 0);
   --destructive: oklch(0.68 0.16 25);
-  --border: var(--cs-border);
-  --input: var(--cs-border);
-  --card: var(--cs-surface);
-  --card-foreground: var(--cs-foreground);
-  --popover: var(--cs-surface-floating);
-  --popover-foreground: var(--cs-foreground);
-  --selected-border-color: var(--cs-selected-border);
+  --border: oklch(0.3 0.01 250);
+  --input: oklch(0.3 0.01 250);
+  --card: oklch(0.2 0.01 250);
+  --card-foreground: oklch(0.96 0 0);
+  --popover: oklch(0.2 0.01 250);
+  --popover-foreground: oklch(0.96 0 0);
+  --selected-border-color: rgb(100 116 139 / 0.8);
 }
 
 /* ===== Base Styles ===== */
@@ -166,7 +158,7 @@ body {
   font-family: var(--font-sans);
   font-size: 0.875rem;
   line-height: 1.5;
-  background: var(--cs-background);
+  background: oklch(0.972 0.003 85);
   color: var(--foreground);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -174,7 +166,7 @@ body {
 }
 
 .dark body {
-  background: var(--cs-surface-sunken);
+  background: oklch(0.13 0.01 250);
 }
 
 @layer base {
@@ -452,12 +444,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--cs-foreground) 18%, transparent);
+  background: oklch(0.88 0 0);
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--cs-foreground) 30%, transparent);
+  background: oklch(0.76 0 0);
 }
 
 .horizontal-scroll-no-bar {
@@ -487,20 +479,20 @@ body {
 
 .skill-scope-edge-fade-left {
   left: 1px;
-  background: linear-gradient(to right, var(--cs-surface) 24%, color-mix(in srgb, var(--cs-surface) 0%, transparent));
+  background: linear-gradient(to right, rgb(255 255 255) 24%, rgb(255 255 255 / 0));
 }
 
 .skill-scope-edge-fade-right {
   right: 1px;
-  background: linear-gradient(to left, var(--cs-surface) 24%, color-mix(in srgb, var(--cs-surface) 0%, transparent));
+  background: linear-gradient(to left, rgb(255 255 255) 24%, rgb(255 255 255 / 0));
 }
 
 .dark .skill-scope-edge-fade-left {
-  background: linear-gradient(to right, var(--cs-surface) 24%, color-mix(in srgb, var(--cs-surface) 0%, transparent));
+  background: linear-gradient(to right, rgb(20 26 34) 24%, rgb(20 26 34 / 0));
 }
 
 .dark .skill-scope-edge-fade-right {
-  background: linear-gradient(to left, var(--cs-surface) 24%, color-mix(in srgb, var(--cs-surface) 0%, transparent));
+  background: linear-gradient(to left, rgb(20 26 34) 24%, rgb(20 26 34 / 0));
 }
 
 /* Shared selected state for navigation, segmented controls, and active targets. */
@@ -508,22 +500,6 @@ body {
   border-color: var(--selected-border-color);
   background-color: var(--selected-control-background);
   color: var(--selected-control-foreground);
-}
-
-/* Editing panels keep their primary action in view while the form scrolls. */
-.side-panel-actions {
-  position: sticky;
-  bottom: -1.25rem;
-  z-index: 5;
-  margin: 1rem -0.25rem -1.25rem;
-  padding: 1rem 0.25rem;
-  border-top: 1px solid var(--cs-border-subtle);
-  background: color-mix(in srgb, var(--cs-surface) 94%, transparent);
-  backdrop-filter: blur(10px);
-}
-
-.side-panel-actions > * {
-  min-width: 0;
 }
 
 .page-scroll-gutter {
@@ -568,7 +544,7 @@ body {
 /* ===== Focus ring (global override for consistent focus) ===== */
 :focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--cs-surface), 0 0 0 4px var(--ring);
+  box-shadow: 0 0 0 2px oklch(0.99 0 0), 0 0 0 4px var(--ring);
   border-radius: 0.375rem;
 }
 
@@ -639,14 +615,6 @@ body {
 .responsive-record-scroll {
   overflow-x: auto;
   overflow-y: visible;
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--cs-foreground) 18%, transparent) transparent;
-  overscroll-behavior-inline: contain;
-}
-
-.responsive-toolbar {
-  min-height: 2.25rem;
-  padding-bottom: 1px;
 }
 
 .responsive-record-row {
@@ -655,29 +623,30 @@ body {
 }
 
 .management-list-card {
-  transition:
-    border-color var(--cs-motion-fast) var(--cs-ease-out),
-    background-color var(--cs-motion-fast) var(--cs-ease-out),
-    box-shadow var(--cs-motion-fast) var(--cs-ease-out);
+  transition: border-color 140ms ease;
 }
 
 @media (hover: hover) and (pointer: fine) {
   .management-list-card:hover {
     border-color: var(--selected-border-color);
-    background-color: var(--cs-surface-raised);
-    box-shadow: var(--cs-shadow-sm);
+    background-color: white;
   }
 }
 
 .management-list-card:focus-within,
 .management-list-card:has([aria-expanded="true"]) {
   border-color: var(--selected-border-color);
-  background-color: var(--cs-surface-raised);
+  background-color: white;
+}
+
+.dark .management-list-card:focus-within,
+.dark .management-list-card:has([aria-expanded="true"]) {
+  background-color: #141a22;
 }
 
 @media (hover: hover) and (pointer: fine) {
   .dark .management-list-card:hover {
-    background-color: var(--cs-surface-raised);
+    background-color: #141a22;
   }
 }
 

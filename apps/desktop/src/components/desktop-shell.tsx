@@ -48,7 +48,7 @@ export function DesktopShell({
   updatePrompt,
 }: {
   brand: string;
-  nav: Array<{ view: Exclude<NavView, "overview">; label: string; section?: "workspace" | "configuration" | "system" }>;
+  nav: Array<{ view: Exclude<NavView, "overview">; label: string }>;
   currentView: NavView;
   onChangeView: (view: NavView) => void;
   children: ReactNode;
@@ -112,7 +112,7 @@ export function DesktopShell({
       aria-expanded={sidebarExpanded}
       onClick={() => setSidebarExpanded((current) => !current)}
       className={cn(
-        "flex size-9 shrink-0 items-center justify-center rounded-[var(--cs-radius-sm)] bg-transparent text-muted-foreground shadow-none transition-[background-color,color] duration-[160ms] ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-accent hover:text-foreground",
+        "flex size-9 shrink-0 items-center justify-center rounded-xl bg-transparent text-neutral-500 shadow-none transition-[background-color,color] duration-[160ms] ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-black/[0.045] hover:text-neutral-900 dark:text-slate-300 dark:hover:bg-white/[0.07] dark:hover:text-white",
         getDesktopShellSidebarToggleClass(platform, sidebarExpanded),
         noDragClass,
       )}
@@ -123,12 +123,12 @@ export function DesktopShell({
 
   return (
     <TooltipProvider>
-    <div className="desktop-shell-root h-screen overflow-hidden bg-background text-foreground">
+    <div className="desktop-shell-root h-screen overflow-hidden bg-[#f7f8fa] text-neutral-900 dark:bg-[#0f1318] dark:text-neutral-100">
       <div className="flex h-full">
         <aside
           data-expanded={sidebarExpanded}
           className={cn(
-            "motion-sidebar-panel relative flex shrink-0 flex-col overflow-hidden border-r border-border-subtle bg-card pb-7 pt-5",
+            "motion-sidebar-panel relative flex shrink-0 flex-col overflow-hidden border-r border-black/[0.06] bg-white pb-7 pt-5 dark:border-white/[0.07] dark:bg-[#11151a]",
             sidebarExpanded ? "w-[208px] px-4" : "w-[78px] items-center px-3",
           )}
         >
@@ -146,7 +146,7 @@ export function DesktopShell({
             )}
           >
             <div className="motion-sidebar-label min-w-0 overflow-hidden">
-              <div className="truncate text-[15px] font-semibold tracking-[-0.02em] text-foreground">{brand}</div>
+              <div className="truncate text-[15px] font-semibold tracking-[-0.02em] text-neutral-950 dark:text-neutral-50">{brand}</div>
             </div>
 
             {!isMacDesktop ? sidebarToggle : null}
@@ -154,33 +154,29 @@ export function DesktopShell({
 
           <nav
             className={cn(
-              "flex flex-1 flex-col gap-1.5",
+              "flex flex-1 flex-col gap-3",
               isMacDesktop ? "mt-8" : "mt-10",
               sidebarExpanded ? "w-full items-stretch" : "w-full items-center",
             )}
           >
-            {nav.map(({ view: item, label, section }, index) => {
+            {nav.map(({ view: item, label }) => {
               const isActive = currentView === item;
-              const previousSection = nav[index - 1]?.section;
-              const showDivider = index > 0 && section && section !== previousSection;
               return (
-                <div key={item} className="w-full">
-                  {showDivider ? <div className={cn("my-3 h-px bg-border-subtle", !sidebarExpanded && "mx-auto w-8")} aria-hidden="true" /> : null}
                 <button
+                  key={item}
                   type="button"
                   title={label}
                   aria-label={label}
                   onClick={() => onChangeView(item)}
                   className={cn(
-                    "group relative flex h-10 items-center rounded-[var(--cs-radius-sm)] transition-[background-color,color] duration-[180ms] ease-[cubic-bezier(0.23,1,0.32,1)]",
+                    "flex h-11 items-center rounded-xl transition-[background-color,color] duration-[180ms] ease-[cubic-bezier(0.23,1,0.32,1)]",
                     sidebarExpanded ? "w-full justify-start gap-3 px-3.5" : "size-11 justify-center",
                     isActive
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                      ? "bg-[#f1f3f5] text-neutral-950 dark:bg-[#1b2129] dark:text-white"
+                      : "text-neutral-700 hover:bg-[#f6f7f8] hover:text-neutral-950 dark:text-slate-300 dark:hover:bg-[#171c23] dark:hover:text-white",
                   )}
                   aria-pressed={isActive}
                 >
-                  <span className={cn("absolute left-0 h-5 w-0.5 rounded-full bg-primary transition-opacity", isActive ? "opacity-100" : "opacity-0")} aria-hidden="true" />
                   <span className="flex size-5 shrink-0 items-center justify-center">{navIcons[item]}</span>
                   <span
                     className={cn(
@@ -191,7 +187,6 @@ export function DesktopShell({
                     {label}
                   </span>
                 </button>
-                </div>
               );
             })}
           </nav>
@@ -211,8 +206,8 @@ export function DesktopShell({
                 onMouseEnter={() => onNoticePauseChange?.(true)}
                 onMouseLeave={() => onNoticePauseChange?.(false)}
                 className={cn(
-                  "motion-notice-enter flex min-w-[280px] max-w-[420px] items-center gap-2.5 rounded-[var(--cs-radius-md)] border border-border-subtle bg-card px-4 py-3 text-sm font-medium shadow-md",
-                  "pointer-events-auto",
+                  "motion-notice-enter flex min-w-[280px] max-w-[420px] items-center gap-2.5 rounded-xl border border-black/[0.08] bg-white px-4 py-3 text-sm font-medium shadow-[0_8px_28px_rgba(15,23,42,0.12)]",
+                  "pointer-events-auto dark:border-white/[0.1] dark:bg-[#171b21]",
                   messageClass,
                 )}
                 role={message.tone === "error" ? "alert" : "status"}
@@ -226,26 +221,26 @@ export function DesktopShell({
 
           {updatePrompt ? (
             <section
-              className="fixed bottom-5 right-5 z-[60] w-[min(360px,calc(100vw-2rem))] rounded-[var(--cs-radius-lg)] border border-primary/25 bg-card p-4 shadow-lg"
+              className="fixed bottom-5 right-5 z-[60] w-[min(360px,calc(100vw-2rem))] rounded-2xl border border-emerald-200/80 bg-white p-4 shadow-[0_12px_36px_rgba(15,23,42,0.16)] dark:border-emerald-900/70 dark:bg-[#171b21]"
               role="status"
               aria-live="polite"
             >
               <div className="flex items-start gap-3">
-                  <div className="flex size-9 shrink-0 items-center justify-center rounded-[var(--cs-radius-sm)] bg-primary/10 text-primary">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-300">
                   <Download className="size-[18px]" aria-hidden="true" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-3">
-                    <h2 className="text-[13px] font-semibold text-foreground">{updatePrompt.title}</h2>
-                    <span className="shrink-0 rounded-[var(--cs-radius-xs)] bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">v{updatePrompt.version}</span>
+                    <h2 className="text-[13px] font-semibold text-neutral-950 dark:text-white">{updatePrompt.title}</h2>
+                    <span className="shrink-0 rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">v{updatePrompt.version}</span>
                   </div>
-                  <p className="mt-1 text-[11px] leading-5 text-muted-foreground">{updatePrompt.description}</p>
+                  <p className="mt-1 text-[11px] leading-5 text-slate-500 dark:text-slate-400">{updatePrompt.description}</p>
                 </div>
               </div>
               <div className="mt-3 flex items-center justify-end gap-2">
                 <button
                   type="button"
-                  className="rounded-[var(--cs-radius-xs)] px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  className="rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-white/[0.07] dark:hover:text-slate-200"
                   onClick={updatePrompt.onSkip}
                   disabled={updatePrompt.busy}
                 >

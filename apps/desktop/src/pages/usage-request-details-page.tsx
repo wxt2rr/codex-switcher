@@ -9,8 +9,7 @@ import type { AccountSummary, UsageFilter, UsageRequestPage, UsageRequestRecord 
 import type { UiLanguage } from "../i18n";
 import { cn } from "../lib/utils";
 import { formatCompact } from "../components/usage-charts";
-import { ListLoadingState, ListPageFrame } from "../components/account-list-primitives";
-import { InlineNotice } from "../components/admin-primitives";
+import { ListLoadingState, PageScrollArea } from "../components/account-list-primitives";
 
 const emptyPage: UsageRequestPage = {
   generatedAt: 0,
@@ -106,18 +105,20 @@ export function UsageRequestDetailsPage({
   }
 
   return (
-    <ListPageFrame contentClassName="gap-4">
+    <section className="h-full min-h-0 overflow-hidden px-6 pb-6 pt-6 xl:px-8 xl:pb-8 xl:pt-8">
+      <PageScrollArea>
+        <div className="admin-page-content flex min-h-full flex-col gap-4">
         <header className="flex items-start justify-between gap-5">
           <div className="min-w-0">
-            <Button variant="ghost" className="relative z-20 mb-2 h-8 gap-1.5 px-2 text-foreground-secondary [-webkit-app-region:no-drag]" onClick={onBack}>
+            <Button variant="ghost" className="relative z-20 mb-2 h-8 gap-1.5 px-2 text-slate-600 [-webkit-app-region:no-drag]" onClick={onBack}>
               <ArrowLeft className="size-4" />
               {zh ? "返回用量" : "Back to usage"}
             </Button>
             <h2 className="text-[28px] font-semibold tracking-[-0.04em]">{zh ? "请求详情" : "Request details"}</h2>
-            <p className="mt-1 max-w-[800px] truncate text-[13px] leading-6 text-muted-foreground" title={baseUrl}>{baseUrl}</p>
+            <p className="mt-1 max-w-[800px] truncate text-[13px] leading-6 text-slate-500" title={baseUrl}>{baseUrl}</p>
           </div>
           <div className="mt-2 flex items-center gap-2">
-            <span className="text-[11px] text-muted-foreground">{data.generatedAt ? `${zh ? "更新于" : "Updated"} ${new Date(data.generatedAt).toLocaleTimeString()}` : ""}</span>
+            <span className="text-[11px] text-slate-400">{data.generatedAt ? `${zh ? "更新于" : "Updated"} ${new Date(data.generatedAt).toLocaleTimeString()}` : ""}</span>
             <Button variant="ghost" className="size-8 p-0" onClick={() => void loadRequests()} disabled={loading}
               aria-label={zh ? "刷新请求详情" : "Refresh request details"} title={zh ? "刷新请求详情" : "Refresh request details"}>
               <RefreshCw className={cn("size-4", loading && "animate-spin")} />
@@ -125,42 +126,42 @@ export function UsageRequestDetailsPage({
           </div>
         </header>
 
-        <div className="responsive-toolbar flex flex-wrap items-center gap-2 rounded-[var(--cs-radius-md)] border border-border-subtle bg-card p-3">
+        <div className="responsive-toolbar flex flex-wrap items-center gap-2 rounded-[14px] border border-black/[0.05] bg-white p-3">
           <div className="relative min-w-[220px] flex-1">
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
             <Input value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)}
               placeholder={zh ? "搜索请求 ID、模型或端点" : "Search request ID, model, or endpoint"}
-              className="h-8 border-transparent bg-secondary pl-10 text-[12px] shadow-none" />
+              className="h-8 border-transparent bg-[#f7f8fa] pl-10 text-[12px] shadow-none" />
           </div>
           <Select value={envName} onValueChange={(value) => { setPage(1); setEnvName(value); setAccountName("all"); }}
             items={[{ value: "all", label: zh ? "全部环境" : "All environments" }, ...environmentNames.map((value) => ({ value, label: value }))]}
-            className="h-8 w-[130px] border-transparent bg-secondary" />
+            className="h-8 w-[130px] border-transparent bg-[#f7f8fa]" />
           <Select value={accountName} onValueChange={(value) => updateFilter(setAccountName, value)}
             items={[{ value: "all", label: zh ? "全部账号" : "All accounts" }, ...accountNames.map((value) => ({ value, label: value }))]}
-            className="h-8 w-[130px] border-transparent bg-secondary" />
+            className="h-8 w-[130px] border-transparent bg-[#f7f8fa]" />
           <Select value={model} onValueChange={(value) => updateFilter(setModel, value)}
             items={[{ value: "all", label: zh ? "全部模型" : "All models" }, ...data.facets.models.map((value) => ({ value, label: value }))]}
-            className="h-8 w-[140px] border-transparent bg-secondary" />
+            className="h-8 w-[140px] border-transparent bg-[#f7f8fa]" />
           <Select value={endpoint} onValueChange={(value) => updateFilter(setEndpoint, value)}
             items={[{ value: "all", label: zh ? "全部端点" : "All endpoints" }, ...data.facets.endpoints.map((value) => ({ value, label: value }))]}
-            className="h-8 w-[150px] border-transparent bg-secondary" />
+            className="h-8 w-[150px] border-transparent bg-[#f7f8fa]" />
           <Select value={poolId} onValueChange={(value) => updateFilter(setPoolId, value)}
             items={[{ value: "all", label: zh ? "全部凭证池" : "All credential pools" }, ...data.facets.poolIds.map((value) => ({ value, label: value }))]}
-            className="h-8 w-[145px] border-transparent bg-secondary" />
+            className="h-8 w-[145px] border-transparent bg-[#f7f8fa]" />
           <Select value={failoverReason} onValueChange={(value) => updateFilter(setFailoverReason, value)}
             items={[{ value: "all", label: zh ? "全部切换原因" : "All failovers" }, ...data.facets.failoverReasons.map((value) => ({ value, label: value }))]}
-            className="h-8 w-[145px] border-transparent bg-secondary" />
+            className="h-8 w-[145px] border-transparent bg-[#f7f8fa]" />
           <Select value={status} onValueChange={(value) => { setPage(1); setStatus(value as typeof status); }}
             items={[{ value: "all", label: zh ? "全部状态" : "All statuses" }, { value: "success", label: zh ? "成功" : "Success" }, { value: "error", label: zh ? "失败" : "Failed" }]}
-            className="h-8 w-[110px] border-transparent bg-secondary" />
+            className="h-8 w-[110px] border-transparent bg-[#f7f8fa]" />
         </div>
 
-        {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
+        {error ? <div className="border-l-2 border-rose-500 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
 
-        <section className="usage-request-table min-h-0 flex-1 overflow-hidden rounded-[var(--cs-radius-md)] border border-border-subtle bg-card">
+        <section className="usage-request-table min-h-0 flex-1 overflow-hidden rounded-[14px] border border-black/[0.05] bg-white">
           {loading && data.generatedAt === 0 ? <div className="h-full overflow-auto p-2"><ListLoadingState rows={6} /></div> : <div className="h-full overflow-auto">
             <table className="w-full min-w-[1380px] text-left text-[12px]">
-              <thead className="border-b border-border bg-secondary/60 text-muted-foreground">
+              <thead className="border-b border-slate-200 bg-[#fafbfc] text-slate-500">
                 <tr>
                   <th className="px-4 py-3 font-medium">{zh ? "时间 / 请求 ID" : "Time / Request ID"}</th>
                   <th className="px-3 font-medium">{zh ? "环境 / 账号" : "Environment / Account"}</th>
@@ -179,11 +180,11 @@ export function UsageRequestDetailsPage({
               </thead>
               <tbody>
                 {data.items.map((item) => (
-                  <tr key={item.requestId} className="border-b border-border-subtle last:border-b-0 hover:bg-secondary/60">
-                    <td className="px-4 py-3.5"><div className="whitespace-nowrap font-medium text-foreground">{new Date(item.completedAt).toLocaleString()}</div><div className="mt-1 max-w-[180px] truncate font-mono text-[10px] text-muted-foreground" title={item.requestId}>{item.requestId}</div></td>
-                    <td className="px-3"><div className="font-medium text-foreground">{item.envName}</div><div className="mt-1 text-muted-foreground">{item.accountName}</div></td>
+                  <tr key={item.requestId} className="border-b border-slate-100 last:border-b-0 hover:bg-[#fafbfc]">
+                    <td className="px-4 py-3.5"><div className="whitespace-nowrap font-medium text-neutral-800">{new Date(item.completedAt).toLocaleString()}</div><div className="mt-1 max-w-[180px] truncate font-mono text-[10px] text-slate-400" title={item.requestId}>{item.requestId}</div></td>
+                    <td className="px-3"><div className="font-medium text-neutral-800">{item.envName}</div><div className="mt-1 text-slate-400">{item.accountName}</div></td>
                     <td className="max-w-[150px] truncate px-3 font-medium" title={item.model ?? "unknown"}>{item.model ?? "unknown"}</td>
-                    <td className="max-w-[180px] truncate px-3 font-mono text-[11px] text-foreground-secondary" title={item.endpoint}>{item.endpoint}</td>
+                    <td className="max-w-[180px] truncate px-3 font-mono text-[11px] text-slate-600" title={item.endpoint}>{item.endpoint}</td>
                     <td className="px-3"><RequestStatus item={item} zh={zh} /></td>
                     <td className="px-3"><RoutingAttempts item={item} zh={zh} /></td>
                     <td className="px-3 tabular-nums text-blue-600">{formatNullableTokens(item.inputTokens)}</td>
@@ -191,29 +192,31 @@ export function UsageRequestDetailsPage({
                     <td className="px-3 tabular-nums text-fuchsia-600">{formatNullableTokens(item.reasoningTokens ?? null)}</td>
                     <td className="px-3 tabular-nums text-cyan-600">{formatNullableTokens(item.cacheReadTokens)}</td>
                     <td className="px-3 font-medium tabular-nums">{formatNullableTokens(item.totalTokens)}</td>
-                    <td className="px-3 tabular-nums text-foreground-secondary">{formatLatency(item.latencyMs)}</td>
-                    <td className="px-4 tabular-nums"><div>{item.actualCost === null ? "-" : `$${item.actualCost.toFixed(6)}`}</div>{item.standardCost !== null ? <div className="mt-1 text-[10px] text-muted-foreground">{zh ? "标准" : "Std"} ${item.standardCost.toFixed(6)}</div> : null}</td>
+                    <td className="px-3 tabular-nums text-slate-600">{formatLatency(item.latencyMs)}</td>
+                    <td className="px-4 tabular-nums"><div>{item.actualCost === null ? "-" : `$${item.actualCost.toFixed(6)}`}</div>{item.standardCost !== null ? <div className="mt-1 text-[10px] text-slate-400">{zh ? "标准" : "Std"} ${item.standardCost.toFixed(6)}</div> : null}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>}
-          {!loading && data.items.length === 0 ? <div className="flex h-[320px] items-center justify-center text-sm text-muted-foreground">{zh ? "没有符合条件的请求" : "No matching requests"}</div> : null}
+          {!loading && data.items.length === 0 ? <div className="flex h-[320px] items-center justify-center text-sm text-slate-400">{zh ? "没有符合条件的请求" : "No matching requests"}</div> : null}
         </section>
 
         <footer className="flex flex-wrap items-center justify-between gap-3 pb-1">
-          <div className="text-[12px] text-muted-foreground">{zh ? `第 ${data.page} / ${data.totalPages} 页 · 共 ${data.total} 条` : `Page ${data.page} of ${data.totalPages} · ${data.total} requests`}</div>
+          <div className="text-[12px] text-slate-500">{zh ? `第 ${data.page} / ${data.totalPages} 页 · 共 ${data.total} 条` : `Page ${data.page} of ${data.totalPages} · ${data.total} requests`}</div>
           <div className="flex items-center gap-2">
             <Select value={String(pageSize)} onValueChange={(value) => { setPage(1); setPageSize(Number(value)); }}
               items={[20, 50, 100].map((value) => ({ value: String(value), label: zh ? `${value} 条/页` : `${value} / page` }))}
-              className="h-8 w-[105px] bg-card" />
+              className="h-8 w-[105px] bg-white" />
             <Button variant="outline" className="size-8 p-0" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={loading || data.page <= 1}
               aria-label={zh ? "上一页" : "Previous page"} title={zh ? "上一页" : "Previous page"}><ChevronLeft className="size-4" /></Button>
             <Button variant="outline" className="size-8 p-0" onClick={() => setPage((value) => Math.min(data.totalPages, value + 1))} disabled={loading || data.page >= data.totalPages}
               aria-label={zh ? "下一页" : "Next page"} title={zh ? "下一页" : "Next page"}><ChevronRight className="size-4" /></Button>
           </div>
         </footer>
-    </ListPageFrame>
+        </div>
+      </PageScrollArea>
+    </section>
   );
 }
 
@@ -257,7 +260,7 @@ function RoutingAttempts({ item, zh }: { item: UsageRequestRecord; zh: boolean }
   const attempts = item.attempts ?? [];
   const trigger = (
     <button type="button" className="cursor-help text-left outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
-      <div className="font-medium text-foreground-secondary">{item.attemptCount ?? Math.max(1, attempts.length)} {zh ? "次" : "attempts"}</div>
+      <div className="font-medium text-neutral-700">{item.attemptCount ?? Math.max(1, attempts.length)} {zh ? "次" : "attempts"}</div>
       {item.failoverReason ? <div className="mt-1 max-w-[150px] truncate text-[10px] text-amber-600">{formatFailureReason(item.failoverReason, zh)}</div> : null}
     </button>
   );
@@ -269,7 +272,7 @@ function RoutingAttempts({ item, zh }: { item: UsageRequestRecord; zh: boolean }
         <div className="min-w-[280px] space-y-2.5">
           <div className="text-[11px] font-semibold">{zh ? "路由尝试详情" : "Routing attempt details"}</div>
           {attempts.length ? attempts.map((attempt, index) => (
-            <div key={`${attempt.accountName}-${attempt.startedAt}-${index}`} className="border-t border-border-subtle pt-2 first:border-t-0 first:pt-0">
+            <div key={`${attempt.accountName}-${attempt.startedAt}-${index}`} className="border-t border-white/15 pt-2 first:border-t-0 first:pt-0">
               <div className="flex items-center justify-between gap-4">
                 <span className="font-semibold text-white">#{index + 1} · {attempt.accountName}</span>
                 <span className="text-white/60">{attempt.httpStatus ?? (zh ? "连接失败" : "Connection failed")} · {formatLatency(Math.max(0, attempt.completedAt - attempt.startedAt))}</span>

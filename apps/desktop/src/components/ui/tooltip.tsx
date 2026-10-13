@@ -25,13 +25,13 @@ export function Tooltip({
           sideOffset={8}
           collisionPadding={12}
           className={cn(
-            "z-[70] max-w-[280px] rounded-[var(--cs-radius-xs)] bg-foreground px-3 py-2 text-[11px] font-medium leading-5 text-background shadow-md",
+            "z-[70] max-w-[280px] rounded-lg bg-neutral-950 px-3 py-2 text-[11px] font-medium leading-5 text-white shadow-md",
             "motion-tooltip-content origin-[var(--radix-tooltip-content-transform-origin)]",
             className,
           )}
         >
           {content}
-          <TooltipPrimitive.Arrow className="fill-foreground" />
+          <TooltipPrimitive.Arrow className="fill-neutral-950" />
         </TooltipPrimitive.Content>
       </TooltipPrimitive.Portal>
     </TooltipPrimitive.Root>

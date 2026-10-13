@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import { Search, SlidersHorizontal } from "lucide-react";
 
 import { Input } from "@/components/form-primitives";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export function ListPageFrame({
@@ -31,11 +30,11 @@ export function ListLoadingState({ rows = 4 }: { rows?: number }) {
   return (
     <div className="list-loading-state space-y-2.5" aria-busy="true" aria-label="Loading">
       {Array.from({ length: rows }, (_, index) => (
-        <div key={index} className="list-loading-row rounded-[var(--cs-radius-md)] border border-border-subtle bg-card px-5 py-4">
+        <div key={index} className="list-loading-row rounded-[14px] border border-black/[0.05] bg-white px-5 py-4 dark:border-white/[0.07] dark:bg-[#141a22]">
           <div className="flex items-center gap-4">
-            <span className="h-4 w-1/4 rounded bg-secondary/80" />
-            <span className="h-3 flex-1 rounded bg-secondary/60" />
-            <span className="h-8 w-20 rounded-lg bg-secondary/60" />
+            <span className="h-4 w-1/4 rounded bg-slate-200/80 dark:bg-slate-700/70" />
+            <span className="h-3 flex-1 rounded bg-slate-200/70 dark:bg-slate-700/60" />
+            <span className="h-8 w-20 rounded-lg bg-slate-200/70 dark:bg-slate-700/60" />
           </div>
         </div>
       ))}
@@ -63,33 +62,31 @@ export function ListPageHeader({
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(220px,1fr)_minmax(0,1.8fr)] xl:items-start">
       <div>
-        <h2 className="text-[28px] font-semibold tracking-[-0.04em] text-foreground">{title}</h2>
-        <p className="mt-1 text-[13px] leading-6 text-muted-foreground">{subtitle}</p>
+        <h2 className="text-[28px] font-semibold tracking-[-0.04em] text-neutral-950 dark:text-neutral-50">{title}</h2>
+        <p className="mt-1 text-[13px] leading-6 text-slate-500 dark:text-slate-400">{subtitle}</p>
       </div>
 
       <div className="responsive-toolbar flex min-w-0 items-center justify-start gap-2.5 xl:justify-end">
         {onSearchChange ? (
           <>
             <div className="relative min-w-[220px] flex-1">
-              <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
               <Input
                 value={search ?? ""}
                 onChange={(event) => onSearchChange(event.target.value)}
                 placeholder={searchPlaceholder}
-                className="h-9 w-full rounded-[var(--cs-radius-sm)] border-border-subtle bg-secondary pl-10 text-[12px] shadow-none"
+                className="h-8 w-full rounded-lg border-transparent bg-[#f3f4f6] pl-10 text-[12px] shadow-none dark:bg-[#1b2129]"
               />
             </div>
             {showFilter ? (
-              <Button
+              <button
                 type="button"
-                variant="secondary"
-                size="icon"
-                className="size-9"
+                className="flex size-8 items-center justify-center rounded-lg bg-[#f3f4f6] text-slate-600 dark:bg-[#1b2129] dark:text-slate-300"
                 aria-label="Filter"
                 title="Filter"
               >
                 <SlidersHorizontal className="size-3.5" />
-              </Button>
+              </button>
             ) : null}
           </>
         ) : null}
@@ -129,16 +126,8 @@ export function ListCard({
   return (
     <article
       onClick={onClick}
-      onKeyDown={onClick ? (event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onClick();
-        }
-      } : undefined}
-      role={onClick ? "button" : undefined}
-      tabIndex={onClick ? 0 : undefined}
       className={cn(
-        "management-list-card rounded-[var(--cs-radius-md)] border border-border-subtle bg-card px-5 py-4 shadow-xs",
+        "management-list-card rounded-[14px] border border-black/[0.05] bg-white px-5 py-4 dark:border-white/[0.07] dark:bg-[#141a22]",
         className,
       )}
     >
@@ -153,19 +142,17 @@ export function SoftBadge({
   className,
 }: {
   label: string;
-  tone?: "brand" | "neutral" | "success" | "warn" | "danger" | "info";
+  tone?: "brand" | "neutral" | "success" | "warn";
   className?: string;
 }) {
   return (
     <span
       className={cn(
         "inline-flex h-6 items-center rounded-md px-2.5 text-[13px] font-medium",
-        tone === "brand" && "bg-primary/10 text-primary",
+        tone === "brand" && "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300",
         tone === "success" && "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300",
         tone === "warn" && "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300",
-        tone === "danger" && "bg-destructive/10 text-destructive",
-        tone === "info" && "bg-info/10 text-info",
-        tone === "neutral" && "bg-secondary text-muted-foreground",
+        tone === "neutral" && "bg-slate-100 text-slate-500 dark:bg-[#202733] dark:text-slate-300",
         className,
       )}
     >
@@ -179,7 +166,7 @@ export function RunStatusBadge({
   tone = "success",
 }: {
   label: string;
-  tone?: "success" | "warn" | "neutral" | "danger" | "info";
+  tone?: "success" | "warn" | "neutral";
 }) {
   return (
     <span
@@ -187,9 +174,7 @@ export function RunStatusBadge({
         "inline-flex h-5 items-center rounded-md px-2 text-[10px] font-semibold",
         tone === "success" && "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300",
         tone === "warn" && "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300",
-        tone === "danger" && "bg-destructive/10 text-destructive",
-        tone === "info" && "bg-info/10 text-info",
-        tone === "neutral" && "bg-secondary text-muted-foreground",
+        tone === "neutral" && "bg-slate-100 text-slate-500 dark:bg-[#202733] dark:text-slate-300",
       )}
     >
       {label}
@@ -221,7 +206,7 @@ export function IconActionButton({
           ? "bg-rose-50 text-rose-600 hover:bg-rose-100 hover:text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 dark:hover:bg-rose-950/60"
           : active
             ? "ui-selected-control"
-            : "bg-secondary text-foreground hover:bg-accent",
+            : "bg-[#f7f8fa] text-neutral-800 hover:bg-[#eef1f4] dark:bg-[#1b2129] dark:text-slate-100 dark:hover:bg-[#232a34]",
         disabled && "cursor-not-allowed opacity-55",
       )}
       onClick={onClick}
@@ -238,13 +223,13 @@ export function IconActionButton({
 
 export function Pager({ totalLabel }: { totalLabel: string }) {
   return (
-    <div className="mt-auto flex items-center justify-between pt-2 text-sm font-medium text-muted-foreground dark:text-muted-foreground">
+    <div className="mt-auto flex items-center justify-between pt-2 text-sm font-medium text-slate-500 dark:text-slate-400">
       <span>{totalLabel}</span>
       <div className="flex items-center gap-3">
-      <span className="flex h-8 items-center rounded-[var(--cs-radius-sm)] bg-secondary px-3 text-xs text-muted-foreground">
+        <span className="flex h-8 items-center rounded-lg bg-[#f3f4f6] px-3 text-xs text-slate-700 dark:bg-[#1b2129] dark:text-slate-200">
           Sort: Recent
         </span>
-        <span className="flex h-8 items-center rounded-[var(--cs-radius-sm)] bg-secondary px-3 text-xs text-muted-foreground">10 / 页</span>
+        <span className="flex h-8 items-center rounded-lg bg-[#f3f4f6] px-3 text-xs text-slate-700 dark:bg-[#1b2129] dark:text-slate-200">10 / 页</span>
       </div>
     </div>
   );
@@ -252,7 +237,7 @@ export function Pager({ totalLabel }: { totalLabel: string }) {
 
 export function EmptyList({ title }: { title: string }) {
   return (
-    <div className="rounded-[var(--cs-radius-lg)] border border-dashed border-border-subtle bg-secondary/60 px-6 py-12 text-center text-sm font-semibold text-muted-foreground">
+    <div className="rounded-[16px] bg-[#f5f6f8] px-6 py-12 text-center text-sm font-semibold text-neutral-500">
       {title}
     </div>
   );

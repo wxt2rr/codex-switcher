@@ -86,12 +86,12 @@ export function ProvidersPage({
         searchPlaceholder={zh ? "搜索服务商" : "Search providers"}
         onSearchChange={setQuery}
         actions={(
-          <span className="hidden text-[11px] text-muted-foreground xl:inline">{visibleItems.length} / {items.length}</span>
+          <span className="hidden text-[11px] text-slate-400 xl:inline">{visibleItems.length} / {items.length}</span>
         )}
       />
 
       {loading ? <ListLoadingState /> : grouped.size === 0 ? (
-        <ListCard className="p-8 text-center text-sm text-muted-foreground">{zh ? "没有匹配的服务商" : "No matching providers"}</ListCard>
+        <ListCard className="p-8 text-center text-sm text-slate-500">{zh ? "没有匹配的服务商" : "No matching providers"}</ListCard>
       ) : (
         <ListStack>
           {["api", "subscription", "local", "custom"].map((category) => {
@@ -99,7 +99,7 @@ export function ProvidersPage({
             if (!entries?.length) return null;
             return (
               <section key={category} className="space-y-3">
-                <div className="text-[12px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                <div className="text-[12px] font-semibold uppercase tracking-[0.08em] text-slate-400">
                   {label(category as ProviderCatalogItem["category"], language)}
                 </div>
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -110,20 +110,20 @@ export function ProvidersPage({
                         <ProviderIcon providerId={item.iconKey} iconUrl={item.iconUrl} displayName={item.displayName} size={32} />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
-                            <h2 className="truncate text-[14px] font-semibold text-foreground">{item.displayName}</h2>
-                            <span className="inline-flex h-5 items-center rounded-md bg-secondary/80 px-2 text-[10px] font-medium text-muted-foreground/80 dark:text-muted-foreground">
+                            <h2 className="truncate text-[14px] font-semibold text-neutral-950 dark:text-white">{item.displayName}</h2>
+                            <span className="inline-flex h-5 items-center rounded-md bg-slate-100/80 px-2 text-[10px] font-medium text-slate-500 dark:bg-[#202733]/80 dark:text-slate-400">
                               {item.authMethods.includes("subscription") ? (zh ? "订阅" : "Subscription") : item.category === "local" ? (zh ? "本地" : "Local") : (zh ? "API" : "API")}
                             </span>
                           </div>
-                          <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">{item.id}</p>
-                          <div className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] leading-4 text-muted-foreground">
-                            <span className="font-medium text-muted-foreground dark:text-muted-foreground">Responses</span>
+                          <p className="mt-1 truncate font-mono text-[11px] text-slate-400">{item.id}</p>
+                          <div className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] leading-4 text-slate-400">
+                            <span className="font-medium text-slate-500 dark:text-slate-300">Responses</span>
                             {item.protocols.map((protocol) => <span key={protocol}>{zh ? "上游" : "Upstream"}: {protocolLabel(protocol)}</span>)}
                             {item.capabilities.modelDiscovery ? <span>{zh ? "自动发现模型" : "Model discovery"}</span> : null}
                             {conversionLabel(item, zh) ? <span className={item.capabilities.protocolConversion ? "font-medium text-emerald-600/80 dark:text-emerald-400/80" : undefined}>{conversionLabel(item, zh)}</span> : null}
                           </div>
                           <div className="mt-4 flex items-center justify-between gap-2">
-                            <span className="text-[11px] text-muted-foreground">{accountCount} {zh ? "个账号" : "accounts"}</span>
+                            <span className="text-[11px] text-slate-400">{accountCount} {zh ? "个账号" : "accounts"}</span>
                             <div className="flex items-center gap-2">
                               <Button size="sm" variant="ghost" onClick={() => setActiveProvider(item)}>{zh ? "详情" : "Details"}</Button>
                               <Button size="sm" variant="outline" onClick={() => onAddAccount(item.id)}>{zh ? "添加账号" : "Add account"}</Button>
@@ -149,12 +149,12 @@ export function ProvidersPage({
       >
         {activeProvider ? (
           <div className="grid gap-4">
-            <div className="flex items-center gap-3 rounded-xl border border-border-subtle bg-secondary p-3">
+            <div className="flex items-center gap-3 rounded-xl border border-black/[0.05] bg-slate-50 p-3">
               <ProviderIcon providerId={activeProvider.iconKey} iconUrl={activeProvider.iconUrl} displayName={activeProvider.displayName} size={36} />
               <div className="min-w-0">
-                <div className="text-sm font-semibold text-foreground">{activeProvider.displayName}</div>
-                <div className="font-mono text-[11px] text-muted-foreground">{activeProvider.id}</div>
-                {activeProvider.defaultBaseUrl ? <div className="mt-1 truncate text-[11px] text-muted-foreground">{activeProvider.defaultBaseUrl}</div> : null}
+                <div className="text-sm font-semibold text-neutral-900">{activeProvider.displayName}</div>
+                <div className="font-mono text-[11px] text-slate-400">{activeProvider.id}</div>
+                {activeProvider.defaultBaseUrl ? <div className="mt-1 truncate text-[11px] text-slate-500">{activeProvider.defaultBaseUrl}</div> : null}
               </div>
             </div>
             <div className="flex flex-wrap gap-1.5">
@@ -164,7 +164,7 @@ export function ProvidersPage({
               <SoftBadge label={zh ? "Codex: Responses" : "Codex: Responses"} tone="brand" />
               {conversionLabel(activeProvider, zh) ? <SoftBadge label={conversionLabel(activeProvider, zh)!} tone={activeProvider.capabilities.protocolConversion ? "success" : "neutral"} /> : null}
             </div>
-            <div className="grid gap-2 rounded-xl bg-secondary p-3 text-[12px] text-foreground-secondary">
+            <div className="grid gap-2 rounded-xl bg-slate-50 p-3 text-[12px] text-slate-600">
               <div className="flex justify-between gap-4"><span>{zh ? "Codex 接入协议" : "Codex ingress"}</span><span>Responses</span></div>
               <div className="flex justify-between gap-4"><span>{zh ? "服务商上游协议" : "Provider upstream"}</span><span className="text-right">{activeProvider.protocols.map((protocol) => protocolLabel(protocol)).join(" / ")}</span></div>
               <div className="flex justify-between gap-4"><span>{zh ? "网关转换" : "Gateway conversion"}</span><span>{activeProvider.capabilities.protocolConversion ? (zh ? "Responses → 上游协议" : "Responses → upstream") : (zh ? "无需转换" : "Not needed")}</span></div>
@@ -173,15 +173,15 @@ export function ProvidersPage({
               <div className="flex justify-between gap-4"><span>{zh ? "凭据刷新" : "Credential refresh"}</span><span>{activeProvider.capabilities.tokenRefresh ? (zh ? "支持" : "Supported") : "—"}</span></div>
               <div className="flex justify-between gap-4"><span>{zh ? "协议转换" : "Protocol conversion"}</span><span>{activeProvider.capabilities.protocolConversion ? (zh ? "支持" : "Supported") : "—"}</span></div>
             </div>
-            <div className="border-t border-border-subtle pt-4">
-              <div className="mb-2 text-[12px] font-semibold text-muted-foreground">{zh ? "已连接的环境账号" : "Connected environment accounts"}</div>
+            <div className="border-t border-black/[0.06] pt-4">
+              <div className="mb-2 text-[12px] font-semibold text-slate-500">{zh ? "已连接的环境账号" : "Connected environment accounts"}</div>
               {providerAccounts.length ? (
                 <div className="grid gap-2">
-                  {providerAccounts.map((account) => <div key={`${account.envName}/${account.name}`} className="rounded-lg bg-secondary px-3 py-2 text-[12px]">{account.envName} / {account.name}</div>)}
+                  {providerAccounts.map((account) => <div key={`${account.envName}/${account.name}`} className="rounded-lg bg-slate-50 px-3 py-2 text-[12px]">{account.envName} / {account.name}</div>)}
                 </div>
-              ) : <div className="text-[12px] text-muted-foreground">{zh ? "还没有账号连接" : "No account connection yet"}</div>}
+              ) : <div className="text-[12px] text-slate-400">{zh ? "还没有账号连接" : "No account connection yet"}</div>}
             </div>
-            <div className="side-panel-actions"><Button onClick={() => onAddAccount(activeProvider.id)}>{zh ? "在账号页添加账号" : "Add account in Accounts"}</Button></div>
+            <Button onClick={() => onAddAccount(activeProvider.id)}>{zh ? "在账号页添加账号" : "Add account in Accounts"}</Button>
           </div>
         ) : null}
       </SidePanel>
