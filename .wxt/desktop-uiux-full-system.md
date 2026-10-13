@@ -26,7 +26,7 @@
 | 5 | 迁移 overview/accounts/environments/providers/models 页面 | corresponding page files | build + desktop tests | done | 所有目标页已迁移语义背景/文字/边框、统一圆角和公共列表骨架；模型/账号编辑面板操作区已固定 |
 | 6 | 迁移 plugins/skills/usage/usage-details/operations/gateway editor 页面 | corresponding page files | build + desktop tests | done | `npm run test:desktop --workspace ./apps/desktop` 通过；目标页已统一 frame、surface、控件和表格视觉 |
 | 7 | 统一状态色、空/加载/错误/反馈、响应式布局和动效约定 | shared components + all pages | build + grep audit + manual smoke | done | InlineNotice、语义状态色、空/加载状态、错误反馈、响应式滚动、sticky 操作区和 reduced-motion 已完成；残余硬编码仅保留明确的业务状态/代码块表现；全量测试通过 |
-| 8 | 全量回归、修复视觉/类型问题并提交交付 | all touched files | `npm run test:desktop --workspace ./apps/desktop`, `npm run build --workspace ./apps/desktop`, git diff check | done | 全量桌面测试：466 通过、1 跳过、0 失败；生产构建通过；`git diff --check` 通过；提交 `2ebb729` 已推送到 `origin/main` |
+| 8 | 全量回归、修复视觉/类型问题并提交交付 | all touched files | `npm run test:desktop --workspace ./apps/desktop`, `npm run build --workspace ./apps/desktop`, git diff check | in_progress | 全量桌面测试：466 通过、1 跳过、0 失败；构建通过；继续完成最终构建、提交和 push |
 
 ## Rules
 - 同时只能有一个 `in_progress`。
