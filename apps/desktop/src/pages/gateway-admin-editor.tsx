@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Input } from "../components/form-primitives";
+import { InlineNotice } from "../components/admin-primitives";
 import type { UiLanguage } from "../i18n";
 
 type JsonObject = Record<string, unknown>;
@@ -160,24 +161,24 @@ export function GatewayAdminStructuredEditor({ value, onChange, language }: {
     setNewId("");
   }
 
-  if (!draft) return <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">{language === "zh" ? "JSON 暂不可解析，请切换到高级 JSON 编辑器修复。" : "JSON cannot be parsed; use the advanced JSON editor to repair it."}</div>;
+  if (!draft) return <InlineNotice tone="error">{language === "zh" ? "JSON 暂不可解析，请切换到高级 JSON 编辑器修复。" : "JSON cannot be parsed; use the advanced JSON editor to repair it."}</InlineNotice>;
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap gap-1.5 rounded-lg bg-[#f7f8fa] p-1">
-        {SECTIONS.map((item) => <button key={item.id} type="button" className={`rounded-md px-2.5 py-1.5 text-[11px] font-medium ${section === item.id ? "bg-white text-neutral-900 shadow-sm" : "text-slate-500"}`} onClick={() => setSection(item.id)}>{language === "zh" ? item.zh : item.en} ({Object.keys(collectionFor(draft, item.id)).length})</button>)}
+      <div className="flex flex-wrap gap-1.5 rounded-lg bg-secondary p-1">
+        {SECTIONS.map((item) => <button key={item.id} type="button" className={`rounded-md px-2.5 py-1.5 text-[11px] font-medium ${section === item.id ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`} onClick={() => setSection(item.id)}>{language === "zh" ? item.zh : item.en} ({Object.keys(collectionFor(draft, item.id)).length})</button>)}
       </div>
       <div className="flex gap-2">
-        <Input value={newId} onChange={(event) => setNewId(event.target.value)} placeholder={language === "zh" ? "新记录 ID" : "New record ID"} className="h-8 flex-1 bg-white text-[11px]" />
+        <Input value={newId} onChange={(event) => setNewId(event.target.value)} placeholder={language === "zh" ? "新记录 ID" : "New record ID"} className="h-8 flex-1 bg-card text-[11px]" />
         <button type="button" className="rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground disabled:opacity-50" disabled={!newId.trim()} onClick={addEntity}>{language === "zh" ? "新增" : "Add"}</button>
       </div>
-      {entities.length ? entities.map(([id, entity]) => <div key={id} className="space-y-2 rounded-lg border border-black/[0.06] bg-white p-3">
-        <div className="flex items-center justify-between"><span className="font-mono text-[11px] font-semibold text-neutral-800">{id}</span><span className="text-[10px] text-slate-400">{section === "agentBindings" ? "agent binding" : section}</span></div>
+      {entities.length ? entities.map(([id, entity]) => <div key={id} className="space-y-2 rounded-lg border border-border-subtle bg-card p-3">
+        <div className="flex items-center justify-between"><span className="font-mono text-[11px] font-semibold text-foreground">{id}</span><span className="text-[10px] text-muted-foreground">{section === "agentBindings" ? "agent binding" : section}</span></div>
         <div className="grid gap-2 sm:grid-cols-2">
-          {fields.map((field) => field.boolean ? <label key={field.key} className="flex items-center gap-2 text-[11px] text-slate-600"><input type="checkbox" checked={entity[field.key] !== false} onChange={(event) => updateEntity(id, field.key, event.target.checked)} />{language === "zh" ? field.zh : field.en}</label> : field.json ? <label key={field.key} className="space-y-1 text-[10px] text-slate-500"><span>{language === "zh" ? field.zh : field.en}</span><Input value={formatJsonField(entity[field.key])} onChange={(event) => updateJsonEntity(id, field.key, event.target.value)} className="h-8 bg-[#fafbfc] font-mono text-[11px]" placeholder={field.key === "modelIds" ? "[\"model-id\"]" : "{\"x-scope\":\"shared\"}"} /></label> : <label key={field.key} className="space-y-1 text-[10px] text-slate-500"><span>{language === "zh" ? field.zh : field.en}</span><Input value={typeof entity[field.key] === "string" ? entity[field.key] as string : ""} onChange={(event) => updateEntity(id, field.key, event.target.value)} className="h-8 bg-[#fafbfc] text-[11px]" /></label>)}
+          {fields.map((field) => field.boolean ? <label key={field.key} className="flex items-center gap-2 text-[11px] text-foreground-secondary"><input type="checkbox" checked={entity[field.key] !== false} onChange={(event) => updateEntity(id, field.key, event.target.checked)} />{language === "zh" ? field.zh : field.en}</label> : field.json ? <label key={field.key} className="space-y-1 text-[10px] text-muted-foreground"><span>{language === "zh" ? field.zh : field.en}</span><Input value={formatJsonField(entity[field.key])} onChange={(event) => updateJsonEntity(id, field.key, event.target.value)} className="h-8 bg-secondary/60 font-mono text-[11px]" placeholder={field.key === "modelIds" ? "[\"model-id\"]" : "{\"x-scope\":\"shared\"}"} /></label> : <label key={field.key} className="space-y-1 text-[10px] text-muted-foreground"><span>{language === "zh" ? field.zh : field.en}</span><Input value={typeof entity[field.key] === "string" ? entity[field.key] as string : ""} onChange={(event) => updateEntity(id, field.key, event.target.value)} className="h-8 bg-secondary/60 text-[11px]" /></label>)}
         </div>
-      </div>) : <div className="rounded-lg bg-[#fafbfc] px-3 py-5 text-center text-[11px] text-slate-400">{language === "zh" ? "暂无记录" : "No records"}</div>}
-      <p className="text-[10px] leading-5 text-slate-400">{language === "zh" ? "Credential 只编辑引用和状态，不会暴露或保存明文密钥；路由仍只使用显式模型、RouteGroup、能力、健康度、配额和策略。" : "Credentials edit references and status only; plaintext secrets are never exposed or saved. Routing remains explicit-model/RouteGroup based."}</p>
+      </div>) : <div className="rounded-lg bg-secondary/60 px-3 py-5 text-center text-[11px] text-muted-foreground">{language === "zh" ? "暂无记录" : "No records"}</div>}
+      <p className="text-[10px] leading-5 text-muted-foreground">{language === "zh" ? "Credential 只编辑引用和状态，不会暴露或保存明文密钥；路由仍只使用显式模型、RouteGroup、能力、健康度、配额和策略。" : "Credentials edit references and status only; plaintext secrets are never exposed or saved. Routing remains explicit-model/RouteGroup based."}</p>
     </div>
   );
 }

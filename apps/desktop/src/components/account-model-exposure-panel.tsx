@@ -180,9 +180,14 @@ export function AccountModelExposurePanel({
       onClose={onClose}
       closeLabel={zh ? "关闭" : "Close"}
       scrollable={false}
+      footer={<>
+        <span className="mr-auto max-w-[18rem] text-[11px] leading-5 text-muted-foreground">{zh ? "可在模型页面继续调整优先级、权重和上游模型名。" : "Adjust priority, weight, and upstream ids later on the Models page."}</span>
+        <Button type="button" variant="outline" onClick={onClose}>{zh ? "取消" : "Cancel"}</Button>
+        <Button type="button" onClick={() => void save()} disabled={saving || loading}>{saving ? (zh ? "保存中…" : "Saving…") : (zh ? "保存暴露模型" : "Save exposed models")}</Button>
+      </>}
     >
       <div className="flex min-h-0 flex-1 flex-col gap-4">
-        <div className="shrink-0 rounded-xl bg-[#f7f8fa] px-3.5 py-3 text-[12px] leading-5 text-slate-600">
+        <div className="shrink-0 rounded-xl bg-secondary px-3.5 py-3 text-[12px] leading-5 text-foreground-secondary">
           {zh
             ? "只会暴露你勾选的模型。服务商返回的模型和模型页面手动配置的模型可以同时选择；发现失败不会删除上次结果。"
             : "Only checked models are exposed. Discovered provider models and manually configured models can be selected together; a failed refresh keeps the last result."}
@@ -202,7 +207,7 @@ export function AccountModelExposurePanel({
         ) : null}
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={zh ? "搜索模型、服务商或标识" : "Search model, provider, or id"} className="pl-9" />
           </div>
           <Select
@@ -221,7 +226,7 @@ export function AccountModelExposurePanel({
               })),
             ]}
             openOnHover={false}
-            className="h-9 min-w-[140px] max-w-[180px] flex-1 bg-white text-[12px]"
+            className="h-9 min-w-[140px] max-w-[180px] flex-1 bg-card text-[12px]"
           />
           <Select
             value={modelFilter}
@@ -231,7 +236,7 @@ export function AccountModelExposurePanel({
               { value: "selected", label: zh ? "已选择" : "Selected" },
             ]}
             openOnHover={false}
-            className="h-9 min-w-[100px] max-w-[130px] flex-1 bg-white text-[12px]"
+            className="h-9 min-w-[100px] max-w-[130px] flex-1 bg-card text-[12px]"
           />
           <Button type="button" variant="outline" onClick={() => void loadModels(true)} disabled={refreshing || loading || !accountKey}>
             <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
@@ -242,17 +247,17 @@ export function AccountModelExposurePanel({
               type="button"
               onClick={onOpenModelSettings}
               aria-label={zh ? "打开模型设置" : "Open model settings"}
-              className="inline-flex size-9 items-center justify-center rounded-lg border border-black/[0.08] bg-white text-slate-500 transition-colors hover:bg-slate-50 hover:text-neutral-900"
+              className="inline-flex size-9 items-center justify-center rounded-lg border border-border-subtle bg-card text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
             >
               <CircleHelp className="size-4" />
             </button>
           </Tooltip>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 text-[12px] text-slate-500">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 text-[12px] text-muted-foreground">
           <span>{loading ? (zh ? "正在加载目录…" : "Loading catalog…") : (zh ? `显示 ${candidates.length} 个模型，已选 ${selectedIds.length} 个` : `${candidates.length} shown, ${selectedIds.length} selected`)}</span>
           <label
             className={cn(
-              "inline-flex items-center gap-1.5 font-medium text-neutral-800",
+              "inline-flex items-center gap-1.5 font-medium text-foreground",
               candidates.length === 0 ? "cursor-not-allowed opacity-50" : "cursor-pointer",
             )}
             title={zh ? "选择或取消当前筛选结果" : "Select or clear the current filtered results"}
@@ -271,7 +276,7 @@ export function AccountModelExposurePanel({
         </div>
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
           {candidates.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-black/[0.1] px-4 py-8 text-center text-[12px] leading-5 text-slate-500">
+            <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-[12px] leading-5 text-muted-foreground">
               {zh ? "没有可选择的模型。可以先在模型页面添加手动模型，或检查服务商凭据后重试。" : "No selectable models. Add a manual model on the Models page or retry after checking the credential."}
             </div>
           ) : candidates.map((model) => {
@@ -289,7 +294,7 @@ export function AccountModelExposurePanel({
             const checked = selectedIds.includes(model.id);
             const historicalBinding = !catalogFallback && Boolean(providerModelKey && !discovered && checked);
             return (
-              <div key={model.id} className={cn("flex items-start gap-3 rounded-xl border px-3.5 py-3 transition-colors", historicalBinding ? "border-amber-200 bg-amber-50/40" : checked ? "border-neutral-300 bg-neutral-50" : "border-black/[0.07] bg-white hover:bg-neutral-50")}>
+              <div key={model.id} className={cn("flex items-start gap-3 rounded-xl border px-3.5 py-3 transition-colors", historicalBinding ? "border-amber-200 bg-amber-50/40" : checked ? "border-border-strong bg-secondary" : "border-border-subtle bg-card hover:bg-accent")}>
                 <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
                   <input type="checkbox" checked={checked} onChange={(event) => toggleModel(model.id, event.target.checked)} className="mt-1 size-4 accent-primary" />
                   <ProviderIcon
@@ -300,12 +305,12 @@ export function AccountModelExposurePanel({
                   />
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2">
-                      <span className="truncate text-[13px] font-medium text-neutral-900">{model.entry.display_name}</span>
+                      <span className="truncate text-[13px] font-medium text-foreground">{model.entry.display_name}</span>
                       {checked ? <Check className="size-3.5 shrink-0 text-emerald-600" /> : null}
                     </span>
-                    <span className="mt-0.5 block truncate font-mono text-[10px] text-slate-400">{model.entry.slug}</span>
-                    <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
-                      <span className={cn("rounded px-1.5 py-0.5", historicalBinding ? "bg-amber-100 text-amber-800" : "bg-slate-100")}>
+                    <span className="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground">{model.entry.slug}</span>
+                    <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+                      <span className={cn("rounded px-1.5 py-0.5", historicalBinding ? "bg-amber-100 text-amber-800" : "bg-secondary")}>
                         {historicalBinding
                           ? (zh ? "历史绑定，当前账号未发现" : "Historical binding; not found for this account")
                           : modelSourceLabel(discovered?.source ?? String(model.entry.model_source ?? "manual"), zh)}
@@ -330,13 +335,6 @@ export function AccountModelExposurePanel({
               </div>
             );
           })}
-        </div>
-        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-black/[0.06] pt-4">
-          <span className="text-[11px] leading-5 text-slate-500">{zh ? "可在模型页面继续调整优先级、权重和上游模型名。" : "Adjust priority, weight, and upstream ids later on the Models page."}</span>
-          <div className="flex shrink-0 gap-2">
-            <Button type="button" variant="outline" onClick={onClose}>{zh ? "取消" : "Cancel"}</Button>
-            <Button type="button" onClick={() => void save()} disabled={saving || loading}>{saving ? (zh ? "保存中…" : "Saving…") : (zh ? "保存暴露模型" : "Save exposed models")}</Button>
-          </div>
         </div>
       </div>
     </SidePanel>

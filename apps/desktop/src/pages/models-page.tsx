@@ -66,7 +66,7 @@ function AccountSourceSummary({
   const remaining = Math.max(0, accountLabels.length - preview.length);
   return (
     <div className="min-w-0">
-      <div className="flex items-center justify-between gap-3 text-[11px] text-slate-400">
+      <div className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
         <span>{label}</span>
         <span>{count} {zh ? "个账号" : count === 1 ? "account" : "accounts"}</span>
       </div>
@@ -75,7 +75,7 @@ function AccountSourceSummary({
           {preview.map((account) => <SoftBadge key={account} label={account} className="max-w-full truncate text-[10px]" />)}
           {remaining ? <SoftBadge label={`+${remaining}`} className="text-[10px]" /> : null}
         </div>
-      ) : <div className="mt-1.5 text-[11px] text-slate-400">{emptyLabel}</div>}
+      ) : <div className="mt-1.5 text-[11px] text-muted-foreground">{emptyLabel}</div>}
     </div>
   );
 }
@@ -276,7 +276,7 @@ export function ModelsPage({
                 })),
               ]}
               openOnHover={false}
-              className="h-8 w-[132px] shrink-0 bg-[#f3f4f6] text-[12px] dark:bg-[#1b2129]"
+              className="h-8 w-[132px] shrink-0 bg-secondary text-[12px]"
             />
             <Button size="sm" variant="outline" onClick={() => void refreshDiscoveries()} disabled={refreshing}>
               <RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />
@@ -292,7 +292,7 @@ export function ModelsPage({
 
       <ListStack className="grid grid-cols-1 gap-3 space-y-0 lg:grid-cols-2 2xl:grid-cols-3">
         {loading ? <ListLoadingState rows={3} /> : snapshot.models.length === 0 ? (
-          <ListCard className="flex min-h-[150px] items-center justify-center text-[13px] font-medium text-slate-400">
+          <ListCard className="flex min-h-[150px] items-center justify-center text-[13px] font-medium text-muted-foreground">
             {zh ? "暂无自定义模型" : "No custom models"}
           </ListCard>
         ) : visibleModels.map((model) => {
@@ -316,10 +316,10 @@ export function ModelsPage({
                   />
                 <div className="min-w-0">
                   <div className="flex min-w-0 items-center gap-2">
-                    <h3 className="truncate text-[15px] font-semibold text-neutral-950 dark:text-white">{model.entry.display_name}</h3>
+                    <h3 className="truncate text-[15px] font-semibold text-foreground">{model.entry.display_name}</h3>
                     <SoftBadge label={providerLabel(providerId, providerCatalog, zh, String(model.entry.provider_display_name ?? ""))} className="max-w-[130px] truncate text-[10px]" />
                   </div>
-                  <p className="mt-1 truncate font-mono text-[11px] text-slate-400">{model.entry.slug}</p>
+                  <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">{model.entry.slug}</p>
                   <div className="mt-1 flex flex-wrap gap-1.5">
                     <SoftBadge label={model.entry.model_source === "discovered" ? (zh ? "服务商发现" : "Discovered") : (zh ? "手动配置" : "Manual")} />
                     {discoveryInfo ? <SoftBadge tone={statusTone} label={discoveryStatusLabel(discoveryInfo.status, zh)} /> : null}
@@ -343,7 +343,7 @@ export function ModelsPage({
                 <IconActionButton icon={<Trash2 className="size-4" />} label={zh ? "删除" : "Delete"} onClick={() => openDelete(model)} tone="danger" />
                 </div>
               </div>
-              <div className="mt-auto grid gap-3 border-t border-black/[0.06] pt-3 dark:border-white/[0.07]">
+              <div className="mt-auto grid gap-3 border-t border-border-subtle pt-3">
                 <AccountSourceSummary label={zh ? "发现来源" : "Discovered by"} count={sourceAccountLabels.length} emptyLabel={zh ? "暂无已知来源账号" : "No known source account"} accountLabels={sourceAccountLabels} zh={zh} />
                 <AccountSourceSummary label={zh ? "账号暴露" : "Exposed to"} count={exposedAccountLabels.length} emptyLabel={zh ? "未暴露到账号" : "Not exposed to any account"} accountLabels={exposedAccountLabels} zh={zh} />
               </div>
@@ -359,11 +359,15 @@ export function ModelsPage({
         onClose={() => setEditorOpen(false)}
         closeLabel={zh ? "关闭" : "Close"}
         scrollable={false}
+        footer={<>
+          <Button variant="outline" onClick={() => setEditorOpen(false)}>{zh ? "取消" : "Cancel"}</Button>
+          <Button onClick={() => void saveModel()} disabled={busy}><Save className="size-4" />{zh ? "保存" : "Save"}</Button>
+        </>}
       >
         <div className="flex min-h-0 flex-1 flex-col gap-4">
-          <div className="flex shrink-0 items-center gap-1 rounded-lg bg-neutral-100 p-1">
-            <button type="button" onClick={() => changeMode("form")} aria-pressed={mode === "form"} className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border text-[12px] ${mode === "form" ? "ui-selected-control" : "border-transparent text-slate-500"}`}><FilePenLine className="size-3.5" />{zh ? "表单" : "Form"}</button>
-            <button type="button" onClick={() => changeMode("json")} aria-pressed={mode === "json"} className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border text-[12px] ${mode === "json" ? "ui-selected-control" : "border-transparent text-slate-500"}`}><Braces className="size-3.5" />JSON</button>
+          <div className="flex shrink-0 items-center gap-1 rounded-lg bg-secondary p-1">
+            <button type="button" onClick={() => changeMode("form")} aria-pressed={mode === "form"} className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border text-[12px] ${mode === "form" ? "ui-selected-control" : "border-transparent text-muted-foreground"}`}><FilePenLine className="size-3.5" />{zh ? "表单" : "Form"}</button>
+            <button type="button" onClick={() => changeMode("json")} aria-pressed={mode === "json"} className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border text-[12px] ${mode === "json" ? "ui-selected-control" : "border-transparent text-muted-foreground"}`}><Braces className="size-3.5" />JSON</button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto pr-1">
             {mode === "form" ? (
@@ -371,10 +375,6 @@ export function ModelsPage({
             ) : (
               <Field label="model-catalogs.json"><Textarea className="min-h-[420px] font-mono text-[12px] leading-5" value={jsonDraft} onChange={(event) => setJsonDraft(event.target.value)} spellCheck={false} /></Field>
             )}
-          </div>
-          <div className="flex shrink-0 justify-end gap-2 border-t border-black/[0.06] pt-4">
-            <Button variant="outline" onClick={() => setEditorOpen(false)}>{zh ? "取消" : "Cancel"}</Button>
-            <Button onClick={() => void saveModel()} disabled={busy}><Save className="size-4" />{zh ? "保存" : "Save"}</Button>
           </div>
         </div>
       </SidePanel>

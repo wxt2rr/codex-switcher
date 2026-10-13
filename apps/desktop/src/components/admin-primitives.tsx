@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { CircleAlert, CircleCheck, LoaderCircle, X } from "lucide-react";
+import { CircleAlert, CircleCheck, Info, LoaderCircle, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
@@ -8,9 +8,9 @@ import { cn } from "@/lib/utils";
 import { useDelayedUnmount } from "./use-delayed-unmount";
 
 const dialogOverlayClass =
-  "motion-dialog-overlay fixed inset-0 flex items-center justify-center overflow-y-auto bg-slate-950/[0.22] px-6 py-4";
+  "motion-dialog-overlay fixed inset-0 flex items-center justify-center overflow-y-auto bg-overlay px-4 py-4 backdrop-blur-[2px] sm:px-6";
 const dialogSurfaceClass =
-  "motion-dialog-enter w-full border border-black/[0.07] bg-white p-6 shadow-[0_6px_18px_-10px_rgba(15,23,42,0.22),0_1px_3px_rgba(15,23,42,0.08)]";
+  "motion-dialog-enter w-full border border-border bg-card p-6 text-card-foreground shadow-lg";
 
 function DialogPortal({ children }: { children: ReactNode }) {
   if (typeof document === "undefined") return children;
@@ -42,9 +42,9 @@ export function PageHeader({
       )}
     >
       <div>
-        <h2 className="text-[24px] font-semibold tracking-[-0.03em] text-neutral-950">{title}</h2>
+        <h2 className="text-[24px] font-semibold tracking-[-0.03em] text-foreground">{title}</h2>
         {description ? (
-          <p className="mt-1 max-w-3xl text-[13px] leading-6 text-neutral-500">
+          <p className="mt-1 max-w-3xl text-[13px] leading-6 text-muted-foreground">
             {description}
           </p>
         ) : null}
@@ -66,7 +66,7 @@ export function PageToolbar({
   return (
     <div
       className={cn(
-        "flex flex-col gap-2.5 rounded-[14px] border border-black/[0.05] bg-white px-3 py-2.5",
+        "flex flex-col gap-2.5 rounded-[var(--cs-radius-md)] border border-border-subtle bg-card px-3 py-2.5 shadow-xs",
         "lg:flex-row lg:items-center lg:justify-between",
       )}
     >
@@ -100,7 +100,7 @@ export function TableCard({
   return (
     <section
       className={cn(
-        "overflow-hidden rounded-[14px] border border-black/[0.05] bg-white",
+        "overflow-hidden rounded-[var(--cs-radius-md)] border border-border-subtle bg-card shadow-xs",
         className,
       )}
     >
@@ -111,8 +111,8 @@ export function TableCard({
         )}
       >
         <div>
-          <h3 className="text-[15px] font-semibold text-neutral-950">{title}</h3>
-          {subtitle ? <p className="mt-0.5 text-[12px] text-neutral-500">{subtitle}</p> : null}
+          <h3 className="text-[15px] font-semibold text-foreground">{title}</h3>
+          {subtitle ? <p className="mt-0.5 text-[12px] text-muted-foreground">{subtitle}</p> : null}
         </div>
         {aside && <div className="shrink-0">{aside}</div>}
       </div>
@@ -136,11 +136,11 @@ export function DataTable({
     <div className={cn("overflow-auto", className)}>
       <table className="min-w-full border-collapse">
         <thead>
-          <tr className="bg-[#f5f6f8]">
+          <tr className="bg-secondary/70">
             {columns.map((column) => (
               <th
                 key={column}
-                className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.16em] text-neutral-400"
+                className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground"
               >
                 {column}
               </th>
@@ -167,8 +167,8 @@ export function DataRow({
       className={cn(
         "transition-colors duration-100",
         active
-          ? "bg-emerald-50/60"
-          : "odd:bg-white even:bg-[#fcfcfd] hover:bg-neutral-50/80",
+          ? "bg-primary/10"
+          : "odd:bg-card even:bg-secondary/30 hover:bg-accent/70",
       )}
     >
       {children}
@@ -186,7 +186,7 @@ export function DataCell({
   className?: string;
 }) {
   return (
-    <td className={cn("px-5 py-3 align-middle text-[13px] text-neutral-700", className)}>
+    <td className={cn("px-5 py-3 align-middle text-[13px] text-foreground-secondary", className)}>
       {children}
     </td>
   );
@@ -206,11 +206,11 @@ export function EmptyTableState({
       <td colSpan={colSpan} className="px-6 py-10">
         <div
           className={cn(
-            "rounded-lg bg-neutral-50/60",
+            "rounded-[var(--cs-radius-sm)] bg-secondary/70",
             "px-6 py-8 text-center",
           )}
         >
-          <div className="text-sm font-semibold text-neutral-600">{title}</div>
+          <div className="text-sm font-semibold text-muted-foreground">{title}</div>
         </div>
       </td>
     </tr>
@@ -229,13 +229,43 @@ export function ToolbarStat({
   return (
     <div
       className={cn(
-        "rounded-lg bg-neutral-50/70 px-3.5 py-2",
+        "rounded-[var(--cs-radius-sm)] bg-secondary/70 px-3.5 py-2",
       )}
     >
-      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-neutral-400">
+      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
         {label}
       </div>
-      <div className="mt-1 text-sm font-semibold text-neutral-700">{value}</div>
+      <div className="mt-1 text-sm font-semibold text-foreground">{value}</div>
+    </div>
+  );
+}
+
+/* ─── Inline feedback ─── */
+
+export function InlineNotice({
+  tone,
+  title,
+  children,
+}: {
+  tone: "info" | "success" | "warning" | "error";
+  title?: string;
+  children: ReactNode;
+}) {
+  const Icon = tone === "success" ? CircleCheck : tone === "warning" ? CircleAlert : tone === "error" ? CircleAlert : Info;
+  const toneClass = tone === "success"
+    ? "border-success/20 bg-success/10 text-success"
+    : tone === "warning"
+      ? "border-warning/20 bg-warning/10 text-warning"
+      : tone === "error"
+        ? "border-destructive/20 bg-destructive/10 text-destructive"
+        : "border-info/20 bg-info/10 text-info";
+  return (
+    <div className={cn("flex items-start gap-2.5 rounded-[var(--cs-radius-sm)] border px-3.5 py-3 text-[12px] leading-5", toneClass)} role={tone === "error" ? "alert" : "status"}>
+      <Icon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+      <div className="min-w-0">
+        {title ? <div className="font-semibold">{title}</div> : null}
+        <div className={title ? "mt-0.5" : undefined}>{children}</div>
+      </div>
     </div>
   );
 }
@@ -249,6 +279,7 @@ export function SidePanel({
   onClose,
   closeLabel = "Close",
   scrollable = true,
+  footer,
   children,
 }: {
   open: boolean;
@@ -257,34 +288,60 @@ export function SidePanel({
   onClose: () => void;
   closeLabel?: string;
   scrollable?: boolean;
+  footer?: ReactNode;
   children: ReactNode;
 }) {
   const mounted = useDelayedUnmount(open);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    panelRef.current?.focus({ preventScroll: true });
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose, open]);
+
   if (!mounted) return null;
 
   return (
     <DialogPortal>
-      <div data-state={open ? "open" : "closed"} className={cn(dialogOverlayClass, "z-40")}>
+      <div
+        data-state={open ? "open" : "closed"}
+        className={cn(dialogOverlayClass, "z-40")}
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) onClose();
+        }}
+      >
         <div
           data-state={open ? "open" : "closed"}
+          ref={panelRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          tabIndex={-1}
           className={cn(
             dialogSurfaceClass,
-            "flex max-h-[min(720px,calc(100dvh-2rem))] max-w-[520px] flex-col overflow-hidden rounded-[16px]",
+            "flex max-h-[min(760px,calc(100dvh-2rem))] max-w-[560px] flex-col overflow-hidden rounded-[var(--cs-radius-lg)]",
             !scrollable && "h-[min(720px,calc(100dvh-2rem))]",
           )}
         >
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border-subtle pb-4">
             <div>
-              <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-neutral-950">{title}</h3>
-              {description ? <p className="mt-1 text-[13px] leading-6 text-neutral-500">{description}</p> : null}
+              <h3 id={titleId} className="text-[20px] font-semibold tracking-[-0.03em] text-foreground">{title}</h3>
+              {description ? <p className="mt-1 text-[13px] leading-6 text-muted-foreground">{description}</p> : null}
             </div>
-            <button type="button" onClick={onClose} aria-label={closeLabel} title={closeLabel} className="motion-interactive-color inline-flex size-8 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-black/[0.045] hover:text-neutral-800">
+            <button type="button" onClick={onClose} aria-label={closeLabel} title={closeLabel} className="motion-interactive-color inline-flex size-8 shrink-0 items-center justify-center rounded-[var(--cs-radius-sm)] text-muted-foreground hover:bg-accent hover:text-foreground">
               <X className="size-4" />
             </button>
           </div>
-          <div className={cn("mt-6 pr-1", scrollable ? "min-h-0 overflow-y-auto" : "min-h-0 flex flex-1 flex-col overflow-hidden")}>
+          <div className={cn("side-panel-body min-h-0 flex-1 py-5 pr-1", scrollable ? "overflow-y-auto" : "flex flex-col overflow-hidden")}>
             {children}
           </div>
+          {footer ? <div className="flex shrink-0 justify-end gap-2 border-t border-border-subtle pt-4">{footer}</div> : null}
         </div>
       </div>
     </DialogPortal>
@@ -315,16 +372,24 @@ export function ConfirmDialog({
   onCancel: () => void;
 }) {
   const mounted = useDelayedUnmount(open);
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onCancel, open]);
   if (!mounted) return null;
 
   return (
     <DialogPortal>
       <div data-state={open ? "open" : "closed"} className={cn(dialogOverlayClass, "z-50")}>
-        <div data-state={open ? "open" : "closed"} className={cn(dialogSurfaceClass, "max-w-[460px] rounded-[16px]")}>
-          <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-neutral-950">{title}</h3>
-          {description ? <p className="mt-2 text-[13px] leading-6 text-neutral-500">{description}</p> : null}
+        <div data-state={open ? "open" : "closed"} className={cn(dialogSurfaceClass, "max-w-[460px] rounded-[var(--cs-radius-lg)]")} role="alertdialog" aria-modal="true">
+          <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-foreground">{title}</h3>
+          {description ? <p className="mt-2 text-[13px] leading-6 text-muted-foreground">{description}</p> : null}
           {impact && (
-            <div className="mt-4 rounded-[10px] border border-black/[0.05] bg-[#fafbfc] p-4">
+            <div className="mt-4 rounded-[var(--cs-radius-sm)] border border-border-subtle bg-secondary/60 p-4">
               {impact}
             </div>
           )}
@@ -370,7 +435,7 @@ export function ProgressDialog({
   const isRunning = phase === "running";
   const Icon = isRunning ? LoaderCircle : phase === "success" ? CircleCheck : CircleAlert;
   const iconClass = isRunning
-    ? "text-slate-400"
+    ? "text-muted-foreground"
     : phase === "success"
       ? "text-emerald-600"
       : "text-rose-600";
@@ -384,14 +449,14 @@ export function ProgressDialog({
         aria-modal="true"
         aria-busy={isRunning}
       >
-        <div data-state={open ? "open" : "closed"} className={cn(dialogSurfaceClass, "max-w-[480px] rounded-[16px]")}>
+        <div data-state={open ? "open" : "closed"} className={cn(dialogSurfaceClass, "max-w-[480px] rounded-[var(--cs-radius-lg)]")}>
           <div className="flex items-start gap-3">
             <Icon className={cn("mt-0.5 size-5 shrink-0", iconClass, isRunning && "animate-spin")} aria-hidden="true" />
-            <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-neutral-950">{title}</h3>
+            <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-foreground">{title}</h3>
           </div>
-          <div className="mt-4 rounded-[10px] border border-black/[0.05] bg-[#fafbfc] p-4">{children}</div>
+          <div className="mt-4 rounded-[var(--cs-radius-sm)] border border-border-subtle bg-secondary/60 p-4">{children}</div>
           {isRunning ? (
-            <div className="mt-5 text-right text-[12px] text-slate-400">{busyLabel}</div>
+            <div className="mt-5 text-right text-[12px] text-muted-foreground">{busyLabel}</div>
           ) : (
             <div className="mt-5 flex justify-end">
               <Button onClick={onConfirm}>{confirmLabel}</Button>
@@ -436,20 +501,20 @@ export function SummaryPanel({
     summary?.tone === "ok"
       ? "border-primary/20 bg-primary/10 text-primary"
       : summary?.tone === "warn"
-        ? "border-neutral-200 bg-neutral-50 text-neutral-700"
-        : "border-neutral-100 bg-neutral-50/60 text-neutral-700";
+        ? "border-border bg-secondary text-foreground"
+        : "border-border-subtle bg-secondary/60 text-foreground";
 
   return (
     <section
-      className="rounded-[18px] bg-white shadow-[0_12px_36px_rgba(15,23,42,0.045)]"
+      className="rounded-[var(--cs-radius-lg)] border border-border-subtle bg-card shadow-xs"
     >
       <div className="px-5 py-3.5">
-        <h3 className="text-[16px] font-semibold text-neutral-950">{title}</h3>
-        <p className="mt-1 text-[12px] text-neutral-500">{subtitle}</p>
+        <h3 className="text-[16px] font-semibold text-foreground">{title}</h3>
+        <p className="mt-1 text-[12px] text-muted-foreground">{subtitle}</p>
       </div>
       <div className="space-y-4 px-5 py-5">
         {summary ? (
-          <div className={cn("rounded-[16px] px-4 py-4", toneClassName)}>
+          <div className={cn("rounded-[var(--cs-radius-lg)] px-4 py-4", toneClassName)}>
             <div className="flex items-center justify-between gap-4">
               <div>
                 <div className="text-sm font-semibold">{summary.title}</div>
@@ -466,9 +531,9 @@ export function SummaryPanel({
                     {section.entries.map((entry) => (
                       <div
                         key={`${section.title}-${entry.label}-${entry.value}`}
-                        className="flex items-start justify-between gap-4 rounded-lg bg-white/80 px-3 py-2 text-[13px] text-neutral-700"
+                        className="flex items-start justify-between gap-4 rounded-[var(--cs-radius-xs)] bg-card/80 px-3 py-2 text-[13px] text-foreground"
                       >
-                        <span className="text-neutral-400">{entry.label}</span>
+                        <span className="text-muted-foreground">{entry.label}</span>
                         <span className="text-right font-medium">{entry.value}</span>
                       </div>
                     ))}
@@ -478,19 +543,19 @@ export function SummaryPanel({
             </div>
           </div>
         ) : (
-          <div className="rounded-lg border border-dashed border-neutral-200 bg-neutral-50/60 px-4 py-8 text-sm text-neutral-400">
+          <div className="rounded-[var(--cs-radius-sm)] border border-dashed border-border bg-secondary/60 px-4 py-8 text-sm text-muted-foreground">
             {emptyLabel}
           </div>
         )}
 
         <div>
-          <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-400">
+          <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
             {rawOutputLabel}
           </div>
           <pre
             className={cn(
               "min-h-[240px] overflow-auto rounded-lg",
-              "bg-[#fafafa] p-4 text-xs leading-6 text-neutral-500",
+              "bg-secondary/60 p-4 text-xs leading-6 text-muted-foreground",
               "font-mono",
             )}
           >

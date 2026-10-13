@@ -565,25 +565,25 @@ export function AccountsPage({
         <div className="shrink-0 flex flex-col gap-4">
           <div className="flex items-start justify-between gap-6">
             <div className="space-y-1">
-              <h2 className="text-[28px] font-semibold tracking-[-0.04em] text-neutral-950">
+              <h2 className="text-[28px] font-semibold tracking-[-0.04em] text-foreground">
                 {language === "zh" ? "账号管理" : language === "ja" ? "アカウント管理" : "Account Management"}
               </h2>
-              <p className="text-[13px] leading-6 text-slate-500">
+              <p className="text-[13px] leading-6 text-muted-foreground">
                 {language === "zh" ? "统一管理订阅授权、服务商账号连接和运行时配置。模型绑定请在模型页面维护。" : language === "ja" ? "サブスクリプション認証、プロバイダー接続、ランタイム設定をまとめて管理します。モデルのバインドはモデル画面で管理します。" : "Manage subscription auth, provider connections, and runtime settings. Model bindings are managed on the Models page."}
               </p>
             </div>
           </div>
 
-          <div className="rounded-[18px] bg-white px-3 py-2.5 ring-1 ring-black/[0.04] shadow-[0_10px_30px_rgba(15,23,42,0.03)]">
+          <div className="rounded-[var(--cs-radius-lg)] bg-card px-3 py-2.5 ring-1 ring-border-subtle shadow-[0_10px_30px_rgba(15,23,42,0.03)]">
             <div className="responsive-toolbar flex items-center gap-2.5">
               <div className="relative min-w-[220px] flex-1">
-                <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+                <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   data-account-search-input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder={language === "zh" ? "搜索账号、环境或 Base URL" : pageCopy.accounts.searchPlaceholder}
-                  className="h-8 rounded-lg border-transparent bg-[#fbfbfc] pl-10 text-[12px] shadow-none focus:border-transparent focus:ring-0"
+                  className="h-8 rounded-lg border-transparent bg-secondary pl-10 text-[12px] shadow-none focus:border-transparent focus:ring-0"
                 />
               </div>
               <Select
@@ -607,7 +607,7 @@ export function AccountsPage({
                     onAction: () => markDefaultEnvironment(env.name),
                   })),
                 ]}
-                className="h-8 w-[140px] rounded-lg border-transparent bg-[#fbfbfc] px-3 text-[12px] shadow-none"
+                className="h-8 w-[140px] rounded-lg border-transparent bg-secondary px-3 text-[12px] shadow-none"
               />
               <Select
                 value={modeFilter}
@@ -617,7 +617,7 @@ export function AccountsPage({
                   { value: "apikey", label: localizeAuthMode("apikey", language) },
                   { value: "auth", label: localizeAuthMode("auth", language) },
                 ]}
-                className="h-8 w-[128px] rounded-lg border-transparent bg-[#fbfbfc] px-3 text-[12px] shadow-none"
+                className="h-8 w-[128px] rounded-lg border-transparent bg-secondary px-3 text-[12px] shadow-none"
               />
               <Select
                 value={sortMode}
@@ -626,12 +626,12 @@ export function AccountsPage({
                   { value: "recent", label: language === "zh" ? "最近使用" : "Recently used" },
                   { value: "name", label: language === "zh" ? "名称排序" : "By name" },
                 ]}
-                className="h-8 w-[128px] rounded-lg border-transparent bg-[#fbfbfc] px-3 text-[12px] shadow-none"
+                className="h-8 w-[128px] rounded-lg border-transparent bg-secondary px-3 text-[12px] shadow-none"
               />
-              <div className="flex h-8 items-center overflow-hidden rounded-lg bg-[#f3f4f6]">
+              <div className="flex h-8 items-center overflow-hidden rounded-lg bg-secondary">
                 <button
                   type="button"
-                  className="motion-interactive-color flex size-8 shrink-0 items-center justify-center text-slate-500 hover:bg-[#ebeef2] hover:text-neutral-800 disabled:cursor-wait"
+                  className="motion-interactive-color flex size-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-wait"
                   aria-label={language === "zh" ? "立即刷新用量" : "Refresh usage now"}
                   title={language === "zh" ? "立即刷新用量" : "Refresh usage now"}
                   onClick={onRefreshAuthMetrics}
@@ -640,7 +640,7 @@ export function AccountsPage({
                   <RefreshCw className={cn("size-3.5", authMetricsLoading && "animate-spin")} />
                 </button>
                 {customRefreshEditing ? (
-                  <div className="flex items-center border-l border-black/[0.05]">
+                  <div className="flex items-center border-l border-border-subtle">
                     <Input
                       data-auth-refresh-input
                       type="number"
@@ -659,7 +659,7 @@ export function AccountsPage({
                     />
                     <button
                       type="button"
-                      className="flex h-8 w-7 items-center justify-center text-slate-500 hover:text-neutral-900"
+                      className="flex h-8 w-7 items-center justify-center text-muted-foreground hover:text-foreground"
                       onClick={commitCustomRefreshInterval}
                       aria-label={language === "zh" ? "应用刷新频率" : "Apply refresh interval"}
                       title={language === "zh" ? "应用刷新频率" : "Apply refresh interval"}
@@ -690,12 +690,12 @@ export function AccountsPage({
                           : `${authRefreshIntervalSeconds}s`,
                       },
                     ]}
-                    className="h-8 w-[64px] rounded-none border-l border-black/[0.05] bg-transparent px-2 text-[12px] shadow-none"
+                    className="h-8 w-[64px] rounded-none border-l border-border-subtle bg-transparent px-2 text-[12px] shadow-none"
                   />
                 )}
               </div>
               <Button
-                className="ml-auto h-8 rounded-lg bg-neutral-950 px-3.5 text-[12px] font-semibold text-white shadow-none hover:bg-neutral-800"
+                className="ml-auto h-8 rounded-lg bg-primary px-3.5 text-[12px] font-semibold text-white shadow-none hover:bg-[var(--cs-primary-hover)]"
                 onClick={() => {
                   onPrimeAccount(undefined);
                   setLoginDrawerOpen(true);
@@ -838,7 +838,7 @@ export function AccountsPage({
                 />
                 <button
                   type="button"
-                  className="motion-interactive-color absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 hover:bg-[#eef1f4] hover:text-neutral-700"
+                  className="motion-interactive-color absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground-secondary"
                   onClick={() => setShowApiKeyDraft((value) => !value)}
                   aria-label={
                     showApiKeyDraft
@@ -923,13 +923,13 @@ export function AccountsPage({
             <div className="space-y-3 border-t border-neutral-200/80 pt-4">
               <div className="flex items-center justify-between gap-4">
                 <div className="min-w-0">
-                  <div className="text-sm font-medium text-neutral-900">{language === "zh" ? "兼容路由" : "Compatibility route"}</div>
-                  <div className="mt-0.5 text-xs text-slate-500">{language === "zh" ? "仅为此账号转换 Responses 与 Chat Completions" : "Convert Responses and Chat Completions for this account only"}</div>
+                  <div className="text-sm font-medium text-foreground">{language === "zh" ? "兼容路由" : "Compatibility route"}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">{language === "zh" ? "仅为此账号转换 Responses 与 Chat Completions" : "Convert Responses and Chat Completions for this account only"}</div>
                 </div>
                 <button type="button" role="switch" aria-checked={compatibilityEnabled} disabled={compatibilityBusy}
                   onClick={toggleCompatibility}
-                  className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:opacity-60 ${compatibilityEnabled ? "bg-primary" : "bg-[#d1d1d6]"}`}>
-                  <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${compatibilityEnabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
+                  className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:opacity-60 ${compatibilityEnabled ? "bg-primary" : "bg-neutral-300"}`}>
+                  <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-card shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${compatibilityEnabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
                 </button>
               </div>
               <Field label={language === "zh" ? "上游模型（可选）" : "Upstream model (optional)"}>
@@ -949,7 +949,7 @@ export function AccountsPage({
                     { value: "safe", label: language === "zh" ? "安全压缩（推荐）" : "Safe compaction (recommended)" },
                     { value: "continuity", label: language === "zh" ? "连续性优先" : "Prioritize continuity" },
                   ]} />
-                <div className="mt-1 text-xs leading-5 text-slate-500">
+                <div className="mt-1 text-xs leading-5 text-muted-foreground">
                   {compatibilityLongConversationStrategy === "safe"
                     ? (language === "zh" ? "自动整理长会话；遇到无法转换的压缩历史时提示新建会话。" : "Summarizes long chats and asks for a new chat when history cannot be converted.")
                     : (language === "zh" ? "尽量继续当前会话，但部分早期内容可能丢失。" : "Keeps the current chat when possible, but early context may be lost.")}
@@ -963,7 +963,7 @@ export function AccountsPage({
                     { value: "system", label: "system" },
                     { value: "developer", label: "developer" },
                   ]} />
-                <div className="mt-1 text-xs leading-5 text-slate-500">
+                <div className="mt-1 text-xs leading-5 text-muted-foreground">
                   {language === "zh" ? "自动使用兼容性更高的 system；仅在上游支持时选择 developer。" : "Auto uses the broadly compatible system role; choose developer only when supported upstream."}
                 </div>
               </Field>
@@ -971,7 +971,7 @@ export function AccountsPage({
                 <Textarea value={compatibilityOverrides} onChange={(event) => setCompatibilityOverrides(event.target.value)} placeholder='{"top_p": 0.9}' />
               </Field>
               <div className="flex items-center justify-between gap-3 text-xs">
-                <div className="flex min-w-0 items-center gap-1.5 text-slate-500">
+                <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
                   {compatibilityBusy ? <LoaderCircle className="size-3.5 animate-spin" />
                     : compatibilityStatus?.state === "ready" ? <CircleCheck className="size-3.5 text-emerald-600" />
                       : compatibilityStatus?.state === "degraded" ? <CircleX className="size-3.5 text-red-600" /> : null}
@@ -1007,7 +1007,7 @@ export function AccountsPage({
               <Textarea value={providerHeadersDraft} onChange={(event) => setProviderHeadersDraft(event.target.value)} placeholder={'{"x-tenant-id":"team-a"}'} />
             </Field>
           ) : null}
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="side-panel-actions grid gap-3 sm:grid-cols-2">
             <Button
               onClick={async () => {
                 if (providerMode) {
@@ -1117,6 +1117,7 @@ export function AccountsPage({
               placeholder={text.inputs.baseUrl}
             />
           </Field>
+          <div className="side-panel-actions">
           <Button
             className="w-full"
             onClick={async () => {
@@ -1128,6 +1129,7 @@ export function AccountsPage({
           >
             {pageCopy.accounts.runtimeAction}
           </Button>
+          </div>
         </div>
       </SidePanel>
 
@@ -1138,20 +1140,20 @@ export function AccountsPage({
           selectedAccount ? (
             <div className="space-y-2.5 text-sm">
               <div className="flex justify-between gap-4">
-                <span className="text-neutral-400">{pageCopy.common.account}</span>
-                <span className="font-medium text-neutral-700">{selectedAccount.name}</span>
+                <span className="text-muted-foreground">{pageCopy.common.account}</span>
+                <span className="font-medium text-foreground-secondary">{selectedAccount.name}</span>
               </div>
               <div className="flex justify-between gap-4">
-                <span className="text-neutral-400">{pageCopy.common.environment}</span>
-                <span className="font-medium text-neutral-700">{selectedAccount.envName}</span>
+                <span className="text-muted-foreground">{pageCopy.common.environment}</span>
+                <span className="font-medium text-foreground-secondary">{selectedAccount.envName}</span>
               </div>
               <div className="flex justify-between gap-4">
-                <span className="text-neutral-400">{pageCopy.accounts.target}</span>
-                <span className="font-medium text-neutral-700">{selectedTargetLabel}</span>
+                <span className="text-muted-foreground">{pageCopy.accounts.target}</span>
+                <span className="font-medium text-foreground-secondary">{selectedTargetLabel}</span>
               </div>
               <div className="flex justify-between gap-4">
-                <span className="text-neutral-400">{pageCopy.common.status}</span>
-                <span className="font-medium text-neutral-700">
+                <span className="text-muted-foreground">{pageCopy.common.status}</span>
+                <span className="font-medium text-foreground-secondary">
                   {selectedAccount.isCurrentCli || selectedAccount.isCurrentApp
                     ? `${selectedAccount.isCurrentCli ? `${text.labels.cli} ` : ""}${selectedAccount.isCurrentApp ? text.labels.app : ""}`.trim()
                     : pageCopy.common.standby}
@@ -1159,7 +1161,7 @@ export function AccountsPage({
               </div>
             </div>
           ) : (
-            <div className="text-sm text-neutral-400">{pageCopy.accounts.logoutMissing}</div>
+            <div className="text-sm text-muted-foreground">{pageCopy.accounts.logoutMissing}</div>
           )
         }
         confirmLabel={pageCopy.accounts.logoutConfirm}
@@ -1178,16 +1180,16 @@ export function AccountsPage({
           selectedAccount ? (
             <div className="space-y-2.5 text-sm">
               <div className="flex justify-between gap-4">
-                <span className="text-neutral-400">{pageCopy.common.account}</span>
-                <span className="font-medium text-neutral-700">{selectedAccount.name}</span>
+                <span className="text-muted-foreground">{pageCopy.common.account}</span>
+                <span className="font-medium text-foreground-secondary">{selectedAccount.name}</span>
               </div>
               <div className="flex justify-between gap-4">
-                <span className="text-neutral-400">{pageCopy.common.environment}</span>
-                <span className="font-medium text-neutral-700">{selectedAccount.envName}</span>
+                <span className="text-muted-foreground">{pageCopy.common.environment}</span>
+                <span className="font-medium text-foreground-secondary">{selectedAccount.envName}</span>
               </div>
               <div className="flex justify-between gap-4">
-                <span className="text-neutral-400">{pageCopy.common.status}</span>
-                <span className="font-medium text-neutral-700">
+                <span className="text-muted-foreground">{pageCopy.common.status}</span>
+                <span className="font-medium text-foreground-secondary">
                   {selectedAccount.isCurrentCli || selectedAccount.isCurrentApp
                     ? `${selectedAccount.isCurrentCli ? `${text.labels.cli} ` : ""}${selectedAccount.isCurrentApp ? text.labels.app : ""}`.trim()
                     : pageCopy.common.standby}
@@ -1195,7 +1197,7 @@ export function AccountsPage({
               </div>
             </div>
           ) : (
-            <div className="text-sm text-neutral-400">{pageCopy.accounts.deleteMissing}</div>
+            <div className="text-sm text-muted-foreground">{pageCopy.accounts.deleteMissing}</div>
           )
         }
         confirmLabel={pageCopy.accounts.deleteConfirm}
@@ -1301,7 +1303,7 @@ function AccountListCard({
     >
       <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
-            <h3 className="truncate text-[15px] font-semibold tracking-[-0.02em] text-neutral-950">{account.name}</h3>
+            <h3 className="truncate text-[15px] font-semibold tracking-[-0.02em] text-foreground">{account.name}</h3>
           </div>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             <SoftBadge tone={isAuth ? "brand" : "neutral"} label={formatAccountAuthLabel(account.authMode)} />
@@ -1322,10 +1324,10 @@ function AccountListCard({
           <div className="min-w-0 space-y-1">
             {baseUrl ? (
               <div className="account-runtime-line min-h-6 min-w-0">
-                <span className="min-w-0 truncate text-[14px] font-medium text-neutral-950 [font-variant-numeric:tabular-nums]">{baseUrl}</span>
+                <span className="min-w-0 truncate text-[14px] font-medium text-foreground [font-variant-numeric:tabular-nums]">{baseUrl}</span>
                 <button
                   type="button"
-                  className="motion-interactive-color inline-flex size-6 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-white hover:text-neutral-900"
+                  className="motion-interactive-color inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-card hover:text-foreground"
                   onClick={() => onCopyBaseUrl(baseUrl)}
                   aria-label={language === "zh" ? "复制 Base URL" : language === "ja" ? "Base URL をコピー" : "Copy Base URL"}
                   title={language === "zh" ? "复制完整 Base URL" : language === "ja" ? "完全な Base URL をコピー" : "Copy full Base URL"}
@@ -1334,16 +1336,16 @@ function AccountListCard({
                 </button>
               </div>
             ) : !isAuth ? (
-              <span className="flex min-h-6 items-center truncate text-[12px] text-slate-400">
+              <span className="flex min-h-6 items-center truncate text-[12px] text-muted-foreground">
                 {language === "zh" ? "未配置 Base URL" : language === "ja" ? "Base URL 未設定" : "Base URL not set"}
               </span>
             ) : null}
             {maskedApiKey ? (
               <div className="account-runtime-line min-h-6 min-w-0">
-                <span className="min-w-0 truncate font-mono text-[12px] text-slate-500 [font-variant-numeric:tabular-nums]">{maskedApiKey}</span>
+                <span className="min-w-0 truncate font-mono text-[12px] text-muted-foreground [font-variant-numeric:tabular-nums]">{maskedApiKey}</span>
                 <button
                   type="button"
-                  className="motion-interactive-color inline-flex size-6 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-white hover:text-neutral-900"
+                  className="motion-interactive-color inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-card hover:text-foreground"
                   onClick={() => onCopyApiKey(apiKeyValue)}
                   aria-label={language === "zh" ? "复制 API Key" : language === "ja" ? "API Key をコピー" : "Copy API key"}
                   title={language === "zh" ? "复制完整 API Key" : language === "ja" ? "完全な API Key をコピー" : "Copy full API key"}
@@ -1380,12 +1382,12 @@ function AccountListCard({
           </div>
         ) : (
           <div className="flex min-h-[52px] items-center px-3 py-2">
-            <div className="text-[12px] leading-5 text-slate-500">{getApiUsageHint(language)}</div>
+            <div className="text-[12px] leading-5 text-muted-foreground">{getApiUsageHint(language)}</div>
           </div>
         )}
       </div>
 
-      <div className="responsive-actions min-h-full border-l border-black/[0.05] pl-4">
+      <div className="responsive-actions min-h-full border-l border-border-subtle pl-4">
         <CardTargetButton
           active={account.isCurrentCli}
           disabled={busy}
@@ -1474,7 +1476,7 @@ function AccountListCard({
         />
         <button
           type="button"
-          className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[12px] font-medium text-neutral-700 ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-55"
+          className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-secondary/60 px-3 text-[12px] font-medium text-foreground-secondary ring-1 ring-border-subtle hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
           onClick={onOpenModels}
           disabled={busy}
           title={language === "zh" ? "选择账号暴露的模型" : "Choose exposed models"}
@@ -1484,7 +1486,7 @@ function AccountListCard({
         </button>
         <button
           type="button"
-          className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[12px] font-medium text-neutral-700 ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-55"
+          className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-secondary/60 px-3 text-[12px] font-medium text-foreground-secondary ring-1 ring-border-subtle hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
           onClick={() => {
             onPrimeAccount(account);
             onLogin();
@@ -1584,14 +1586,14 @@ function RowActionMenu({
     <div ref={rootRef} className="relative">
       <button
         type="button"
-        className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[12px] font-medium text-neutral-700 ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-55"
+        className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-secondary/60 px-3 text-[12px] font-medium text-foreground-secondary ring-1 ring-border-subtle hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
         onClick={() => setOpen((value) => !value)}
         disabled={disabled}
         aria-expanded={open}
       >
         <Ellipsis className="size-4" />
         <span className="responsive-action-label">{label}</span>
-        <ChevronDown className={cn("motion-chevron responsive-action-label size-3.5 text-slate-400", open && "rotate-180")} />
+        <ChevronDown className={cn("motion-chevron responsive-action-label size-3.5 text-muted-foreground", open && "rotate-180")} />
       </button>
       {menuMounted ? (
         <div
@@ -1599,7 +1601,7 @@ function RowActionMenu({
           data-state={open ? "open" : "closed"}
           data-menu-placement={placement}
           className={cn(
-            "motion-popover-enter absolute right-0 z-20 min-w-[188px] overflow-visible rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md",
+            "motion-popover-enter absolute right-0 z-20 min-w-[188px] overflow-visible rounded-lg border border-border-subtle bg-card p-1.5 shadow-md",
             placement === "up" ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]",
           )}
           style={{ transformOrigin: placement === "up" ? "bottom right" : "top right", maxHeight: availableHeight }}
@@ -1613,7 +1615,7 @@ function RowActionMenu({
           ) : (
             <button key={item.key} type="button"
               className={cn("motion-interactive-color flex w-full items-center rounded-lg px-3 py-2 text-left text-[12px] font-medium",
-                item.tone === "danger" ? "text-rose-600 hover:bg-rose-50" : "text-neutral-700 hover:bg-[#f6f7f9]")}
+                item.tone === "danger" ? "text-rose-600 hover:bg-rose-50" : "text-foreground-secondary hover:bg-accent")}
               onClick={() => { setOpen(false); item.onSelect?.(); }}>
               {item.label}
             </button>
@@ -1642,19 +1644,19 @@ function RowActionSubmenu({
 
   return (
     <div ref={triggerRef} className="relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
-      <button type="button" className="motion-interactive-color flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[12px] font-medium text-neutral-700 hover:bg-[#f6f7f9]"
+      <button type="button" className="motion-interactive-color flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[12px] font-medium text-foreground-secondary hover:bg-accent"
         aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         <span>{item.label}</span>
-        <ChevronRight className="size-3.5 text-slate-400" />
+        <ChevronRight className="size-3.5 text-muted-foreground" />
       </button>
       {mounted ? (
         <div ref={menuRef} data-state={open ? "open" : "closed"} data-submenu-placement={placement}
           className={cn("absolute right-full z-30 pr-2", placement === "up" ? "bottom-[-4px]" : "top-[-4px]")}
           style={{ maxHeight: availableHeight }}>
-          <div className="motion-popover-enter min-w-[180px] overflow-y-auto rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md"
+          <div className="motion-popover-enter min-w-[180px] overflow-y-auto rounded-lg border border-border-subtle bg-card p-1.5 shadow-md"
             style={{ maxHeight: availableHeight }}>
             {item.children.map((child) => (
-              <button key={child.key} type="button" className="motion-interactive-color block w-full rounded-lg px-3 py-2 text-left text-[12px] font-medium text-neutral-700 hover:bg-[#f6f7f9]"
+              <button key={child.key} type="button" className="motion-interactive-color block w-full rounded-lg px-3 py-2 text-left text-[12px] font-medium text-foreground-secondary hover:bg-accent"
                 onClick={() => { onClose(); child.onSelect(); }}>
                 {child.label}
               </button>
@@ -1671,7 +1673,7 @@ function SoftBadge({ label, tone, title }: { label: string; tone: "brand" | "neu
     <span
       className={cn(
         "inline-flex h-5 items-center rounded-md px-2 text-[10px] font-medium",
-        tone === "brand" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500",
+        tone === "brand" ? "bg-emerald-50 text-emerald-700" : "bg-secondary text-muted-foreground",
       )}
       title={title}
     >
@@ -1700,19 +1702,19 @@ function CardUsageRow({
 
   return (
     <div className="account-usage-row px-0.5 py-1">
-      <span className="truncate text-[11px] font-semibold text-neutral-900">{label}</span>
+      <span className="truncate text-[11px] font-semibold text-foreground">{label}</span>
       <div className="min-w-0">
-        <div className="h-1.5 overflow-hidden rounded-full bg-slate-200/80">
+        <div className="h-1.5 overflow-hidden rounded-full bg-secondary">
           <div
             className={cn("h-full origin-left rounded-full transition-[transform,background-color] duration-[220ms] ease-[cubic-bezier(0.23,1,0.32,1)]", getUsageProgressClass(percent))}
             style={{ transform: `scaleX(${percent / 100})` }}
           />
         </div>
       </div>
-      <span className="text-right text-[10px] font-semibold text-neutral-700 [font-variant-numeric:tabular-nums]">
+      <span className="text-right text-[10px] font-semibold text-foreground-secondary [font-variant-numeric:tabular-nums]">
         {hasPercent ? `${percent}%` : ""}
       </span>
-      <span className="text-right text-[10px] font-medium text-slate-500 [font-variant-numeric:tabular-nums]">
+      <span className="text-right text-[10px] font-medium text-muted-foreground [font-variant-numeric:tabular-nums]">
         {resetHint}
       </span>
     </div>
@@ -1766,7 +1768,7 @@ function RequestHealthRow({
   const visibleSegments = segments.slice(-REQUEST_HEALTH_SAMPLE_SIZE);
   const slots = Array.from({ length: REQUEST_HEALTH_SAMPLE_SIZE }, (_, index) => {
     const segment = visibleSegments[index - (REQUEST_HEALTH_SAMPLE_SIZE - visibleSegments.length)];
-    if (!segment) return { className: "bg-slate-100", title: "" };
+    if (!segment) return { className: "bg-secondary", title: "" };
     const value = kind === "success" ? segment.success : segment.cacheHit;
     const stateLabel = kind === "success"
       ? value ? (language === "zh" ? "成功" : "Success") : (language === "zh" ? "失败" : "Failed")
@@ -1774,8 +1776,8 @@ function RequestHealthRow({
         : value ? (language === "zh" ? "命中" : "Hit") : (language === "zh" ? "未命中" : "Miss");
     return {
       className: kind === "success"
-        ? value ? "bg-[#afc8b4]" : "bg-[#e6b3a9]"
-        : value === null ? "bg-[#ece9e3]" : value ? "bg-[#afc8b4]" : "bg-[#d9d4cc]",
+        ? value ? "bg-primary/50" : "bg-danger/50"
+        : value === null ? "bg-secondary" : value ? "bg-primary/50" : "bg-neutral-300",
       title: `${new Date(segment.completedAt).toLocaleString()} · ${stateLabel}`,
     };
   });
@@ -1784,8 +1786,8 @@ function RequestHealthRow({
   return (
     <div>
       <div className="mb-1 flex items-center justify-between gap-3 text-[10px] leading-none">
-        <span className="font-medium text-slate-500">{label}</span>
-        <span className="font-semibold text-neutral-800 [font-variant-numeric:tabular-nums]">{percent}</span>
+        <span className="font-medium text-muted-foreground">{label}</span>
+        <span className="font-semibold text-foreground [font-variant-numeric:tabular-nums]">{percent}</span>
       </div>
       <div
         className="grid h-2.5 gap-px"
@@ -1881,8 +1883,8 @@ function CardTargetButton({
       <div
         className={cn(
           "motion-interactive-color flex h-9 overflow-hidden rounded-lg border border-transparent",
-          active ? "ui-selected-control" : "bg-[#fafafa] text-neutral-700",
-          !disabled && !active && "hover:bg-[#f3f4f6] hover:text-neutral-950",
+          active ? "ui-selected-control" : "bg-secondary/60 text-foreground-secondary",
+          !disabled && !active && "hover:bg-secondary hover:text-foreground",
           disabled && "cursor-not-allowed opacity-55",
         )}
       >
@@ -1897,8 +1899,8 @@ function CardTargetButton({
         <button
           type="button"
           className={cn(
-            "motion-interactive-color flex h-full w-8 items-center justify-center text-slate-400",
-            !disabled && "hover:bg-black/[0.035] hover:text-neutral-700",
+            "motion-interactive-color flex h-full w-8 items-center justify-center text-muted-foreground",
+            !disabled && "hover:bg-black/[0.035] hover:text-foreground-secondary",
           )}
           onClick={() => setOpen((value) => !value)}
           disabled={disabled}
@@ -1915,7 +1917,7 @@ function CardTargetButton({
           className={cn("absolute right-0 z-20 overflow-visible", placement === "up" ? "bottom-full pb-2" : "top-full pt-2")}
           style={{ maxHeight: availableHeight }}
         >
-          <div data-state={open ? "open" : "closed"} className="motion-popover-enter min-w-[172px] rounded-lg border border-black/[0.08] bg-white p-1 shadow-md">
+          <div data-state={open ? "open" : "closed"} className="motion-popover-enter min-w-[172px] rounded-lg border border-border-subtle bg-card p-1 shadow-md">
             {items.map((item) => (
               <div
                 key={item.key}
@@ -1938,9 +1940,9 @@ function CardTargetButton({
                 <button
                   type="button"
                   className={cn(
-                    "motion-interactive-color flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[12px] font-medium text-neutral-700 hover:bg-[#f6f7f9] hover:text-neutral-950",
-                    item.key === primaryStrategy && "bg-[#f5f7fa] text-neutral-950",
-                    item.disabled && "cursor-not-allowed text-slate-300 hover:bg-transparent hover:text-slate-300",
+                    "motion-interactive-color flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[12px] font-medium text-foreground-secondary hover:bg-accent hover:text-foreground",
+                    item.key === primaryStrategy && "bg-secondary text-foreground",
+                    item.disabled && "cursor-not-allowed text-muted-foreground hover:bg-transparent hover:text-muted-foreground",
                   )}
                   disabled={item.disabled}
                   onClick={() => {
@@ -1951,7 +1953,7 @@ function CardTargetButton({
                   }}
                 >
                   {item.label}
-                  {item.key === "new-window" && loadProjects ? <span className="text-slate-400">›</span> : null}
+                  {item.key === "new-window" && loadProjects ? <span className="text-muted-foreground">›</span> : null}
                 </button>
                 {item.key === "new-window" && projectMenuMounted && loadProjects ? (
                   <div
@@ -1962,18 +1964,18 @@ function CardTargetButton({
                       projectPlacement === "up" ? "bottom-[-4px]" : "top-[-4px]",
                     )}
                   >
-                    <div data-state={projectOpen ? "open" : "closed"} className="motion-popover-enter flex w-[280px] flex-col overflow-hidden rounded-lg border border-black/[0.08] bg-white p-1 shadow-md" style={{ maxHeight: projectAvailableHeight }}>
+                    <div data-state={projectOpen ? "open" : "closed"} className="motion-popover-enter flex w-[280px] flex-col overflow-hidden rounded-lg border border-border-subtle bg-card p-1 shadow-md" style={{ maxHeight: projectAvailableHeight }}>
                       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                         {projects.map((project) => (
-                          <button key={project.path} type="button" title={project.path} className="motion-interactive-color block w-full rounded-lg px-3 py-2 text-left hover:bg-[#f6f7f9]" onClick={() => { setOpen(false); setProjectOpen(false); onSelectProject?.(project.path); }}>
-                            <span className="block truncate text-[12px] font-medium text-neutral-800">{project.name}</span>
-                            <span className="block truncate text-[10px] text-slate-400">{project.path}</span>
+                          <button key={project.path} type="button" title={project.path} className="motion-interactive-color block w-full rounded-lg px-3 py-2 text-left hover:bg-accent" onClick={() => { setOpen(false); setProjectOpen(false); onSelectProject?.(project.path); }}>
+                            <span className="block truncate text-[12px] font-medium text-foreground">{project.name}</span>
+                            <span className="block truncate text-[10px] text-muted-foreground">{project.path}</span>
                           </button>
                         ))}
                       </div>
-                      <div className="mt-1 border-t border-black/[0.06] pt-1">
-                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[12px] text-neutral-700 hover:bg-[#f6f7f9]" onClick={() => { setOpen(false); onSelectProject?.(""); }}>{homeLabel}</button>
-                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[12px] text-neutral-700 hover:bg-[#f6f7f9]" onClick={() => { void onPickDirectory?.().then((path) => { if (path) { setOpen(false); onSelectProject?.(path); } }); }}>{pickDirectoryLabel}</button>
+                      <div className="mt-1 border-t border-border-subtle pt-1">
+                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[12px] text-foreground-secondary hover:bg-accent" onClick={() => { setOpen(false); onSelectProject?.(""); }}>{homeLabel}</button>
+                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[12px] text-foreground-secondary hover:bg-accent" onClick={() => { void onPickDirectory?.().then((path) => { if (path) { setOpen(false); onSelectProject?.(path); } }); }}>{pickDirectoryLabel}</button>
                       </div>
                     </div>
                   </div>

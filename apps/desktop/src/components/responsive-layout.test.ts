@@ -49,8 +49,8 @@ test("shared page layout uses the full content width and defines compact actions
   assert.match(primitives, /responsive-action-label/);
   assert.match(primitives, /responsive-record-scroll mt-1 min-h-0 flex-1 space-y-2\.5/);
   assert.match(primitives, /management-list-card/);
-  assert.match(css, /\.management-list-card\s*\{[^}]*transition:\s*border-color 140ms ease/s);
-  assert.match(css, /\.management-list-card:hover\s*\{[^}]*border-color:[^}]*background-color:\s*white/s);
+  assert.match(css, /\.management-list-card\s*\{[^}]*border-color var\(--cs-motion-fast\) var\(--cs-ease-out\)/s);
+  assert.match(css, /\.management-list-card:hover\s*\{[^}]*border-color:\s*var\(--selected-border-color\)[^}]*background-color:\s*var\(--cs-surface-raised\)/s);
   assert.match(css, /@media \(hover: hover\) and \(pointer: fine\)/);
   assert.match(primitives, /title=\{label\}/);
   assert.match(css, /container-type:\s*inline-size/);
@@ -143,8 +143,8 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.doesNotMatch(accounts, /CircleHelp/);
   assert.doesNotMatch(accounts, /function TooltipHint/);
   assert.doesNotMatch(accounts, /getModelProviderHint/);
-  assert.match(accounts, /bg-\[#afc8b4\]/);
-  assert.match(accounts, /bg-\[#e6b3a9\]/);
+  assert.match(accounts, /bg-primary/);
+  assert.match(accounts, /bg-neutral-300/);
   assert.match(css, /\.account-model-actions\s*\{[^}]*width:\s*2rem;/s);
   assert.match(reactApp, /Base URL 已复制/);
   assert.match(reactApp, /API Key 已复制/);
@@ -197,12 +197,12 @@ test("account records keep actions in the row and provide icons for compact cont
 });
 
 test("selected controls share the green theme treatment", () => {
-  assert.match(css, /--selected-border-color:\s*rgb\(148 163 184 \/ 0\.55\)/);
+  assert.match(css, /--selected-border-color:\s*var\(--cs-selected-border\)/);
   assert.match(css, /\.ui-selected-control\s*\{[^}]*border-color:\s*var\(--selected-border-color\);[^}]*background-color:\s*var\(--selected-control-background\);[^}]*color:\s*var\(--selected-control-foreground\);/s);
   assert.match(css, /\.management-list-card:hover\s*\{[^}]*border-color:\s*var\(--selected-border-color\)/s);
   assert.match(primitives, /active\s*\?\s*"ui-selected-control"/);
   assert.match(accounts, /active \? "ui-selected-control"/);
-  assert.match(desktopShell, /\? "bg-\[#f1f3f5\] text-neutral-950 dark:bg-\[#1b2129\] dark:text-white"/);
+  assert.match(desktopShell, /isActive\s*\?\s*"bg-primary\/10 text-primary"/);
   assert.doesNotMatch(desktopShell, /ui-selected-control/);
   assert.match(environments, /\? "ui-selected-control rounded-lg border px-3 py-1\.5 text-xs font-semibold"/);
   assert.match(models, /mode === "form" \? "ui-selected-control"/);
@@ -237,7 +237,7 @@ test("all management record cards opt into the single-row responsive contract", 
   assert.match(environments, /ListStack/);
   assert.match(environments, /<ListStack>/);
   assert.match(environments, /title=\{env\.path\}/);
-  assert.match(environments, /font-mono text-\[11px\] text-slate-500/);
+  assert.match(environments, /font-mono text-\[11px\] text-muted-foreground/);
   assert.doesNotMatch(environments, /!rounded-none/);
   assert.doesNotMatch(environments, /!shadow-none/);
   assert.doesNotMatch(environments, /index % 2 \? "bg-\[#fafbfc\]" : "bg-white"/);
@@ -305,7 +305,7 @@ test("desktop motion is restrained and respects reduced-motion preferences", () 
   assert.match(css, /--motion-popover-enter:\s*200ms/);
   assert.match(css, /--motion-popover-exit:\s*140ms/);
   assert.match(css, /--motion-toggle:\s*240ms/);
-  assert.match(css, /--ease-drawer:\s*cubic-bezier\(0\.32, 0\.72, 0, 1\)/);
+  assert.match(css, /--ease-drawer:\s*var\(--cs-ease-drawer\)/);
   assert.match(css, /\.motion-popover-enter\[data-menu-placement="up"\]/);
   assert.match(css, /@starting-style/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*transform:\s*none !important/);
@@ -373,15 +373,16 @@ test("dialogs use a restrained native-style overlay and single surface", () => {
   assert.doesNotMatch(adminPrimitives, /items-start justify-center/);
   assert.doesNotMatch(adminPrimitives, /style=\{\{ alignItems: "flex-start" \}\}/);
   assert.match(adminPrimitives, /dialogOverlayClass/);
-  assert.match(adminPrimitives, /bg-slate-950\/\[0\.22\]/);
-  assert.doesNotMatch(adminPrimitives, /backdrop-blur/);
-  assert.match(adminPrimitives, /shadow-\[0_6px_18px_-10px/);
+  assert.match(adminPrimitives, /bg-overlay/);
+  assert.match(adminPrimitives, /backdrop-blur-\[2px\]/);
+  assert.match(adminPrimitives, /shadow-lg/);
   assert.match(adminPrimitives, /dialogSurfaceClass/);
   assert.match(adminPrimitives, /motion-dialog-enter/);
   assert.doesNotMatch(adminPrimitives, /animate-fade-in-up/);
-  assert.match(adminPrimitives, /max-w-\[520px\].*rounded-\[16px\]/);
-  assert.match(adminPrimitives, /max-h-\[min\(720px,calc\(100dvh-2rem\)\)\]/);
-  assert.match(adminPrimitives, /min-h-0 overflow-y-auto/);
+  assert.match(adminPrimitives, /max-w-\[560px\].*rounded-\[var\(--cs-radius-lg\)\]/);
+  assert.match(adminPrimitives, /max-h-\[min\(760px,calc\(100dvh-2rem\)\)\]/);
+  assert.match(adminPrimitives, /side-panel-body min-h-0/);
+  assert.match(adminPrimitives, /overflow-y-auto/);
   assert.match(adminPrimitives, /<X className="size-4"/);
   assert.doesNotMatch(adminPrimitives, /mt-5 rounded-\[16px\] bg-\[#f7f8fa\] p-4/);
   assert.doesNotMatch(operations, /rounded-xl bg-\[#f7f8fa\]/);

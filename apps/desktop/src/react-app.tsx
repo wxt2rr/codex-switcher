@@ -1234,14 +1234,14 @@ export function App() {
       <DesktopShell
         brand={copy.brand}
         nav={[
-          { view: "accounts", label: copy.nav.accounts },
-          { view: "environments", label: copy.nav.environments },
-          { view: "providers", label: copy.nav.providers },
-          { view: "models", label: copy.nav.models },
-          { view: "plugins", label: copy.nav.plugins },
-          { view: "skills", label: copy.nav.skills },
-          { view: "usage", label: copy.nav.usage },
-          { view: "operations", label: copy.nav.operations },
+          { view: "accounts", label: copy.nav.accounts, section: "workspace" },
+          { view: "environments", label: copy.nav.environments, section: "workspace" },
+          { view: "providers", label: copy.nav.providers, section: "configuration" },
+          { view: "models", label: copy.nav.models, section: "configuration" },
+          { view: "plugins", label: copy.nav.plugins, section: "configuration" },
+          { view: "skills", label: copy.nav.skills, section: "configuration" },
+          { view: "usage", label: copy.nav.usage, section: "system" },
+          { view: "operations", label: copy.nav.operations, section: "system" },
         ]}
         currentView={view}
         onChangeView={setView}
@@ -1275,14 +1275,14 @@ export function App() {
       <DesktopShell
         brand={copy.brand}
         nav={[
-          { view: "accounts", label: copy.nav.accounts },
-          { view: "environments", label: copy.nav.environments },
-          { view: "providers", label: copy.nav.providers },
-          { view: "models", label: copy.nav.models },
-          { view: "plugins", label: copy.nav.plugins },
-          { view: "skills", label: copy.nav.skills },
-          { view: "usage", label: copy.nav.usage },
-          { view: "operations", label: copy.nav.operations },
+          { view: "accounts", label: copy.nav.accounts, section: "workspace" },
+          { view: "environments", label: copy.nav.environments, section: "workspace" },
+          { view: "providers", label: copy.nav.providers, section: "configuration" },
+          { view: "models", label: copy.nav.models, section: "configuration" },
+          { view: "plugins", label: copy.nav.plugins, section: "configuration" },
+          { view: "skills", label: copy.nav.skills, section: "configuration" },
+          { view: "usage", label: copy.nav.usage, section: "system" },
+          { view: "operations", label: copy.nav.operations, section: "system" },
         ]}
         currentView={view}
         onChangeView={setView}
@@ -1322,14 +1322,14 @@ export function App() {
     <DesktopShell
       brand={copy.brand}
       nav={[
-        { view: "accounts", label: copy.nav.accounts },
-        { view: "environments", label: copy.nav.environments },
-        { view: "providers", label: copy.nav.providers },
-        { view: "models", label: copy.nav.models },
-        { view: "plugins", label: copy.nav.plugins },
-        { view: "skills", label: copy.nav.skills },
-        { view: "usage", label: copy.nav.usage },
-        { view: "operations", label: copy.nav.operations },
+        { view: "accounts", label: copy.nav.accounts, section: "workspace" },
+        { view: "environments", label: copy.nav.environments, section: "workspace" },
+        { view: "providers", label: copy.nav.providers, section: "configuration" },
+        { view: "models", label: copy.nav.models, section: "configuration" },
+        { view: "plugins", label: copy.nav.plugins, section: "configuration" },
+        { view: "skills", label: copy.nav.skills, section: "configuration" },
+        { view: "usage", label: copy.nav.usage, section: "system" },
+        { view: "operations", label: copy.nav.operations, section: "system" },
       ]}
       currentView={view}
       onChangeView={setView}

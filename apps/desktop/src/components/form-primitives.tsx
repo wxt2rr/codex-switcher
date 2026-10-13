@@ -25,13 +25,13 @@ export function Field({
 }) {
   return (
     <div className="grid gap-1.5">
-      <label className="text-[12px] font-medium text-neutral-700">{label}</label>
+      <label className="text-[12px] font-medium text-foreground">{label}</label>
       {children}
       {(hint || error) && (
         <span
           className={cn(
             "text-xs transition-colors",
-            error ? "text-rose-500" : "text-neutral-400",
+            error ? "text-destructive" : "text-muted-foreground",
           )}
         >
           {error ?? hint}
@@ -46,10 +46,10 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
     <input
       {...props}
       className={cn(
-        "h-9 w-full rounded-lg border border-transparent bg-[#f1f4f8] px-3 dark:bg-[#19212b]",
-        "text-[13px] text-neutral-800 placeholder:text-neutral-400 dark:text-slate-100 dark:placeholder:text-slate-500",
+        "h-9 w-full rounded-[var(--cs-radius-sm)] border border-border-subtle bg-secondary px-3",
+        "text-[13px] text-foreground placeholder:text-muted-foreground",
         "outline-none transition-[background-color,color,border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]",
-        "hover:bg-[#e9eef5] dark:hover:bg-[#202a36]",
+        "hover:bg-accent",
         "focus:border-primary focus:ring-2 focus:ring-primary/15 focus:ring-offset-0",
         props.className,
       )}
@@ -160,7 +160,7 @@ export function Select({
                   "ml-auto flex size-6 shrink-0 items-center justify-center rounded-md",
                   item.actionDisabled
                     ? "cursor-default text-amber-500"
-                    : "text-slate-400 hover:bg-slate-100 hover:text-amber-500",
+                    : "text-muted-foreground hover:bg-accent hover:text-amber-500",
                 )}
               >
                 {item.actionIcon}
@@ -180,10 +180,10 @@ export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
     <textarea
       {...props}
       className={cn(
-        "min-h-[120px] w-full rounded-lg border border-transparent bg-[#f1f4f8] px-3 py-2.5 dark:bg-[#19212b]",
-        "text-[13px] text-neutral-800 placeholder:text-neutral-400 dark:text-slate-100 dark:placeholder:text-slate-500",
+        "min-h-[120px] w-full rounded-[var(--cs-radius-sm)] border border-border-subtle bg-secondary px-3 py-2.5",
+        "text-[13px] text-foreground placeholder:text-muted-foreground",
         "outline-none transition-[background-color,color,border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]",
-        "hover:bg-[#e9eef5] dark:hover:bg-[#202a36]",
+        "hover:bg-accent",
         "focus:border-primary focus:ring-2 focus:ring-primary/15 focus:ring-offset-0",
         "resize-y",
         props.className,

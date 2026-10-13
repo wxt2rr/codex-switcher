@@ -253,7 +253,7 @@ function EnvironmentActionMenu({
     <div ref={rootRef} className="relative shrink-0">
       <button
         type="button"
-        className="motion-interactive-color flex size-9 items-center justify-center rounded-lg bg-[#f7f8fa] text-neutral-700 hover:bg-[#eef1f4] hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-55"
+        className="motion-interactive-color flex size-9 items-center justify-center rounded-lg bg-secondary text-foreground-secondary hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
         onClick={() => setOpen((value) => !value)}
         disabled={busy}
         aria-label={language === "zh" ? "更多操作" : language === "ja" ? "その他の操作" : "More actions"}
@@ -269,7 +269,7 @@ function EnvironmentActionMenu({
           data-state={open ? "open" : "closed"}
           data-menu-placement={placement}
           className={cn(
-            "motion-popover-enter absolute right-0 z-40 min-w-[172px] overflow-y-auto rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md",
+            "motion-popover-enter absolute right-0 z-40 min-w-[172px] overflow-y-auto rounded-lg border border-border-subtle bg-card p-1.5 shadow-md",
             placement === "up" ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]",
           )}
           style={{ transformOrigin: placement === "up" ? "bottom right" : "top right", maxHeight: availableHeight }}
@@ -281,7 +281,7 @@ function EnvironmentActionMenu({
               type="button"
               className={cn(
                 "motion-interactive-color flex w-full items-center rounded-lg px-3 py-2 text-left text-[12px] font-medium",
-                item.tone === "danger" ? "text-rose-600 hover:bg-rose-50" : "text-neutral-700 hover:bg-[#f6f7f9]",
+                item.tone === "danger" ? "text-rose-600 hover:bg-rose-50" : "text-foreground-secondary hover:bg-accent",
               )}
               onClick={() => {
                 setOpen(false);
@@ -345,7 +345,7 @@ function EnvCard({
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h3 className="truncate text-[15px] font-semibold tracking-[-0.02em] text-neutral-950">{env.name}</h3>
+            <h3 className="truncate text-[15px] font-semibold tracking-[-0.02em] text-foreground">{env.name}</h3>
             {currentTargetBadges.map((target) => <SoftBadge key={target} tone="brand" label={target} className="h-5 px-2 text-[10px]" />)}
             <SoftBadge
               tone={isGatewayEnabled ? "brand" : "neutral"}
@@ -353,19 +353,19 @@ function EnvCard({
               className="h-5 px-2 text-[10px]"
             />
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
             <span className={cn(
               "inline-flex h-6 items-center gap-1.5 rounded-md px-2 font-medium",
               runtime.tone === "success" && "bg-emerald-50 text-emerald-700",
               runtime.tone === "warn" && "bg-amber-50 text-amber-700",
-              runtime.tone === "neutral" && "bg-slate-100 text-slate-500",
+              runtime.tone === "neutral" && "bg-secondary text-muted-foreground",
             )}>
-              <span className={cn("size-1.5 rounded-full", runtime.tone === "success" ? "bg-emerald-500" : runtime.tone === "warn" ? "bg-amber-500" : "bg-slate-300")} />
+              <span className={cn("size-1.5 rounded-full", runtime.tone === "success" ? "bg-emerald-500" : runtime.tone === "warn" ? "bg-amber-500" : "bg-muted-foreground/40")} />
               {runtime.label}
             </span>
-            <span className="text-slate-500">{language === "zh" ? `${accountCount} 个账号` : language === "ja" ? `${accountCount} アカウント` : `${accountCount} accounts`}</span>
+            <span className="text-muted-foreground">{language === "zh" ? `${accountCount} 个账号` : language === "ja" ? `${accountCount} アカウント` : `${accountCount} accounts`}</span>
           </div>
-          {runtime.detail ? <div className="mt-1 font-mono text-[11px] text-slate-400">{runtime.detail}</div> : null}
+          {runtime.detail ? <div className="mt-1 font-mono text-[11px] text-muted-foreground">{runtime.detail}</div> : null}
         </div>
 
         <div className="environment-card-actions flex flex-wrap items-center gap-2 xl:justify-end">
@@ -404,14 +404,14 @@ function EnvCard({
         </div>
       </div>
 
-      <div className="grid gap-3 border-t border-black/[0.06] pt-3 dark:border-white/[0.07] sm:grid-cols-2">
+      <div className="grid gap-3 border-t border-border-subtle pt-3 sm:grid-cols-2">
         <div className="min-w-0">
-          <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">{language === "zh" ? "环境路径" : language === "ja" ? "環境パス" : "Environment path"}</div>
-          <div className="mt-1 truncate font-mono text-[11px] text-slate-500" title={env.path}>{env.path}</div>
+          <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">{language === "zh" ? "环境路径" : language === "ja" ? "環境パス" : "Environment path"}</div>
+          <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground" title={env.path}>{env.path}</div>
         </div>
         <div className="min-w-0">
-          <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">{language === "zh" ? "本地网关" : language === "ja" ? "ローカルゲートウェイ" : "Local gateway"}</div>
-          <div className={cn("mt-1 truncate font-mono text-[11px]", routeStatus?.localGatewayBaseUrl ? "text-slate-500" : "text-slate-400")} title={routeStatus?.localGatewayBaseUrl ?? undefined}>
+          <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">{language === "zh" ? "本地网关" : language === "ja" ? "ローカルゲートウェイ" : "Local gateway"}</div>
+          <div className={cn("mt-1 truncate font-mono text-[11px]", routeStatus?.localGatewayBaseUrl ? "text-muted-foreground" : "text-muted-foreground")} title={routeStatus?.localGatewayBaseUrl ?? undefined}>
             {routeStatus?.localGatewayBaseUrl ?? (isGatewayEnabled ? (language === "zh" ? "等待服务启动" : language === "ja" ? "サービスの起動を待機中" : "Waiting for service") : (language === "zh" ? "未启用" : language === "ja" ? "未有効" : "Not enabled"))}
           </div>
         </div>
@@ -626,10 +626,10 @@ export function EnvironmentsPage({
   return (
     <ListPageFrame className="overflow-hidden" contentClassName="h-full gap-3">
       <div className="shrink-0 flex flex-col gap-4">
-        <div><h2 className="text-[28px] font-semibold tracking-[-0.04em] text-neutral-950">{pageTitle(language)}</h2><p className="mt-1 text-[13px] leading-6 text-slate-500">{pageSubtitle(language)}</p></div>
-        <div className="rounded-[14px] border border-black/[0.05] bg-white px-3 py-2.5">
+        <div><h2 className="text-[28px] font-semibold tracking-[-0.04em] text-foreground">{pageTitle(language)}</h2><p className="mt-1 text-[13px] leading-6 text-muted-foreground">{pageSubtitle(language)}</p></div>
+        <div className="rounded-[var(--cs-radius-md)] border border-border-subtle bg-card px-3 py-2.5">
           <div className="responsive-toolbar flex items-center gap-2.5">
-            <div className="relative min-w-[220px] flex-1"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={pageCopy.environments.searchPlaceholder} className="h-8 rounded-lg border-transparent bg-[#fbfbfc] pl-10 text-[12px] shadow-none" /></div>
+            <div className="relative min-w-[220px] flex-1"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={pageCopy.environments.searchPlaceholder} className="h-8 rounded-lg border-transparent bg-secondary pl-10 text-[12px] shadow-none" /></div>
             <Button
               variant="outline"
               className="h-8 rounded-lg px-3.5 text-[12px] shadow-none"
@@ -640,7 +640,7 @@ export function EnvironmentsPage({
               {language === "zh" ? "修复指定会话" : language === "ja" ? "指定会話を修復" : "Repair conversation"}
             </Button>
             <Button
-              className="ml-auto h-8 rounded-lg bg-neutral-950 px-3.5 text-[12px] shadow-none"
+              className="ml-auto h-8 rounded-lg bg-primary px-3.5 text-[12px] shadow-none"
               onClick={() => setDrawerOpen(true)}
               disabled={busy}
             >
@@ -721,6 +721,7 @@ export function EnvironmentsPage({
               ]}
             />
           </Field>
+          <div className="side-panel-actions">
           <Button
             className="w-full"
             onClick={async () => {
@@ -730,6 +731,7 @@ export function EnvironmentsPage({
           >
             {pageCopy.environments.create}
           </Button>
+          </div>
         </div>
       </SidePanel>
 
@@ -769,18 +771,18 @@ export function EnvironmentsPage({
           </Button>
 
           {conversationRepairDialog?.phase === "analyzing" ? (
-            <div className="flex items-center gap-2 rounded-lg bg-[#f7f8fa] px-3 py-3 text-[12px] text-slate-500">
+            <div className="flex items-center gap-2 rounded-lg bg-secondary px-3 py-3 text-[12px] text-muted-foreground">
               <LoaderCircle className="size-4 animate-spin" />
               {language === "zh" ? "正在扫描所有 Codex 环境…" : language === "ja" ? "すべての Codex 環境をスキャン中…" : "Scanning all Codex environments…"}
             </div>
           ) : null}
 
           {repairInspection ? (
-            <div className="space-y-3 rounded-xl border border-black/[0.06] bg-[#fbfbfc] p-4">
+            <div className="space-y-3 rounded-xl border border-border-subtle bg-secondary p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">{language === "zh" ? "分析结果" : language === "ja" ? "分析結果" : "Inspection result"}</div>
-                  <div className="mt-1 break-all font-mono text-[12px] text-neutral-800">{repairInspection.conversationId}</div>
+                  <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">{language === "zh" ? "分析结果" : language === "ja" ? "分析結果" : "Inspection result"}</div>
+                  <div className="mt-1 break-all font-mono text-[12px] text-foreground">{repairInspection.conversationId}</div>
                 </div>
                 <SoftBadge
                   tone={repairInspection.status === "ambiguous" ? "warn" : "neutral"}
@@ -806,7 +808,7 @@ export function EnvironmentsPage({
               {selectedRepairCandidate ? (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm font-semibold text-neutral-900">{selectedRepairCandidate.envName}</span>
+                    <span className="text-sm font-semibold text-foreground">{selectedRepairCandidate.envName}</span>
                     <span className={cn("rounded-md px-2 py-1 text-[10px] font-semibold", conversationRepairStatusClass(selectedRepairCandidate.status))}>
                       {conversationRepairStatusLabel(selectedRepairCandidate.status, language)}
                     </span>
@@ -818,13 +820,13 @@ export function EnvironmentsPage({
                       [language === "zh" ? "历史模型" : "Recorded model", selectedRepairCandidate.recordedModel ?? "—"],
                       [language === "zh" ? "当前模型" : "Current model", selectedRepairCandidate.currentModel ?? "—"],
                     ].map(([label, value]) => (
-                      <div key={String(label)} className="min-w-0 rounded-lg bg-white px-3 py-2">
-                        <div className="text-[10px] text-slate-400">{label}</div>
-                        <div className="mt-1 truncate font-mono text-[11px] text-slate-700" title={String(value)}>{value}</div>
+                      <div key={String(label)} className="min-w-0 rounded-lg bg-card px-3 py-2">
+                        <div className="text-[10px] text-muted-foreground">{label}</div>
+                        <div className="mt-1 truncate font-mono text-[11px] text-foreground-secondary" title={String(value)}>{value}</div>
                       </div>
                     ))}
                   </div>
-                  <div className="text-[12px] leading-5 text-slate-500">{selectedRepairCandidate.statusMessage}</div>
+                  <div className="text-[12px] leading-5 text-muted-foreground">{selectedRepairCandidate.statusMessage}</div>
                   {selectedRepairCandidate.gatewayEnabled ? (
                     <div className="rounded-lg bg-sky-50 px-3 py-2 text-[11px] leading-5 text-sky-700">
                       {language === "zh" ? "该环境当前启用了网关模式。" : language === "ja" ? "この環境ではゲートウェイモードが有効です。" : "Gateway mode is enabled for this environment."}
@@ -870,12 +872,12 @@ export function EnvironmentsPage({
 
       <SidePanel open={poolOpen} title={language === "zh" ? `${poolEnvName} · 凭证池` : `${poolEnvName} · Credential pool`} onClose={() => setPoolOpen(false)} closeLabel={pageCopy.common.close}>
         <div className="space-y-4">
-          <div className="rounded-lg bg-[#f7f8fa] px-4 py-3 text-xs leading-5 text-slate-600">
+          <div className="rounded-lg bg-secondary px-4 py-3 text-xs leading-5 text-foreground-secondary">
             {language === "zh" ? "新会话按权重选择账号，同一会话优先保持原账号；只有限流、额度或网络失败才会自动切换。Responses 模式支持 AUTH 与 API Key 混合自动分发。" : "New sessions use weighted selection and stay on one account; failover is limited to rate, quota, and network failures. Responses pools can mix AUTH and API-key accounts."}
           </div>
           {poolStatus?.health.length ? <div className="grid gap-2 sm:grid-cols-2">
-            {poolStatus.health.map((item) => <div key={item.accountName} className="flex items-center justify-between rounded-lg border border-black/[0.05] bg-white px-3 py-2 text-xs">
-              <span className="truncate font-medium text-neutral-800">{item.accountName}</span>
+            {poolStatus.health.map((item) => <div key={item.accountName} className="flex items-center justify-between rounded-lg border border-border-subtle bg-card px-3 py-2 text-xs">
+              <span className="truncate font-medium text-foreground">{item.accountName}</span>
               <SoftBadge tone={item.state === "healthy" ? "success" : item.state === "cooldown" ? "warn" : "neutral"} label={item.state === "healthy" ? (language === "zh" ? "可用" : "Healthy") : item.state === "cooldown" ? (language === "zh" ? "冷却中" : "Cooldown") : item.state} />
             </div>)}
           </div> : null}
@@ -891,13 +893,13 @@ export function EnvironmentsPage({
             }} items={[{ value: "responses", label: "Responses" }, { value: "chat_completions", label: "Chat Completions" }]} />
           </Field>
           <Field label={language === "zh" ? "分发策略" : "Dispatch strategy"}>
-            <div className="rounded-lg bg-[#f7f8fa] px-3 py-2 text-sm text-slate-700">{language === "zh" ? "会话粘性 + 加权轮询" : "Sticky session + weighted round robin"}</div>
+            <div className="rounded-lg bg-secondary px-3 py-2 text-sm text-foreground-secondary">{language === "zh" ? "会话粘性 + 加权轮询" : "Sticky session + weighted round robin"}</div>
           </Field>
           <Field label={language === "zh" ? "参与轮询的账号" : "Pool members"}>
-            <div className="space-y-2 rounded-lg bg-[#f7f8fa] p-3">
+            <div className="space-y-2 rounded-lg bg-secondary p-3">
               {poolEnvAccounts.map((account, index) => {
                 const selected = poolMembers.includes(account.name);
-                return <label key={account.name} className="flex items-center gap-3 rounded-lg bg-white px-3 py-2 text-sm">
+                return <label key={account.name} className="flex items-center gap-3 rounded-lg bg-card px-3 py-2 text-sm">
                   <input type="checkbox" checked={selected} onChange={(event) => setPoolMembers((current) => event.target.checked ? [...current, account.name] : current.filter((name) => name !== account.name))} />
                   <span className="min-w-0 flex-1 truncate">{account.name}</span>
                   <Input
@@ -912,7 +914,7 @@ export function EnvironmentsPage({
                     title={language === "zh" ? "分配权重：数值越高，新会话分配到该账号的概率越高" : "Distribution weight: higher values receive more new sessions"}
                   />
                   <span
-                    className="text-[10px] text-slate-400"
+                    className="text-[10px] text-muted-foreground"
                     title={language === "zh" ? "轮询顺序：权重相同时按此顺序选择账号" : "Rotation order used when weights are equal"}
                   >#{index + 1}</span>
                 </label>;
@@ -933,7 +935,7 @@ export function EnvironmentsPage({
               hint={language === "zh" ? "当前账号达到失败次数后，最多再切换到几个其它账号" : "Maximum number of other accounts tried after the current account fails"}
             ><Input type="number" min={0} max={1} value={poolFailover} onChange={(event) => setPoolFailover(event.target.value)} /></Field>
           </div>
-          <div className="flex justify-end gap-2.5">
+          <div className="side-panel-actions flex justify-end gap-2.5">
             <Button variant="outline" onClick={() => setPoolOpen(false)}>{pageCopy.common.cancel}</Button>
             {poolStatus ? <Button variant="destructive" onClick={async () => { if (await onSaveAccountPool({ envName: poolEnvName, enabled: false, protocol: poolProtocol, members: [] })) setPoolOpen(false); }}>{language === "zh" ? "关闭凭证池" : "Disable credential pool"}</Button> : null}
             <Button onClick={async () => { if (poolMembers.length && await onSaveAccountPool({ envName: poolEnvName, enabled: true, protocol: poolProtocol, members: poolMembers.map((accountName, priority) => ({ accountName, priority, weight: poolWeights[accountName] ?? 1 })), sessionTtlMinutes: Number(poolTtl), maxSameAccountFailures: Number(poolSameAccountFailures), maxFailoverAttempts: Number(poolFailover) })) setPoolOpen(false); }} disabled={busy || poolMembers.length === 0}>{language === "zh" ? "保存凭证池" : "Save credential pool"}</Button>
@@ -949,7 +951,7 @@ export function EnvironmentsPage({
           <Field label={pageCopy.environments.pathColumn}>
             <Input value={editHomePath} onChange={(event) => setEditHomePath(event.target.value)} placeholder={text.inputs.baseUrl} />
           </Field>
-          <div className="flex justify-end gap-2.5">
+          <div className="side-panel-actions flex justify-end gap-2.5">
             <Button
               variant="destructive"
               onClick={() => onImportDefaultEnv(editEnvName)}
@@ -986,7 +988,7 @@ export function EnvironmentsPage({
                 className={
                   configTab === tab
                     ? "ui-selected-control rounded-lg border px-3 py-1.5 text-xs font-semibold"
-                    : "rounded-lg border border-transparent bg-[#f3f4f6] px-3 py-1.5 text-xs font-semibold text-slate-600"
+                    : "rounded-lg border border-transparent bg-secondary px-3 py-1.5 text-xs font-semibold text-foreground-secondary"
                 }
                 onClick={() => setConfigTab(tab)}
                 aria-pressed={configTab === tab}
@@ -1009,7 +1011,7 @@ export function EnvironmentsPage({
               spellCheck={false}
             />
           </Field>
-          <div className="flex justify-end gap-2.5">
+          <div className="side-panel-actions flex justify-end gap-2.5">
             <Button variant="outline" onClick={() => setConfigOpen(false)}>{pageCopy.common.cancel}</Button>
             <Button
               onClick={async () => {
@@ -1033,7 +1035,7 @@ export function EnvironmentsPage({
       >
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-3">
-            <div className="text-sm font-semibold text-neutral-900">{historyEnvName}</div>
+            <div className="text-sm font-semibold text-foreground">{historyEnvName}</div>
             <Select
               value={historyFilter}
               onValueChange={(value) => setHistoryFilter(value as "all" | "config.toml" | "auth.json")}
@@ -1042,13 +1044,13 @@ export function EnvironmentsPage({
                 { value: "config.toml", label: "config.toml" },
                 { value: "auth.json", label: "auth.json" },
               ]}
-              className="h-8 w-[140px] rounded-lg bg-[#f7f8fa] text-[12px]"
+              className="h-8 w-[140px] rounded-lg bg-secondary text-[12px]"
             />
           </div>
 
           <div className="max-h-[460px] space-y-3 overflow-auto pr-1">
             {historyGroups.length === 0 ? (
-              <div className="rounded-lg bg-[#f7f8fa] px-4 py-10 text-center text-sm text-slate-500">
+              <div className="rounded-lg bg-secondary px-4 py-10 text-center text-sm text-muted-foreground">
                 {language === "zh" ? "暂无修改历史" : "No history yet"}
               </div>
             ) : null}
@@ -1060,7 +1062,7 @@ export function EnvironmentsPage({
               return (
                 <div
                   key={group.key}
-                  className="rounded-lg bg-[#f7f8fa] px-4 py-4"
+                  className="rounded-lg bg-secondary px-4 py-4"
                 >
                   <div className="flex items-start gap-3">
                     <input
@@ -1076,9 +1078,9 @@ export function EnvironmentsPage({
                       className="mt-1"
                     />
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 text-[12px] font-semibold text-neutral-900">
+                      <div className="flex items-center gap-2 text-[12px] font-semibold text-foreground">
                         <span>{formatHistoryTimestamp(group.createdAt)}</span>
-                        <span className="rounded-md bg-white px-2 py-0.5 text-[10px] font-medium text-slate-500">
+                        <span className="rounded-md bg-card px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                           {localizeHistorySource(group.source, language)}
                         </span>
                       </div>
@@ -1086,14 +1088,14 @@ export function EnvironmentsPage({
                         {(["config.toml", "auth.json"] as const).map((fileType) => {
                           const file = group.files[fileType];
                           return (
-                            <div key={fileType} className="rounded-lg bg-white px-3 py-3">
-                              <div className="flex items-center gap-2 text-[12px] font-semibold text-neutral-900">
+                            <div key={fileType} className="rounded-lg bg-card px-3 py-3">
+                              <div className="flex items-center gap-2 text-[12px] font-semibold text-foreground">
                                 <span>{fileType}</span>
                                 <span
                                   className={
                                     file.changed
-                                      ? "rounded-md bg-[#eef4ff] px-2 py-0.5 text-[10px] font-medium text-sky-700"
-                                      : "rounded-md bg-[#f3f4f6] px-2 py-0.5 text-[10px] font-medium text-slate-500"
+                                      ? "rounded-md bg-info/10 px-2 py-0.5 text-[10px] font-medium text-sky-700"
+                                      : "rounded-md bg-secondary px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
                                   }
                                 >
                                   {file.changed
@@ -1105,7 +1107,7 @@ export function EnvironmentsPage({
                                       : "Unchanged"}
                                 </span>
                               </div>
-                              <div className="mt-2 max-h-[140px] overflow-auto rounded-lg bg-[#fbfbfc] px-3 py-2 font-mono text-[11px] leading-5 text-slate-600 whitespace-pre-wrap break-all">
+                              <div className="mt-2 max-h-[140px] overflow-auto rounded-lg bg-secondary px-3 py-2 font-mono text-[11px] leading-5 text-foreground-secondary whitespace-pre-wrap break-all">
                                 {file.changed
                                   ? file.content || (language === "zh" ? "空文件" : "Empty file")
                                   : language === "zh"
@@ -1119,7 +1121,7 @@ export function EnvironmentsPage({
                     </div>
                     <button
                       type="button"
-                      className="flex size-8 items-center justify-center rounded-lg bg-white text-slate-600"
+                      className="flex size-8 items-center justify-center rounded-lg bg-card text-foreground-secondary"
                       onClick={async () => {
                         let restored = false;
                         for (const entryId of groupIds) {
@@ -1142,7 +1144,7 @@ export function EnvironmentsPage({
             })}
           </div>
 
-          <div className="flex justify-end gap-2.5">
+          <div className="side-panel-actions flex justify-end gap-2.5">
             <Button variant="outline" onClick={() => setHistoryOpen(false)}>
               {pageCopy.common.cancel}
             </Button>
@@ -1168,7 +1170,7 @@ export function EnvironmentsPage({
         open={syncHistoryOpen}
         title={language === "zh" ? "同步对话列表" : language === "ja" ? "会話履歴を同期" : "Sync conversation history"}
         impact={
-          <div className="space-y-2 text-sm text-neutral-500">
+          <div className="space-y-2 text-sm text-muted-foreground">
             <div>{language === "zh" ? `将环境 ${syncHistoryEnvName} 中旧会话的 provider 标识统一为 codex_switcher_router。` : `Normalize existing sessions in ${syncHistoryEnvName} to codex_switcher_router.`}</div>
             <div>{language === "zh" ? "只修改会话元数据和索引，不修改消息内容。执行前会自动备份；请先关闭该环境正在运行的 Codex。同步列表不保证跨服务商继续上下文。" : "Only metadata and index records change. A backup is created first; close Codex for this environment before continuing. Unified visibility does not guarantee cross-provider continuation."}</div>
           </div>
@@ -1211,8 +1213,8 @@ export function EnvironmentsPage({
         >
           {syncHistoryDialog.phase === "running" ? (
             <div className="space-y-4">
-              <div className="flex items-center gap-3 text-sm font-medium text-neutral-800">
-                <LoaderCircle className="size-4 animate-spin text-slate-400" />
+              <div className="flex items-center gap-3 text-sm font-medium text-foreground">
+                <LoaderCircle className="size-4 animate-spin text-muted-foreground" />
                 <span>
                   {language === "zh"
                     ? syncHistorySteps[syncHistoryDialog.step]?.zh
@@ -1220,17 +1222,17 @@ export function EnvironmentsPage({
                       ? syncHistorySteps[syncHistoryDialog.step]?.ja
                       : syncHistorySteps[syncHistoryDialog.step]?.en}
                 </span>
-                <span className="ml-auto shrink-0 text-[12px] font-normal text-slate-400">
+                <span className="ml-auto shrink-0 text-[12px] font-normal text-muted-foreground">
                   {syncHistoryDialog.step + 1}/{syncHistorySteps.length}
                 </span>
               </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-slate-100" aria-label={language === "zh" ? "同步进度" : "Sync progress"}>
+              <div className="h-1.5 overflow-hidden rounded-full bg-secondary" aria-label={language === "zh" ? "同步进度" : "Sync progress"}>
                 <div
                   className="h-full rounded-full bg-emerald-500 transition-[width] duration-500"
                   style={{ width: `${Math.round(((syncHistoryDialog.step + 1) / syncHistorySteps.length) * 100)}%` }}
                 />
               </div>
-              <div className="text-[12px] leading-5 text-slate-500">
+              <div className="text-[12px] leading-5 text-muted-foreground">
                 {language === "zh"
                   ? `环境：${syncHistoryDialog.envName}。请稍候，完成前不要关闭应用。`
                   : language === "ja"
@@ -1256,16 +1258,16 @@ export function EnvironmentsPage({
                   [language === "zh" ? "更新会话" : language === "ja" ? "更新したセッション" : "Sessions", syncHistoryDialog.result.sessionsUpdated],
                   [language === "zh" ? "更新索引" : language === "ja" ? "更新したスレッド" : "Threads", syncHistoryDialog.result.threadsUpdated],
                 ].map(([label, value]) => (
-                  <div key={String(label)} className="rounded-lg bg-white px-3 py-2.5 text-center">
-                    <div className="text-[11px] text-slate-400">{label}</div>
-                    <div className="mt-1 text-base font-semibold text-neutral-800">{value}</div>
+                  <div key={String(label)} className="rounded-lg bg-card px-3 py-2.5 text-center">
+                    <div className="text-[11px] text-muted-foreground">{label}</div>
+                    <div className="mt-1 text-base font-semibold text-foreground">{value}</div>
                   </div>
                 ))}
               </div>
-              <div className="space-y-1 text-[12px] leading-5 text-slate-500">
-                <div>Provider：<code className="break-all text-slate-700">{syncHistoryDialog.result.providerId}</code></div>
+              <div className="space-y-1 text-[12px] leading-5 text-muted-foreground">
+                <div>Provider：<code className="break-all text-foreground-secondary">{syncHistoryDialog.result.providerId}</code></div>
                 {syncHistoryDialog.result.backupPath ? (
-                  <div>{language === "zh" ? "备份位置" : language === "ja" ? "バックアップ先" : "Backup"}：<code className="break-all text-slate-700">{syncHistoryDialog.result.backupPath}</code></div>
+                  <div>{language === "zh" ? "备份位置" : language === "ja" ? "バックアップ先" : "Backup"}：<code className="break-all text-foreground-secondary">{syncHistoryDialog.result.backupPath}</code></div>
                 ) : null}
               </div>
             </div>
@@ -1285,16 +1287,16 @@ export function EnvironmentsPage({
           selectedDeleteEnv ? (
             <div className="space-y-2.5 text-sm">
               <div className="flex justify-between gap-4">
-                <span className="text-neutral-400">{pageCopy.common.environment}</span>
-                <span className="font-medium text-neutral-700">{selectedDeleteEnv.name}</span>
+                <span className="text-muted-foreground">{pageCopy.common.environment}</span>
+                <span className="font-medium text-foreground-secondary">{selectedDeleteEnv.name}</span>
               </div>
               <div className="flex justify-between gap-4">
-                <span className="text-neutral-400">{pageCopy.environments.countColumn}</span>
-                <span className="font-medium text-neutral-700">{selectedDeleteAccounts}</span>
+                <span className="text-muted-foreground">{pageCopy.environments.countColumn}</span>
+                <span className="font-medium text-foreground-secondary">{selectedDeleteAccounts}</span>
               </div>
             </div>
           ) : (
-            <div className="text-sm text-neutral-400">{pageCopy.environments.deleteMissing}</div>
+            <div className="text-sm text-muted-foreground">{pageCopy.environments.deleteMissing}</div>
           )
         }
         confirmLabel={pageCopy.environments.deleteConfirm}
