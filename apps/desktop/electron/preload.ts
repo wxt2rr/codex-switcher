@@ -105,6 +105,10 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     ipcRenderer.invoke("desktop:updateEnvFiles", envName, files),
   syncEnvironmentConversationHistory: (envName: string) =>
     ipcRenderer.invoke("desktop:syncEnvironmentConversationHistory", envName),
+  inspectCodexConversation: (conversationId: string) =>
+    ipcRenderer.invoke("desktop:inspectCodexConversation", conversationId),
+  repairCodexConversation: (input: { conversationId: string; envName?: string; targetProviderId?: string }) =>
+    ipcRenderer.invoke("desktop:repairCodexConversation", input),
   listEnvFileHistory: (envName: string) => ipcRenderer.invoke("desktop:listEnvFileHistory", envName),
   restoreEnvFileHistory: (envName: string, entryId: string) =>
     ipcRenderer.invoke("desktop:restoreEnvFileHistory", envName, entryId),

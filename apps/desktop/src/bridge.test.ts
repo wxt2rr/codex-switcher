@@ -152,6 +152,19 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       calls.push(`syncEnvironmentConversationHistory:${envName}`);
       return { envName, providerId: "codex_switcher_router", sessionsScanned: 0, sessionsUpdated: 0, threadsUpdated: 0, message: "ok" };
     },
+    inspectCodexConversation: async (conversationId) => ({
+      conversationId,
+      status: "not-found" as const,
+      candidates: [],
+      message: "not found",
+    }),
+    repairCodexConversation: async ({ conversationId }) => ({
+      conversationId,
+      envName: "default",
+      providerId: "codex_switcher_router",
+      filesUpdated: [],
+      message: "ok",
+    }),
     listEnvFileHistory: async (envName) => {
       calls.push(`listEnvFileHistory:${envName}`);
       return "[]\n";

@@ -55,6 +55,53 @@ export interface CodexHistorySyncResult {
   message: string;
 }
 
+export type CodexConversationRepairStatus =
+  | "already-current"
+  | "repairable"
+  | "provider-missing"
+  | "model-mismatch"
+  | "metadata-mismatch"
+  | "incomplete";
+
+export interface CodexConversationCandidate {
+  envName: string;
+  homePath: string;
+  stateDbPath?: string;
+  sessionPath?: string;
+  recordedProvider?: string;
+  recordedModel?: string;
+  cwd?: string;
+  currentProvider?: string;
+  currentModel?: string;
+  targetProvider: string;
+  gatewayEnabled: boolean;
+  providerMatches: boolean;
+  modelMatches?: boolean;
+  metadataConsistent: boolean;
+  canRepair: boolean;
+  status: CodexConversationRepairStatus;
+  statusMessage: string;
+}
+
+export interface CodexConversationInspectionResult {
+  conversationId: string;
+  status: "not-found" | "found" | "ambiguous";
+  candidates: CodexConversationCandidate[];
+  message: string;
+}
+
+export interface CodexConversationRepairResult {
+  conversationId: string;
+  envName: string;
+  sessionPath?: string;
+  stateDbPath?: string;
+  previousProvider?: string;
+  providerId: string;
+  filesUpdated: string[];
+  backupPath?: string;
+  message: string;
+}
+
 export interface DesktopCreateEnvRequest {
   envName: string;
   source: {
@@ -512,6 +559,8 @@ export interface DesktopElectronApi {
   updateEnvConfig(envName: string, content: string): Promise<DesktopActionResult>;
   updateEnvFiles(envName: string, files: DesktopEnvEditableFiles): Promise<DesktopActionResult>;
   syncEnvironmentConversationHistory(envName: string): Promise<CodexHistorySyncResult>;
+  inspectCodexConversation(conversationId: string): Promise<CodexConversationInspectionResult>;
+  repairCodexConversation(input: { conversationId: string; envName?: string; targetProviderId?: string }): Promise<CodexConversationRepairResult>;
   listEnvFileHistory(envName: string): Promise<string>;
   restoreEnvFileHistory(envName: string, entryId: string): Promise<DesktopActionResult>;
   deleteEnvFileHistory(envName: string, entryIds: string[]): Promise<DesktopActionResult>;
@@ -643,6 +692,8 @@ export interface DesktopBridge {
   updateEnvConfig(envName: string, content: string): Promise<DesktopActionResult>;
   updateEnvFiles(envName: string, files: DesktopEnvEditableFiles): Promise<DesktopActionResult>;
   syncEnvironmentConversationHistory(envName: string): Promise<CodexHistorySyncResult>;
+  inspectCodexConversation(conversationId: string): Promise<CodexConversationInspectionResult>;
+  repairCodexConversation(input: { conversationId: string; envName?: string; targetProviderId?: string }): Promise<CodexConversationRepairResult>;
   listEnvFileHistory(envName: string): Promise<string>;
   restoreEnvFileHistory(envName: string, entryId: string): Promise<DesktopActionResult>;
   deleteEnvFileHistory(envName: string, entryIds: string[]): Promise<DesktopActionResult>;
@@ -770,6 +821,8 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       updateEnvConfig: unavailable,
       updateEnvFiles: unavailable,
       syncEnvironmentConversationHistory: unavailable,
+      inspectCodexConversation: unavailable,
+      repairCodexConversation: unavailable,
       listEnvFileHistory: unavailable,
       restoreEnvFileHistory: unavailable,
       deleteEnvFileHistory: unavailable,
@@ -1007,6 +1060,19 @@ function createBrowserPreviewBridge(): DesktopBridge {
       sessionsUpdated: 0,
       threadsUpdated: 0,
       message: "History synchronization is unavailable in browser preview",
+    }),
+    inspectCodexConversation: async (conversationId) => ({
+      conversationId,
+      status: "not-found",
+      candidates: [],
+      message: "Conversation repair is unavailable in browser preview",
+    }),
+    repairCodexConversation: async ({ conversationId }) => ({
+      conversationId,
+      envName: "",
+      providerId: "codex_switcher_router",
+      filesUpdated: [],
+      message: "Conversation repair is unavailable in browser preview",
     }),
     listEnvFileHistory: async () => "[]\n",
     restoreEnvFileHistory: () => browserPreviewAction(),

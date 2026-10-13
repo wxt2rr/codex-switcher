@@ -47,6 +47,8 @@ import {
   updateEnvConfig,
   updateEnvFiles,
   syncEnvironmentConversationHistory,
+  inspectCodexConversationById,
+  repairCodexConversationById,
   listEnvFileHistory,
   restoreEnvFileHistory,
   deleteEnvFileHistory,
@@ -582,6 +584,14 @@ function registerHandlers() {
   ipcMain.handle("desktop:syncEnvironmentConversationHistory", (_event: IpcMainInvokeEvent, envName: string) =>
     syncEnvironmentConversationHistory(envName)
   );
+  ipcMain.handle("desktop:inspectCodexConversation", (_event: IpcMainInvokeEvent, conversationId: string) =>
+    inspectCodexConversationById(conversationId)
+  );
+  ipcMain.handle("desktop:repairCodexConversation", (_event: IpcMainInvokeEvent, input: {
+    conversationId: string;
+    envName?: string;
+    targetProviderId?: string;
+  }) => repairCodexConversationById(input));
   ipcMain.handle("desktop:listEnvFileHistory", (_event: IpcMainInvokeEvent, envName: string) =>
     listEnvFileHistory(envName)
   );

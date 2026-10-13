@@ -1,11 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownToLine, CheckCircle2, CircleAlert, Ellipsis, FolderPlus, LoaderCircle, Network, Search, Shuffle, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowDownToLine, CheckCircle2, CircleAlert, Ellipsis, FolderPlus, LoaderCircle, Network, Search, Shuffle, RotateCcw, Trash2, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useAdaptiveMenuLayout } from "../components/adaptive-menu-placement";
 import { useDelayedUnmount } from "../components/use-delayed-unmount";
 import { cn } from "../lib/utils";
-import type { AccountPoolInput, AccountPoolStatus, CodexHistorySyncResult, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry } from "../bridge";
+import type {
+  AccountPoolInput,
+  AccountPoolStatus,
+  CodexConversationCandidate,
+  CodexConversationInspectionResult,
+  CodexConversationRepairResult,
+  CodexHistorySyncResult,
+  DesktopEnvEditableFiles,
+  DesktopEnvFileHistoryEntry,
+} from "../bridge";
 import {
   EmptyList,
   ListCard,
@@ -31,6 +40,43 @@ function pageSubtitle(language: UiLanguage) {
   return "Manage Codex environments, paths, and account ownership";
 }
 
+function conversationRepairStatusLabel(status: CodexConversationCandidate["status"], language: UiLanguage) {
+  if (language === "zh") {
+    return {
+      "already-current": "已是当前 provider",
+      repairable: "可以修复",
+      "provider-missing": "当前 provider 未配置",
+      "model-mismatch": "模型不一致",
+      "metadata-mismatch": "会话元数据不一致",
+      incomplete: "会话元数据不完整",
+    }[status];
+  }
+  if (language === "ja") {
+    return {
+      "already-current": "現在の provider と一致",
+      repairable: "修復可能",
+      "provider-missing": "現在の provider が未設定",
+      "model-mismatch": "モデルが不一致",
+      "metadata-mismatch": "メタデータが不一致",
+      incomplete: "メタデータが不完全",
+    }[status];
+  }
+  return {
+    "already-current": "Already uses current provider",
+    repairable: "Ready to repair",
+    "provider-missing": "Current provider is missing",
+    "model-mismatch": "Model mismatch",
+    "metadata-mismatch": "Metadata mismatch",
+    incomplete: "Incomplete metadata",
+  }[status];
+}
+
+function conversationRepairStatusClass(status: CodexConversationCandidate["status"]) {
+  if (status === "repairable" || status === "metadata-mismatch") return "bg-amber-50 text-amber-700";
+  if (status === "already-current") return "bg-emerald-50 text-emerald-700";
+  return "bg-rose-50 text-rose-700";
+}
+
 type HistoryFileType = "config.toml" | "auth.json";
 
 type SyncHistoryDialogState = {
@@ -38,6 +84,15 @@ type SyncHistoryDialogState = {
   phase: "running" | "success" | "error";
   step: number;
   result?: CodexHistorySyncResult;
+  error?: string;
+};
+
+type ConversationRepairDialogState = {
+  phase: "input" | "analyzing" | "ready" | "repairing" | "success" | "error";
+  conversationId: string;
+  preferredEnvName?: string;
+  inspection?: CodexConversationInspectionResult;
+  result?: CodexConversationRepairResult;
   error?: string;
 };
 
@@ -158,6 +213,7 @@ function EnvironmentActionMenu({
   onConfig,
   onHistory,
   onSyncHistory,
+  onRepairConversation,
   onDelete,
 }: {
   language: UiLanguage;
@@ -166,6 +222,7 @@ function EnvironmentActionMenu({
   onConfig: () => void;
   onHistory: () => void;
   onSyncHistory: () => void;
+  onRepairConversation: () => void;
   onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -188,6 +245,7 @@ function EnvironmentActionMenu({
     { key: "config", label: language === "zh" ? "修改环境文件" : language === "ja" ? "環境ファイルを変更" : "Edit environment files", onSelect: onConfig },
     { key: "history", label: language === "zh" ? "查看修改历史" : language === "ja" ? "変更履歴を表示" : "View change history", onSelect: onHistory },
     { key: "sync-history", label: language === "zh" ? "同步对话列表" : language === "ja" ? "会話履歴を同期" : "Sync conversation history", onSelect: onSyncHistory },
+    { key: "repair-conversation", label: language === "zh" ? "修复指定会话" : language === "ja" ? "指定会話を修復" : "Repair conversation", onSelect: onRepairConversation },
     { key: "delete", label: language === "zh" ? "删除环境" : language === "ja" ? "環境を削除" : "Delete environment", onSelect: onDelete, tone: "danger" as const },
   ];
 
@@ -249,6 +307,7 @@ function EnvCard({
   onConfig,
   onHistory,
   onSyncHistory,
+  onRepairConversation,
   onDelete,
   routeStatus,
   canRoute,
@@ -264,6 +323,7 @@ function EnvCard({
   onConfig: () => void;
   onHistory: () => void;
   onSyncHistory: () => void;
+  onRepairConversation: () => void;
   onDelete: () => void;
   routeStatus?: EnvironmentRouteStatus;
   canRoute: boolean;
@@ -340,7 +400,7 @@ function EnvCard({
                   : `Account pool · ${poolStatus.readyMembers}/${poolStatus.members.length}`
               : language === "zh" ? "账号池" : language === "ja" ? "アカウントプール" : "Account pool"}
           </Button>
-          <EnvironmentActionMenu language={language} busy={busy} onEdit={onEdit} onConfig={onConfig} onHistory={onHistory} onSyncHistory={onSyncHistory} onDelete={onDelete} />
+          <EnvironmentActionMenu language={language} busy={busy} onEdit={onEdit} onConfig={onConfig} onHistory={onHistory} onSyncHistory={onSyncHistory} onRepairConversation={onRepairConversation} onDelete={onDelete} />
         </div>
       </div>
 
@@ -378,6 +438,8 @@ export function EnvironmentsPage({
   onRestoreEnvFileHistory,
   onDeleteEnvFileHistory,
   onSyncEnvironmentConversationHistory,
+  onInspectCodexConversation,
+  onRepairCodexConversation,
   onImportDefaultEnv,
   onDeleteEnv,
   routeStatuses,
@@ -402,6 +464,8 @@ export function EnvironmentsPage({
   onRestoreEnvFileHistory: (envName: string, entryId: string) => Promise<boolean>;
   onDeleteEnvFileHistory: (envName: string, entryIds: string[]) => Promise<boolean>;
   onSyncEnvironmentConversationHistory: (envName: string) => Promise<CodexHistorySyncResult>;
+  onInspectCodexConversation: (conversationId: string) => Promise<CodexConversationInspectionResult>;
+  onRepairCodexConversation: (input: { conversationId: string; envName?: string; targetProviderId?: string }) => Promise<CodexConversationRepairResult>;
   onImportDefaultEnv: (envName: string) => void;
   onDeleteEnv: () => void;
   routeStatuses: EnvironmentRouteStatus[];
@@ -429,6 +493,10 @@ export function EnvironmentsPage({
   const [syncHistoryOpen, setSyncHistoryOpen] = useState(false);
   const [syncHistoryEnvName, setSyncHistoryEnvName] = useState("");
   const [syncHistoryDialog, setSyncHistoryDialog] = useState<SyncHistoryDialogState | null>(null);
+  const [conversationRepairOpen, setConversationRepairOpen] = useState(false);
+  const [conversationRepairId, setConversationRepairId] = useState("");
+  const [conversationRepairEnvName, setConversationRepairEnvName] = useState("");
+  const [conversationRepairDialog, setConversationRepairDialog] = useState<ConversationRepairDialogState | null>(null);
   const [poolOpen, setPoolOpen] = useState(false);
   const [poolEnvName, setPoolEnvName] = useState("");
   const [poolProtocol, setPoolProtocol] = useState<"responses" | "chat_completions">("responses");
@@ -481,6 +549,63 @@ export function EnvironmentsPage({
       ? account.runtime.apiProtocol !== "chat_completions" || account.authMode === "auth"
       : account.authMode !== "auth" && account.runtime.apiProtocol === "chat_completions"));
   const poolStatus = accountPools.find((pool) => pool.envName === poolEnvName);
+  const repairInspection = conversationRepairDialog?.inspection;
+  const selectedRepairCandidate = repairInspection?.candidates.find((candidate) => candidate.envName === conversationRepairEnvName)
+    ?? (repairInspection?.candidates.length === 1 ? repairInspection.candidates[0] : undefined);
+
+  function openConversationRepair(envName = "") {
+    setConversationRepairId("");
+    setConversationRepairEnvName(envName);
+    setConversationRepairDialog(null);
+    setConversationRepairOpen(true);
+  }
+
+  async function inspectConversation() {
+    const conversationId = conversationRepairId.trim();
+    if (!conversationId) return;
+    setConversationRepairDialog({
+      phase: "analyzing",
+      conversationId,
+      preferredEnvName: conversationRepairEnvName || undefined,
+    });
+    try {
+      const inspection = await onInspectCodexConversation(conversationId);
+      const preferred = conversationRepairEnvName && inspection.candidates.some((candidate) => candidate.envName === conversationRepairEnvName)
+        ? conversationRepairEnvName
+        : inspection.candidates.length === 1 ? inspection.candidates[0]?.envName : undefined;
+      setConversationRepairEnvName(preferred ?? "");
+      setConversationRepairDialog({
+        phase: "ready",
+        conversationId,
+        preferredEnvName: preferred,
+        inspection,
+      });
+    } catch (error) {
+      setConversationRepairDialog({
+        phase: "error",
+        conversationId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  async function repairConversation() {
+    const dialog = conversationRepairDialog;
+    const envName = conversationRepairEnvName.trim() || undefined;
+    if (!dialog || dialog.phase !== "ready" || !envName) return;
+    setConversationRepairDialog({ ...dialog, phase: "repairing", preferredEnvName: envName });
+    try {
+      const result = await onRepairCodexConversation({ conversationId: dialog.conversationId, envName });
+      setConversationRepairDialog({ ...dialog, phase: "success", preferredEnvName: envName, result });
+    } catch (error) {
+      setConversationRepairDialog({
+        ...dialog,
+        phase: "error",
+        preferredEnvName: envName,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 
   function openPoolEditor(envName: string) {
     const current = accountPools.find((pool) => pool.envName === envName);
@@ -505,6 +630,15 @@ export function EnvironmentsPage({
         <div className="rounded-[14px] border border-black/[0.05] bg-white px-3 py-2.5">
           <div className="responsive-toolbar flex items-center gap-2.5">
             <div className="relative min-w-[220px] flex-1"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={pageCopy.environments.searchPlaceholder} className="h-8 rounded-lg border-transparent bg-[#fbfbfc] pl-10 text-[12px] shadow-none" /></div>
+            <Button
+              variant="outline"
+              className="h-8 rounded-lg px-3.5 text-[12px] shadow-none"
+              onClick={() => openConversationRepair()}
+              disabled={busy}
+            >
+              <Wrench className="size-4" />
+              {language === "zh" ? "修复指定会话" : language === "ja" ? "指定会話を修復" : "Repair conversation"}
+            </Button>
             <Button
               className="ml-auto h-8 rounded-lg bg-neutral-950 px-3.5 text-[12px] shadow-none"
               onClick={() => setDrawerOpen(true)}
@@ -562,6 +696,7 @@ export function EnvironmentsPage({
                 setSyncHistoryEnvName(env.name);
                 setSyncHistoryOpen(true);
               }}
+              onRepairConversation={() => openConversationRepair(env.name)}
               onDelete={() => {
                 onEnvDeleteDraftChange(env.name);
                 setDeleteOpen(true);
@@ -595,6 +730,141 @@ export function EnvironmentsPage({
           >
             {pageCopy.environments.create}
           </Button>
+        </div>
+      </SidePanel>
+
+      <SidePanel
+        open={conversationRepairOpen}
+        title={language === "zh" ? "修复指定会话" : language === "ja" ? "指定会話を修復" : "Repair conversation"}
+        description={language === "zh"
+          ? "输入 Codex 对话 ID，先定位环境并比较 provider/model；确认后只修改该会话的元数据。"
+          : language === "ja"
+            ? "Codex の会話 ID を入力し、環境と provider/model を確認してから対象会話だけを修復します。"
+            : "Enter a Codex conversation ID to locate its environment and compare provider/model before changing only that conversation."}
+        onClose={() => setConversationRepairOpen(false)}
+        closeLabel={pageCopy.common.close}
+      >
+        <div className="space-y-4">
+          <Field label={language === "zh" ? "对话 ID" : language === "ja" ? "会話 ID" : "Conversation ID"}>
+            <Input
+              value={conversationRepairId}
+              onChange={(event) => {
+                setConversationRepairId(event.target.value);
+                if (conversationRepairDialog) setConversationRepairDialog(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && conversationRepairId.trim() && !busy) void inspectConversation();
+              }}
+              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+              autoFocus
+              spellCheck={false}
+              disabled={busy}
+            />
+          </Field>
+          <Button className="w-full" onClick={() => void inspectConversation()} disabled={busy || !conversationRepairId.trim()}>
+            {conversationRepairDialog?.phase === "analyzing" ? <LoaderCircle className="size-4 animate-spin" /> : <Search className="size-4" />}
+            {conversationRepairDialog?.phase === "analyzing"
+              ? language === "zh" ? "正在分析…" : language === "ja" ? "分析中…" : "Analyzing…"
+              : language === "zh" ? "分析会话" : language === "ja" ? "会話を分析" : "Analyze conversation"}
+          </Button>
+
+          {conversationRepairDialog?.phase === "analyzing" ? (
+            <div className="flex items-center gap-2 rounded-lg bg-[#f7f8fa] px-3 py-3 text-[12px] text-slate-500">
+              <LoaderCircle className="size-4 animate-spin" />
+              {language === "zh" ? "正在扫描所有 Codex 环境…" : language === "ja" ? "すべての Codex 環境をスキャン中…" : "Scanning all Codex environments…"}
+            </div>
+          ) : null}
+
+          {repairInspection ? (
+            <div className="space-y-3 rounded-xl border border-black/[0.06] bg-[#fbfbfc] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">{language === "zh" ? "分析结果" : language === "ja" ? "分析結果" : "Inspection result"}</div>
+                  <div className="mt-1 break-all font-mono text-[12px] text-neutral-800">{repairInspection.conversationId}</div>
+                </div>
+                <SoftBadge
+                  tone={repairInspection.status === "ambiguous" ? "warn" : "neutral"}
+                  label={repairInspection.status === "not-found"
+                    ? language === "zh" ? "未找到" : language === "ja" ? "未検出" : "Not found"
+                    : repairInspection.status === "ambiguous"
+                      ? language === "zh" ? "需选择环境" : language === "ja" ? "環境を選択" : "Select environment"
+                      : language === "zh" ? "已定位" : language === "ja" ? "検出済み" : "Found"}
+                />
+              </div>
+
+              {repairInspection.candidates.length > 1 ? (
+                <Field label={language === "zh" ? "匹配环境" : language === "ja" ? "一致した環境" : "Matching environment"}>
+                  <Select
+                    value={conversationRepairEnvName}
+                    onValueChange={setConversationRepairEnvName}
+                    items={repairInspection.candidates.map((candidate) => ({ value: candidate.envName, label: candidate.envName }))}
+                    placeholder={language === "zh" ? "选择环境" : language === "ja" ? "環境を選択" : "Select an environment"}
+                  />
+                </Field>
+              ) : null}
+
+              {selectedRepairCandidate ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-semibold text-neutral-900">{selectedRepairCandidate.envName}</span>
+                    <span className={cn("rounded-md px-2 py-1 text-[10px] font-semibold", conversationRepairStatusClass(selectedRepairCandidate.status))}>
+                      {conversationRepairStatusLabel(selectedRepairCandidate.status, language)}
+                    </span>
+                  </div>
+                  <div className="grid gap-2 text-[12px] sm:grid-cols-2">
+                    {[
+                      [language === "zh" ? "历史 provider" : "Recorded provider", selectedRepairCandidate.recordedProvider ?? "—"],
+                      [language === "zh" ? "当前 provider" : "Current provider", selectedRepairCandidate.currentProvider ?? "—"],
+                      [language === "zh" ? "历史模型" : "Recorded model", selectedRepairCandidate.recordedModel ?? "—"],
+                      [language === "zh" ? "当前模型" : "Current model", selectedRepairCandidate.currentModel ?? "—"],
+                    ].map(([label, value]) => (
+                      <div key={String(label)} className="min-w-0 rounded-lg bg-white px-3 py-2">
+                        <div className="text-[10px] text-slate-400">{label}</div>
+                        <div className="mt-1 truncate font-mono text-[11px] text-slate-700" title={String(value)}>{value}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="text-[12px] leading-5 text-slate-500">{selectedRepairCandidate.statusMessage}</div>
+                  {selectedRepairCandidate.gatewayEnabled ? (
+                    <div className="rounded-lg bg-sky-50 px-3 py-2 text-[11px] leading-5 text-sky-700">
+                      {language === "zh" ? "该环境当前启用了网关模式。" : language === "ja" ? "この環境ではゲートウェイモードが有効です。" : "Gateway mode is enabled for this environment."}
+                    </div>
+                  ) : null}
+                  <Button
+                    className="w-full"
+                    onClick={() => void repairConversation()}
+                    disabled={busy || conversationRepairDialog.phase !== "ready" || !selectedRepairCandidate.canRepair}
+                  >
+                    <Wrench className="size-4" />
+                    {conversationRepairDialog.phase === "repairing"
+                      ? language === "zh" ? "正在修复…" : language === "ja" ? "修復中…" : "Repairing…"
+                      : language === "zh" ? "确认修复此会话" : language === "ja" ? "この会話を修復" : "Confirm repair"}
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-start gap-2 text-[12px] leading-5 text-rose-700">
+                  <CircleAlert className="mt-0.5 size-4 shrink-0" />
+                  <span>{repairInspection.message}</span>
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          {conversationRepairDialog?.phase === "success" && conversationRepairDialog.result ? (
+            <div className="space-y-2 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-[12px] leading-5 text-emerald-800">
+              <div className="flex items-center gap-2 font-semibold"><CheckCircle2 className="size-4" />{language === "zh" ? "指定会话修复完成" : language === "ja" ? "指定会話を修復しました" : "Conversation repaired"}</div>
+              <div>{conversationRepairDialog.result.message}</div>
+              <div>{language === "zh" ? "已更新文件" : "Updated files"}：{conversationRepairDialog.result.filesUpdated.length}</div>
+              {conversationRepairDialog.result.backupPath ? <div className="break-all">{language === "zh" ? "备份位置" : "Backup"}：<code>{conversationRepairDialog.result.backupPath}</code></div> : null}
+            </div>
+          ) : null}
+
+          {conversationRepairDialog?.phase === "error" ? (
+            <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-4 text-[12px] leading-5 text-rose-700">
+              <CircleAlert className="mt-0.5 size-4 shrink-0" />
+              <span className="break-words">{conversationRepairDialog.error}</span>
+            </div>
+          ) : null}
         </div>
       </SidePanel>
 

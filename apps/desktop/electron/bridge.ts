@@ -23,6 +23,12 @@ import {
   type EnvFileHistorySource,
 } from "./env-file-history.js";
 import { syncCodexProviderHistory, type CodexHistorySyncResult } from "./codex-history-sync.js";
+import {
+  inspectCodexConversation,
+  repairCodexConversation,
+  type CodexConversationInspectionResult,
+  type CodexConversationRepairResult,
+} from "./codex-conversation-repair.js";
 import { UsageRouterManager, type GatewayRouteBinding } from "./usage-router-manager.js";
 import type {
   GatewayEnvironmentState,
@@ -2263,6 +2269,44 @@ export async function syncEnvironmentConversationHistory(envName: string): Promi
     homePath: environment.path,
     stateDir: getStateDir(),
     isRunning,
+  });
+}
+
+async function loadConversationRepairContext() {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const environments = Object.values(state.envs).map((environment) => ({
+    envName: environment.name,
+    homePath: environment.path,
+    gatewayEnabled: environment.gateway?.mode === "gateway",
+  }));
+  const support = await loadCoreSupportModules();
+  const isRunning = async (envName: string) => {
+    const paths = support.resolveManagedAppStatePaths(getStateDir());
+    const reconciled = await support.reconcileManagedAppInstanceCount(paths, envName).catch(() => undefined);
+    if (reconciled !== undefined) return reconciled > 0;
+    const instances = await support.listManagedAppInstances(paths);
+    return instances.some((instance) => instance.targetKey?.trim().split("/", 1)[0] === envName);
+  };
+  return { environments, isRunning };
+}
+
+export async function inspectCodexConversationById(conversationId: string): Promise<CodexConversationInspectionResult> {
+  const context = await loadConversationRepairContext();
+  return inspectCodexConversation(conversationId, context.environments);
+}
+
+export async function repairCodexConversationById(input: {
+  conversationId: string;
+  envName?: string;
+  targetProviderId?: string;
+}): Promise<CodexConversationRepairResult> {
+  const context = await loadConversationRepairContext();
+  return repairCodexConversation({
+    ...input,
+    environments: context.environments,
+    stateDir: getStateDir(),
+    isRunning: context.isRunning,
   });
 }
 

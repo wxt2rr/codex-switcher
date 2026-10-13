@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { mergeAccountUsageMetrics, mergeOverviewWithAuthMetrics } from "@/auth-metrics";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/components/theme-provider";
-import type { AccountPoolInput, AccountPoolStatus, AppEnvironmentBadgeStatus, AppPresenceStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexHistorySyncResult, CodexToolStatus, DesktopAutoUpdateStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry, DesktopLaunchStrategy, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, LaunchAtLoginStatus, ProviderCatalogItem, ProviderCredentialImportRequest, RouterLifecycleSettings, RouterPortSettings } from "./bridge";
+import type { AccountPoolInput, AccountPoolStatus, AppEnvironmentBadgeStatus, AppPresenceStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexConversationInspectionResult, CodexConversationRepairResult, CodexHistorySyncResult, CodexToolStatus, DesktopAutoUpdateStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry, DesktopLaunchStrategy, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, LaunchAtLoginStatus, ProviderCatalogItem, ProviderCredentialImportRequest, RouterLifecycleSettings, RouterPortSettings } from "./bridge";
 import { DesktopShell } from "./components/desktop-shell";
 import type { AccountSummary, AuthMetricsPayload, EnvironmentRouteStatus, NavView, OverviewPayload } from "./desktop-model";
 import { resolveDesktopBridge } from "./bridge";
@@ -923,6 +923,37 @@ export function App() {
     }
   }
 
+  async function handleInspectCodexConversation(conversationId: string): Promise<CodexConversationInspectionResult> {
+    setBusy(true);
+    try {
+      return await bridge.inspectCodexConversation(conversationId);
+    } catch (error) {
+      setErrorMessage(error);
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRepairCodexConversation(input: {
+    conversationId: string;
+    envName?: string;
+    targetProviderId?: string;
+  }): Promise<CodexConversationRepairResult> {
+    setBusy(true);
+    try {
+      const result = await bridge.repairCodexConversation(input);
+      setSuccessMessage(language === "zh" ? `会话 ${input.conversationId} 已修复` : `Conversation ${input.conversationId} repaired`);
+      await refreshOverview({ loadMetrics: true });
+      return result;
+    } catch (error) {
+      setErrorMessage(error);
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleUpdateRuntime(): Promise<boolean> {
     if (!runtimeEnvDraft.trim() || !runtimeAccountDraft.trim()) {
       setValidationMessage("runtime-requires-input");
@@ -1326,6 +1357,8 @@ export function App() {
           onRestoreEnvFileHistory={handleRestoreEnvFileHistory}
           onDeleteEnvFileHistory={handleDeleteEnvFileHistory}
           onSyncEnvironmentConversationHistory={handleSyncEnvironmentConversationHistory}
+          onInspectCodexConversation={handleInspectCodexConversation}
+          onRepairCodexConversation={handleRepairCodexConversation}
           onImportDefaultEnv={(envName) => void handleImportDefaultEnv(envName)}
           onDeleteEnv={() => void handleDeleteEnv()}
           routeStatuses={routeStatuses}
