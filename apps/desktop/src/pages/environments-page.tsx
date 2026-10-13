@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownToLine, Ellipsis, FolderPlus, Network, Search, Shuffle, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowDownToLine, CheckCircle2, CircleAlert, Ellipsis, FolderPlus, LoaderCircle, Network, Search, Shuffle, RotateCcw, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useAdaptiveMenuLayout } from "../components/adaptive-menu-placement";
@@ -13,7 +13,7 @@ import {
   ListStack,
   SoftBadge,
 } from "../components/account-list-primitives";
-import { ConfirmDialog, SidePanel } from "../components/admin-primitives";
+import { ConfirmDialog, ProgressDialog, SidePanel } from "../components/admin-primitives";
 import { Field, Input, Select, Textarea } from "../components/form-primitives";
 import type { EnvironmentRouteStatus, EnvSummary, OverviewPayload } from "../desktop-model";
 import { getDesktopCopy } from "../desktop-copy";
@@ -32,6 +32,21 @@ function pageSubtitle(language: UiLanguage) {
 }
 
 type HistoryFileType = "config.toml" | "auth.json";
+
+type SyncHistoryDialogState = {
+  envName: string;
+  phase: "running" | "success" | "error";
+  step: number;
+  result?: CodexHistorySyncResult;
+  error?: string;
+};
+
+const syncHistorySteps = [
+  { zh: "检查环境和运行中的 Codex", ja: "環境と実行中の Codex を確認中", en: "Checking the environment and running Codex instances" },
+  { zh: "扫描会话文件和本地索引", ja: "セッションファイルとローカルインデックスをスキャン中", en: "Scanning session files and the local index" },
+  { zh: "统一 provider 并写入会话元数据", ja: "provider メタデータをセッションに反映中", en: "Updating provider metadata in sessions" },
+  { zh: "保存备份并完成同步", ja: "バックアップを保存して同期を完了中", en: "Saving the backup and finishing the sync" },
+];
 
 type HistorySnapshotGroup = {
   key: string;
@@ -386,7 +401,7 @@ export function EnvironmentsPage({
   onListEnvFileHistory: (envName: string) => Promise<DesktopEnvFileHistoryEntry[]>;
   onRestoreEnvFileHistory: (envName: string, entryId: string) => Promise<boolean>;
   onDeleteEnvFileHistory: (envName: string, entryIds: string[]) => Promise<boolean>;
-  onSyncEnvironmentConversationHistory: (envName: string) => Promise<CodexHistorySyncResult | null>;
+  onSyncEnvironmentConversationHistory: (envName: string) => Promise<CodexHistorySyncResult>;
   onImportDefaultEnv: (envName: string) => void;
   onDeleteEnv: () => void;
   routeStatuses: EnvironmentRouteStatus[];
@@ -413,6 +428,7 @@ export function EnvironmentsPage({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [syncHistoryOpen, setSyncHistoryOpen] = useState(false);
   const [syncHistoryEnvName, setSyncHistoryEnvName] = useState("");
+  const [syncHistoryDialog, setSyncHistoryDialog] = useState<SyncHistoryDialogState | null>(null);
   const [poolOpen, setPoolOpen] = useState(false);
   const [poolEnvName, setPoolEnvName] = useState("");
   const [poolProtocol, setPoolProtocol] = useState<"responses" | "chat_completions">("responses");
@@ -423,6 +439,17 @@ export function EnvironmentsPage({
   const [poolFailover, setPoolFailover] = useState("1");
   const pageCopy = getDesktopCopy(language);
   const text = getTranslations(language);
+
+  useEffect(() => {
+    if (!syncHistoryDialog || syncHistoryDialog.phase !== "running") return;
+    const timer = window.setInterval(() => {
+      setSyncHistoryDialog((current) => {
+        if (!current || current.phase !== "running") return current;
+        return { ...current, step: Math.min(current.step + 1, syncHistorySteps.length - 1) };
+      });
+    }, 700);
+    return () => window.clearInterval(timer);
+  }, [syncHistoryDialog?.phase]);
 
   const accountCountByEnv = useMemo(() => {
     const map = new Map<string, number>();
@@ -880,10 +907,106 @@ export function EnvironmentsPage({
         cancelLabel={pageCopy.common.cancel}
         onCancel={() => setSyncHistoryOpen(false)}
         onConfirm={() => {
+          const envName = syncHistoryEnvName;
           setSyncHistoryOpen(false);
-          void onSyncEnvironmentConversationHistory(syncHistoryEnvName);
+          setSyncHistoryDialog({ envName, phase: "running", step: 0 });
+          void (async () => {
+            try {
+              const result = await onSyncEnvironmentConversationHistory(envName);
+              setSyncHistoryDialog({ envName, phase: "success", step: syncHistorySteps.length - 1, result });
+            } catch (error) {
+              setSyncHistoryDialog({
+                envName,
+                phase: "error",
+                step: 0,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          })();
         }}
       />
+
+      {syncHistoryDialog ? (
+        <ProgressDialog
+          open
+          phase={syncHistoryDialog.phase}
+          title={syncHistoryDialog.phase === "running"
+            ? language === "zh" ? "正在同步对话列表" : language === "ja" ? "会話履歴を同期中" : "Syncing conversation history"
+            : syncHistoryDialog.phase === "success"
+              ? language === "zh" ? "对话列表同步完成" : language === "ja" ? "会話履歴の同期が完了しました" : "Conversation history synced"
+              : language === "zh" ? "对话列表同步失败" : language === "ja" ? "会話履歴の同期に失敗しました" : "Conversation history sync failed"}
+          confirmLabel={language === "zh" ? "确定" : language === "ja" ? "確認" : "OK"}
+          busyLabel={language === "zh" ? "正在处理…" : language === "ja" ? "処理中…" : "Working…"}
+          onConfirm={() => setSyncHistoryDialog(null)}
+        >
+          {syncHistoryDialog.phase === "running" ? (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 text-sm font-medium text-neutral-800">
+                <LoaderCircle className="size-4 animate-spin text-slate-400" />
+                <span>
+                  {language === "zh"
+                    ? syncHistorySteps[syncHistoryDialog.step]?.zh
+                    : language === "ja"
+                      ? syncHistorySteps[syncHistoryDialog.step]?.ja
+                      : syncHistorySteps[syncHistoryDialog.step]?.en}
+                </span>
+                <span className="ml-auto shrink-0 text-[12px] font-normal text-slate-400">
+                  {syncHistoryDialog.step + 1}/{syncHistorySteps.length}
+                </span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-slate-100" aria-label={language === "zh" ? "同步进度" : "Sync progress"}>
+                <div
+                  className="h-full rounded-full bg-emerald-500 transition-[width] duration-500"
+                  style={{ width: `${Math.round(((syncHistoryDialog.step + 1) / syncHistorySteps.length) * 100)}%` }}
+                />
+              </div>
+              <div className="text-[12px] leading-5 text-slate-500">
+                {language === "zh"
+                  ? `环境：${syncHistoryDialog.envName}。请稍候，完成前不要关闭应用。`
+                  : language === "ja"
+                    ? `環境：${syncHistoryDialog.envName}。完了するまでアプリを閉じないでください。`
+                    : `Environment: ${syncHistoryDialog.envName}. Please wait until the operation finishes.`}
+              </div>
+            </div>
+          ) : syncHistoryDialog.phase === "success" && syncHistoryDialog.result ? (
+            <div className="space-y-4">
+              <div className="flex items-start gap-2 text-sm font-medium text-emerald-700">
+                <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
+                <span>
+                  {language === "zh"
+                    ? `环境 ${syncHistoryDialog.envName} 已同步 ${syncHistoryDialog.result.sessionsUpdated} 个会话、${syncHistoryDialog.result.threadsUpdated} 条索引记录。`
+                    : language === "ja"
+                      ? `${syncHistoryDialog.envName} の ${syncHistoryDialog.result.sessionsUpdated} 件のセッションと ${syncHistoryDialog.result.threadsUpdated} 件のインデックスを同期しました。`
+                      : syncHistoryDialog.result.message}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  [language === "zh" ? "扫描会话" : language === "ja" ? "スキャンしたセッション" : "Scanned", syncHistoryDialog.result.sessionsScanned],
+                  [language === "zh" ? "更新会话" : language === "ja" ? "更新したセッション" : "Sessions", syncHistoryDialog.result.sessionsUpdated],
+                  [language === "zh" ? "更新索引" : language === "ja" ? "更新したスレッド" : "Threads", syncHistoryDialog.result.threadsUpdated],
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="rounded-lg bg-white px-3 py-2.5 text-center">
+                    <div className="text-[11px] text-slate-400">{label}</div>
+                    <div className="mt-1 text-base font-semibold text-neutral-800">{value}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="space-y-1 text-[12px] leading-5 text-slate-500">
+                <div>Provider：<code className="break-all text-slate-700">{syncHistoryDialog.result.providerId}</code></div>
+                {syncHistoryDialog.result.backupPath ? (
+                  <div>{language === "zh" ? "备份位置" : language === "ja" ? "バックアップ先" : "Backup"}：<code className="break-all text-slate-700">{syncHistoryDialog.result.backupPath}</code></div>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-start gap-2 text-sm leading-6 text-rose-700">
+              <CircleAlert className="mt-0.5 size-4 shrink-0" />
+              <span className="break-words">{syncHistoryDialog.error || (language === "zh" ? "同步失败，请查看错误提示后重试。" : "The sync failed. Review the error and try again.")}</span>
+            </div>
+          )}
+        </ProgressDialog>
+      ) : null}
 
       <ConfirmDialog
         open={deleteOpen}

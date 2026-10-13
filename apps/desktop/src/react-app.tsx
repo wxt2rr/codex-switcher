@@ -907,7 +907,7 @@ export function App() {
     }
   }
 
-  async function handleSyncEnvironmentConversationHistory(envName: string): Promise<CodexHistorySyncResult | null> {
+  async function handleSyncEnvironmentConversationHistory(envName: string): Promise<CodexHistorySyncResult> {
     setBusy(true);
     try {
       const result = await bridge.syncEnvironmentConversationHistory(envName);
@@ -917,7 +917,7 @@ export function App() {
       return result;
     } catch (error) {
       setErrorMessage(error);
-      return null;
+      throw error;
     } finally {
       setBusy(false);
     }

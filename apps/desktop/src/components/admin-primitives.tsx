@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { X } from "lucide-react";
+import { CircleAlert, CircleCheck, LoaderCircle, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
@@ -339,6 +339,64 @@ export function ConfirmDialog({
               {confirmLabel}
             </Button>
           </div>
+        </div>
+      </div>
+    </DialogPortal>
+  );
+}
+
+/* ─── Progress / result dialog ─── */
+
+export function ProgressDialog({
+  open,
+  title,
+  phase,
+  children,
+  confirmLabel = "OK",
+  busyLabel = "Working…",
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  phase: "running" | "success" | "error";
+  children: ReactNode;
+  confirmLabel?: string;
+  busyLabel?: string;
+  onConfirm?: () => void;
+}) {
+  const mounted = useDelayedUnmount(open);
+  if (!mounted) return null;
+
+  const isRunning = phase === "running";
+  const Icon = isRunning ? LoaderCircle : phase === "success" ? CircleCheck : CircleAlert;
+  const iconClass = isRunning
+    ? "text-slate-400"
+    : phase === "success"
+      ? "text-emerald-600"
+      : "text-rose-600";
+
+  return (
+    <DialogPortal>
+      <div
+        data-state={open ? "open" : "closed"}
+        className={cn(dialogOverlayClass, "z-[60]")}
+        role="dialog"
+        aria-modal="true"
+        aria-busy={isRunning}
+      >
+        <div data-state={open ? "open" : "closed"} className={cn(dialogSurfaceClass, "max-w-[480px] rounded-[16px]")}>
+          <div className="flex items-start gap-3">
+            <Icon className={cn("mt-0.5 size-5 shrink-0", iconClass, isRunning && "animate-spin")} aria-hidden="true" />
+            <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-neutral-950">{title}</h3>
+          </div>
+          <div className="mt-4 rounded-[10px] border border-black/[0.05] bg-[#fafbfc] p-4">{children}</div>
+          {isRunning ? (
+            <div className="mt-5 text-right text-[12px] text-slate-400">{busyLabel}</div>
+          ) : (
+            <div className="mt-5 flex justify-end">
+              <Button onClick={onConfirm}>{confirmLabel}</Button>
+            </div>
+          )}
         </div>
       </div>
     </DialogPortal>
