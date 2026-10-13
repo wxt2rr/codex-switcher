@@ -34,6 +34,9 @@ test("package.json exposes Windows manual helper npm scripts", async () => {
     scripts?: Record<string, string>;
   };
   assert.equal(desktopPackageJson.scripts?.["test:desktop"], "node ./scripts/run-tests.mjs");
+  assert.match(desktopPackageJson.scripts?.["package:mac"] ?? "", /prepare-release\.mjs mac/);
+  assert.match(desktopPackageJson.scripts?.["package:linux"] ?? "", /prepare-release\.mjs linux/);
+  assert.match(desktopPackageJson.scripts?.["package:win"] ?? "", /prepare-release\.mjs win/);
   assert.equal(
     packageJson.scripts?.["release:verify-manifest"],
     "node ./scripts/verify-update-manifest.mjs",
