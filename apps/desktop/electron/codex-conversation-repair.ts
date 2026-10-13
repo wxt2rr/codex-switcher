@@ -105,6 +105,18 @@ interface BackupManifest {
 
 let sqlModule: Promise<SqlJsStatic> | undefined;
 
+/** Accept both the raw thread UUID and Codex's deep-link representation. */
+export function normalizeCodexConversationId(value: string): string {
+  const input = value.trim();
+  const match = input.match(/^codex:\/\/threads\/([^/?#]+)(?:[/?#].*)?$/i);
+  if (!match) return input;
+  try {
+    return decodeURIComponent(match[1]!);
+  } catch {
+    return match[1]!;
+  }
+}
+
 function loadSql(): Promise<SqlJsStatic> {
   const moduleAnchor = typeof __filename === "string" ? __filename : join(process.cwd(), "package.json");
   const resolveFromWorkspace = createRequire(moduleAnchor);
@@ -116,7 +128,7 @@ export async function inspectCodexConversation(
   conversationId: string,
   environments: CodexConversationRepairEnvironment[],
 ): Promise<CodexConversationInspectionResult> {
-  const normalizedId = conversationId.trim();
+  const normalizedId = normalizeCodexConversationId(conversationId);
   if (!normalizedId) throw new Error("Conversation ID is required");
 
   const candidates: CodexConversationCandidate[] = [];
@@ -156,7 +168,7 @@ export async function inspectCodexConversation(
 export async function repairCodexConversation(
   options: CodexConversationRepairOptions,
 ): Promise<CodexConversationRepairResult> {
-  const normalizedId = options.conversationId.trim();
+  const normalizedId = normalizeCodexConversationId(options.conversationId);
   if (!normalizedId) throw new Error("Conversation ID is required");
 
   const inspection = await inspectCodexConversation(normalizedId, options.environments);

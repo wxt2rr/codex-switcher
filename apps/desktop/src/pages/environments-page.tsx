@@ -755,7 +755,7 @@ export function EnvironmentsPage({
               onKeyDown={(event) => {
                 if (event.key === "Enter" && conversationRepairId.trim() && !busy) void inspectConversation();
               }}
-              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+              placeholder="UUID 或 codex://threads/<id>"
               autoFocus
               spellCheck={false}
               disabled={busy}
