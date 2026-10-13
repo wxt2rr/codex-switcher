@@ -45,6 +45,16 @@ export interface DesktopEnvFileHistoryEntry {
   content: string;
 }
 
+export interface CodexHistorySyncResult {
+  envName: string;
+  providerId: string;
+  sessionsScanned: number;
+  sessionsUpdated: number;
+  threadsUpdated: number;
+  backupPath?: string;
+  message: string;
+}
+
 export interface DesktopCreateEnvRequest {
   envName: string;
   source: {
@@ -501,6 +511,7 @@ export interface DesktopElectronApi {
   readEnvFiles(envName: string): Promise<string>;
   updateEnvConfig(envName: string, content: string): Promise<DesktopActionResult>;
   updateEnvFiles(envName: string, files: DesktopEnvEditableFiles): Promise<DesktopActionResult>;
+  syncEnvironmentConversationHistory(envName: string): Promise<CodexHistorySyncResult>;
   listEnvFileHistory(envName: string): Promise<string>;
   restoreEnvFileHistory(envName: string, entryId: string): Promise<DesktopActionResult>;
   deleteEnvFileHistory(envName: string, entryIds: string[]): Promise<DesktopActionResult>;
@@ -631,6 +642,7 @@ export interface DesktopBridge {
   readEnvFiles(envName: string): Promise<string>;
   updateEnvConfig(envName: string, content: string): Promise<DesktopActionResult>;
   updateEnvFiles(envName: string, files: DesktopEnvEditableFiles): Promise<DesktopActionResult>;
+  syncEnvironmentConversationHistory(envName: string): Promise<CodexHistorySyncResult>;
   listEnvFileHistory(envName: string): Promise<string>;
   restoreEnvFileHistory(envName: string, entryId: string): Promise<DesktopActionResult>;
   deleteEnvFileHistory(envName: string, entryIds: string[]): Promise<DesktopActionResult>;
@@ -757,6 +769,7 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       readEnvFiles: unavailable,
       updateEnvConfig: unavailable,
       updateEnvFiles: unavailable,
+      syncEnvironmentConversationHistory: unavailable,
       listEnvFileHistory: unavailable,
       restoreEnvFileHistory: unavailable,
       deleteEnvFileHistory: unavailable,
@@ -987,6 +1000,14 @@ function createBrowserPreviewBridge(): DesktopBridge {
     readEnvFiles: browserPreviewReadEnvFiles,
     updateEnvConfig: () => browserPreviewAction(),
     updateEnvFiles: () => browserPreviewAction(),
+    syncEnvironmentConversationHistory: async (envName) => ({
+      envName,
+      providerId: "codex_switcher_router",
+      sessionsScanned: 0,
+      sessionsUpdated: 0,
+      threadsUpdated: 0,
+      message: "History synchronization is unavailable in browser preview",
+    }),
     listEnvFileHistory: async () => "[]\n",
     restoreEnvFileHistory: () => browserPreviewAction(),
     deleteEnvFileHistory: () => browserPreviewAction(),

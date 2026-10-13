@@ -1,4 +1,6 @@
 import type { SwitcherState, TargetName } from "../state/store.js";
+/** Stable Codex provider namespace used for all Switcher-managed API routes. */
+export declare const MANAGED_PROVIDER_ID = "codex_switcher_router";
 export interface ApplyTargetHomeStateOptions {
     state: SwitcherState;
     target: TargetName;

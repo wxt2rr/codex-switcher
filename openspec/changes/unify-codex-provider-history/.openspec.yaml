@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-10-13
+goal: Unify gateway and direct sessions under codex_switcher_router and migrate
+  existing local session metadata safely.

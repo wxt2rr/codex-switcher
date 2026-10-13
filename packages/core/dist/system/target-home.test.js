@@ -46,8 +46,11 @@ test("target-home writer installs auth.json and managed config for apikey accoun
         assert.equal(auth.OPENAI_API_KEY, "sk-test-123");
         const config = await readFile(join(homePath, "config.toml"), "utf8");
         assert.match(config, /preferred_auth_method = "apikey"/);
-        assert.match(config, /openai_base_url = "https:\/\/proxy\.example\.test\/v1"/);
-        assert.doesNotMatch(config, /requires_openai_auth = false/);
+        assert.match(config, /model_provider = "codex_switcher_router"/);
+        assert.match(config, /\[model_providers\.codex_switcher_router\]/);
+        assert.match(config, /base_url = "https:\/\/proxy\.example\.test\/v1"/);
+        assert.match(config, /wire_api = "responses"/);
+        assert.match(config, /requires_openai_auth = false/);
         assert.doesNotMatch(config, /http_headers = \{ "x-openai-actor-authorization" = "codex-sw\.app" \}/);
     }
     finally {

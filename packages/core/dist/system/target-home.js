@@ -1,7 +1,8 @@
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { writeFileAtomically } from "./atomic-file.js";
-const LOCAL_ROUTER_PROVIDER_ID = "codex_switcher_router";
+/** Stable Codex provider namespace used for all Switcher-managed API routes. */
+export const MANAGED_PROVIDER_ID = "codex_switcher_router";
 export async function repairLegacyTargetHomeConfigs(options) {
     const result = {
         checked: 0,
@@ -106,32 +107,35 @@ async function writeManagedConfig(configPath, runtime, options = {}) {
     const compatibilityRouteActive = runtime.apiProtocol === "chat_completions" &&
         runtime.compatibilityRouteEnabled &&
         Boolean(runtime.compatibilityRouteBaseUrl);
-    const localRouterBaseUrl = compatibilityRouteActive
+    const configuredBaseUrl = compatibilityRouteActive
         ? runtime.compatibilityRouteBaseUrl
         : runtime.openaiBaseUrlMode === "custom"
             ? runtime.openaiBaseUrl
             : undefined;
-    const localRouterActive = isLocalRouterBaseUrl(localRouterBaseUrl);
+    const localRouterBaseUrl = isLocalRouterBaseUrl(configuredBaseUrl) ? configuredBaseUrl : undefined;
+    const localRouterActive = Boolean(localRouterBaseUrl);
     if (compatibilityRouteActive && !localRouterActive) {
         managedLines.push(`openai_base_url = ${quoteTomlString(runtime.compatibilityRouteBaseUrl)}`);
     }
-    if (!localRouterActive && !compatibilityRouteActive && runtime.apiProtocol !== "chat_completions"
-        && runtime.openaiBaseUrlMode === "custom" && runtime.openaiBaseUrl) {
-        managedLines.push(`openai_base_url = "${runtime.openaiBaseUrl}"`);
-    }
+    const directManagedBaseUrl = !compatibilityRouteActive && runtime.apiProtocol !== "chat_completions"
+        && runtime.openaiBaseUrlMode === "custom" && runtime.openaiBaseUrl
+        ? runtime.openaiBaseUrl
+        : undefined;
     if (managedModelSlug) {
         managedLines.push(`model = ${quoteTomlString(managedModelSlug)}`);
     }
     if (managedModelCatalogPath) {
         managedLines.push(`model_catalog_json = ${quoteTomlString(managedModelCatalogPath)}`);
     }
-    if (localRouterActive) {
+    const managedProviderBaseUrl = localRouterBaseUrl ?? directManagedBaseUrl;
+    const managedProviderActive = Boolean(managedProviderBaseUrl);
+    if (managedProviderActive) {
         managedLines.push("");
-        managedLines.push(`model_provider = ${quoteTomlString(LOCAL_ROUTER_PROVIDER_ID)}`);
+        managedLines.push(`model_provider = ${quoteTomlString(MANAGED_PROVIDER_ID)}`);
         managedLines.push("");
-        managedLines.push(`[model_providers.${LOCAL_ROUTER_PROVIDER_ID}]`);
-        managedLines.push('name = "codex-switcher local router"');
-        managedLines.push(`base_url = ${quoteTomlString(localRouterBaseUrl)}`);
+        managedLines.push(`[model_providers.${MANAGED_PROVIDER_ID}]`);
+        managedLines.push('name = "codex-switcher router"');
+        managedLines.push(`base_url = ${quoteTomlString(managedProviderBaseUrl)}`);
         managedLines.push('wire_api = "responses"');
         managedLines.push("supports_websockets = false");
         if (runtime.preferredAuthMethod === "chatgpt") {
@@ -285,7 +289,7 @@ function removeManagedConfigLines(content, options) {
     const managedProviderIds = new Set(lines
         .map((line) => line.trim().match(/^model_provider\s*=\s*"([^"]+)"$/)?.[1] ?? "")
         .filter(Boolean));
-    managedProviderIds.add(LOCAL_ROUTER_PROVIDER_ID);
+    managedProviderIds.add(MANAGED_PROVIDER_ID);
     let skipManagedProviderSection = false;
     let insideTomlSection = false;
     for (const line of lines) {

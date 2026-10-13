@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useAdaptiveMenuLayout } from "../components/adaptive-menu-placement";
 import { useDelayedUnmount } from "../components/use-delayed-unmount";
 import { cn } from "../lib/utils";
-import type { AccountPoolInput, AccountPoolStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry } from "../bridge";
+import type { AccountPoolInput, AccountPoolStatus, CodexHistorySyncResult, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry } from "../bridge";
 import {
   EmptyList,
   ListCard,
@@ -142,6 +142,7 @@ function EnvironmentActionMenu({
   onEdit,
   onConfig,
   onHistory,
+  onSyncHistory,
   onDelete,
 }: {
   language: UiLanguage;
@@ -149,6 +150,7 @@ function EnvironmentActionMenu({
   onEdit: () => void;
   onConfig: () => void;
   onHistory: () => void;
+  onSyncHistory: () => void;
   onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -170,6 +172,7 @@ function EnvironmentActionMenu({
     { key: "edit", label: language === "zh" ? "编辑环境" : language === "ja" ? "環境を編集" : "Edit environment", onSelect: onEdit },
     { key: "config", label: language === "zh" ? "修改环境文件" : language === "ja" ? "環境ファイルを変更" : "Edit environment files", onSelect: onConfig },
     { key: "history", label: language === "zh" ? "查看修改历史" : language === "ja" ? "変更履歴を表示" : "View change history", onSelect: onHistory },
+    { key: "sync-history", label: language === "zh" ? "同步对话列表" : language === "ja" ? "会話履歴を同期" : "Sync conversation history", onSelect: onSyncHistory },
     { key: "delete", label: language === "zh" ? "删除环境" : language === "ja" ? "環境を削除" : "Delete environment", onSelect: onDelete, tone: "danger" as const },
   ];
 
@@ -230,6 +233,7 @@ function EnvCard({
   onEdit,
   onConfig,
   onHistory,
+  onSyncHistory,
   onDelete,
   routeStatus,
   canRoute,
@@ -244,6 +248,7 @@ function EnvCard({
   onEdit: () => void;
   onConfig: () => void;
   onHistory: () => void;
+  onSyncHistory: () => void;
   onDelete: () => void;
   routeStatus?: EnvironmentRouteStatus;
   canRoute: boolean;
@@ -320,7 +325,7 @@ function EnvCard({
                   : `Account pool · ${poolStatus.readyMembers}/${poolStatus.members.length}`
               : language === "zh" ? "账号池" : language === "ja" ? "アカウントプール" : "Account pool"}
           </Button>
-          <EnvironmentActionMenu language={language} busy={busy} onEdit={onEdit} onConfig={onConfig} onHistory={onHistory} onDelete={onDelete} />
+          <EnvironmentActionMenu language={language} busy={busy} onEdit={onEdit} onConfig={onConfig} onHistory={onHistory} onSyncHistory={onSyncHistory} onDelete={onDelete} />
         </div>
       </div>
 
@@ -357,6 +362,7 @@ export function EnvironmentsPage({
   onListEnvFileHistory,
   onRestoreEnvFileHistory,
   onDeleteEnvFileHistory,
+  onSyncEnvironmentConversationHistory,
   onImportDefaultEnv,
   onDeleteEnv,
   routeStatuses,
@@ -380,6 +386,7 @@ export function EnvironmentsPage({
   onListEnvFileHistory: (envName: string) => Promise<DesktopEnvFileHistoryEntry[]>;
   onRestoreEnvFileHistory: (envName: string, entryId: string) => Promise<boolean>;
   onDeleteEnvFileHistory: (envName: string, entryIds: string[]) => Promise<boolean>;
+  onSyncEnvironmentConversationHistory: (envName: string) => Promise<CodexHistorySyncResult | null>;
   onImportDefaultEnv: (envName: string) => void;
   onDeleteEnv: () => void;
   routeStatuses: EnvironmentRouteStatus[];
@@ -404,6 +411,8 @@ export function EnvironmentsPage({
   const [historySelection, setHistorySelection] = useState<string[]>([]);
   const [historyFilter, setHistoryFilter] = useState<"all" | "config.toml" | "auth.json">("all");
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [syncHistoryOpen, setSyncHistoryOpen] = useState(false);
+  const [syncHistoryEnvName, setSyncHistoryEnvName] = useState("");
   const [poolOpen, setPoolOpen] = useState(false);
   const [poolEnvName, setPoolEnvName] = useState("");
   const [poolProtocol, setPoolProtocol] = useState<"responses" | "chat_completions">("responses");
@@ -521,6 +530,10 @@ export function EnvironmentsPage({
                 setHistoryFilter("all");
                 setHistoryEntries(await onListEnvFileHistory(env.name));
                 setHistoryOpen(true);
+              }}
+              onSyncHistory={() => {
+                setSyncHistoryEnvName(env.name);
+                setSyncHistoryOpen(true);
               }}
               onDelete={() => {
                 onEnvDeleteDraftChange(env.name);
@@ -853,6 +866,24 @@ export function EnvironmentsPage({
           </div>
         </div>
       </SidePanel>
+
+      <ConfirmDialog
+        open={syncHistoryOpen}
+        title={language === "zh" ? "同步对话列表" : language === "ja" ? "会話履歴を同期" : "Sync conversation history"}
+        impact={
+          <div className="space-y-2 text-sm text-neutral-500">
+            <div>{language === "zh" ? `将环境 ${syncHistoryEnvName} 中旧会话的 provider 标识统一为 codex_switcher_router。` : `Normalize existing sessions in ${syncHistoryEnvName} to codex_switcher_router.`}</div>
+            <div>{language === "zh" ? "只修改会话元数据和索引，不修改消息内容。执行前会自动备份；请先关闭该环境正在运行的 Codex。同步列表不保证跨服务商继续上下文。" : "Only metadata and index records change. A backup is created first; close Codex for this environment before continuing. Unified visibility does not guarantee cross-provider continuation."}</div>
+          </div>
+        }
+        confirmLabel={language === "zh" ? "开始同步" : language === "ja" ? "同期を開始" : "Start sync"}
+        cancelLabel={pageCopy.common.cancel}
+        onCancel={() => setSyncHistoryOpen(false)}
+        onConfirm={() => {
+          setSyncHistoryOpen(false);
+          void onSyncEnvironmentConversationHistory(syncHistoryEnvName);
+        }}
+      />
 
       <ConfirmDialog
         open={deleteOpen}

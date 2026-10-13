@@ -103,6 +103,8 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     ipcRenderer.invoke("desktop:updateEnvConfig", envName, content),
   updateEnvFiles: (envName: string, files: { configToml: string; authJson: string }) =>
     ipcRenderer.invoke("desktop:updateEnvFiles", envName, files),
+  syncEnvironmentConversationHistory: (envName: string) =>
+    ipcRenderer.invoke("desktop:syncEnvironmentConversationHistory", envName),
   listEnvFileHistory: (envName: string) => ipcRenderer.invoke("desktop:listEnvFileHistory", envName),
   restoreEnvFileHistory: (envName: string, entryId: string) =>
     ipcRenderer.invoke("desktop:restoreEnvFileHistory", envName, entryId),

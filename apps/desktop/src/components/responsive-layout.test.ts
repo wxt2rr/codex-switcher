@@ -231,6 +231,8 @@ test("credential-pool editor explains retry and failover thresholds", () => {
 test("all management record cards opt into the single-row responsive contract", () => {
   assert.match(environments, /environment-card/);
   assert.match(environments, /EnvironmentActionMenu/);
+  assert.match(environments, /同步对话列表/);
+  assert.match(environments, /SyncEnvironmentConversationHistory/);
   assert.match(environments, /getRouteRuntimeSummary/);
   assert.match(environments, /ListStack/);
   assert.match(environments, /<ListStack>/);

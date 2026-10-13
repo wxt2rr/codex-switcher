@@ -148,6 +148,10 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       calls.push(`updateEnvFiles:${envName}:${files.configToml.length}:${files.authJson.length}`);
       return { message: "ok" };
     },
+    syncEnvironmentConversationHistory: async (envName) => {
+      calls.push(`syncEnvironmentConversationHistory:${envName}`);
+      return { envName, providerId: "codex_switcher_router", sessionsScanned: 0, sessionsUpdated: 0, threadsUpdated: 0, message: "ok" };
+    },
     listEnvFileHistory: async (envName) => {
       calls.push(`listEnvFileHistory:${envName}`);
       return "[]\n";
@@ -378,6 +382,7 @@ test("desktop bridge forwards calls to injected electron api", async () => {
     apiKey: "sk-demo",
     baseUrl: "https://api.example.test/v1",
   });
+  await bridge.syncEnvironmentConversationHistory("project");
   await bridge.logoutAccount("project", "personal", "cli");
   await bridge.deleteAccount("project", "personal");
   await bridge.copyAccount("project", "personal", "sandbox");
@@ -429,6 +434,7 @@ test("desktop bridge forwards calls to injected electron api", async () => {
     "updateEnvConfig:sandbox:18",
     "updateRuntime:project:personal:default",
     "updateIndependentModel:project:personal:on",
+    "syncEnvironmentConversationHistory:project",
     "logoutAccount:project:personal:cli",
     "deleteAccount:project:personal",
     "copyAccount:project:personal:sandbox",

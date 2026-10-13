@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { mergeAccountUsageMetrics, mergeOverviewWithAuthMetrics } from "@/auth-metrics";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/components/theme-provider";
-import type { AccountPoolInput, AccountPoolStatus, AppEnvironmentBadgeStatus, AppPresenceStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, DesktopAutoUpdateStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry, DesktopLaunchStrategy, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, LaunchAtLoginStatus, ProviderCatalogItem, ProviderCredentialImportRequest, RouterLifecycleSettings, RouterPortSettings } from "./bridge";
+import type { AccountPoolInput, AccountPoolStatus, AppEnvironmentBadgeStatus, AppPresenceStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexHistorySyncResult, CodexToolStatus, DesktopAutoUpdateStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry, DesktopLaunchStrategy, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, LaunchAtLoginStatus, ProviderCatalogItem, ProviderCredentialImportRequest, RouterLifecycleSettings, RouterPortSettings } from "./bridge";
 import { DesktopShell } from "./components/desktop-shell";
 import type { AccountSummary, AuthMetricsPayload, EnvironmentRouteStatus, NavView, OverviewPayload } from "./desktop-model";
 import { resolveDesktopBridge } from "./bridge";
@@ -907,6 +907,22 @@ export function App() {
     }
   }
 
+  async function handleSyncEnvironmentConversationHistory(envName: string): Promise<CodexHistorySyncResult | null> {
+    setBusy(true);
+    try {
+      const result = await bridge.syncEnvironmentConversationHistory(envName);
+      setSuccessMessage(language === "zh"
+        ? `环境 ${envName} 已同步 ${result.sessionsUpdated} 个会话、${result.threadsUpdated} 条索引记录`
+        : `Synchronized ${result.sessionsUpdated} sessions and ${result.threadsUpdated} thread records for ${envName}`);
+      return result;
+    } catch (error) {
+      setErrorMessage(error);
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleUpdateRuntime(): Promise<boolean> {
     if (!runtimeEnvDraft.trim() || !runtimeAccountDraft.trim()) {
       setValidationMessage("runtime-requires-input");
@@ -1309,6 +1325,7 @@ export function App() {
           onListEnvFileHistory={handleListEnvFileHistory}
           onRestoreEnvFileHistory={handleRestoreEnvFileHistory}
           onDeleteEnvFileHistory={handleDeleteEnvFileHistory}
+          onSyncEnvironmentConversationHistory={handleSyncEnvironmentConversationHistory}
           onImportDefaultEnv={(envName) => void handleImportDefaultEnv(envName)}
           onDeleteEnv={() => void handleDeleteEnv()}
           routeStatuses={routeStatuses}

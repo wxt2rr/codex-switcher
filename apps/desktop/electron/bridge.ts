@@ -22,6 +22,7 @@ import {
   type EnvFileHistoryEntry,
   type EnvFileHistorySource,
 } from "./env-file-history.js";
+import { syncCodexProviderHistory, type CodexHistorySyncResult } from "./codex-history-sync.js";
 import { UsageRouterManager, type GatewayRouteBinding } from "./usage-router-manager.js";
 import type {
   GatewayEnvironmentState,
@@ -2238,6 +2239,31 @@ export async function updateEnvFiles(
     message: `Updated editable files for ${envName}`,
     output: env.path,
   };
+}
+
+export async function syncEnvironmentConversationHistory(envName: string): Promise<CodexHistorySyncResult> {
+  const trimmedEnvName = envName.trim();
+  if (!trimmedEnvName) throw new Error("Environment name is required");
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const environment = state.envs[trimmedEnvName];
+  if (!environment) throw new Error(`Env '${trimmedEnvName}' not found`);
+
+  const support = await loadCoreSupportModules();
+  const isRunning = async () => {
+    const paths = support.resolveManagedAppStatePaths(getStateDir());
+    const reconciled = await support.reconcileManagedAppInstanceCount(paths, trimmedEnvName).catch(() => undefined);
+    if (reconciled !== undefined) return reconciled > 0;
+    const instances = await support.listManagedAppInstances(paths);
+    return instances.some((instance) => instance.targetKey?.trim().split("/", 1)[0] === trimmedEnvName);
+  };
+
+  return syncCodexProviderHistory({
+    envName: trimmedEnvName,
+    homePath: environment.path,
+    stateDir: getStateDir(),
+    isRunning,
+  });
 }
 
 export async function listEnvFileHistory(envName: string): Promise<string> {

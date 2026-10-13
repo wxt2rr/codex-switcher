@@ -46,6 +46,7 @@ import {
   updateEnv,
   updateEnvConfig,
   updateEnvFiles,
+  syncEnvironmentConversationHistory,
   listEnvFileHistory,
   restoreEnvFileHistory,
   deleteEnvFileHistory,
@@ -577,6 +578,9 @@ function registerHandlers() {
   );
   ipcMain.handle("desktop:updateEnvFiles", (_event: IpcMainInvokeEvent, envName: string, files) =>
     updateEnvFiles(envName, files)
+  );
+  ipcMain.handle("desktop:syncEnvironmentConversationHistory", (_event: IpcMainInvokeEvent, envName: string) =>
+    syncEnvironmentConversationHistory(envName)
   );
   ipcMain.handle("desktop:listEnvFileHistory", (_event: IpcMainInvokeEvent, envName: string) =>
     listEnvFileHistory(envName)
