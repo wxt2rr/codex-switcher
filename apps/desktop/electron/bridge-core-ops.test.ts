@@ -1221,7 +1221,8 @@ test("desktop bridge materializes environment route changes in the active config
 
     await bridge.toggleEnvironmentRoute("project", false);
     const disabledConfig = await readFile(join(root, "envs", "project", "home", "config.toml"), "utf8");
-    assert.match(disabledConfig, /openai_base_url = "https:\/\/api\.example\.com\/v1"/);
+    assert.match(disabledConfig, /model_provider = "codex_switcher_router"/);
+    assert.match(disabledConfig, /base_url = "https:\/\/api\.example\.com\/v1"/);
   } finally {
     await service?.close();
     bridge.__testUtils.resetUsageRouterManagerForTest();
