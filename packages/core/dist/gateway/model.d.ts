@@ -6,6 +6,16 @@ export type GatewayCredentialKind = "auth" | "api_key" | "oauth" | "plugin" | "l
 export type GatewayCredentialStatus = "active" | "cooldown" | "invalid" | "expired" | "disabled";
 export type GatewayRoutingStrategy = "smart" | "order" | "rotate" | "usage" | "pace" | "weight" | "weighted_round_robin";
 export type GatewaySessionPolicy = "auto" | "session" | "turn" | "off";
+export type GatewayCapabilityStatus = "supported" | "unsupported" | "unknown" | "degraded";
+export type GatewayCapabilitySource = "provider" | "preset" | "discovery" | "probe" | "observed" | "legacy";
+export interface GatewayCapabilityObservation {
+    status: GatewayCapabilityStatus;
+    source: GatewayCapabilitySource;
+    checkedAt?: number;
+    expiresAt?: number;
+    evidence?: string;
+}
+export type GatewayCapabilityProfile = Record<string, GatewayCapabilityObservation>;
 export interface GatewayProviderEndpoints {
     responses?: string;
     chatCompletions?: string;
@@ -67,6 +77,8 @@ export interface GatewayModelDefinition {
         vision?: boolean;
         streaming?: boolean;
     };
+    /** Fine-grained model/provider capabilities. Optional for legacy documents. */
+    capabilityProfile?: GatewayCapabilityProfile;
     enabled: boolean;
 }
 export interface GatewayRouteGroupMember {
@@ -95,6 +107,7 @@ export interface GatewayRouteGroupDefinition {
         vision?: boolean;
         streaming?: boolean;
     };
+    capabilityProfile?: GatewayCapabilityProfile;
 }
 /** Explicit request-metadata routing only. This schema deliberately has no
  * prompt, classifier, intent, or free-form expression field. */

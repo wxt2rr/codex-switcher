@@ -386,7 +386,7 @@ test("account compatibility persists only the local token, hydrates the router, 
   let restored = "";
   try {
     const enabled = await manager.enableAccountCompatibility({ envName: "work", accountName: "chat", authMode: "apikey",
-      baseUrl: "https://api.example.com/v1", apiKey: "sk-upstream", upstreamModel: "provider-model",
+      baseUrl: "https://api.example.com/v1", apiKey: "sk-upstream", providerId: "qwen", upstreamModel: "provider-model",
       longConversationStrategy: "continuity", instructionRole: "developer" },
     async (value) => { runtime = value; });
     assert.equal(enabled.state, "ready");
@@ -395,6 +395,7 @@ test("account compatibility persists only the local token, hydrates the router, 
     assert.equal((await manager.getAccountCompatibilityStatuses(["work/chat"]))[0]?.state, "ready");
     assert.equal((await manager.listRoutes())[0]?.longConversationStrategy, "continuity");
     assert.equal((await manager.listRoutes())[0]?.instructionRole, "developer");
+    assert.equal((await manager.listRoutes())[0]?.providerId, "qwen");
 
     const tokenFile = await import("node:fs/promises").then(({ readFile }) => readFile(join(stateDir, "usage-router", "compatibility-route-tokens.json"), "utf8"));
     assert.equal(tokenFile.includes("sk-upstream"), false);

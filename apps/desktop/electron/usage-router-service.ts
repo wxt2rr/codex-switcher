@@ -6,6 +6,20 @@ import { Readable } from "node:stream";
 
 import type { ConversionDiagnostic, ConversionQuality } from "../../../packages/gateway/dist/conversion/index.js";
 import {
+  classifyCapabilityMismatch,
+  createCapabilityRegistry,
+  filterUnsupportedHostedTools,
+  initializeGatewayCapabilityRuntime,
+  knownCapabilityProfile,
+  loadCapabilities,
+  mergeCapabilityProfiles,
+  observeCapability,
+  profileFromLegacyCapabilities,
+  snapshotCapabilities,
+  type CapabilityId,
+  type CapabilityRegistry,
+} from "./gateway-capability-runtime.js";
+import {
   extractTokenUsage,
   type EnvironmentGateway,
   type GatewayRouteRuntimeMetrics,
@@ -331,6 +345,22 @@ function hasUpgradeIntent(headers: IncomingHttpHeaders): boolean {
     .some((value) => value.trim().toLowerCase() === "upgrade");
 }
 
+function readGatewayAccountName(headers: IncomingHttpHeaders): string | undefined {
+  const raw = headers["x-codex-account"];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const encoding = headers["x-codex-account-encoding"];
+  const encodingValue = Array.isArray(encoding) ? encoding[0] : encoding;
+  if (String(encodingValue ?? "").trim().toLowerCase() !== "uri") return value.trim();
+  try {
+    return decodeURIComponent(value).trim() || undefined;
+  } catch {
+    // Keep the original value for diagnostics and backwards compatibility if a
+    // malformed internal header is ever received.
+    return value.trim();
+  }
+}
+
 async function readJson(request: IncomingMessage, maxBytes = 1024 * 1024): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -620,19 +650,76 @@ interface DesktopConvertedRequest extends DesktopConversionTrace {
   body: Buffer;
 }
 
+function capabilityProfileForRoute(
+  route: Pick<RouteTarget, "routeId" | "providerId" | "upstreamBaseUrl" | "capabilityProfile" | "capabilities">,
+  protocol: RouteProtocol,
+  model: string | undefined,
+  registry?: CapabilityRegistry,
+) {
+  const context = { providerId: route.providerId, endpoint: route.upstreamBaseUrl, protocol, modelId: model ?? "unknown", credentialId: route.routeId };
+  return mergeCapabilityProfiles(
+    knownCapabilityProfile(context),
+    profileFromLegacyCapabilities(route.capabilities),
+    route.capabilityProfile,
+    registry?.profile(context),
+  );
+}
+
+function requestedCapabilityIds(body: Record<string, unknown> | undefined): CapabilityId[] {
+  const result = new Set<CapabilityId>();
+  if (body?.stream === true) result.add("output.streaming");
+  if (body?.reasoning !== undefined || body?.thinking !== undefined) result.add("output.reasoning");
+  if (!Array.isArray(body?.tools)) return [...result];
+  for (const raw of body.tools) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const type = typeof (raw as Record<string, unknown>).type === "string" ? String((raw as Record<string, unknown>).type) : "function";
+    if (["web_search", "web_search_preview", "web_search_options"].includes(type)) result.add("tools.hosted.web_search");
+    else if (["code_interpreter", "code_interpreter_preview", "python"].includes(type)) result.add("tools.hosted.code_interpreter");
+    else if (["computer_use", "computer_use_preview"].includes(type)) result.add("tools.hosted.computer_use");
+    else if (type === "function") result.add("tools.function");
+    else if (type === "custom") result.add("tools.custom");
+    else if (type === "namespace") result.add("tools.namespace");
+  }
+  return [...result];
+}
+
+function observeCapabilityMismatch(
+  registry: CapabilityRegistry | undefined,
+  persist: (() => void) | undefined,
+  route: RouteTarget,
+  protocol: RouteProtocol,
+  model: string | undefined,
+  body: Record<string, unknown> | undefined,
+  status: number,
+  message: string | null,
+): ReturnType<typeof classifyCapabilityMismatch> {
+  if (!registry) return undefined;
+  const mismatch = classifyCapabilityMismatch({ status, message: message ?? undefined, requestedCapabilities: requestedCapabilityIds(body) });
+  if (!mismatch) return undefined;
+  const context = { providerId: route.providerId, endpoint: route.upstreamBaseUrl, protocol, modelId: model ?? "unknown", credentialId: route.routeId };
+  observeCapability(registry, context, mismatch.capability, "unsupported", "observed", mismatch.evidence, 24 * 60 * 60 * 1000);
+  persist?.();
+  return mismatch;
+}
+
 async function convertRequestForRoute(
   source: RouteProtocol,
   target: RouteProtocol,
   body: Record<string, unknown>,
   upstreamModel: string | undefined,
   originModel: string | undefined,
+  route?: Pick<RouteTarget, "routeId" | "providerId" | "upstreamBaseUrl" | "capabilityProfile" | "capabilities">,
 ): Promise<DesktopConvertedRequest> {
+  const capabilityProfile = route
+    ? capabilityProfileForRoute(route, target, upstreamModel ?? originModel)
+    : {};
+  const hasCapabilityProfile = Object.keys(capabilityProfile).length > 0;
   const converted = useLegacyProtocolConversion() ? undefined : await convertGatewayRequestAtRuntime(
       source,
       target,
       body as unknown as import("../../../packages/gateway/dist/protocol.js").JsonObject,
       { originModelName: originModel, upstreamModelName: upstreamModel },
-      { toolLossPolicy: "allow" },
+      { toolLossPolicy: "allow", ...(hasCapabilityProfile ? { capabilityProfile, capabilityPolicy: "safe" as const } : {}) },
     );
   if (converted) {
     return {
@@ -674,6 +761,21 @@ function initialPoolHealth(pool: AccountPool, saved: PoolMemberHealthState[]): P
 }
 
 function sanitizePoolFailureReason(reason: PoolFailureReason): string { return reason; }
+
+function capabilityObservationEntries(registry: CapabilityRegistry): Array<Record<string, unknown>> {
+  return Object.entries(snapshotCapabilities(registry)).map(([key, observation]) => {
+    // capabilityKey is provider|endpoint|protocol|model|credential|capability.
+    // Split from the right so provider/endpoint identifiers may contain '|'.
+    const parts = key.split("|");
+    const capability = parts.pop() ?? "";
+    const credentialId = parts.pop() ?? "*";
+    const modelId = parts.pop() ?? "unknown";
+    const protocol = parts.pop() ?? "unknown";
+    const endpoint = parts.pop() ?? "*";
+    const providerId = parts.join("|") || "unknown-provider";
+    return { key, providerId, endpoint, protocol, modelId, credentialId, capability, ...observation };
+  });
+}
 
 export function sanitizeRouterErrorMessage(value: unknown): string | null {
   const raw = value instanceof Error ? value.message : typeof value === "string" ? value : String(value ?? "");
@@ -805,11 +907,13 @@ async function proxyAccountPoolRequest(
   middleware?: RuntimeGatewayMiddlewareRegistry,
   middlewareContext?: RuntimeGatewayMiddlewareContext,
   resolveProviderAdapter?: (providerId: string | undefined) => RuntimeProviderAdapter | undefined,
+  capabilityRegistry?: CapabilityRegistry,
+  persistCapabilityObservations?: () => void,
 ): Promise<void> {
   const startedAt = Date.now();
   const body = bodyOverride ?? (request.method === "GET" || request.method === "HEAD" ? Buffer.alloc(0) : await readRequestBodyBuffer(request));
   const parsedBody = parseRequestBody(body);
-  const entryAccountName = request.headers["x-codex-account"]?.toString() || entryAccountNameOverride;
+  const entryAccountName = readGatewayAccountName(request.headers) || entryAccountNameOverride;
   const derived = derivePoolSessionKey({ headers: request.headers as Record<string, string | string[] | undefined>, body: parsedBody, endpoint: `/${routeSuffix}`, model: typeof parsedBody?.model === "string" ? parsedBody.model : undefined, entryAccountName });
   const bindings = await store.listPoolBindings(pool.poolId);
   const attempted: string[] = [];
@@ -881,11 +985,19 @@ async function proxyAccountPoolRequest(
       ? { ...route, upstreamModel: effectiveUpstreamModel, protocol: effectiveProtocol }
       : route;
     let candidateBody = rewriteGatewayModel(body, effectiveUpstreamModel) ?? body;
-    const candidateParsedBody = candidateBody.length ? parseRequestBody(candidateBody) : parsedBody;
+    let candidateParsedBody = candidateBody.length ? parseRequestBody(candidateBody) : parsedBody;
+    if (candidateParsedBody) {
+      const capabilityProfile = capabilityProfileForRoute(effectiveRoute, effectiveRoute.protocol, effectiveUpstreamModel, capabilityRegistry);
+      const filtered = filterUnsupportedHostedTools(candidateParsedBody as import("../../../packages/gateway/dist/protocol.js").JsonObject, capabilityProfile, Object.keys(capabilityProfile).length ? "safe" : "allow");
+      if (filtered.omitted.length) {
+        candidateParsedBody = filtered.body as Record<string, unknown>;
+        candidateBody = Buffer.from(JSON.stringify(candidateParsedBody));
+      }
+    }
     let conversionTrace: DesktopConversionTrace | undefined;
     if (candidateParsedBody && pool.protocol !== effectiveRoute.protocol) {
       const converted = await convertRequestForRoute(pool.protocol, effectiveRoute.protocol, candidateParsedBody, effectiveUpstreamModel,
-        typeof parsedBody?.model === "string" ? parsedBody.model : undefined);
+        typeof parsedBody?.model === "string" ? parsedBody.model : undefined, effectiveRoute);
       candidateBody = converted.body;
       conversionTrace = converted;
       finalConversionQuality = converted.quality;
@@ -916,28 +1028,57 @@ async function proxyAccountPoolRequest(
     }
     const proxy = resolveUpstreamProxy(upstream, effectiveRoute.proxyUrl ?? member.proxyUrl, defaultProxyUrl);
     let upstreamResponse: Response;
+    const executeCandidate = async (): Promise<Response> => pool.protocol === "chat_completions"
+      && (effectiveRoute.protocol === "responses" || effectiveRoute.protocol === "chat_completions")
+      ? await handleChatCompatibilityRequest({
+        route: { ...effectiveRoute, proxyUrl: proxy.url }, secret: { routeId: effectiveRoute.routeId, upstreamApiKey: secret.upstreamBearerToken, localRouteToken, hydratedAt: secret.hydratedAt },
+        authorization: `Bearer ${localRouteToken}`, request: candidateParsedBody ?? {}, headers,
+        history, signal: AbortSignal.timeout(120_000),
+        capabilityProfile: capabilityProfileForRoute(effectiveRoute, effectiveRoute.protocol, effectiveUpstreamModel, capabilityRegistry),
+      })
+      : providerAdapter?.request && providerAccount
+      ? responseFromProviderRequest(await providerAdapter.request!({
+        account: providerAccount,
+        secret: secret.upstreamBearerToken,
+        protocol: effectiveRoute.protocol,
+        url: upstream,
+        method: request.method ?? "GET",
+        headers,
+        ...(candidateBody.length ? { body: candidateBody.toString("utf8") } : {}),
+      }))
+      : await fetchWithOptionalProxy(upstream, {
+        method: request.method, headers, body: candidateBody.length ? candidateBody as unknown as BodyInit : undefined, redirect: "manual",
+        ...(candidateBody.length ? { duplex: "half" } as RequestInit : {}), signal: AbortSignal.timeout(120_000),
+      }, proxy.url);
     try {
-      upstreamResponse = pool.protocol === "chat_completions"
-        && (effectiveRoute.protocol === "responses" || effectiveRoute.protocol === "chat_completions")
-        ? await handleChatCompatibilityRequest({
-          route: { ...effectiveRoute, proxyUrl: proxy.url }, secret: { routeId: effectiveRoute.routeId, upstreamApiKey: secret.upstreamBearerToken, localRouteToken, hydratedAt: secret.hydratedAt },
-          authorization: `Bearer ${localRouteToken}`, request: candidateParsedBody ?? {}, headers,
-          history, signal: AbortSignal.timeout(120_000),
-        })
-        : providerAdapter?.request && providerAccount
-        ? responseFromProviderRequest(await providerAdapter.request!({
-          account: providerAccount,
-          secret: secret.upstreamBearerToken,
-          protocol: effectiveRoute.protocol,
-          url: upstream,
-          method: request.method ?? "GET",
-          headers,
-          ...(candidateBody.length ? { body: candidateBody.toString("utf8") } : {}),
-        }))
-        : await fetchWithOptionalProxy(upstream, {
-          method: request.method, headers, body: candidateBody.length ? candidateBody as unknown as BodyInit : undefined, redirect: "manual",
-          ...(candidateBody.length ? { duplex: "half" } as RequestInit : {}), signal: AbortSignal.timeout(120_000),
-        }, proxy.url);
+      upstreamResponse = await executeCandidate();
+      // Learn a precise capability rejection and replay the same account once
+      // with only the incompatible Hosted Tool removed. This is deliberately
+      // local to the selected member: capability mismatches are not failover
+      // or cooldown signals.
+      if (!upstreamResponse.ok && capabilityRegistry && candidateParsedBody) {
+        const initialMessage = await extractSafeUpstreamResponseError(upstreamResponse, `Upstream returned HTTP ${upstreamResponse.status}`);
+        const initialMismatch = observeCapabilityMismatch(capabilityRegistry, persistCapabilityObservations, effectiveRoute, effectiveRoute.protocol, effectiveUpstreamModel, candidateParsedBody, upstreamResponse.status, initialMessage);
+        if (initialMismatch) {
+          const profile = capabilityProfileForRoute(effectiveRoute, effectiveRoute.protocol, effectiveUpstreamModel, capabilityRegistry);
+          const filtered = filterUnsupportedHostedTools(candidateParsedBody as import("../../../packages/gateway/dist/protocol.js").JsonObject, profile, "safe");
+          if (filtered.omitted.length) {
+            candidateParsedBody = filtered.body as Record<string, unknown>;
+            if (pool.protocol !== effectiveRoute.protocol) {
+              const converted = await convertRequestForRoute(pool.protocol, effectiveRoute.protocol, candidateParsedBody, effectiveUpstreamModel,
+                typeof parsedBody?.model === "string" ? parsedBody.model : undefined, effectiveRoute);
+              candidateBody = converted.body;
+              conversionTrace = converted;
+              finalConversionQuality = converted.quality;
+              finalConversionDiagnostics = converted.diagnostics;
+            } else {
+              candidateBody = Buffer.from(JSON.stringify(candidateParsedBody));
+            }
+            await upstreamResponse.body?.cancel();
+            upstreamResponse = await executeCandidate();
+          }
+        }
+      }
       if (pool.protocol !== effectiveRoute.protocol && upstreamResponse.body) {
         upstreamResponse = await convertUpstreamResponse(upstreamResponse, effectiveRoute.protocol, pool.protocol, {
           originModelName: typeof parsedBody?.model === "string" ? parsedBody.model : undefined,
@@ -964,11 +1105,17 @@ async function proxyAccountPoolRequest(
       finalStatus = 502; break;
     }
     upstreamResponse = await applyGatewayMiddlewareResponse(upstreamResponse, middleware, middlewareContext);
-    const reason = classifyPoolFailure(upstreamResponse.status);
+    const errorMessagePreview = !upstreamResponse.ok
+      ? await extractSafeUpstreamResponseError(upstreamResponse, `Upstream returned HTTP ${upstreamResponse.status}`)
+      : null;
+    const capabilityMismatch = !upstreamResponse.ok
+      ? observeCapabilityMismatch(capabilityRegistry, persistCapabilityObservations, effectiveRoute, effectiveRoute.protocol, effectiveUpstreamModel, candidateParsedBody, upstreamResponse.status, errorMessagePreview)
+      : undefined;
+    const reason: PoolFailureReason = capabilityMismatch ? "capability_mismatch" : classifyPoolFailure(upstreamResponse.status);
     const retryable = !upstreamResponse.ok && isPoolRetryableFailure(reason, upstreamResponse.status);
     if (retryable && attempt + 1 < maxAttempts) {
       const errorBody = await upstreamResponse.arrayBuffer().catch(() => null);
-      const errorMessage = extractSafeErrorMessage(errorBody ? Buffer.from(errorBody).toString("utf8") : "",
+      const errorMessage = errorMessagePreview ?? extractSafeErrorMessage(errorBody ? Buffer.from(errorBody).toString("utf8") : "",
         `Upstream returned HTTP ${upstreamResponse.status}`);
       const sameAccountLimitReached = (memberAttempts.get(member.accountName) ?? 0) >= maxSameAccountFailures;
       if (sameAccountLimitReached) {
@@ -1069,6 +1216,8 @@ async function proxyRequest(
   defaultProxyUrl?: string,
   middleware?: RuntimeGatewayMiddlewareRegistry,
   middlewareContext?: RuntimeGatewayMiddlewareContext,
+  capabilityRegistry?: CapabilityRegistry,
+  persistCapabilityObservations?: () => void,
 ): Promise<void> {
   const startedAt = Date.now();
   const candidates = [route, ...fallbackRoutes.filter((candidate) => candidate.routeId !== route.routeId)];
@@ -1083,7 +1232,14 @@ async function proxyRequest(
     const candidateSecret = resolveSecret?.(candidate) ?? (candidate.routeId === route.routeId ? secret : undefined);
     return candidateSecret?.authMode === "auth";
   });
-  const requestBody = bodyOverride ?? (requiresAuthResponsesBody && request.method !== "GET" && request.method !== "HEAD"
+  // Capability filtering and one-time degradation retries need a replayable
+  // body. Buffer requests whenever a capability registry/profile or protocol
+  // conversion is active; otherwise preserve the legacy streaming path.
+  const shouldBufferRequestBody = request.method !== "GET" && request.method !== "HEAD"
+    && (requiresAuthResponsesBody || Boolean(capabilityRegistry) || Boolean(incomingProtocol)
+      || candidates.some((candidate) => Boolean(candidate.capabilityProfile || candidate.capabilities)));
+  const bodyWasBuffered = bodyOverride !== undefined || shouldBufferRequestBody;
+  const requestBody = bodyOverride ?? (shouldBufferRequestBody
     ? await readRequestBodyBuffer(request)
     : undefined);
   for (const [index, candidate] of candidates.entries()) {
@@ -1091,17 +1247,25 @@ async function proxyRequest(
     const candidateSecret = resolveSecret?.(candidate) ?? (candidate.routeId === route.routeId ? secret : undefined);
     let candidateBody = rewriteGatewayModel(requestBody, candidate.upstreamModel);
     candidateBody = normalizeAuthResponsesRequest(candidateBody, candidate, candidateSecret);
+    if (candidateBody) {
+      const candidateParsedBody = parseRequestBody(candidateBody);
+      if (candidateParsedBody) {
+        const capabilityProfile = capabilityProfileForRoute(candidate, candidate.protocol, candidate.upstreamModel ?? incomingModel, capabilityRegistry);
+        const filtered = filterUnsupportedHostedTools(candidateParsedBody as import("../../../packages/gateway/dist/protocol.js").JsonObject, capabilityProfile, Object.keys(capabilityProfile).length ? "safe" : "allow");
+        if (filtered.omitted.length) candidateBody = Buffer.from(JSON.stringify(filtered.body));
+      }
+    }
     let conversionTrace: DesktopConversionTrace | undefined;
     if (candidateBody && incomingProtocol && candidate.protocol !== incomingProtocol) {
       const parsed = parseRequestBody(candidateBody);
       if (parsed) {
         const converted = await convertRequestForRoute(incomingProtocol, candidate.protocol, parsed,
-          candidate.upstreamModel ?? incomingModel, incomingModel);
+          candidate.upstreamModel ?? incomingModel, incomingModel, candidate);
         candidateBody = converted.body;
         conversionTrace = converted;
       }
     }
-    const hasBody = candidateBody ? candidateBody.length > 0 : request.method !== "GET" && request.method !== "HEAD";
+    const hasBody = candidateBody ? candidateBody.length > 0 : !bodyWasBuffered && request.method !== "GET" && request.method !== "HEAD";
     const estimatedTokens = candidateBody?.length ? Math.max(1, Math.ceil(candidateBody.length / 4)) : 1;
     const attemptStartedAt = Date.now();
     const upstreamSuffix = incomingProtocol ? mapGatewaySuffix(routeSuffix, incomingProtocol, candidate.protocol, candidate.upstreamModel ?? incomingModel) : routeSuffix;
@@ -1123,7 +1287,7 @@ async function proxyRequest(
       } else {
         applyProtocolCredentialHeaders(headers, candidate.protocol, candidateSecret);
       }
-      const response = providerAdapter?.request && candidateSecret && providerAccount
+      const sendCandidate = async (): Promise<Response> => providerAdapter?.request && candidateSecret && providerAccount
         ? responseFromProviderRequest(await providerAdapter.request({
           account: providerAccount,
           secret: candidateSecret.upstreamApiKey,
@@ -1142,6 +1306,23 @@ async function proxyRequest(
           redirect: "manual",
           ...(hasBody ? { duplex: "half" } as RequestInit : {}),
         }, proxy.url);
+      let response = await sendCandidate();
+      // An unknown capability is learned from a precise tool-shape rejection,
+      // then the same request is retried once after safe tool removal.
+      if (!response.ok && capabilityRegistry && candidateBody) {
+        const initialMessage = await extractSafeUpstreamResponseError(response, `Upstream returned HTTP ${response.status}`);
+        const initialBody = parseRequestBody(candidateBody);
+        const initialMismatch = observeCapabilityMismatch(capabilityRegistry, persistCapabilityObservations, candidate, candidate.protocol, candidate.upstreamModel ?? incomingModel, initialBody, response.status, initialMessage);
+        if (initialMismatch && initialBody) {
+          const profile = capabilityProfileForRoute(candidate, candidate.protocol, candidate.upstreamModel ?? incomingModel, capabilityRegistry);
+          const filtered = filterUnsupportedHostedTools(initialBody as import("../../../packages/gateway/dist/protocol.js").JsonObject, profile, "safe");
+          if (filtered.omitted.length) {
+            await response.body?.cancel();
+            candidateBody = Buffer.from(JSON.stringify(filtered.body));
+            response = await sendCandidate();
+          }
+        }
+      }
       const convertedResponse = incomingProtocol && candidate.protocol !== incomingProtocol
         ? await convertUpstreamResponse(response, candidate.protocol, incomingProtocol, {
           originModelName: incomingModel,
@@ -1149,12 +1330,19 @@ async function proxyRequest(
         })
         : response;
       const middlewareResponse = await applyGatewayMiddlewareResponse(convertedResponse, middleware, middlewareContext);
-      const responseReason = classifyPoolFailure(middlewareResponse.status);
+      const candidateRequestBody = candidateBody ? parseRequestBody(candidateBody) : undefined;
+      const responseErrorMessage = !middlewareResponse.ok
+        ? await extractSafeUpstreamResponseError(middlewareResponse, `Upstream returned HTTP ${middlewareResponse.status}`)
+        : null;
+      const capabilityMismatch = !middlewareResponse.ok
+        ? observeCapabilityMismatch(capabilityRegistry, persistCapabilityObservations, candidate, candidate.protocol, candidate.upstreamModel ?? incomingModel, candidateRequestBody, middlewareResponse.status, responseErrorMessage)
+        : undefined;
+      const responseReason = capabilityMismatch ? "capability_mismatch" : classifyPoolFailure(middlewareResponse.status);
       const responseRetryAfterMs = retryAfterMs(convertedResponse) ?? null;
       if (!middlewareResponse.ok && index < candidates.length - 1
         && isPoolRetryableFailure(responseReason, middlewareResponse.status)) {
         const body = Buffer.from(await middlewareResponse.arrayBuffer());
-        const errorMessage = extractSafeErrorMessage(body.toString("utf8"), `Upstream returned HTTP ${convertedResponse.status}`);
+        const errorMessage = responseErrorMessage ?? extractSafeErrorMessage(body.toString("utf8"), `Upstream returned HTTP ${convertedResponse.status}`);
         onOutcome?.(candidate, false, convertedResponse.status, {
           latencyMs: Date.now() - attemptStartedAt, estimatedTokens,
           attemptIndex: index + 1, attemptCount: candidates.length, outcome: "retry",
@@ -1177,7 +1365,7 @@ async function proxyRequest(
         lastRetryableRoute = candidate;
         continue;
       }
-      const errorMessage = await extractSafeUpstreamResponseError(middlewareResponse, `Upstream returned HTTP ${middlewareResponse.status}`);
+      const errorMessage = responseErrorMessage ?? await extractSafeUpstreamResponseError(middlewareResponse, `Upstream returned HTTP ${middlewareResponse.status}`);
       onOutcome?.(candidate, middlewareResponse.ok, middlewareResponse.status, {
         latencyMs: Date.now() - attemptStartedAt, estimatedTokens,
         attemptIndex: index + 1, attemptCount: candidates.length,
@@ -1346,6 +1534,8 @@ async function proxyCompatibilityRequest(
   history: ConversationHistoryStore,
   usageContext?: UsageTelemetryContext,
   defaultProxyUrl?: string,
+  capabilityRegistry?: CapabilityRegistry,
+  persistCapabilityObservations?: () => void,
 ): Promise<void> {
   const startedAt = Date.now();
   let status = 500;
@@ -1358,10 +1548,24 @@ async function proxyCompatibilityRequest(
     applyConfiguredRouteHeaders(headers, route.requestHeaders);
     const upstream = `${route.upstreamBaseUrl.replace(/\/+$/, "")}/responses`;
     const proxy = resolveUpstreamProxy(upstream, route.proxyUrl, defaultProxyUrl);
-    const result = await handleChatCompatibilityRequest({
-      route: { ...route, proxyUrl: proxy.url }, secret, authorization: request.headers.authorization, request: requestBody,
+    const execute = (body: Record<string, unknown>) => handleChatCompatibilityRequest({
+      route: { ...route, proxyUrl: proxy.url }, secret, authorization: request.headers.authorization, request: body,
       headers, history,
+      capabilityProfile: capabilityProfileForRoute(route, route.protocol, route.upstreamModel, capabilityRegistry),
     });
+    let result = await execute(requestBody);
+    if (!result.ok && capabilityRegistry) {
+      const errorPreview = await extractSafeUpstreamResponseError(result, `Upstream returned HTTP ${result.status}`);
+      const mismatch = observeCapabilityMismatch(capabilityRegistry, persistCapabilityObservations, route, route.protocol, route.upstreamModel, requestBody, result.status, errorPreview);
+      if (mismatch) {
+        const profile = capabilityProfileForRoute(route, route.protocol, route.upstreamModel, capabilityRegistry);
+        const filtered = filterUnsupportedHostedTools(requestBody as import("../../../packages/gateway/dist/protocol.js").JsonObject, profile, "safe");
+        if (filtered.omitted.length) {
+          await result.body?.cancel();
+          result = await execute(filtered.body as Record<string, unknown>);
+        }
+      }
+    }
     status = result.status;
     await relayResponse(result, response, tap);
   } catch (error) {
@@ -1401,6 +1605,8 @@ async function proxyCompatibilityRequest(
 
 export async function startUsageRouterService(options: UsageRouterServiceOptions): Promise<RunningUsageRouterService> {
   await mkdir(options.stateDir, { recursive: true });
+  const capabilityRuntimeReady = await initializeGatewayCapabilityRuntime();
+  if (!capabilityRuntimeReady) console.warn("[gateway-capability] shared capability runtime unavailable; capability observations are disabled");
   // Prefer the shared framework-agnostic route engine in the real desktop
   // service.  The local resolver remains as a test/development fallback when
   // a package artifact is unavailable.
@@ -1530,7 +1736,8 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
       gatewayHealth.delete(gatewayRouteMetricKey(gateway, route.routeId));
       return;
     }
-    if (!gateway.poolId || !isPoolRetryableFailure(classifyPoolFailure(status), status)) return;
+    const failureReason = telemetry.failureReason ?? classifyPoolFailure(status);
+    if (!gateway.poolId || failureReason === "capability_mismatch" || !isPoolRetryableFailure(failureReason, status)) return;
     const healthKey = gatewayRouteMetricKey(gateway, route.routeId);
     const previous = gatewayHealth.get(healthKey) ?? { consecutiveFailures: 0, cooldownUntil: null };
     const failures = previous.consecutiveFailures + 1;
@@ -1549,6 +1756,19 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
   const statePath = join(options.stateDir, "router-state.json");
   const portStatePath = join(options.stateDir, "router-port.json");
   const eventLogPath = join(options.stateDir, "router-events.jsonl");
+  const capabilityStatePath = join(options.stateDir, "capability-observations.json");
+  const capabilityRegistry = capabilityRuntimeReady ? createCapabilityRegistry() : undefined;
+  try {
+    if (capabilityRegistry) loadCapabilities(capabilityRegistry, JSON.parse(await readFile(capabilityStatePath, "utf8")));
+  } catch {
+    // First run or a partially written cache: capability observations are disposable.
+  }
+  let capabilityWriteQueue = Promise.resolve();
+  const persistCapabilityObservations = (): void => {
+    if (!capabilityRegistry) return;
+    const snapshot = snapshotCapabilities(capabilityRegistry);
+    capabilityWriteQueue = capabilityWriteQueue.then(() => writePrivateJsonAtomically(capabilityStatePath, snapshot)).catch(() => undefined);
+  };
   let eventLogQueue = Promise.resolve();
   const recordPoolEvent = (event: Record<string, unknown>) => {
     eventLogQueue = eventLogQueue.then(async () => {
@@ -1623,6 +1843,9 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           }
           events.sort((left, right) => Number(right.at ?? 0) - Number(left.at ?? 0));
           return sendJson(response, 200, events.slice(0, limit));
+        }
+        if (url.pathname === "/admin/capabilities" && request.method === "GET") {
+          return sendJson(response, 200, capabilityRegistry ? capabilityObservationEntries(capabilityRegistry) : []);
         }
         if (url.pathname === "/admin/routes" && request.method === "GET") {
           return sendJson(response, 200, await store.listRoutes());
@@ -1888,7 +2111,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
             routeRules: gateway.routeRules,
             ruleContext: inferGatewayRuleContext(request, parsedGatewayBody, requestedModel),
             requestedModel,
-            requestedAccountName: request.headers["x-codex-account"]?.toString().trim() || undefined,
+            requestedAccountName: readGatewayAccountName(request.headers),
             sessionKey: request.headers["x-codex-session"]?.toString().trim() || undefined,
             requiredCapabilities: inferGatewayCapabilities(parsedGatewayBody),
           },
@@ -1920,7 +2143,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
             envName: gateway.envName,
             protocol: gatewayProtocol,
             requestedModel: requestedModel ?? null,
-            requestedAccountName: request.headers["x-codex-account"]?.toString().trim() || null,
+            requestedAccountName: readGatewayAccountName(request.headers) ?? null,
             requiredCapabilities: inferGatewayCapabilities(parsedGatewayBody),
             failureCode: routeResult.code,
             failureMessage: routeResult.message,
@@ -2013,6 +2236,8 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
             gatewayMiddleware,
             gatewayMiddlewareContext,
             (providerId) => providerId && pluginManager?.registry.has(providerId) ? pluginManager.registry.get(providerId) : undefined,
+            capabilityRegistry,
+            persistCapabilityObservations,
           );
         }
         const legacyFallbackRoutes = gateway.routeGroups
@@ -2069,6 +2294,8 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           defaultProxyUrl,
           gatewayMiddleware,
           gatewayMiddlewareContext,
+          capabilityRegistry,
+          persistCapabilityObservations,
         );
       }
       const poolMatch = url.pathname.match(/^\/pools\/([^/]+)\/?(.*)$/);
@@ -2090,7 +2317,9 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           agentId: request.headers["x-codex-agent"]?.toString().trim() || null,
           ingressProtocol: pool!.protocol,
         }, defaultProxyUrl, undefined, undefined,
-          (providerId) => providerId && pluginManager?.registry.has(providerId) ? pluginManager.registry.get(providerId) : undefined);
+          (providerId) => providerId && pluginManager?.registry.has(providerId) ? pluginManager.registry.get(providerId) : undefined,
+          capabilityRegistry,
+          persistCapabilityObservations);
       }
       const match = url.pathname.match(/^\/routes\/([^/]+)\/?(.*)$/);
       if (!match) return sendJson(response, 404, { error: "Not found" });
@@ -2102,13 +2331,13 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
         return await proxyCompatibilityRequest(request, response, route, secret, store, history, {
           agentId: request.headers["x-codex-agent"]?.toString().trim() || null,
           ingressProtocol: route.protocol,
-        }, defaultProxyUrl);
+        }, defaultProxyUrl, capabilityRegistry, persistCapabilityObservations);
       }
       await proxyRequest(request, response, route, `${match[2]}${url.search}`, store, routeSecrets.get(route.routeId), undefined, [], undefined, undefined, undefined, undefined,
         (providerId) => providerId && pluginManager?.registry.has(providerId) ? pluginManager.registry.get(providerId) : undefined, {
           agentId: request.headers["x-codex-agent"]?.toString().trim() || null,
           ingressProtocol: route.protocol,
-        }, defaultProxyUrl);
+        }, defaultProxyUrl, undefined, undefined, capabilityRegistry, persistCapabilityObservations);
     } catch (error) {
       if (!response.headersSent) sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) });
       else response.destroy(error instanceof Error ? error : undefined);
@@ -2188,6 +2417,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
         // the lifecycle promise cannot wait indefinitely during shutdown.
         server.closeIdleConnections();
         await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+        await capabilityWriteQueue;
         await store.close();
         await pluginManager?.close().catch(() => undefined);
         await closeUpstreamProxyAgents();

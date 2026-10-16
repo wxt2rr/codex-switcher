@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   classifyPoolFailure,
+  isPoolRetryableFailure,
   cooldownForFailure,
   derivePoolSessionKey,
   nextMemberHealth,
@@ -67,6 +68,7 @@ test("classifies retryable and non-retryable failures", () => {
   assert.equal(classifyPoolFailure(429), "rate_limit");
   assert.equal(classifyPoolFailure(422), "validation");
   assert.equal(classifyPoolFailure(null, new Error("socket closed")), "transport");
+  assert.equal(isPoolRetryableFailure("capability_mismatch", 400), false);
 });
 
 test("normalizes same-account failure thresholds to the supported range", () => {

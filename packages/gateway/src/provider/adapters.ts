@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { GatewayProtocol, JsonObject } from "../protocol.js";
+import type { CapabilityObservation } from "../capability/contracts.js";
 
 export const BUILT_IN_PROVIDER_IDS = [
   "openai",
@@ -132,6 +133,7 @@ export interface ProviderModel {
   iconKey?: string;
   protocols: GatewayProtocol[];
   capabilities: { reasoning: boolean; tools: boolean; vision: boolean; streaming: boolean };
+  capabilityProfile?: Record<string, CapabilityObservation>;
   contextWindow?: number;
   source: "preset" | "discovery" | "manual";
 }

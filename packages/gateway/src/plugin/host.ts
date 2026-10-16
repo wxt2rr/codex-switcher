@@ -483,13 +483,54 @@ export class ProcessPluginTransport implements PluginTransport {
  * child must opt into Electron's Node-compatible mode, while standalone Node
  * callers keep a minimal environment and never inherit host secrets.
  */
-export function buildPluginProcessEnvironment(overrides: Record<string, string> = {}): Record<string, string> {
-  return {
-    PATH: process.env.PATH ?? "",
+const WINDOWS_PLUGIN_RUNTIME_ENVIRONMENT = [
+  // CreateProcessW uses LOCALAPPDATA while resolving the AppContainer
+  // profile. Omitting it makes the Windows launcher fail with
+  // ERROR_ENVVAR_NOT_FOUND (0x800700cb) before the plugin entrypoint runs.
+  "LOCALAPPDATA",
+  "APPDATA",
+  "USERPROFILE",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "TEMP",
+  "TMP",
+  "SystemRoot",
+  "WINDIR",
+  "SystemDrive",
+  "ProgramData",
+  "ProgramFiles",
+  "ProgramFiles(x86)",
+  "CommonProgramFiles",
+  "CommonProgramFiles(x86)",
+  "COMSPEC",
+] as const;
+
+export function buildPluginProcessEnvironment(
+  overrides: Record<string, string> = {},
+  platform: NodeJS.Platform = process.platform,
+  sourceEnvironment: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const environment: Record<string, string> = {
+    PATH: sourceEnvironment.PATH ?? "",
     NODE_ENV: "production",
-    ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
-    ...overrides,
   };
+  if (process.versions.electron) environment.ELECTRON_RUN_AS_NODE = "1";
+
+  if (platform === "win32") {
+    for (const key of WINDOWS_PLUGIN_RUNTIME_ENVIRONMENT) {
+      const value = sourceEnvironment[key];
+      if (value !== undefined) environment[key] = value;
+    }
+    // Windows keeps the current directory for each drive in hidden
+    // environment entries such as `=C:`. CreateProcessW consults these when
+    // the executable and cwd are on different drives, so retain them without
+    // copying arbitrary host variables or credentials into the plugin.
+    for (const [key, value] of Object.entries(sourceEnvironment)) {
+      if (/^=[A-Za-z]:$/.test(key) && value !== undefined) environment[key] = value;
+    }
+  }
+
+  return { ...environment, ...overrides };
 }
 
 export function redactPluginLog(value: string): string {

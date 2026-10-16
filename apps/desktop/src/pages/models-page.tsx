@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Braces, FilePenLine, Pencil, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 
-import type { CustomModelRecord, DesktopBridge, ModelCatalogEntry, ModelCatalogSnapshot, ProviderCatalogItem } from "../bridge";
+import type { CustomModelRecord, DesktopBridge, GatewayCapabilityObservationEntry, ModelCatalogEntry, ModelCatalogSnapshot, ProviderCatalogItem } from "../bridge";
 import type { OverviewPayload } from "../desktop-model";
 import type { UiLanguage } from "../i18n";
 import {
@@ -39,6 +39,26 @@ function discoveryStatusLabel(status: string, zh: boolean): string {
   if (status === "failed") return zh ? "发现失败" : "Discovery failed";
   if (status === "unavailable") return zh ? "暂不可用" : "Unavailable";
   return status;
+}
+
+function capabilityStatusLabel(status: GatewayCapabilityObservationEntry["status"], zh: boolean): string {
+  if (status === "supported") return zh ? "支持" : "Supported";
+  if (status === "unsupported") return zh ? "不支持" : "Unsupported";
+  if (status === "degraded") return zh ? "降级" : "Degraded";
+  return zh ? "未知" : "Unknown";
+}
+
+function capabilityLabel(capability: string, zh: boolean): string {
+  const labels: Record<string, string> = {
+    "tools.hosted.web_search": zh ? "联网搜索" : "Web search",
+    "tools.hosted.code_interpreter": zh ? "代码解释器" : "Code interpreter",
+    "tools.hosted.computer_use": zh ? "电脑操作" : "Computer use",
+    "tools.function": zh ? "函数工具" : "Function tools",
+    "tools.parallel": zh ? "并行工具" : "Parallel tools",
+    "input.image": zh ? "图片输入" : "Image input",
+    "output.reasoning": zh ? "推理" : "Reasoning",
+  };
+  return labels[capability] ?? capability;
 }
 
 function accountLabel(
@@ -108,6 +128,7 @@ export function ModelsPage({
   const [query, setQuery] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
   const [refreshing, setRefreshing] = useState(false);
+  const [capabilityObservations, setCapabilityObservations] = useState<GatewayCapabilityObservationEntry[]>([]);
 
   const activeModel = snapshot.models.find((model) => model.id === activeModelId);
   const knownAccountKeys = useMemo(
@@ -170,7 +191,10 @@ export function ModelsPage({
   }, [discoveryByModelKey, providerFilter, query, snapshot.models]);
 
   useEffect(() => {
-    void bridge.listCustomModels().then(setSnapshot).catch(onError).finally(() => setLoading(false));
+    void Promise.all([bridge.listCustomModels(), bridge.listGatewayCapabilityObservations()])
+      .then(([nextSnapshot, observations]) => { setSnapshot(nextSnapshot); setCapabilityObservations(observations); })
+      .catch(onError)
+      .finally(() => setLoading(false));
   }, [bridge]);
 
   async function refreshDiscoveries() {
@@ -180,6 +204,7 @@ export function ModelsPage({
         await bridge.discoverAccountModels(account.envName, account.name);
       }
       setSnapshot(await bridge.listCustomModels());
+      setCapabilityObservations(await bridge.listGatewayCapabilityObservations());
       onSuccess(zh ? "账号模型目录已刷新" : "Account model catalogs refreshed");
     } catch (error) {
       onError(error);
@@ -307,6 +332,11 @@ export function ModelsPage({
           const statusTone = discoveryInfo?.status === "available" ? "success" : discoveryInfo ? "warn" : "neutral";
           const testAccountKey = exposedAccountKeysByModel.get(model.id)?.[0] ?? discoveryInfo?.accountKeys?.[0];
           const testAccount = testAccountKey ? accountsByKey.get(testAccountKey) : undefined;
+          const modelCapabilityObservations = capabilityObservations.filter((entry) => {
+            const upstream = String(model.entry.upstream_model_id ?? "");
+            const slug = model.entry.slug;
+            return entry.modelId === slug || entry.modelId === upstream || (slug.includes(":") && entry.modelId === slug.slice(slug.indexOf(":") + 1));
+          });
           return (
             <ListCard key={model.id} className="flex min-h-[178px] flex-col gap-3 p-4">
               <div className="flex items-start justify-between gap-3">
@@ -326,6 +356,7 @@ export function ModelsPage({
                 <SoftBadge label={providerLabel(providerId, providerCatalog, zh, String(model.entry.provider_display_name ?? ""))} className="h-5 max-w-[150px] truncate rounded-md px-2 text-[10px]" />
                 <SoftBadge label={model.entry.model_source === "discovered" ? (zh ? "服务商发现" : "Discovered") : (zh ? "手动配置" : "Manual")} className="h-5 rounded-md px-2 text-[10px]" />
                 {discoveryInfo ? <SoftBadge tone={statusTone} label={discoveryStatusLabel(discoveryInfo.status, zh)} className="h-5 rounded-md px-2 text-[10px]" /> : null}
+                {modelCapabilityObservations.slice(0, 3).map((entry) => <SoftBadge key={`${entry.key}/${entry.capability}`} tone={entry.status === "supported" ? "success" : entry.status === "unsupported" ? "warn" : "neutral"} label={`${capabilityLabel(entry.capability, zh)} · ${capabilityStatusLabel(entry.status, zh)}`} className="h-5 max-w-[150px] truncate rounded-md px-2 text-[10px]" />)}
               </div>
               <div className="mt-auto grid grid-cols-2 gap-3 border-t border-black/[0.06] pt-3 dark:border-white/[0.07]">
                 <AccountSourceSummary label={zh ? "发现来源" : "Discovered by"} count={sourceAccountLabels.length} emptyLabel={zh ? "暂无已知来源账号" : "No known source account"} accountLabels={sourceAccountLabels} zh={zh} />

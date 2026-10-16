@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { handleChatCompatibilityRequest } from "./compatibility-handler.js";
+import { handleChatCompatibilityRequest, resolveCompatibilityUpstreamModel } from "./compatibility-handler.js";
 import { ConversationHistoryStore } from "./history-store.js";
 import { ChatUpstreamClient } from "./upstream-client.js";
 
@@ -11,6 +11,13 @@ const route = {
   reasoningProfile: "auto" as const, enabled: true, createdAt: 1, updatedAt: 1,
 };
 const secret = { routeId: "route", upstreamApiKey: "sk-upstream", localRouteToken: "local", hydratedAt: 1 };
+
+test("compatibility model mapping strips the provider prefix", () => {
+  assert.equal(resolveCompatibilityUpstreamModel({ providerId: "qwen", upstreamModel: "legacy" }, "qwen:kimi-k3"), "kimi-k3");
+  assert.equal(resolveCompatibilityUpstreamModel({ providerId: "qwen", upstreamModel: undefined }, "qwen:kimi-k3"), "kimi-k3");
+  assert.equal(resolveCompatibilityUpstreamModel({ providerId: undefined, upstreamModel: undefined }, "custom:model:v2"), "model:v2");
+  assert.equal(resolveCompatibilityUpstreamModel({ providerId: "qwen", upstreamModel: "kimi-k3" }, "kimi-k3"), "kimi-k3");
+});
 
 test("compatibility handler authorizes, converts and records non-stream tool calls", async () => {
   let upstreamBody: Record<string, unknown> | undefined;
@@ -28,6 +35,22 @@ test("compatibility handler authorizes, converts and records non-stream tool cal
   const payload = await response.json() as { id: string; output: unknown[] };
   assert.equal(payload.output.length, 2);
   assert.equal(history.snapshot("route").responses[0]?.responseId, payload.id);
+});
+
+test("compatibility handler sends the upstream model id for provider-qualified requests", async () => {
+  let upstreamBody: Record<string, unknown> | undefined;
+  const client = new ChatUpstreamClient({ fetchImpl: async (_url, init) => {
+    upstreamBody = JSON.parse(String(init?.body));
+    return Response.json({ choices: [{ finish_reason: "stop", message: { content: "ok" } }] });
+  } });
+  const history = new ConversationHistoryStore();
+  const response = await handleChatCompatibilityRequest({
+    route: { ...route, providerId: "qwen", upstreamModel: "legacy" }, secret,
+    authorization: "Bearer local", history, client,
+    request: { model: "qwen:kimi-k3", input: "hello" },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(upstreamBody?.model, "kimi-k3");
 });
 
 test("compatibility handler rejects the local route token before upstream execution", async () => {

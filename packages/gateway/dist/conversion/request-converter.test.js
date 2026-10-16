@@ -51,4 +51,20 @@ test("request conversion preserves tool calls, tool results and developer instru
     assert.equal(anthropic.value.system, "developer policy");
     assert.deepEqual(anthropic.value.messages, [{ role: "user", content: "hello" }]);
 });
+test("request conversion applies a route capability profile to hosted tools", async () => {
+    const responses = {
+        model: "logical",
+        input: "search for the answer",
+        tools: [{ type: "web_search_preview" }, { type: "function", function: { name: "echo", parameters: { type: "object" } } }],
+    };
+    const result = await convertGatewayRequest("responses", "chat_completions", responses, { upstreamModelName: "kimi-k3" }, {
+        capabilityPolicy: "safe",
+        capabilityProfile: {
+            "tools.hosted.web_search": { status: "unsupported", source: "observed" },
+            "tools.function": { status: "supported", source: "provider" },
+        },
+    });
+    assert.deepEqual(result.value.tools, [{ type: "function", function: { name: "echo", parameters: { type: "object" } } }]);
+    assert.equal(result.diagnostics.some((item) => item.code === "capability_tool_omitted"), true);
+});
 //# sourceMappingURL=request-converter.test.js.map

@@ -15,6 +15,24 @@ test("plugin child environment runs Node entries from Electron without inheritin
     else
         assert.equal(environment.ELECTRON_RUN_AS_NODE, undefined);
 });
+test("Windows plugin child environment keeps AppContainer runtime paths without inheriting secrets", () => {
+    const environment = buildPluginProcessEnvironment({}, "win32", {
+        PATH: "C:\\Windows\\System32",
+        LOCALAPPDATA: "C:\\Users\\demo\\AppData\\Local",
+        APPDATA: "C:\\Users\\demo\\AppData\\Roaming",
+        USERPROFILE: "C:\\Users\\demo",
+        TEMP: "C:\\Users\\demo\\AppData\\Local\\Temp",
+        TMP: "C:\\Users\\demo\\AppData\\Local\\Temp",
+        SystemRoot: "C:\\Windows",
+        "=C:": "C:\\workspace",
+        OPENAI_API_KEY: "should-not-be-copied",
+    });
+    assert.equal(environment.LOCALAPPDATA, "C:\\Users\\demo\\AppData\\Local");
+    assert.equal(environment.APPDATA, "C:\\Users\\demo\\AppData\\Roaming");
+    assert.equal(environment.SystemRoot, "C:\\Windows");
+    assert.equal(environment["=C:"], "C:\\workspace");
+    assert.equal(environment.OPENAI_API_KEY, undefined);
+});
 test("plugin manifest and frame validation reject unsafe or oversized data", () => {
     assert.equal(validatePluginManifest({ id: "provider-openai", name: "Provider", version: "1.0.0", apiVersion: 1, entry: "plugin.js", permissions: ["provider"] }), true);
     assert.equal(validatePluginManifest({ id: "Bad ID", name: "Provider", version: "1.0.0", apiVersion: 1, entry: "plugin.js", permissions: [] }), false);

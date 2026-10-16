@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { capabilityProfileFromModel } from "../capability/contracts.js";
 /**
  * Exposes a signed/installed provider plugin through the same adapter
  * contract as built-in providers. The host remains authoritative for
@@ -148,12 +149,20 @@ function normalizeModels(value, providerId) {
             return [];
         const protocols = Array.isArray(item.protocols) ? item.protocols.filter((protocol) => ["responses", "chat_completions", "anthropic", "gemini"].includes(String(protocol))) : [];
         const capabilities = isRecord(item.capabilities) ? item.capabilities : {};
+        const capabilityProfile = capabilityProfileFromModel({
+            ...item,
+            reasoning: capabilities.reasoning,
+            tools: capabilities.tools,
+            vision: capabilities.vision,
+            streaming: capabilities.streaming,
+        }, "discovery");
         return [{
                 id: item.id,
                 displayName: typeof item.displayName === "string" && item.displayName.trim() ? item.displayName : item.id,
                 providerId,
                 protocols: protocols.length ? protocols : ["responses"],
                 capabilities: { reasoning: capabilities.reasoning === true, tools: capabilities.tools !== false, vision: capabilities.vision === true, streaming: capabilities.streaming !== false },
+                ...(Object.keys(capabilityProfile).length ? { capabilityProfile: capabilityProfile } : {}),
                 ...(typeof item.contextWindow === "number" ? { contextWindow: item.contextWindow } : {}),
                 source: item.source === "preset" || item.source === "manual" ? item.source : "discovery",
             }];

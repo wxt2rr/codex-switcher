@@ -125,6 +125,7 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     baseUrl?: string;
   }) => ipcRenderer.invoke("desktop:updateIndependentModel", request),
   listCustomModels: () => ipcRenderer.invoke("desktop:listCustomModels"),
+  listGatewayCapabilityObservations: () => ipcRenderer.invoke("desktop:listGatewayCapabilityObservations"),
   discoverAccountModels: (envName: string, accountName: string) =>
     ipcRenderer.invoke("desktop:discoverAccountModels", envName, accountName),
   refreshAllAccountModels: () => ipcRenderer.invoke("desktop:refreshAllAccountModels"),

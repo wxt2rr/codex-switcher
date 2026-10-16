@@ -111,10 +111,10 @@ export async function synchronizeAccountModelCatalog(options: {
   }).map((id) => {
     const model = byId.get(id);
     if (!model) throw new Error(`Bound custom model '${id}' no longer exists`);
-    return {
+    return normalizeCodexCatalogEntry({
       ...model.entry,
       display_name: formatCodexModelDisplayName(model.entry, undefined, options.accountName),
-    };
+    });
   });
   const bundled = options.loadBundledCatalog
     ? await options.loadBundledCatalog()
@@ -209,7 +209,7 @@ async function mergeModelCatalogFile(path: string, entries: ModelCatalogEntry[])
 }
 
 async function writePresetModelCatalog(path: string, entries: ModelCatalogEntry[]): Promise<void> {
-  await atomicWriteJson(path, { models: [...entries] });
+  await atomicWriteJson(path, { models: entries.map(normalizeCodexCatalogEntry) });
 }
 
 async function setModelCatalogConfig(configPath: string, catalogPath: string): Promise<void> {

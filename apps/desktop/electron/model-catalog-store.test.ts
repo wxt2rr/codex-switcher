@@ -56,6 +56,16 @@ test("normalizer preserves advanced JSON fields and creates stable defaults", ()
   assert.equal(normalized.default_reasoning_level, "medium");
   assert.equal(normalized.prefer_websockets, false);
   assert.ok(normalized.truncation_policy);
+  assert.deepEqual(normalized.available_access_programs, { cyber: [] });
+});
+
+test("normalizer repairs incomplete access program metadata from discovered models", () => {
+  const normalized = normalizeCustomModelInput({
+    slug: "discovered-model",
+    display_name: "Discovered Model",
+    available_access_programs: {},
+  });
+  assert.deepEqual(normalized.available_access_programs, { cyber: [] });
 });
 
 test("normalizer rejects unsupported protocols and invalid context windows", () => {

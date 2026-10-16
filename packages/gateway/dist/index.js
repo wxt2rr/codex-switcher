@@ -26,4 +26,5 @@ export * from "./agent/adapter.js";
 export * from "./agent/remote.js";
 export * from "./agent/import.js";
 export * from "./runtime/runtime.js";
+export * from "./capability/index.js";
 //# sourceMappingURL=index.js.map

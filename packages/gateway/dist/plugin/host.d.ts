@@ -155,12 +155,7 @@ export declare class ProcessPluginTransport implements PluginTransport {
     private failAll;
     private writeFrame;
 }
-/**
- * Electron's process.execPath is the Electron binary rather than node. The
- * child must opt into Electron's Node-compatible mode, while standalone Node
- * callers keep a minimal environment and never inherit host secrets.
- */
-export declare function buildPluginProcessEnvironment(overrides?: Record<string, string>): Record<string, string>;
+export declare function buildPluginProcessEnvironment(overrides?: Record<string, string>, platform?: NodeJS.Platform, sourceEnvironment?: NodeJS.ProcessEnv): Record<string, string>;
 export declare function redactPluginLog(value: string): string;
 export declare class RestartingPluginTransport implements PluginTransport {
     private readonly factory;

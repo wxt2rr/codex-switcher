@@ -446,6 +446,7 @@ export function normalizeCustomModelInput(value: Record<string, unknown>): Model
     prefer_websockets: false,
     slug,
     display_name: displayName,
+    available_access_programs: normalizeAvailableAccessPrograms(value.available_access_programs),
   };
   // A hand-authored catalog entry has no discovery response to establish a
   // narrower capability set. Keep image input enabled when the field is
@@ -455,6 +456,14 @@ export function normalizeCustomModelInput(value: Record<string, unknown>): Model
     normalized.input_modalities = ["text", "image"];
   }
   return normalized;
+}
+
+function normalizeAvailableAccessPrograms(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return { cyber: [] };
+  const cyber = Array.isArray(value.cyber)
+    ? value.cyber.filter((program): program is string => typeof program === "string")
+    : [];
+  return { ...value, cyber };
 }
 
 /**

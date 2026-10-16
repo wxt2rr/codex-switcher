@@ -1,4 +1,5 @@
 import type { GatewayProtocol, JsonObject } from "../protocol.js";
+import type { CapabilityObservation } from "../capability/contracts.js";
 export declare const BUILT_IN_PROVIDER_IDS: readonly ["openai", "anthropic", "gemini", "deepseek", "kimi", "moonshot", "glm", "zai", "zhipu", "qwen", "minimax", "stepfun", "qianfan", "tencent-cloud", "huawei-maas", "volcengine-ark", "mistral", "groq", "xai", "openrouter", "together", "fireworks", "siliconflow", "nvidia-nim", "modelscope", "ollama", "lmstudio", "custom", "custom-openai", "custom-anthropic", "mimo", "chatgpt", "codex-subscription", "chatgpt-subscription", "claude-subscription", "copilot-subscription", "gemini-subscription", "cursor-subscription", "grok-subscription", "devin-subscription"];
 export type BuiltInProviderId = (typeof BUILT_IN_PROVIDER_IDS)[number];
 export type ProviderAuthMethod = "api_key" | "oauth" | "subscription" | "plugin" | "none";
@@ -79,6 +80,7 @@ export interface ProviderModel {
         vision: boolean;
         streaming: boolean;
     };
+    capabilityProfile?: Record<string, CapabilityObservation>;
     contextWindow?: number;
     source: "preset" | "discovery" | "manual";
 }

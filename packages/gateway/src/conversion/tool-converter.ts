@@ -1,6 +1,7 @@
 import type { GatewayProtocol, JsonObject, JsonValue } from "../protocol.js";
+import type { CapabilityProfile } from "../capability/contracts.js";
 
-export type CanonicalToolKind = "function" | "custom" | "namespace" | "web_search";
+export type CanonicalToolKind = "function" | "custom" | "namespace" | "web_search" | "code_interpreter" | "computer_use";
 
 export interface CanonicalTool {
   kind: CanonicalToolKind;
@@ -21,7 +22,9 @@ export function decodeTools(protocol: GatewayProtocol, value: JsonValue | undefi
   }
   return value.flatMap((item) => {
     if (!isObject(item)) return [];
-    if (item.type === "web_search" || item.type === "web_search_preview") return [{ kind: "web_search", name: String(item.type), raw: item }];
+    if (["web_search", "web_search_preview", "web_search_options"].includes(String(item.type))) return [{ kind: "web_search", name: String(item.type), raw: item }];
+    if (["code_interpreter", "code_interpreter_preview", "python"].includes(String(item.type))) return [{ kind: "code_interpreter", name: String(item.type), raw: item }];
+    if (["computer_use", "computer_use_preview"].includes(String(item.type))) return [{ kind: "computer_use", name: String(item.type), raw: item }];
     if (item.type === "custom") return [{ kind: "custom", name: asString(item.name) ?? "custom", description: asString(item.description), raw: item }];
     if (item.type === "namespace") {
       const functions = isObject(item.namespace) ? item.namespace.functions : undefined;
@@ -32,12 +35,39 @@ export function decodeTools(protocol: GatewayProtocol, value: JsonValue | undefi
   });
 }
 
-export function encodeTools(protocol: GatewayProtocol, tools: readonly CanonicalTool[]): JsonValue[] | undefined {
+export function encodeTools(
+  protocol: GatewayProtocol,
+  tools: readonly CanonicalTool[],
+  capabilityProfile?: CapabilityProfile,
+  capabilityPolicy: "safe" | "allow" = "allow",
+  onOmit?: (tool: CanonicalTool, reason: string) => void,
+): JsonValue[] | undefined {
   if (!tools.length) return undefined;
   const result: JsonValue[] = [];
   for (const tool of tools) {
+    const capability = tool.kind === "web_search" ? "tools.hosted.web_search"
+      : tool.kind === "code_interpreter" ? "tools.hosted.code_interpreter"
+        : tool.kind === "computer_use" ? "tools.hosted.computer_use"
+          : tool.kind === "function" ? "tools.function" : tool.kind === "custom" ? "tools.custom" : "tools.namespace";
+    const observation = capabilityProfile?.[capability];
+    const shouldOmit = capabilityPolicy === "safe"
+      && ["web_search", "code_interpreter", "computer_use"].includes(tool.kind)
+      && (!observation || observation.status === "unknown" || observation.status === "unsupported");
+    if (shouldOmit) {
+      onOmit?.(tool, observation?.status === "unsupported" ? "selected route does not support this hosted tool" : "selected route capability is unknown");
+      continue;
+    }
     if (tool.kind === "web_search") {
       result.push(protocol === "responses" ? { type: "web_search_preview" } : protocol === "chat_completions" ? { type: "web_search_options" } : protocol === "gemini" ? { googleSearch: {} } : { type: "computer_20241022", name: tool.name });
+      continue;
+    }
+    if (tool.kind === "code_interpreter" || tool.kind === "computer_use") {
+      // These hosted tools do not have a protocol-equivalent form in every
+      // target. Preserve a provider-native shape when one was supplied; the
+      // capability planner has already removed it when the selected route is
+      // known to reject it.
+      if (tool.raw) result.push(tool.raw);
+      else result.push({ type: tool.kind === "code_interpreter" ? "code_interpreter" : "computer_use_preview" });
       continue;
     }
     if (protocol === "gemini") {

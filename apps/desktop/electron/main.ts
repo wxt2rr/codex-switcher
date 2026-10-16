@@ -116,6 +116,7 @@ import {
   scanCliTerminalSettings,
   setCliTerminalSelection,
   listCustomModels,
+  listGatewayCapabilityObservations,
   discoverAccountModels,
   refreshAllAccountModels,
   listProviderCatalog,
@@ -610,6 +611,7 @@ function registerHandlers() {
     updateIndependentModel(request)
   );
   ipcMain.handle("desktop:listCustomModels", () => listCustomModels());
+  ipcMain.handle("desktop:listGatewayCapabilityObservations", () => listGatewayCapabilityObservations());
   ipcMain.handle("desktop:discoverAccountModels", (_event: IpcMainInvokeEvent, envName: string, accountName: string) =>
     discoverAccountModels(envName, accountName));
   ipcMain.handle("desktop:refreshAllAccountModels", () => refreshAllAccountModels());

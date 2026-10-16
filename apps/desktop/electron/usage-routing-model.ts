@@ -10,6 +10,13 @@ export interface RouteCapabilities {
   vision?: boolean;
   streaming?: boolean;
 }
+export type RouteCapabilityProfile = Record<string, {
+  status: "supported" | "unsupported" | "unknown" | "degraded";
+  source: "provider" | "preset" | "discovery" | "probe" | "observed" | "legacy";
+  checkedAt?: number;
+  expiresAt?: number;
+  evidence?: string;
+}>;
 
 export interface RouteTarget {
   routeId: string;
@@ -23,6 +30,7 @@ export interface RouteTarget {
   routeGroupId?: string;
   upstreamModel?: string;
   capabilities?: RouteCapabilities;
+  capabilityProfile?: RouteCapabilityProfile;
   reasoningProfile: ReasoningProfile;
   longConversationStrategy?: LongConversationStrategy;
   instructionRole?: CompatibilityInstructionRole;

@@ -3,6 +3,16 @@ import { createInterface } from "node:readline";
 export type CswProtocol = "responses" | "chat_completions" | "anthropic" | "gemini";
 export type CswAuthMethod = "api_key" | "oauth" | "subscription" | "none";
 
+export type CswCapabilityStatus = "supported" | "unsupported" | "unknown" | "degraded";
+export type CswCapabilitySource = "provider" | "preset" | "discovery" | "probe" | "observed" | "legacy";
+export interface CswCapabilityObservation {
+  status: CswCapabilityStatus;
+  source: CswCapabilitySource;
+  checkedAt?: number;
+  expiresAt?: number;
+  evidence?: string;
+}
+
 export interface CswProviderEndpoint {
   protocol: CswProtocol;
   baseUrl: string;
@@ -36,6 +46,8 @@ export interface CswProviderModel {
     vision?: boolean;
     streaming?: boolean;
   };
+  /** Optional fine-grained capabilities. `tools` remains supported for old plugins. */
+  capabilityProfile?: Record<string, CswCapabilityObservation>;
   contextWindow?: number;
   source?: "discovery" | "preset" | "manual";
 }

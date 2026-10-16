@@ -459,6 +459,21 @@ export interface ModelCatalogSnapshot {
 }
 export interface SaveCustomModelRequest { id?: string; entry: Record<string, unknown>; }
 
+export interface GatewayCapabilityObservationEntry {
+  key: string;
+  providerId: string;
+  endpoint: string;
+  protocol: string;
+  modelId: string;
+  credentialId: string;
+  capability: string;
+  status: "supported" | "unsupported" | "unknown" | "degraded";
+  source: "provider" | "preset" | "discovery" | "probe" | "observed" | "legacy";
+  checkedAt?: number;
+  expiresAt?: number;
+  evidence?: string;
+}
+
 export type SkillProviderId = string;
 export interface MarketplaceSkill {
   id: string; slug: string; name: string; source: string; catalogSourceId?: string; sourcePath?: string;
@@ -567,6 +582,7 @@ export interface DesktopElectronApi {
   updateRuntime(envName: string, accountName: string, baseUrl: string): Promise<DesktopActionResult>;
   updateIndependentModel(request: DesktopIndependentModelRequest): Promise<DesktopActionResult>;
   listCustomModels(): Promise<ModelCatalogSnapshot>;
+  listGatewayCapabilityObservations(): Promise<GatewayCapabilityObservationEntry[]>;
   discoverAccountModels(envName: string, accountName: string): Promise<ModelCatalogSnapshot>;
   refreshAllAccountModels(): Promise<ModelCatalogSnapshot>;
   listProviderCatalog(): Promise<ProviderCatalogItem[]>;
@@ -700,6 +716,7 @@ export interface DesktopBridge {
   updateRuntime(envName: string, accountName: string, baseUrl: string): Promise<DesktopActionResult>;
   updateIndependentModel(request: DesktopIndependentModelRequest): Promise<DesktopActionResult>;
   listCustomModels(): Promise<ModelCatalogSnapshot>;
+  listGatewayCapabilityObservations(): Promise<GatewayCapabilityObservationEntry[]>;
   discoverAccountModels(envName: string, accountName: string): Promise<ModelCatalogSnapshot>;
   refreshAllAccountModels(): Promise<ModelCatalogSnapshot>;
   listProviderCatalog(): Promise<ProviderCatalogItem[]>;
@@ -829,6 +846,7 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       updateRuntime: unavailable,
       updateIndependentModel: unavailable,
       listCustomModels: unavailable,
+      listGatewayCapabilityObservations: unavailable,
       discoverAccountModels: unavailable,
       refreshAllAccountModels: unavailable,
       listProviderCatalog: unavailable,
@@ -1080,6 +1098,7 @@ function createBrowserPreviewBridge(): DesktopBridge {
     updateRuntime: () => browserPreviewAction(),
     updateIndependentModel: () => browserPreviewAction(),
     listCustomModels: async () => ({ version: 1, models: [], accountBindings: {} }),
+    listGatewayCapabilityObservations: async () => [],
     discoverAccountModels: async () => ({ version: 1, models: [], accountBindings: {} }),
     refreshAllAccountModels: async () => ({ version: 1, models: [], accountBindings: {} }),
     listProviderCatalog: async () => [],

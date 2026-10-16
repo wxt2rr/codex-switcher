@@ -1,6 +1,7 @@
 import type { GatewayProtocol, JsonObject, JsonValue } from "../protocol.js";
 import type { ConversionDiagnostic, ToolLossPolicy } from "./diagnostics.js";
 import type { ConversionPath, ConversionQuality, ConversionStep } from "./formats.js";
+import type { CapabilityProfile } from "../capability/contracts.js";
 export interface ReasoningConversionState {
     enabled?: boolean;
     effort?: "low" | "medium" | "high" | "xhigh";
@@ -19,6 +20,10 @@ export interface ConversionMetadata {
 }
 export interface ConversionOptions {
     toolLossPolicy?: ToolLossPolicy;
+    /** Capability observations for the selected provider/model/protocol route. */
+    capabilityProfile?: CapabilityProfile;
+    /** Safe mode omits unknown hosted tools; allow preserves legacy conversion. */
+    capabilityPolicy?: "safe" | "allow";
     mediaResolver?: MediaResolver;
     emitSequenceNumber?: boolean;
 }

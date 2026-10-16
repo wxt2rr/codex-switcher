@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, CircleHelp, RefreshCw, Search } from "lucide-react";
+import { Check, CircleHelp, Info, RefreshCw, Search } from "lucide-react";
 
 import type {
   AccountModelDiscoverySnapshot,
@@ -182,10 +182,19 @@ export function AccountModelExposurePanel({
       scrollable={false}
     >
       <div className="flex min-h-0 flex-1 flex-col gap-4">
-        <div className="shrink-0 rounded-xl bg-[#f7f8fa] px-3.5 py-3 text-[12px] leading-5 text-slate-600">
-          {zh
-            ? "只会暴露你勾选的模型。服务商返回的模型和模型页面手动配置的模型可以同时选择；发现失败不会删除上次结果。"
-            : "Only checked models are exposed. Discovered provider models and manually configured models can be selected together; a failed refresh keeps the last result."}
+        <div className="flex shrink-0 items-center gap-2 rounded-lg border border-black/[0.05] bg-[#fafbfc] px-3 py-2 text-[11px] leading-5 text-slate-500">
+          <Info className="size-3.5 shrink-0 text-slate-400" />
+          <span className="truncate">
+            {zh ? "选择的模型会暴露给当前账号，保存后可在模型页继续调整。" : "Selected models are exposed to this account and can be adjusted later on the Models page."}
+          </span>
+          <Tooltip content={zh
+            ? "服务商返回的模型和模型页手动配置的模型可以同时选择；刷新失败不会删除上次结果。"
+            : "Discovered and manually configured models can be selected together; a failed refresh keeps the last result."}
+          >
+            <button type="button" aria-label={zh ? "查看模型暴露说明" : "View model exposure details"} className="inline-flex size-5 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-neutral-700">
+              <CircleHelp className="size-3.5" />
+            </button>
+          </Tooltip>
         </div>
         {catalogFallback ? (
           <div role="status" className="shrink-0 rounded-xl border border-amber-200 bg-amber-50/70 px-3.5 py-3 text-[12px] leading-5 text-amber-900">
@@ -200,7 +209,7 @@ export function AccountModelExposurePanel({
             </div>
           </div>
         ) : null}
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-black/[0.05] bg-white p-1.5">
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
             <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={zh ? "搜索模型、服务商或标识" : "Search model, provider, or id"} className="pl-9" />
@@ -269,7 +278,10 @@ export function AccountModelExposurePanel({
             <span>{zh ? "全选" : "Select all"}</span>
           </label>
         </div>
-        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+        <div
+          className={cn("min-h-0 flex-1 space-y-2 overflow-y-auto pr-1", refreshing && "pointer-events-none opacity-60")}
+          aria-busy={refreshing}
+        >
           {candidates.length === 0 ? (
             <div className="rounded-xl border border-dashed border-black/[0.1] px-4 py-8 text-center text-[12px] leading-5 text-slate-500">
               {zh ? "没有可选择的模型。可以先在模型页面添加手动模型，或检查服务商凭据后重试。" : "No selectable models. Add a manual model on the Models page or retry after checking the credential."}

@@ -102,6 +102,7 @@ function ensureRouteMetadataColumns(db: Database): void {
     ["proxy_url", "TEXT"],
     ["long_conversation_strategy", "TEXT NOT NULL DEFAULT 'safe'"],
     ["instruction_role", "TEXT NOT NULL DEFAULT 'auto'"],
+    ["capability_profile_json", "TEXT"],
   ] as const;
   for (const [name, definition] of migrations) {
     if (!columns.has(name)) db.run(`ALTER TABLE route_targets ADD COLUMN ${name} ${definition}`);
@@ -200,6 +201,31 @@ function parseHeaders(value: unknown): Record<string, string> | undefined {
     const headers: Record<string, string> = {};
     for (const [key, child] of Object.entries(parsed)) if (key.trim() && typeof child === "string") headers[key] = child;
     return Object.keys(headers).length ? headers : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseCapabilityProfile(value: unknown): RouteTarget["capabilityProfile"] {
+  if (typeof value !== "string" || !value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    const result: NonNullable<RouteTarget["capabilityProfile"]> = {};
+    for (const [key, item] of Object.entries(parsed)) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const candidate = item as Record<string, unknown>;
+      if (!["supported", "unsupported", "unknown", "degraded"].includes(String(candidate.status))) continue;
+      if (!["provider", "preset", "discovery", "probe", "observed", "legacy"].includes(String(candidate.source))) continue;
+      result[key] = {
+        status: candidate.status as NonNullable<RouteTarget["capabilityProfile"]>[string]["status"],
+        source: candidate.source as NonNullable<RouteTarget["capabilityProfile"]>[string]["source"],
+        ...(typeof candidate.checkedAt === "number" ? { checkedAt: candidate.checkedAt } : {}),
+        ...(typeof candidate.expiresAt === "number" ? { expiresAt: candidate.expiresAt } : {}),
+        ...(typeof candidate.evidence === "string" ? { evidence: candidate.evidence.slice(0, 500) } : {}),
+      };
+    }
+    return Object.keys(result).length ? result : undefined;
   } catch {
     return undefined;
   }
@@ -505,7 +531,8 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
            route_id, env_name, account_name, upstream_base_url, original_base_url,
            enabled, created_at, updated_at, protocol, upstream_model, reasoning_profile, request_overrides_json,
            request_headers_json, proxy_url, long_conversation_strategy, instruction_role, provider_id, exposed_model_id, route_group_id
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           , capability_profile_json
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(route_id) DO UPDATE SET
            env_name=excluded.env_name, account_name=excluded.account_name,
            upstream_base_url=excluded.upstream_base_url, original_base_url=excluded.original_base_url,
@@ -517,6 +544,7 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
            proxy_url=excluded.proxy_url,
            long_conversation_strategy=excluded.long_conversation_strategy,
            instruction_role=excluded.instruction_role,
+           capability_profile_json=excluded.capability_profile_json,
            updated_at=excluded.updated_at`,
         [route.routeId, route.envName, route.accountName, route.upstreamBaseUrl, route.originalBaseUrl,
           route.enabled ? 1 : 0, route.createdAt, route.updatedAt, route.protocol,
@@ -525,7 +553,8 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
           route.requestHeaders ? JSON.stringify(route.requestHeaders) : null,
           route.proxyUrl ?? null,
           route.longConversationStrategy ?? "safe", route.instructionRole ?? "auto",
-          route.providerId ?? null, route.exposedModelId ?? null, route.routeGroupId ?? null],
+          route.providerId ?? null, route.exposedModelId ?? null, route.routeGroupId ?? null,
+          route.capabilityProfile ? JSON.stringify(route.capabilityProfile) : null],
       ));
     },
     removeRoute(routeId) {
@@ -550,6 +579,7 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
         longConversationStrategy: row.long_conversation_strategy === "continuity" ? "continuity" : "safe",
         instructionRole: row.instruction_role === "system" || row.instruction_role === "developer"
           ? row.instruction_role : "auto",
+        capabilityProfile: parseCapabilityProfile(row.capability_profile_json),
         enabled: Boolean(row.enabled), createdAt: asNumber(row.created_at), updatedAt: asNumber(row.updated_at),
       }));
     },

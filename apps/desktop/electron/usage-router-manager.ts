@@ -106,6 +106,7 @@ export interface GatewayRouteBinding {
    * from the Codex ingress protocol when the gateway performs conversion. */
   upstreamProtocolByAccount?: Record<string, RouteTarget["protocol"]>;
   capabilities?: RouteCapabilities;
+  capabilityProfile?: RouteTarget["capabilityProfile"];
   requestHeadersByAccount?: Record<string, Record<string, string>>;
   proxyUrlByAccount?: Record<string, string>;
 }
@@ -128,6 +129,21 @@ export interface AccountRouteStatus {
 }
 
 export interface CompatibilityCheckResult extends StagedCompatibilityResult { ok: boolean; status: number; message: string; }
+
+export interface GatewayCapabilityObservationEntry {
+  key: string;
+  providerId: string;
+  endpoint: string;
+  protocol: string;
+  modelId: string;
+  credentialId: string;
+  capability: string;
+  status: "supported" | "unsupported" | "unknown" | "degraded";
+  source: "provider" | "preset" | "discovery" | "probe" | "observed" | "legacy";
+  checkedAt?: number;
+  expiresAt?: number;
+  evidence?: string;
+}
 
 export interface ModelRequestTestInput {
   envName: string;
@@ -172,6 +188,27 @@ export interface UsageRouterManagerOptions {
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function capabilityObservationEntry(key: string, value: unknown): GatewayCapabilityObservationEntry[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const observation = value as Partial<GatewayCapabilityObservationEntry>;
+  if (!["supported", "unsupported", "unknown", "degraded"].includes(String(observation.status))) return [];
+  if (!["provider", "preset", "discovery", "probe", "observed", "legacy"].includes(String(observation.source))) return [];
+  const parts = key.split("|");
+  const capability = parts.pop() ?? "";
+  const credentialId = parts.pop() ?? "*";
+  const modelId = parts.pop() ?? "unknown";
+  const protocol = parts.pop() ?? "unknown";
+  const endpoint = parts.pop() ?? "*";
+  const providerId = parts.join("|") || "unknown-provider";
+  return [{ key, providerId, endpoint, protocol, modelId, credentialId,
+    capability, status: observation.status as GatewayCapabilityObservationEntry["status"],
+    source: observation.source as GatewayCapabilityObservationEntry["source"],
+    ...(typeof observation.checkedAt === "number" ? { checkedAt: observation.checkedAt } : {}),
+    ...(typeof observation.expiresAt === "number" ? { expiresAt: observation.expiresAt } : {}),
+    ...(typeof observation.evidence === "string" ? { evidence: observation.evidence } : {}),
+  }];
+}
 
 export class UsageRouterManager {
   private readonly routerDir: string;
@@ -361,6 +398,19 @@ export class UsageRouterManager {
     if (state && await this.isHealthy(state)) return this.adminWithState<EnvironmentGateway[]>(state, "/admin/gateways");
     const store = await createUsageStore(join(this.routerDir, "usage.db"));
     try { return await store.listGateways(); } finally { await store.close(); }
+  }
+
+  async listCapabilityObservations(): Promise<GatewayCapabilityObservationEntry[]> {
+    const state = await this.readState();
+    if (state && await this.isHealthy(state)) {
+      return this.adminWithState<GatewayCapabilityObservationEntry[]>(state, "/admin/capabilities");
+    }
+    try {
+      const raw = JSON.parse(await readFile(join(this.routerDir, "capability-observations.json"), "utf8")) as Record<string, unknown>;
+      return Object.entries(raw).flatMap(([key, value]) => capabilityObservationEntry(key, value));
+    } catch {
+      return [];
+    }
   }
 
   async enableAccountPool(
@@ -618,6 +668,7 @@ export class UsageRouterManager {
           routeGroupId: binding.routeGroupId,
           upstreamModel: binding.upstreamModel,
           capabilities: binding.capabilities,
+          capabilityProfile: binding.capabilityProfile,
           reasoningProfile: baseRoute.reasoningProfile,
           longConversationStrategy: baseRoute.longConversationStrategy,
           instructionRole: baseRoute.instructionRole,
@@ -771,6 +822,7 @@ export class UsageRouterManager {
     const now = Date.now();
     const route: RouteTarget = { routeId, envName: account.envName, accountName: account.accountName,
       upstreamBaseUrl, originalBaseUrl: account.baseUrl, protocol: "chat_completions",
+      providerId: account.providerId ?? previous?.providerId,
       upstreamModel: account.upstreamModel, reasoningProfile: account.reasoningProfile ?? "auto",
       longConversationStrategy: account.longConversationStrategy ?? "safe",
       instructionRole: account.instructionRole ?? "auto",
@@ -900,7 +952,11 @@ export class UsageRouterManager {
     let body: Record<string, unknown>;
     if (gateway) {
       endpoint = `${buildLocalGatewayBaseUrl(state.port, gateway.gatewayId)}/responses`;
-      headers.set("x-codex-account", accountName);
+      // HTTP header values are ByteStrings. Account aliases are user-defined and
+      // may contain CJK or other Unicode characters, so keep the routing hint
+      // ASCII-safe and let the local router decode it before route selection.
+      headers.set("x-codex-account", encodeURIComponent(accountName));
+      headers.set("x-codex-account-encoding", "uri");
       body = { model: requestedModel, input: prompt, max_output_tokens: 64 };
     } else {
       const protocol: RouteProtocol = route!.protocol;

@@ -39,6 +39,25 @@ test("previews gateway imports and keeps imported credentials disabled until loc
   assert.ok(preview.warnings.some((warning) => warning.includes("no imported credential")));
 });
 
+test("imports nested legacy and namespaced model capabilities", () => {
+  const result = importGatewayConfiguration({
+    providers: [{ id: "relay", responses: "https://relay.example/v1" }],
+    models: [{
+      id: "kimi-k3",
+      providerId: "relay",
+      capabilities: {
+        tools: false,
+        vision: true,
+        "tools.hosted.web_search": { status: "unsupported", source: "provider" },
+      },
+    }],
+  }, "default");
+  const model = result.gateway.models["relay/kimi-k3"];
+  assert.equal(model?.capabilities.tools, false);
+  assert.equal(model?.capabilities.vision, true);
+  assert.equal(model?.capabilityProfile?.["tools.hosted.web_search"]?.status, "unsupported");
+});
+
 test("imports a gateway-shaped document while forcing manual mode and removing unsupported fields", () => {
   const result = importGatewayConfiguration({
     schemaVersion: 1,

@@ -101,6 +101,7 @@ export async function discoverGatewayProviderModels(input: {
         displayName: model.displayName,
         protocols: model.protocols,
         capabilities: model.capabilities,
+        ...(model.capabilityProfile ? { capabilityProfile: model.capabilityProfile } : {}),
         enabled: true,
       });
     }
@@ -182,6 +183,7 @@ export async function discoverGatewayAccountModels(input: {
     displayName: model.displayName,
     protocols: model.protocols,
     capabilities: model.capabilities,
+    ...(model.capabilityProfile ? { capabilityProfile: model.capabilityProfile } : {}),
     enabled: true,
     source: model.source,
   })).sort((left, right) => left.id.localeCompare(right.id));

@@ -1,5 +1,6 @@
 import type {
   GatewayEnvironmentState,
+  GatewayCapabilityProfile,
   GatewayModelDefinition,
   GatewayRouteGroupDefinition,
 } from "../../../packages/core/dist/gateway/model.js";
@@ -90,6 +91,7 @@ function addBundledModelBindings(
       vision: Array.isArray(model.input_modalities) && model.input_modalities.includes("image"),
       streaming: true,
     };
+    const capabilityProfile = modelCapabilityProfile(model);
     const group: GatewayRouteGroupDefinition = gateway.routeGroups[routeGroupId] ?? {
       id: routeGroupId,
       displayName: model.display_name,
@@ -99,6 +101,7 @@ function addBundledModelBindings(
       sessionPolicy: "auto",
       fallbackEnabled: true,
       capabilities,
+      capabilityProfile,
     };
 
     for (const [accountName, account] of Object.entries(environment.accounts)) {
@@ -115,7 +118,7 @@ function addBundledModelBindings(
       const internalModelId = createBuiltinModelId(environment.name, model.slug, providerId);
       const existing = gateway.models[internalModelId];
       gateway.models[internalModelId] = existing
-        ? { ...existing, protocols: Array.from(new Set([...existing.protocols, "responses"])) }
+        ? { ...existing, protocols: Array.from(new Set([...existing.protocols, "responses"])), capabilityProfile: { ...(existing.capabilityProfile ?? {}), ...capabilityProfile } }
         : {
             id: internalModelId,
             providerId,
@@ -123,6 +126,7 @@ function addBundledModelBindings(
             displayName: model.display_name,
             protocols: ["responses"],
             capabilities,
+            capabilityProfile,
             enabled: true,
           };
       const memberExists = group.members.some((member) => (
@@ -191,6 +195,7 @@ function addModelBinding(
   const modelDefinition: GatewayModelDefinition = existing ? {
     ...existing,
     protocols: modelProtocols,
+    capabilityProfile: { ...(existing.capabilityProfile ?? {}), ...modelCapabilityProfile(model.entry) },
   } : {
     id: internalModelId,
     providerId,
@@ -205,6 +210,7 @@ function addModelBinding(
         && model.entry.input_modalities.includes("image"),
       streaming: true,
     },
+    capabilityProfile: modelCapabilityProfile(model.entry),
     enabled: true,
   };
   gateway.models[internalModelId] = modelDefinition;
@@ -219,6 +225,7 @@ function addModelBinding(
     sessionPolicy: "auto",
     fallbackEnabled: true,
     capabilities: modelDefinition.capabilities,
+    capabilityProfile: modelDefinition.capabilityProfile,
   };
   const member = group.members.find((candidate) => (
     candidate.modelId === internalModelId
@@ -308,6 +315,20 @@ function modelSupportsTools(entry: ModelCatalogEntry): boolean {
   // calls. It must not disable ordinary tool calls at the gateway layer.
   if (entry.tools === false || entry.supports_tools === false) return false;
   return entry.tool_mode !== "disabled";
+}
+
+function modelCapabilityProfile(entry: ModelCatalogEntry): GatewayCapabilityProfile {
+  const profile: GatewayCapabilityProfile = {};
+  const now = Date.now();
+  const add = (id: string, supported: boolean): void => {
+    profile[id] = { status: supported ? "supported" : "unsupported", source: "preset", checkedAt: now };
+  };
+  if (typeof entry.supports_search_tool === "boolean") add("tools.hosted.web_search", entry.supports_search_tool);
+  if (typeof entry.supports_parallel_tool_calls === "boolean") add("tools.parallel", entry.supports_parallel_tool_calls);
+  if (Array.isArray(entry.input_modalities) && entry.input_modalities.includes("image")) add("input.image", true);
+  if (modelSupportsTools(entry)) add("tools.function", true);
+  if (Array.isArray(entry.supported_reasoning_levels) || entry.supports_reasoning_summaries === true) add("output.reasoning", true);
+  return profile;
 }
 
 function accountNameFromSecretRef(secretRef: string, environmentName: string): string | undefined {

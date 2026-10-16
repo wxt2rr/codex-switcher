@@ -1660,6 +1660,117 @@ test("Chat compatibility account pool keeps member-specific history and never re
   await new Promise<void>((resolve) => upstream.close(() => resolve()));
 });
 
+test("native routes learn an unknown hosted-tool capability, retry once, and reuse it after restart", async () => {
+  let calls = 0;
+  const receivedTools: unknown[] = [];
+  const upstream = createServer(async (request, response) => {
+    calls += 1;
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { tools?: unknown };
+    receivedTools.push(body.tools);
+    response.setHeader("content-type", "application/json");
+    if (calls === 1) {
+      response.statusCode = 400;
+      response.end(JSON.stringify({ error: { message: "'function' is a required property, expected an object - tools.0" } }));
+      return;
+    }
+    response.end(JSON.stringify({ id: `capability-response-${calls}`, model: "capability-model", usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } }));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const address = upstream.address(); assert(address && typeof address !== "string");
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-capability-router-"));
+  let firstService: { origin: string; close(): Promise<void> } | undefined;
+  let secondService: { origin: string; close(): Promise<void> } | undefined;
+  const route = {
+    routeId: "route-capability", envName: "work", accountName: "key",
+    upstreamBaseUrl: `http://127.0.0.1:${address.port}/v1`, originalBaseUrl: "default",
+    protocol: "responses" as const, upstreamModel: "capability-model", reasoningProfile: "auto" as const,
+    enabled: true, createdAt: Date.now(), updatedAt: Date.now(),
+  };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  const call = (origin: string) => fetch(`${origin}/routes/${route.routeId}/responses`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: "capability-model", input: "hello", tools: [{ type: "web_search_preview" }] }),
+  });
+  try {
+    firstService = await startUsageRouterService({ stateDir, adminToken: "secret" });
+    assert.equal((await fetch(`${firstService.origin}/admin/routes/${route.routeId}`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(route) })).status, 204);
+    const response = await call(firstService.origin);
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).id, "capability-response-2");
+    assert.equal(calls, 2);
+    assert.deepEqual(receivedTools, [[{ type: "web_search_preview" }], undefined]);
+    const observations = await (await fetch(`${firstService.origin}/admin/capabilities`, { headers: adminHeaders })).json() as Array<{ modelId: string; capability: string; status: string; source: string }>;
+    assert.ok(observations.some((item) => item.modelId === "capability-model" && item.capability === "tools.hosted.web_search" && item.status === "unsupported" && item.source === "observed"));
+    await firstService.close();
+    firstService = undefined;
+
+    secondService = await startUsageRouterService({ stateDir, adminToken: "secret" });
+    const restarted = await call(secondService.origin);
+    assert.equal(restarted.status, 200);
+    await restarted.arrayBuffer();
+    assert.equal(calls, 3);
+    assert.equal(receivedTools[2], undefined);
+    await secondService.close();
+    secondService = undefined;
+  } finally {
+    await firstService?.close().catch(() => undefined);
+    await secondService?.close().catch(() => undefined);
+    await rm(stateDir, { recursive: true, force: true });
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
+});
+
+test("account-pool capability mismatches retry the selected member without cooldown", async () => {
+  let calls = 0;
+  const upstream = createServer(async (request, response) => {
+    calls += 1;
+    for await (const _chunk of request) { /* drain */ }
+    response.setHeader("content-type", "application/json");
+    if (calls === 1) {
+      response.statusCode = 400;
+      response.end(JSON.stringify({ error: { message: "invalid tool schema: expected an object" } }));
+      return;
+    }
+    response.end(JSON.stringify({ id: "pool-capability-success", usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } }));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const address = upstream.address(); assert(address && typeof address !== "string");
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-pool-capability-"));
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+  const now = Date.now();
+  const pool = { poolId: "pool-capability", envName: "work", protocol: "responses" as const, enabled: true,
+    strategy: "sticky_weighted_round_robin" as const, sessionTtlMinutes: 60, maxFailoverAttempts: 1, maxSameAccountFailures: 1,
+    createdAt: now, updatedAt: now, cursor: 0,
+    members: [{ accountName: "a", routeId: "route-pool-capability", protocol: "responses" as const,
+      upstreamBaseUrl: `http://127.0.0.1:${address.port}/v1`, originalBaseUrl: "default", enabled: true, weight: 1, priority: 0 }] };
+  const headers = { authorization: "Bearer secret", "content-type": "application/json" };
+  try {
+    const poolPut = await fetch(`${service.origin}/admin/pools`, { method: "PUT", headers, body: JSON.stringify(pool) });
+    assert.equal(poolPut.status, 204);
+    const secretPut = await fetch(`${service.origin}/admin/pools/${pool.poolId}/members/a/secret`, { method: "PUT", headers, body: JSON.stringify({ upstreamApiKey: "sk-a" }) });
+    assert.equal(secretPut.status, 204);
+    const tokenPut = await fetch(`${service.origin}/admin/pools/${pool.poolId}/token`, { method: "PUT", headers, body: JSON.stringify({ localRouteToken: "pool-token" }) });
+    assert.equal(tokenPut.status, 204);
+    const response = await fetch(`${service.origin}/pools/${pool.poolId}/responses`, {
+      method: "POST", headers: { authorization: "Bearer pool-token", "content-type": "application/json" },
+      body: JSON.stringify({ model: "pool-model", input: "hello", tools: [{ type: "web_search_preview" }] }),
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).id, "pool-capability-success");
+    assert.equal(calls, 2);
+    const health = await (await fetch(`${service.origin}/admin/pools/${pool.poolId}/health`, { headers: { authorization: "Bearer secret" } })).json() as Array<{ accountName: string; state: string; consecutiveFailures: number }>;
+    const memberHealth = health.find((item) => item.accountName === "a");
+    assert.equal(memberHealth?.state, "healthy");
+    assert.equal(memberHealth?.consecutiveFailures, 0);
+  } finally {
+    await service.close();
+    await rm(stateDir, { recursive: true, force: true });
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
+});
+
 test("admin shutdown gracefully stops the router", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-router-shutdown-"));
   const service = await startUsageRouterService({ stateDir, adminToken: "secret" });

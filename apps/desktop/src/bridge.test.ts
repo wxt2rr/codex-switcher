@@ -186,6 +186,7 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       return { message: "ok" };
     },
     listCustomModels: async () => ({ version: 1, models: [], accountBindings: {} }),
+    listGatewayCapabilityObservations: async () => [],
     discoverAccountModels: async () => ({ version: 1, models: [], accountBindings: {} }),
     refreshAllAccountModels: async () => ({ version: 1, models: [], accountBindings: {} }),
     listProviderCatalog: async () => [],

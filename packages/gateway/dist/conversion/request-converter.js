@@ -8,7 +8,7 @@ export async function convertGatewayRequest(source, target, body, metadata = {},
     const canonical = decodeCanonicalRequest(source, body);
     const diagnostics = diagnoseCanonicalRequest(source, target, canonical);
     const messages = await resolveMessages(source, target, canonical.messages, options.mediaResolver, diagnostics);
-    const value = encodeProtocolRequest(target, { ...canonical, messages, model: metadata.upstreamModelName ?? canonical.model });
+    const value = encodeProtocolRequest(source, target, { ...canonical, messages, model: metadata.upstreamModelName ?? canonical.model }, options, diagnostics);
     if (target === "anthropic" && canonical.maxTokens === undefined) {
         diagnostics.push({ code: "anthropic_default_max_tokens", level: "warning", message: "Anthropic requires max_tokens; the converter supplied a safe default", source, target, path: "max_tokens" });
     }
@@ -58,14 +58,17 @@ function decodeCanonicalRequest(protocol, body) {
         metadata: pickMetadata(body),
     };
 }
-function encodeProtocolRequest(protocol, request) {
+function encodeProtocolRequest(source, protocol, request, options, diagnostics) {
     const reasoning = encodeReasoning(protocol, request.reasoning);
+    const encodedTools = encodeTools(protocol, request.tools, options.capabilityProfile, options.capabilityPolicy ?? "allow", (tool, reason) => {
+        diagnostics.push({ code: "capability_tool_omitted", level: "warning", message: `Omitted ${tool.name}: ${reason}`, source, target: protocol, path: "tools" });
+    });
     if (protocol === "responses") {
         return {
             model: request.model,
             input: request.messages.map((message) => ({ role: message.role, ...(message.name ? { name: message.name } : {}), content: message.parts.map((part) => encodeResponsesPart(part)) })),
             stream: request.stream,
-            ...(encodeTools(protocol, request.tools) ? { tools: encodeTools(protocol, request.tools) } : {}),
+            ...(encodedTools ? { tools: encodedTools } : {}),
             ...(reasoning ? { reasoning: reasoning } : {}),
             ...request.metadata,
         };
@@ -75,7 +78,7 @@ function encodeProtocolRequest(protocol, request) {
             model: request.model,
             messages: request.messages.map(encodeChatMessage),
             stream: request.stream,
-            ...(encodeTools(protocol, request.tools) ? { tools: encodeTools(protocol, request.tools) } : {}),
+            ...(encodedTools ? { tools: encodedTools } : {}),
             ...(reasoning ? { reasoning } : {}),
             ...(request.maxTokens !== undefined ? { max_tokens: request.maxTokens } : {}),
             ...request.metadata,
@@ -90,7 +93,7 @@ function encodeProtocolRequest(protocol, request) {
             messages,
             max_tokens: request.maxTokens ?? 4096,
             stream: request.stream,
-            ...(encodeTools(protocol, request.tools) ? { tools: encodeTools(protocol, request.tools) } : {}),
+            ...(encodedTools ? { tools: encodedTools } : {}),
             ...(reasoning ? { thinking: reasoning } : {}),
             ...request.metadata,
         };
@@ -100,7 +103,7 @@ function encodeProtocolRequest(protocol, request) {
         model: request.model,
         ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
         contents: request.messages.filter((message) => message.role !== "system").map((message) => ({ role: message.role === "assistant" ? "model" : "user", parts: message.parts.map((part) => encodeGeminiPart(part)) })),
-        ...(encodeTools(protocol, request.tools) ? { tools: encodeTools(protocol, request.tools) } : {}),
+        ...(encodedTools ? { tools: encodedTools } : {}),
         generationConfig: { responseMimeType: "text/plain", ...(request.maxTokens !== undefined ? { maxOutputTokens: request.maxTokens } : {}), ...(reasoning ?? {}) },
         ...request.metadata,
     };

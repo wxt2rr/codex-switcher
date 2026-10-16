@@ -14,6 +14,7 @@ export type PoolFailureReason =
   | "upstream_5xx"
   | "upstream_4xx"
   | "validation"
+  | "capability_mismatch"
   | "stream_interrupted"
   | "no_available_member";
 
@@ -270,6 +271,7 @@ export function classifyPoolFailure(status: number | null, error?: unknown): Poo
 }
 
 export function isPoolRetryableFailure(reason: PoolFailureReason, status: number | null): boolean {
+  if (reason === "capability_mismatch") return false;
   if (reason === "transport" || reason === "timeout" || reason === "rate_limit" || reason === "quota" || reason === "upstream_5xx") return true;
   return status === 401 || status === 403 || status === 408 || status === 425 || (status !== null && status >= 500);
 }

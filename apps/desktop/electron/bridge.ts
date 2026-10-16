@@ -29,7 +29,7 @@ import {
   type CodexConversationInspectionResult,
   type CodexConversationRepairResult,
 } from "./codex-conversation-repair.js";
-import { UsageRouterManager, type GatewayRouteBinding } from "./usage-router-manager.js";
+import { UsageRouterManager, type GatewayRouteBinding, type GatewayCapabilityObservationEntry } from "./usage-router-manager.js";
 import type {
   GatewayEnvironmentState,
   GatewayRouteGroupDefinition,
@@ -600,6 +600,7 @@ function buildGatewayRouteBindings(
         vision: model.capabilities.vision === true,
         streaming: model.capabilities.streaming !== false,
       },
+      ...(model.capabilityProfile ? { capabilityProfile: model.capabilityProfile } : {}),
       ...(Object.keys(requestHeadersByAccount).length ? { requestHeadersByAccount } : {}),
       ...(Object.keys(proxyUrlByAccount).length ? { proxyUrlByAccount } : {}),
     });
@@ -650,6 +651,7 @@ function buildGatewayRouteBindings(
       protocolByAccount,
       upstreamProtocolByAccount,
       capabilities: model.capabilities,
+      ...(model.capabilityProfile ? { capabilityProfile: model.capabilityProfile } : {}),
       ...(Object.keys(requestHeadersByAccount).length ? { requestHeadersByAccount } : {}),
       ...(Object.keys(proxyUrlByAccount).length ? { proxyUrlByAccount } : {}),
     });
@@ -766,6 +768,7 @@ function createAccountPoolRuntimeUpdater(
     }
     await getUsageRouterManager().enableAccountCompatibility({
       envName, accountName, authMode: account.authMode, baseUrl, apiKey,
+      providerId: account.runtime.providerId,
       upstreamModel: account.runtime.compatibilityUpstreamModel,
       reasoningProfile: account.runtime.compatibilityReasoningProfile,
       longConversationStrategy: account.runtime.compatibilityLongConversationStrategy,
@@ -927,9 +930,10 @@ async function restoreEnabledRoutes(): Promise<void> {
       envName: route.envName,
       accountName: route.accountName,
       authMode: account.authMode,
+      providerId: account.runtime.providerId ?? route.providerId,
       baseUrl: route.originalBaseUrl || account.runtime.openaiBaseUrl || "default",
       apiKey,
-      upstreamModel: account.runtime.compatibilityUpstreamModel ?? route.upstreamModel,
+      upstreamModel: account.runtime.compatibilityUpstreamModel?.trim() || route.upstreamModel,
       reasoningProfile: account.runtime.compatibilityReasoningProfile ?? route.reasoningProfile,
       longConversationStrategy: account.runtime.compatibilityLongConversationStrategy ?? route.longConversationStrategy,
       instructionRole: account.runtime.compatibilityInstructionRole ?? route.instructionRole,
@@ -1866,7 +1870,8 @@ export async function switchAccount(
       const baseUrl = await resolveAccountUpstreamBaseUrl(envName, accountName, selected.runtime);
       if (apiKey) {
         await getUsageRouterManager().enableAccountCompatibility({ envName, accountName, authMode: selected.authMode,
-          baseUrl, apiKey, upstreamModel: selected.runtime.compatibilityUpstreamModel,
+          baseUrl, apiKey, providerId: selected.runtime.providerId,
+          upstreamModel: selected.runtime.compatibilityUpstreamModel,
           reasoningProfile: selected.runtime.compatibilityReasoningProfile,
           longConversationStrategy: selected.runtime.compatibilityLongConversationStrategy,
           instructionRole: selected.runtime.compatibilityInstructionRole,
@@ -1965,7 +1970,7 @@ export async function enableAccountCompatibility(input: {
   const baseUrl = await resolveAccountUpstreamBaseUrl(input.envName, input.accountName, account.runtime);
   return getUsageRouterManager().enableAccountCompatibility({
     envName: input.envName, accountName: input.accountName, authMode: account.authMode,
-    baseUrl, apiKey, upstreamModel: input.upstreamModel,
+    baseUrl, apiKey, providerId: account.runtime.providerId, upstreamModel: input.upstreamModel,
     reasoningProfile: input.reasoningProfile, requestOverrides: input.requestOverrides,
     longConversationStrategy: input.longConversationStrategy,
     instructionRole: input.instructionRole,
@@ -2878,6 +2883,10 @@ export async function listCustomModels() {
     await store.load(),
     await loadKnownAccountKeys(),
   );
+}
+
+export async function listGatewayCapabilityObservations(): Promise<GatewayCapabilityObservationEntry[]> {
+  return getUsageRouterManager().listCapabilityObservations();
 }
 
 /** Discovers and persists the models visible to one environment account. */

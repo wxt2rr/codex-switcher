@@ -104,6 +104,7 @@ test("usage store persists routes and aggregates usage by model and Base URL", a
     requestOverrides: { temperature: 0.2 },
     requestHeaders: { "x-provider-scope": "shared" },
     proxyUrl: "http://127.0.0.1:7890",
+    capabilityProfile: { "tools.hosted.web_search": { status: "unsupported", source: "observed", evidence: "provider rejected hosted search" } },
     enabled: true,
     createdAt: 1,
     updatedAt: 1,
@@ -160,6 +161,8 @@ test("usage store persists routes and aggregates usage by model and Base URL", a
   assert.deepEqual(route?.requestOverrides, { temperature: 0.2 });
   assert.deepEqual(route?.requestHeaders, { "x-provider-scope": "shared" });
   assert.equal(route?.proxyUrl, "http://127.0.0.1:7890");
+  assert.equal(route?.capabilityProfile?.["tools.hosted.web_search"]?.status, "unsupported");
+  assert.equal(route?.capabilityProfile?.["tools.hosted.web_search"]?.source, "observed");
   const snapshot = await reopened.queryUsage({ from: 0, to: 2000 });
   assert.equal(snapshot.summary.requests, 1);
   assert.equal(snapshot.summary.totalTokens, 120);

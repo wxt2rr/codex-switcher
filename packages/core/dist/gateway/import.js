@@ -99,7 +99,49 @@ function buildModel(id, provider, upstreamModelId, raw) {
         protocols.push("anthropic");
     if (provider.endpoints.gemini)
         protocols.push("gemini");
-    return { id, providerId: provider.id, upstreamModelId, displayName: readString(raw, "displayName", "name") || upstreamModelId, protocols: protocols.length ? protocols : ["responses"], capabilities: { reasoning: raw?.reasoning === true || raw?.supportsReasoning === true, tools: raw?.tools !== false, vision: raw?.vision === true || raw?.supportsVision === true, streaming: raw?.streaming !== false }, enabled: raw?.enabled !== false };
+    const legacyCapabilities = asRecord(raw?.capabilities);
+    const capabilityValue = (key) => {
+        if (typeof raw?.[key] === "boolean")
+            return raw[key];
+        return typeof legacyCapabilities[key] === "boolean" ? legacyCapabilities[key] : undefined;
+    };
+    const capabilityProfile = readCapabilityProfile(raw ?? {});
+    return {
+        id,
+        providerId: provider.id,
+        upstreamModelId,
+        displayName: readString(raw, "displayName", "name") || upstreamModelId,
+        protocols: protocols.length ? protocols : ["responses"],
+        capabilities: {
+            reasoning: capabilityValue("reasoning") === true || raw?.supportsReasoning === true,
+            tools: capabilityValue("tools") !== false,
+            vision: capabilityValue("vision") === true || raw?.supportsVision === true,
+            streaming: capabilityValue("streaming") !== false,
+        },
+        ...(Object.keys(capabilityProfile ?? {}).length ? { capabilityProfile } : {}),
+        enabled: raw?.enabled !== false,
+    };
+}
+function readCapabilityProfile(raw) {
+    const nestedCapabilities = asRecord(raw.capabilities);
+    const nestedLooksLikeProfile = Object.entries(nestedCapabilities).some(([id, value]) => id.includes(".") || (isRecord(value) && typeof value.status === "string"));
+    const profile = asRecord(raw.capabilityProfile ?? raw.capabilitiesProfile ?? (nestedLooksLikeProfile ? nestedCapabilities : undefined));
+    const result = {};
+    if (profile) {
+        for (const [id, value] of Object.entries(profile)) {
+            const item = asRecord(value);
+            const status = typeof value === "boolean" ? (value ? "supported" : "unsupported") : readString(item, "status");
+            const source = typeof value === "boolean" ? "discovery" : readString(item, "source");
+            if ((status === "supported" || status === "unsupported" || status === "unknown" || status === "degraded")
+                && (source === "provider" || source === "preset" || source === "discovery" || source === "probe" || source === "observed" || source === "legacy")) {
+                result[id] = { status, source, ...(typeof item?.checkedAt === "number" ? { checkedAt: item.checkedAt } : {}), ...(typeof item?.expiresAt === "number" ? { expiresAt: item.expiresAt } : {}), ...(typeof item?.evidence === "string" ? { evidence: item.evidence.slice(0, 500) } : {}) };
+            }
+        }
+    }
+    const search = raw.supports_search_tool ?? raw.supportsSearchTool;
+    if (typeof search === "boolean")
+        result["tools.hosted.web_search"] = { status: search ? "supported" : "unsupported", source: "preset" };
+    return result;
 }
 function buildCredentials(raw, provider, environmentId, warnings) {
     const keys = [...(typeof raw.key === "string" && raw.key.trim() ? [raw.key] : []), ...(Array.isArray(raw.keys) ? raw.keys : [])];
