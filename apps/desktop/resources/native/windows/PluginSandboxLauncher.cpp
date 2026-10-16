@@ -415,7 +415,13 @@ int wmain(int argc, wchar_t** argv) {
     return fail(L"cannot attach AppContainer security capabilities", HRESULT_FROM_WIN32(GetLastError()));
   }
 
-  std::wstring commandLine = quoteArgument(node) + L" --preserve-symlinks-main " + quoteArgument(entry);
+  // Provider plugins are ESM modules. Node's default ESM resolver calls
+  // realpathSync for imported files, which makes an AppContainer try to
+  // lstat the drive root (for example C:\\) even when the plugin directory
+  // itself is granted. Preserve symlinks for the whole module graph so the
+  // resolver stays inside the explicitly granted paths. Keep the main-module
+  // flag for the entrypoint as well.
+  std::wstring commandLine = quoteArgument(node) + L" --preserve-symlinks --preserve-symlinks-main " + quoteArgument(entry);
   std::vector<wchar_t> mutableCommand(commandLine.begin(), commandLine.end());
   mutableCommand.push_back(L'\0');
   STARTUPINFOEXW startup{};

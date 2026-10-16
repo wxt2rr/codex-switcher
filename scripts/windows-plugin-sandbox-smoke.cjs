@@ -11,6 +11,8 @@ const root = mkdtempSync(join(process.cwd(), ".codex-switcher-plugin-sandbox-"))
 const homeRoot = mkdtempSync(join(process.env.USERPROFILE || tmpdir(), "codex-switcher-plugin-home-"));
 const entry = join(root, "plugin.cjs");
 const bootstrapEntry = join(root, "bootstrap.cjs");
+const bootstrapEsmEntry = join(root, "bootstrap.mjs");
+const bootstrapEsmDependency = join(root, "bootstrap-dependency.mjs");
 const stagedNode = join(root, "node.exe");
 const marker = join(root, "should-not-exist.txt");
 const homeSecret = join(homeRoot, "secret.txt");
@@ -19,6 +21,10 @@ writeFileSync(homeSecret, "must stay unreadable", "utf8");
 try {
   copyFileSync(node, stagedNode);
   writeFileSync(bootstrapEntry, "process.stdout.write(JSON.stringify({ ready: true })); process.exit(0);\n", "utf8");
+  // Shipped provider plugins are ESM. Keep an actual import in the smoke test
+  // so AppContainer module-resolution regressions are caught before release.
+  writeFileSync(bootstrapEsmDependency, "export const ready = true;\n", "utf8");
+  writeFileSync(bootstrapEsmEntry, "import { ready } from './bootstrap-dependency.mjs'; process.stdout.write(JSON.stringify({ ready })); process.exit(0);\n", "utf8");
   const bootstrap = runLauncher({
     profile: "codex-switcher-smoke-bootstrap",
     entry: bootstrapEntry,
@@ -26,6 +32,14 @@ try {
   });
   if (bootstrap.result.status !== 0 || bootstrap.observation.ready !== true) {
     throw new Error(`sandbox Node bootstrap failed: ${JSON.stringify(bootstrap.observation)}`);
+  }
+  const esmBootstrap = runLauncher({
+    profile: "codex-switcher-smoke-bootstrap-esm",
+    entry: bootstrapEsmEntry,
+    extraArgs: [],
+  });
+  if (esmBootstrap.result.status !== 0 || esmBootstrap.observation.ready !== true) {
+    throw new Error(`sandbox ESM bootstrap failed: ${JSON.stringify(esmBootstrap.observation)}`);
   }
 
   writeFileSync(entry, buildSmokePlugin({
