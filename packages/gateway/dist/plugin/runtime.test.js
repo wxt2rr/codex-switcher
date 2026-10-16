@@ -4,8 +4,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { ProviderRegistry } from "../provider/registry.js";
-import { PluginRuntimeManager } from "./runtime.js";
+import { PluginRuntimeManager, ensurePluginDataDirectory } from "./runtime.js";
 const manifest = { id: "runtime-provider", name: "Runtime Provider", version: "1.0.0", apiVersion: 1, entry: "index.js", permissions: ["provider"] };
+test("plugin data directory falls back when the shared state path is not writable", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-plugin-data-fallback-"));
+    const primary = join(root, "primary-file");
+    const fallback = join(root, "fallback");
+    try {
+        await writeFile(primary, "not a directory", "utf8");
+        assert.equal(ensurePluginDataDirectory(primary, "provider-demo", fallback), join(fallback, "provider-demo"));
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
 function transportFactory(requests) {
     return {
         async send(request) {

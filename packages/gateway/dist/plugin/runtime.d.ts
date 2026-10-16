@@ -25,6 +25,8 @@ export interface PluginRuntimeOptions {
     settings?: (pluginId: string) => Promise<Record<string, unknown>> | Record<string, unknown>;
     /** Host-owned writable data root for managed provider plugins. */
     pluginDataDir?: string;
+    /** Optional writable fallback for hosts whose primary state directory is not writable. */
+    pluginDataFallbackDir?: string;
 }
 export interface ActivePluginProvider {
     manifest: GatewayPluginManifest;
@@ -49,3 +51,10 @@ export declare class PluginRuntimeManager {
     close(): Promise<void>;
     list(): ActivePluginProvider[];
 }
+/**
+ * Creates a host-owned writable directory for a managed plugin. Windows users
+ * can have an older shared state directory owned by another account or backed
+ * by a protected reparse point; keep that directory as the first choice and
+ * use the host's explicit fallback when it cannot be created.
+ */
+export declare function ensurePluginDataDirectory(root: string, pluginId: string, fallbackRoot?: string): string;

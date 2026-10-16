@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { PluginConcurrencyLimiter, PluginHost, ProcessPluginTransport, RestartingPluginTransport, validatePluginManifest } from "./host.js";
 import { createPluginProviderAdapter } from "./provider-adapter.js";
 /**
@@ -15,9 +15,9 @@ export class PluginRuntimeManager {
     constructor(options) {
         this.options = options;
         this.transportFactory = options.transportFactory ?? ((manifest, path, sandbox) => {
-            const dataDir = options.pluginDataDir ? join(options.pluginDataDir, manifest.id) : undefined;
-            if (dataDir)
-                mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+            const dataDir = options.pluginDataDir
+                ? ensurePluginDataDirectory(options.pluginDataDir, manifest.id, options.pluginDataFallbackDir)
+                : undefined;
             const launchSandbox = dataDir
                 ? { ...sandbox, writablePaths: [...(sandbox.writablePaths ?? []), dataDir] }
                 : sandbox;
@@ -83,6 +83,35 @@ export class PluginRuntimeManager {
         this.globalConcurrency?.close();
     }
     list() { return [...this.active.values()]; }
+}
+const PLUGIN_DATA_DIRECTORY_FALLBACK_ERRORS = new Set(["EACCES", "ENOTDIR", "EPERM", "EROFS"]);
+/**
+ * Creates a host-owned writable directory for a managed plugin. Windows users
+ * can have an older shared state directory owned by another account or backed
+ * by a protected reparse point; keep that directory as the first choice and
+ * use the host's explicit fallback when it cannot be created.
+ */
+export function ensurePluginDataDirectory(root, pluginId, fallbackRoot) {
+    const primary = join(root, pluginId);
+    try {
+        mkdirSync(primary, { recursive: true, mode: 0o700 });
+        return primary;
+    }
+    catch (error) {
+        const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+        if (!fallbackRoot || !PLUGIN_DATA_DIRECTORY_FALLBACK_ERRORS.has(code) || samePath(root, fallbackRoot))
+            throw error;
+        const fallback = join(fallbackRoot, pluginId);
+        mkdirSync(fallback, { recursive: true, mode: 0o700 });
+        return fallback;
+    }
+}
+function samePath(left, right) {
+    const normalizedLeft = resolve(left);
+    const normalizedRight = resolve(right);
+    return process.platform === "win32"
+        ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+        : normalizedLeft === normalizedRight;
 }
 function normalizeProviderDescriptor(value, expectedIds) {
     const record = isRecord(value) && isRecord(value.provider) ? value.provider : value;

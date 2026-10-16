@@ -125,6 +125,13 @@ async function getManager(stateDir: string) {
       rootDir: join(stateDir, "provider-plugins"),
       settingsDir: join(stateDir, "provider-plugin-settings"),
       pluginDataDir: join(stateDir, "provider-plugin-data"),
+      ...(process.platform === "win32" ? {
+        pluginDataFallbackDir: join(
+          process.env.LOCALAPPDATA || join(process.env.USERPROFILE || stateDir, "AppData", "Local"),
+          "codex-switcher",
+          "provider-plugin-data",
+        ),
+      } : {}),
       ...(verifySignature ? { verifySignature } : {}),
       log: (line: string) => {
         recordPluginDiagnostic({ level: "info", phase: "runtime", message: line });

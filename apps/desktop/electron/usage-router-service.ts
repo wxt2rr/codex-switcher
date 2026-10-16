@@ -1649,6 +1649,13 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
       // runtime settings. In that state the route silently falls back to a
       // raw upstream request and Our Free Model returns 401.
       pluginDataDir: join(pluginStateDir, "provider-plugin-data"),
+      ...(process.platform === "win32" ? {
+        pluginDataFallbackDir: join(
+          process.env.LOCALAPPDATA || join(process.env.USERPROFILE || pluginStateDir, "AppData", "Local"),
+          "codex-switcher",
+          "provider-plugin-data",
+        ),
+      } : {}),
       sandbox: { mode: pluginSandboxMode },
       ...(trustedPublicKeyPem ? {
         verifySignature: (manifest: import("../../../packages/gateway/dist/plugin/host.js").GatewayPluginManifest, checksum: string) =>
