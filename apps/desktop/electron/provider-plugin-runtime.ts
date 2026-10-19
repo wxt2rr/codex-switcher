@@ -126,11 +126,7 @@ async function getManager(stateDir: string) {
       settingsDir: join(stateDir, "provider-plugin-settings"),
       pluginDataDir: join(stateDir, "provider-plugin-data"),
       ...(process.platform === "win32" ? {
-        pluginDataFallbackDir: join(
-          process.env.LOCALAPPDATA || join(process.env.USERPROFILE || stateDir, "AppData", "Local"),
-          "codex-switcher",
-          "provider-plugin-data",
-        ),
+        pluginDataFallbackDir: resolvePluginDataFallbackDir(stateDir),
       } : {}),
       ...(verifySignature ? { verifySignature } : {}),
       log: (line: string) => {
@@ -151,6 +147,23 @@ async function getManager(stateDir: string) {
   } finally {
     managerLoad = undefined;
   }
+}
+
+/**
+ * Returns the Windows path that is writable by the packaged Electron app.
+ * MSIX/AppContainer builds can expose USERPROFILE and LOCALAPPDATA while
+ * denying writes to arbitrary directories below them. The main process sets
+ * CODEX_SWITCHER_PLUGIN_DATA_FALLBACK_DIR to Electron's app-specific
+ * userData directory; standalone/dev hosts retain the conventional fallback.
+ */
+export function resolvePluginDataFallbackDir(stateDir: string): string {
+  const configured = process.env.CODEX_SWITCHER_PLUGIN_DATA_FALLBACK_DIR?.trim();
+  if (configured) return join(configured, "provider-plugin-data");
+  return join(
+    process.env.LOCALAPPDATA || join(process.env.USERPROFILE || stateDir, "AppData", "Local"),
+    "codex-switcher",
+    "provider-plugin-data",
+  );
 }
 
 export interface ProviderPluginSettingsSnapshot {

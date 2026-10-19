@@ -52,6 +52,7 @@ import { ConversationHistoryStore } from "./openai-chat-compat/history-store.js"
 import { FileHistoryPersistence } from "./openai-chat-compat/history-persistence.js";
 import { handleChatCompatibilityRequest } from "./openai-chat-compat/compatibility-handler.js";
 import { loadGatewayPluginRuntime } from "./core-runtime.js";
+import { resolvePluginDataFallbackDir } from "./provider-plugin-runtime.js";
 import { closeUpstreamProxyAgents, fetchWithOptionalProxy, normalizeUpstreamProxyUrl, resolveUpstreamProxy, type UpstreamProxySource } from "./upstream-proxy.js";
 import {
   convertGatewayRequestAtRuntime,
@@ -1650,11 +1651,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
       // raw upstream request and Our Free Model returns 401.
       pluginDataDir: join(pluginStateDir, "provider-plugin-data"),
       ...(process.platform === "win32" ? {
-        pluginDataFallbackDir: join(
-          process.env.LOCALAPPDATA || join(process.env.USERPROFILE || pluginStateDir, "AppData", "Local"),
-          "codex-switcher",
-          "provider-plugin-data",
-        ),
+        pluginDataFallbackDir: resolvePluginDataFallbackDir(pluginStateDir),
       } : {}),
       sandbox: { mode: pluginSandboxMode },
       ...(trustedPublicKeyPem ? {

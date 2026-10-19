@@ -11,6 +11,7 @@ import {
   listProviderPluginMarket,
   listProviderPlugins,
   refreshProviderPluginMarket,
+  resolvePluginDataFallbackDir,
 } from "./provider-plugin-runtime.js";
 import { PluginMarket } from "../../../packages/gateway/dist/index.js";
 import { loadGatewayPluginRuntime } from "./core-runtime.js";
@@ -30,6 +31,20 @@ test("desktop provider plugin runtime resolves packaged Gateway modules lazily",
   assert.equal(typeof runtime.ProviderPluginManager, "function");
   assert.equal(typeof runtime.PluginMarket, "function");
   assert.equal(typeof runtime.verifyPluginManifestSignature, "function");
+});
+
+test("desktop provider plugin runtime honors the packaged writable plugin data root", async () => {
+  const previous = process.env.CODEX_SWITCHER_PLUGIN_DATA_FALLBACK_DIR;
+  process.env.CODEX_SWITCHER_PLUGIN_DATA_FALLBACK_DIR = "C:\\Users\\tester\\AppData\\Local\\Packages\\Codex\\LocalCache";
+  try {
+    assert.equal(
+      resolvePluginDataFallbackDir("C:\\Users\\tester\\.codex-switcher"),
+      join("C:\\Users\\tester\\AppData\\Local\\Packages\\Codex\\LocalCache", "provider-plugin-data"),
+    );
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_SWITCHER_PLUGIN_DATA_FALLBACK_DIR;
+    else process.env.CODEX_SWITCHER_PLUGIN_DATA_FALLBACK_DIR = previous;
+  }
 });
 
 test("desktop provider plugin market reads explicit sources and rejects unsupported URLs", async () => {
