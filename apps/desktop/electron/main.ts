@@ -377,11 +377,15 @@ async function applyAppPresenceSettings(settings: AppPresenceStatus): Promise<vo
 
 app.whenReady().then(async () => {
   // Windows packaged/AppContainer builds cannot write arbitrary directories
-  // under USERPROFILE or LOCALAPPDATA. Keep managed plugin data in Electron's
-  // app-specific writable profile and pass the same location to the router
-  // child process through its inherited environment.
+  // under USERPROFILE or the legacy state directory. Keep managed plugin data
+  // in a dedicated application-data directory and pass the same absolute
+  // location to the router child process through its inherited environment.
   if (process.platform === "win32") {
-    process.env.CODEX_SWITCHER_PLUGIN_DATA_FALLBACK_DIR = app.getPath("userData");
+    process.env.CODEX_SWITCHER_PLUGIN_DATA_DIR = join(
+      app.getPath("appData"),
+      "codex-switcher",
+      "provider-plugin-data",
+    );
   }
   if (process.platform !== "darwin") {
     Menu.setApplicationMenu(null);

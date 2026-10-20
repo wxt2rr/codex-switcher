@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
+  CircleAlert,
   Download,
   AlertTriangle,
   FileCode2,
+  LoaderCircle,
   PackageCheck,
   Puzzle,
   RefreshCw,
@@ -13,7 +15,7 @@ import {
   XCircle,
 } from "lucide-react";
 
-import { ConfirmDialog, SidePanel } from "../components/admin-primitives";
+import { ConfirmDialog, ProgressDialog, SidePanel } from "../components/admin-primitives";
 import { ListCard, ListLoadingState, ListPageFrame, ListPageHeader, ListStack, SoftBadge } from "../components/account-list-primitives";
 import { Field, Input, Select } from "../components/form-primitives";
 import { Button } from "../components/ui/button";
@@ -23,6 +25,18 @@ import { cn } from "../lib/utils";
 
 type PluginTab = "installed" | "market";
 type InstallSource = "local" | "npm" | "git";
+type PluginInstallTarget = Pick<ProviderPluginMarketEntry, "id" | "name" | "version">;
+type PluginInstallDialogState =
+  | { phase: "running"; target: PluginInstallTarget; step: number; startedAt: number }
+  | { phase: "success"; target: PluginInstallTarget; result: ProviderPluginSnapshot; elapsedMs: number }
+  | { phase: "error"; target: PluginInstallTarget; error: string };
+
+const pluginInstallSteps = [
+  { zh: "准备安装", en: "Preparing installation" },
+  { zh: "下载并解包插件", en: "Downloading and unpacking the plugin" },
+  { zh: "校验插件文件", en: "Verifying plugin files" },
+  { zh: "启动插件进程", en: "Starting the plugin process" },
+] as const;
 
 export function PluginsPage({
   bridge,
@@ -44,6 +58,7 @@ export function PluginsPage({
   const [busyId, setBusyId] = useState<string>();
   const [selected, setSelected] = useState<ProviderPluginSnapshot>();
   const [pendingInstall, setPendingInstall] = useState<ProviderPluginMarketEntry>();
+  const [installDialog, setInstallDialog] = useState<PluginInstallDialogState>();
   const [pendingAction, setPendingAction] = useState<{ kind: "remove" | "rollback"; plugin: ProviderPluginSnapshot }>();
   const [localOpen, setLocalOpen] = useState(false);
   const [source, setSource] = useState<InstallSource>("local");
@@ -69,6 +84,17 @@ export function PluginsPage({
   }
 
   useEffect(() => { void load(); }, []);
+
+  useEffect(() => {
+    if (installDialog?.phase !== "running") return;
+    const timer = window.setInterval(() => {
+      setInstallDialog((current) => {
+        if (!current || current.phase !== "running") return current;
+        return { ...current, step: Math.min(current.step + 1, pluginInstallSteps.length - 1) };
+      });
+    }, 1_200);
+    return () => window.clearInterval(timer);
+  }, [installDialog?.phase]);
 
   const normalizedQuery = query.trim().toLowerCase();
   const filteredInstalled = useMemo(() => installed.filter((plugin) =>
@@ -105,13 +131,11 @@ export function PluginsPage({
       onError(new Error(zh ? "该市场条目没有明确的安装来源" : "This market entry has no explicit install source"));
       return;
     }
-    await withBusy(plugin.id, async () => {
-      await bridge.installProviderPluginFromMarket({ id: plugin.id, version: plugin.version });
-      setPendingInstall(undefined);
-      setTab("installed");
-      await load();
-      onSuccess(zh ? `${plugin.name} 已安装` : `${plugin.name} installed`);
-    });
+    setPendingInstall(undefined);
+    await runPluginInstall(
+      { id: plugin.id, name: plugin.name, version: plugin.version },
+      () => bridge.installProviderPluginFromMarket({ id: plugin.id, version: plugin.version }),
+    );
   }
 
   async function installLocalPlugin() {
@@ -128,13 +152,31 @@ export function PluginsPage({
       : source === "npm"
         ? { kind: "npm", spec: sourceValue.trim() }
         : { kind: "git", url: sourceValue.trim(), ref: gitRef.trim() };
-    await withBusy(manifest.id, async () => {
-      await bridge.installProviderPlugin({ manifest, source: installSource });
-      setLocalOpen(false);
+    setLocalOpen(false);
+    await runPluginInstall(
+      { id: manifest.id, name: manifest.name, version: manifest.version },
+      () => bridge.installProviderPlugin({ manifest, source: installSource }),
+    );
+  }
+
+  async function runPluginInstall(target: PluginInstallTarget, task: () => Promise<ProviderPluginSnapshot>) {
+    const startedAt = Date.now();
+    setBusyId(target.id);
+    setInstallDialog({ phase: "running", target, step: 0, startedAt });
+    try {
+      const result = await task();
       setTab("installed");
       await load();
-      onSuccess(zh ? `${manifest.name} 已安装` : `${manifest.name} installed`);
-    });
+      setInstallDialog({ phase: "success", target, result, elapsedMs: Date.now() - startedAt });
+    } catch (error) {
+      setInstallDialog({
+        phase: "error",
+        target,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setBusyId(undefined);
+    }
   }
 
   async function togglePlugin(plugin: ProviderPluginSnapshot) {
@@ -239,9 +281,96 @@ export function PluginsPage({
         </div>
       </SidePanel>
 
+      <PluginInstallDialog
+        state={installDialog}
+        zh={zh}
+        onClose={() => setInstallDialog(undefined)}
+        onSuccess={onSuccess}
+      />
+
       <ConfirmDialog open={Boolean(pendingInstall)} title={pendingInstall ? (zh ? `安装 ${pendingInstall.name}？` : `Install ${pendingInstall.name}?`) : ""} description={zh ? "插件将在隔离进程中运行。请确认来源、信任级别和权限后再安装。" : "The plugin will run in an isolated process. Review its source, trust level, and permissions before installing."} impact={pendingInstall ? <PermissionSummary plugin={pendingInstall} zh={zh} /> : null} confirmLabel={zh ? "确认安装" : "Install"} cancelLabel={zh ? "取消" : "Cancel"} tone="default" onConfirm={() => pendingInstall && void installMarketPlugin(pendingInstall)} onCancel={() => setPendingInstall(undefined)} />
       <ConfirmDialog open={Boolean(pendingAction)} title={pendingAction ? (pendingAction.kind === "remove" ? (zh ? `卸载 ${pendingAction.plugin.name}？` : `Remove ${pendingAction.plugin.name}?`) : (zh ? `回滚 ${pendingAction.plugin.name}？` : `Roll back ${pendingAction.plugin.name}?`)) : ""} description={pendingAction?.kind === "remove" ? (zh ? "卸载会停止插件并删除已安装版本，但不会删除账号凭据。" : "Removing stops the plugin and deletes installed versions; account credentials are not deleted.") : (zh ? "回滚会切换到上一个已验证版本。" : "Rollback switches to the last verified version.")} confirmLabel={pendingAction?.kind === "remove" ? (zh ? "卸载" : "Remove") : (zh ? "回滚" : "Roll back")} cancelLabel={zh ? "取消" : "Cancel"} onConfirm={() => void confirmAction()} onCancel={() => setPendingAction(undefined)} />
     </ListPageFrame>
+  );
+}
+
+function PluginInstallDialog({
+  state,
+  zh,
+  onClose,
+  onSuccess,
+}: {
+  state?: PluginInstallDialogState;
+  zh: boolean;
+  onClose: () => void;
+  onSuccess: (message: string) => void;
+}) {
+  if (!state) return null;
+  return (
+    <ProgressDialog
+      open
+      phase={state.phase}
+      title={state.phase === "running"
+        ? (zh ? `正在安装 ${state.target.name}` : `Installing ${state.target.name}`)
+        : state.phase === "success"
+          ? (zh ? "插件安装完成" : "Plugin installed")
+          : (zh ? "插件安装失败" : "Plugin installation failed")}
+      confirmLabel={zh ? "确定" : "OK"}
+      busyLabel={zh ? "安装任务执行中…" : "Installation is in progress…"}
+      onConfirm={() => {
+        onClose();
+        if (state.phase === "success") onSuccess(zh ? `${state.target.name} 已安装` : `${state.target.name} installed`);
+      }}
+    >
+      {state.phase === "running" ? (
+        <div className="space-y-4" aria-live="polite">
+          <div className="flex items-center gap-3">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30">
+              <LoaderCircle className="size-5 animate-spin" aria-hidden="true" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-neutral-800 dark:text-white">
+                {pluginInstallSteps[state.step]?.[zh ? "zh" : "en"]}
+              </div>
+              <div className="mt-1 truncate text-[12px] text-slate-500">{state.target.id}@{state.target.version}</div>
+            </div>
+            <span className="ml-auto shrink-0 text-[12px] text-slate-400">{state.step + 1}/{pluginInstallSteps.length}</span>
+          </div>
+          <div
+            role="progressbar"
+            aria-label={zh ? "插件安装进度" : "Plugin installation progress"}
+            aria-valuetext={pluginInstallSteps[state.step]?.[zh ? "zh" : "en"]}
+            className="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"
+          >
+            <div className="plugin-install-progress h-full w-1/3 rounded-full bg-emerald-500" />
+          </div>
+          <p className="text-[12px] leading-5 text-slate-500">
+            {zh ? "正在完成来源下载、文件校验和隔离进程启动。完成前请不要关闭应用。" : "The source is downloaded, verified, and started in an isolated process. Keep the app open until it finishes."}
+          </p>
+        </div>
+      ) : state.phase === "success" ? (
+        <div className="space-y-4" aria-live="polite">
+          <div className="flex items-start gap-2 text-sm font-medium text-emerald-700 dark:text-emerald-400">
+            <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <span>{zh ? "插件已完成校验并启动，可以在“已安装”中管理。" : "The plugin was verified and started. Manage it from Installed."}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-[12px]">
+            <div className="rounded-lg bg-white px-3 py-2.5 dark:bg-slate-900"><div className="text-slate-400">{zh ? "版本" : "Version"}</div><div className="mt-1 font-medium text-neutral-800 dark:text-white">v{state.result.version}</div></div>
+            <div className="rounded-lg bg-white px-3 py-2.5 dark:bg-slate-900"><div className="text-slate-400">{zh ? "耗时" : "Elapsed"}</div><div className="mt-1 font-medium text-neutral-800 dark:text-white">{formatElapsed(state.elapsedMs)}</div></div>
+            <div className="col-span-2 rounded-lg bg-white px-3 py-2.5 dark:bg-slate-900"><div className="text-slate-400">{zh ? "运行状态" : "Runtime"}</div><div className="mt-1 font-medium text-emerald-700 dark:text-emerald-400">{state.result.active ? (zh ? "运行中" : "Active") : (zh ? "已安装，待启用" : "Installed, inactive")}</div></div>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4" aria-live="assertive">
+          <div className="flex items-start gap-2 text-sm font-medium text-rose-700 dark:text-rose-400">
+            <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <span>{zh ? "安装未完成，原有插件版本已保留。" : "Installation did not complete. The previous plugin version was preserved."}</span>
+          </div>
+          <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-rose-50 px-3 py-2.5 font-mono text-[11px] leading-5 text-rose-800 dark:bg-rose-950/30 dark:text-rose-300">{state.error}</pre>
+          <p className="text-[12px] leading-5 text-slate-500">{zh ? "关闭提示后可以重新安装；如果问题持续，请查看插件详情中的运行诊断。" : "Close this message and try again. If it persists, review Runtime diagnostics in the plugin details."}</p>
+        </div>
+      )}
+    </ProgressDialog>
   );
 }
 
@@ -333,4 +462,9 @@ function comparePluginVersions(left: string, right: string): number {
     if (difference !== 0) return difference;
   }
   return 0;
+}
+
+function formatElapsed(milliseconds: number): string {
+  if (milliseconds < 1_000) return "<1s";
+  return `${(milliseconds / 1_000).toFixed(1)}s`;
 }

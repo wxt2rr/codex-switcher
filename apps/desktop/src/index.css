@@ -596,6 +596,15 @@ body {
   50% { opacity: 0.9; }
 }
 
+@keyframes plugin-install-progress {
+  0% { transform: translateX(-120%); }
+  45%, 100% { transform: translateX(320%); }
+}
+
+.plugin-install-progress {
+  animation: plugin-install-progress 1.45s ease-in-out infinite;
+}
+
 .usage-request-table {
   min-height: clamp(300px, 52vh, 620px);
 }

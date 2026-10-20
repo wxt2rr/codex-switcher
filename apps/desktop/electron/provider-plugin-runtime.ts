@@ -124,7 +124,7 @@ async function getManager(stateDir: string) {
     const next = new runtime.ProviderPluginManager({
       rootDir: join(stateDir, "provider-plugins"),
       settingsDir: join(stateDir, "provider-plugin-settings"),
-      pluginDataDir: join(stateDir, "provider-plugin-data"),
+      pluginDataDir: resolveProviderPluginDataDir(stateDir),
       ...(process.platform === "win32" ? {
         pluginDataFallbackDir: resolvePluginDataFallbackDir(stateDir),
       } : {}),
@@ -150,11 +150,26 @@ async function getManager(stateDir: string) {
 }
 
 /**
- * Returns the Windows path that is writable by the packaged Electron app.
- * MSIX/AppContainer builds can expose USERPROFILE and LOCALAPPDATA while
- * denying writes to arbitrary directories below them. The main process sets
- * CODEX_SWITCHER_PLUGIN_DATA_FALLBACK_DIR to Electron's app-specific
- * userData directory; standalone/dev hosts retain the conventional fallback.
+ * Returns the shared host-owned data directory used by managed provider
+ * plugins. Packaged Windows builds set this to an absolute application-data
+ * path before any IPC handler can create a plugin manager. The usage router
+ * inherits the same environment variable, so both processes use one store.
+ */
+export function resolveProviderPluginDataDir(stateDir: string): string {
+  if (process.platform !== "win32") return join(stateDir, "provider-plugin-data");
+  const configured = process.env.CODEX_SWITCHER_PLUGIN_DATA_DIR?.trim();
+  if (configured) return configured;
+  return join(
+    process.env.LOCALAPPDATA || join(process.env.USERPROFILE || stateDir, "AppData", "Local"),
+    "codex-switcher",
+    "provider-plugin-data",
+  );
+}
+
+/**
+ * Returns a second Windows location for hosts that cannot create the primary
+ * plugin data directory. This remains available for standalone/dev hosts and
+ * for older installations that have not set the new absolute directory env.
  */
 export function resolvePluginDataFallbackDir(stateDir: string): string {
   const configured = process.env.CODEX_SWITCHER_PLUGIN_DATA_FALLBACK_DIR?.trim();

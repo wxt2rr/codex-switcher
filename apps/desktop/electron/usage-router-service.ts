@@ -52,7 +52,7 @@ import { ConversationHistoryStore } from "./openai-chat-compat/history-store.js"
 import { FileHistoryPersistence } from "./openai-chat-compat/history-persistence.js";
 import { handleChatCompatibilityRequest } from "./openai-chat-compat/compatibility-handler.js";
 import { loadGatewayPluginRuntime } from "./core-runtime.js";
-import { resolvePluginDataFallbackDir } from "./provider-plugin-runtime.js";
+import { resolvePluginDataFallbackDir, resolveProviderPluginDataDir } from "./provider-plugin-runtime.js";
 import { closeUpstreamProxyAgents, fetchWithOptionalProxy, normalizeUpstreamProxyUrl, resolveUpstreamProxy, type UpstreamProxySource } from "./upstream-proxy.js";
 import {
   convertGatewayRequestAtRuntime,
@@ -1659,7 +1659,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
       // a process-local directory and lose their generated credentials and
       // runtime settings. In that state the route silently falls back to a
       // raw upstream request and Our Free Model returns 401.
-      pluginDataDir: join(pluginStateDir, "provider-plugin-data"),
+      pluginDataDir: resolveProviderPluginDataDir(pluginStateDir),
       ...(process.platform === "win32" ? {
         pluginDataFallbackDir: resolvePluginDataFallbackDir(pluginStateDir),
       } : {}),
