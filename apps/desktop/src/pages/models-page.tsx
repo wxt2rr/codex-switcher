@@ -369,6 +369,7 @@ export function ModelsPage({
                       envName: testAccount.envName,
                       accountName: testAccount.name,
                       model: model.entry.slug,
+                      modelId: model.id,
                       ...(discoveryInfo?.upstreamModelId || fallbackUpstreamModel
                         ? { upstreamModel: discoveryInfo?.upstreamModelId ?? fallbackUpstreamModel }
                         : {}),

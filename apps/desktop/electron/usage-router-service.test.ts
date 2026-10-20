@@ -5,6 +5,7 @@ import { connect as connectSocket } from "node:net";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 
 import { extractRouterErrorDiagnostics, extractSafeErrorMessage, sanitizeRouterErrorMessage, startUsageRouterService } from "./usage-router-service.js";
 import type { RouteTarget } from "./usage-routing-model.js";
@@ -360,6 +361,44 @@ test("native Responses routes preserve payload bytes, suffix and headers while r
 
   await service.close();
   await new Promise<void>((resolve, reject) => upstream.close((error) => error ? reject(error) : resolve()));
+});
+
+test("native Responses routes do not re-advertise decoded upstream gzip", async () => {
+  const upstream = createServer(async (request, response) => {
+    for await (const _chunk of request) { /* drain */ }
+    const payload = JSON.stringify({ model: "gzip-model", output_text: "compressed response" });
+    response.setHeader("content-type", "application/json");
+    response.setHeader("content-encoding", "gzip");
+    response.end(gzipSync(payload));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const address = upstream.address();
+  assert(address && typeof address !== "string");
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-router-gzip-"));
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+  const route = {
+    routeId: "route-gzip", envName: "work", accountName: "gzip-account",
+    upstreamBaseUrl: `http://127.0.0.1:${address.port}/v1`,
+    originalBaseUrl: `http://127.0.0.1:${address.port}/v1`,
+    protocol: "responses" as const, reasoningProfile: "auto" as const,
+    enabled: true, createdAt: Date.now(), updatedAt: Date.now(),
+  };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  try {
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify(route),
+    })).status, 204);
+    const response = await fetch(`${service.origin}/routes/${route.routeId}/responses`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "gzip-model", input: "hello" }),
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-encoding"), null);
+    assert.deepEqual(await response.json(), { model: "gzip-model", output_text: "compressed response" });
+  } finally {
+    await service.close();
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
 });
 
 test("native Responses routes inject hydrated AUTH credentials and account identity", async () => {
@@ -1379,6 +1418,55 @@ test("environment Gateway converts a Responses credential pool member to an Anth
   }
 });
 
+test("environment Gateway normalizes developer messages for Chat Completions upstreams", async () => {
+  let upstreamBody: Record<string, unknown> | undefined;
+  const upstream = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    upstreamBody = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ id: "developer-role-response", choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }] }));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const address = upstream.address(); assert(address && typeof address !== "string");
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-developer-role-"));
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+  const route = {
+    routeId: "route-chat-developer-role", envName: "work", accountName: "aliyun", providerId: "aliyun",
+    exposedModelId: "aliyun:glm-5.3", upstreamModel: "glm-5.3", upstreamBaseUrl: `http://127.0.0.1:${address.port}/v1`,
+    originalBaseUrl: "default", protocol: "chat_completions" as const, reasoningProfile: "auto" as const,
+    enabled: true, createdAt: 1, updatedAt: 1,
+  };
+  const gateway = {
+    gatewayId: "gateway-developer-role", envName: "work", routeIds: [route.routeId], defaultRouteId: route.routeId,
+    routeGroups: { "aliyun:glm-5.3": { id: "aliyun:glm-5.3", exposedModelId: "aliyun:glm-5.3", routeIds: [route.routeId], strategy: "order" as const, sessionPolicy: "off" as const, fallbackEnabled: true } },
+    enabled: true, createdAt: 1, updatedAt: 1,
+  };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  try {
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(route) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}/secret`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify({ upstreamApiKey: "aliyun-key", localRouteToken: "local-developer-role" }),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway) })).status, 204);
+
+    const response = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
+      method: "POST", headers: { authorization: "Bearer local-developer-role", "content-type": "application/json" },
+      body: JSON.stringify({ model: "aliyun:glm-5.3", input: [
+        { role: "developer", content: [{ type: "input_text", text: "follow policy" }] },
+        { role: "user", content: [{ type: "input_text", text: "hello" }] },
+      ] }),
+    });
+    assert.equal(response.status, 200);
+    await response.arrayBuffer();
+    assert.equal((upstreamBody?.messages as Array<{ role: string }>)[0]?.role, "system");
+    assert.equal((upstreamBody?.messages as Array<{ role: string }>)[1]?.role, "user");
+  } finally {
+    await service.close();
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
+});
+
 test("environment Gateway converts Responses requests and Chat SSE responses through the shared stream engine", async () => {
   let upstreamPath = "";
   let upstreamBody: Record<string, unknown> | undefined;
@@ -1429,8 +1517,14 @@ test("environment Gateway converts Responses requests and Chat SSE responses thr
     assert.equal(upstreamBody?.model, "chat-upstream-model");
     assert.deepEqual(upstreamBody?.messages, [{ role: "user", content: "hello" }]);
     assert.match(streamText, /event: response\.created/);
+    assert.match(streamText, /event: response\.in_progress/);
+    assert.match(streamText, /event: response\.output_item\.added/);
+    assert.match(streamText, /event: response\.content_part\.added/);
     assert.match(streamText, /event: response\.output_text\.delta/);
     assert.match(streamText, /hello/);
+    assert.match(streamText, /event: response\.output_text\.done/);
+    assert.match(streamText, /event: response\.content_part\.done/);
+    assert.match(streamText, /event: response\.output_item\.done/);
     assert.match(streamText, /event: response\.usage/);
     assert.match(streamText, /event: response\.completed/);
   } finally {

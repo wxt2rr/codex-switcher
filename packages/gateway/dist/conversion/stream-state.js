@@ -15,6 +15,9 @@ export function createResponseStreamState(source, target, metadata = {}, options
         nextToolCallIndex: 0,
         anthropicNextBlockIndex: 0,
         anthropicToolBlockIndexes: new Map(),
+        responseCreatedAt: Math.floor(Date.now() / 1000),
+        responseOutputIndex: 0,
+        responseToolStates: new Map(),
         usage: { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
         events: [],
     };
@@ -98,8 +101,14 @@ export async function failResponseStream(state, code, message) {
 function encodeStreamEvents(protocol, event, state) {
     const sequence = () => state.options.emitSequenceNumber ? { sequence_number: state.sequenceNumber++ } : {};
     if (event.type === "message_start") {
-        if (protocol === "responses")
-            return [json({ type: "response.created", response: { id: event.responseId, object: "response", status: "in_progress" }, ...sequence() })];
+        if (protocol === "responses") {
+            const model = state.metadata.upstreamModelName ?? state.metadata.originModelName;
+            const response = { id: event.responseId, object: "response", created_at: state.responseCreatedAt, status: "in_progress", ...(model ? { model } : {}), output: [], error: null, incomplete_details: null };
+            return [
+                json({ type: "response.created", response, ...sequence() }),
+                json({ type: "response.in_progress", response, ...sequence() }),
+            ];
+        }
         if (protocol === "chat_completions")
             return [json({ id: event.responseId, object: "chat.completion.chunk", choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }], ...sequence() })];
         if (protocol === "anthropic")
@@ -107,8 +116,16 @@ function encodeStreamEvents(protocol, event, state) {
         return [json({ responseId: event.responseId, candidates: [{ content: { role: "model", parts: [] } }], ...sequence() })];
     }
     if (event.type === "text_delta") {
-        if (protocol === "responses")
-            return [json({ type: "response.output_text.delta", delta: event.text, ...sequence() })];
+        if (protocol === "responses") {
+            if (!event.text)
+                return [];
+            const output = ensureResponseTextState(state);
+            output.text += event.text;
+            return [
+                ...announceResponseText(output, state, sequence),
+                json({ type: "response.output_text.delta", response_id: state.id, item_id: output.itemId, output_index: output.outputIndex, content_index: 0, delta: event.text, ...sequence() }),
+            ];
+        }
         if (protocol === "chat_completions")
             return [json({ id: state.id, object: "chat.completion.chunk", choices: [{ index: 0, delta: { content: event.text }, finish_reason: null }], ...sequence() })];
         if (protocol === "anthropic")
@@ -116,8 +133,16 @@ function encodeStreamEvents(protocol, event, state) {
         return [json({ responseId: state.id, candidates: [{ content: { role: "model", parts: [{ text: event.text }] } }], ...sequence() })];
     }
     if (event.type === "reasoning_delta") {
-        if (protocol === "responses")
-            return [json({ type: "response.reasoning_summary_text.delta", delta: event.text, ...sequence() })];
+        if (protocol === "responses") {
+            if (!event.text)
+                return [];
+            const output = ensureResponseReasoningState(state);
+            output.text += event.text;
+            return [
+                ...announceResponseReasoning(output, state, sequence),
+                json({ type: "response.reasoning_summary_text.delta", response_id: state.id, item_id: output.itemId, output_index: output.outputIndex, summary_index: 0, delta: event.text, ...sequence() }),
+            ];
+        }
         if (protocol === "chat_completions")
             return [json({ id: state.id, object: "chat.completion.chunk", choices: [{ index: 0, delta: { reasoning_content: event.text }, finish_reason: null }], ...sequence() })];
         if (protocol === "anthropic")
@@ -125,8 +150,28 @@ function encodeStreamEvents(protocol, event, state) {
         return [json({ responseId: state.id, candidates: [{ content: { role: "model", parts: [{ text: event.text, thought: true }] } }], ...sequence() })];
     }
     if (event.type === "tool_call_delta") {
-        if (protocol === "responses")
-            return [json({ type: "response.function_call_arguments.delta", item_id: event.callId, call_id: event.callId, ...(event.name ? { name: event.name } : {}), delta: event.argumentsDelta ?? "", ...sequence() })];
+        if (protocol === "responses") {
+            const tool = state.responseToolStates.get(event.callId) ?? {
+                callId: event.callId,
+                itemId: `fc_${state.id}_${state.responseToolStates.size}`,
+                arguments: "",
+                announced: false,
+            };
+            tool.name ??= event.name;
+            tool.arguments += event.argumentsDelta ?? "";
+            state.responseToolStates.set(event.callId, tool);
+            const events = [];
+            if (!tool.announced && tool.name) {
+                tool.announced = true;
+                tool.outputIndex = state.responseOutputIndex++;
+                events.push(json({ type: "response.output_item.added", response_id: state.id, output_index: tool.outputIndex, item: {
+                        id: tool.itemId, type: "function_call", status: "in_progress", arguments: "", call_id: tool.callId, name: tool.name,
+                    }, ...sequence() }));
+            }
+            if (tool.announced)
+                events.push(json({ type: "response.function_call_arguments.delta", response_id: state.id, item_id: tool.itemId, output_index: tool.outputIndex, call_id: tool.callId, ...(tool.name ? { name: tool.name } : {}), delta: event.argumentsDelta ?? "", ...sequence() }));
+            return events;
+        }
         if (protocol === "chat_completions")
             return [json({ id: state.id, object: "chat.completion.chunk", choices: [{ index: 0, delta: { tool_calls: [{ id: event.callId, type: "function", function: { ...(event.name ? { name: event.name } : {}), arguments: event.argumentsDelta ?? "" } }] }, finish_reason: null }], ...sequence() })];
         if (protocol === "anthropic") {
@@ -155,7 +200,7 @@ function encodeStreamEvents(protocol, event, state) {
         return [json({ error: { code: event.code, message: event.message }, ...sequence() })];
     }
     if (protocol === "responses")
-        return [json({ type: "response.completed", response: { id: state.id, status: "completed", usage: encodeUsage(protocol, state.usage) }, ...sequence() })];
+        return finishResponsesStream(state, event.reason, sequence);
     if (protocol === "chat_completions")
         return [json({ id: state.id, object: "chat.completion.chunk", choices: [{ index: 0, delta: {}, finish_reason: event.reason ?? "stop" }], ...sequence() })];
     if (protocol === "anthropic") {
@@ -168,6 +213,69 @@ function encodeStreamEvents(protocol, event, state) {
         return events;
     }
     return [json({ responseId: state.id, candidates: [{ finishReason: event.reason ?? "STOP" }], usageMetadata: encodeUsage(protocol, state.usage), ...sequence() })];
+}
+function ensureResponseTextState(state) {
+    if (!state.responseTextState)
+        state.responseTextState = { itemId: `msg_${state.id}`, outputIndex: state.responseOutputIndex++, text: "", announced: false };
+    return state.responseTextState;
+}
+function ensureResponseReasoningState(state) {
+    if (!state.responseReasoningState)
+        state.responseReasoningState = { itemId: `rs_${state.id}`, outputIndex: state.responseOutputIndex++, text: "", announced: false };
+    return state.responseReasoningState;
+}
+function announceResponseText(output, state, sequence) {
+    if (output.announced)
+        return [];
+    output.announced = true;
+    return [
+        json({ type: "response.output_item.added", response_id: state.id, output_index: output.outputIndex, item: {
+                id: output.itemId, type: "message", status: "in_progress", role: "assistant", content: [],
+            }, ...sequence() }),
+        json({ type: "response.content_part.added", response_id: state.id, item_id: output.itemId, output_index: output.outputIndex, content_index: 0, part: {
+                type: "output_text", text: "", annotations: [],
+            }, ...sequence() }),
+    ];
+}
+function announceResponseReasoning(output, state, sequence) {
+    if (output.announced)
+        return [];
+    output.announced = true;
+    return [
+        json({ type: "response.output_item.added", response_id: state.id, output_index: output.outputIndex, item: {
+                id: output.itemId, type: "reasoning", summary: [],
+            }, ...sequence() }),
+        json({ type: "response.reasoning_summary_part.added", response_id: state.id, item_id: output.itemId, output_index: output.outputIndex, summary_index: 0, part: {
+                type: "summary_text", text: "",
+            }, ...sequence() }),
+    ];
+}
+function finishResponsesStream(state, reason, sequence) {
+    const events = [];
+    const output = [];
+    const model = state.metadata.upstreamModelName ?? state.metadata.originModelName;
+    if (state.responseReasoningState) {
+        const reasoning = state.responseReasoningState;
+        const item = { id: reasoning.itemId, type: "reasoning", summary: [{ type: "summary_text", text: reasoning.text }] };
+        output.push({ ...item, output_index: reasoning.outputIndex });
+        events.push(json({ type: "response.reasoning_summary_text.done", response_id: state.id, item_id: reasoning.itemId, output_index: reasoning.outputIndex, summary_index: 0, text: reasoning.text, ...sequence() }), json({ type: "response.output_item.done", response_id: state.id, output_index: reasoning.outputIndex, item, ...sequence() }));
+    }
+    if (state.responseTextState) {
+        const text = state.responseTextState;
+        const item = { id: text.itemId, type: "message", status: "completed", role: "assistant", content: [{ type: "output_text", text: text.text, annotations: [] }] };
+        output.push({ ...item, output_index: text.outputIndex });
+        events.push(json({ type: "response.output_text.done", response_id: state.id, item_id: text.itemId, output_index: text.outputIndex, content_index: 0, text: text.text, ...sequence() }), json({ type: "response.content_part.done", response_id: state.id, item_id: text.itemId, output_index: text.outputIndex, content_index: 0, part: item.content[0], ...sequence() }), json({ type: "response.output_item.done", response_id: state.id, output_index: text.outputIndex, item, ...sequence() }));
+    }
+    for (const tool of [...state.responseToolStates.values()].filter((candidate) => candidate.announced).sort((left, right) => (left.outputIndex ?? 0) - (right.outputIndex ?? 0))) {
+        const item = { id: tool.itemId, type: "function_call", status: "completed", arguments: tool.arguments, call_id: tool.callId, name: tool.name ?? "tool" };
+        output.push({ ...item, output_index: tool.outputIndex ?? 0 });
+        events.push(json({ type: "response.function_call_arguments.done", response_id: state.id, item_id: tool.itemId, output_index: tool.outputIndex, arguments: tool.arguments, ...sequence() }), json({ type: "response.output_item.done", response_id: state.id, output_index: tool.outputIndex, item, ...sequence() }));
+    }
+    output.sort((left, right) => Number(left.output_index ?? 0) - Number(right.output_index ?? 0));
+    const incomplete = reason === "length" || reason === "max_tokens" || reason === "max_output_tokens" || reason === "incomplete";
+    const response = { id: state.id, object: "response", created_at: state.responseCreatedAt, status: incomplete ? "incomplete" : "completed", ...(model ? { model } : {}), output: output.map(({ output_index: _index, ...item }) => item), error: null, incomplete_details: incomplete ? { reason: reason ?? "incomplete" } : null, usage: encodeUsage("responses", state.usage) };
+    events.push(json({ type: incomplete ? "response.incomplete" : "response.completed", response, ...sequence() }));
+    return events;
 }
 function openAnthropicBlock(state, type, requestedIndex, tool) {
     const index = requestedIndex ?? state.anthropicNextBlockIndex;

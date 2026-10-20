@@ -162,6 +162,19 @@ export interface ModelRequestTestResult {
   model: string;
 }
 
+export interface ModelRequestPreviewInput {
+  envName: string;
+  accountName: string;
+  model: string;
+  prompt?: string;
+  route: RouteTarget;
+  upstreamApiKey?: string;
+  authMode?: "auth" | "apikey" | "none";
+  accountId?: string;
+  /** Keep managed provider routes unhydrated when the saved route would not have a secret. */
+  hydrateRouteSecret?: boolean;
+}
+
 interface RouteTokenFile { routes: Record<string, string>; pools?: Record<string, string>; }
 
 export interface EnvironmentRouteStatus {
@@ -208,6 +221,38 @@ function capabilityObservationEntry(key: string, value: unknown): GatewayCapabil
     ...(typeof observation.expiresAt === "number" ? { expiresAt: observation.expiresAt } : {}),
     ...(typeof observation.evidence === "string" ? { evidence: observation.evidence } : {}),
   }];
+}
+
+async function collectModelTestResult(
+  response: Response,
+  requestedModel: string,
+  startedAt: number,
+): Promise<ModelRequestTestResult> {
+  const raw = await response.text();
+  let parsed: Record<string, unknown> | undefined;
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (value && typeof value === "object" && !Array.isArray(value)) parsed = value as Record<string, unknown>;
+  } catch {
+    // Some providers return plain text or an SSE body. Keep a short excerpt.
+  }
+  const outputText = typeof parsed?.output_text === "string"
+    ? parsed.output_text
+    : typeof parsed?.response === "string"
+      ? parsed.response
+      : typeof parsed?.text === "string"
+        ? parsed.text
+        : Array.isArray(parsed?.choices) && typeof parsed.choices[0] === "object" && parsed.choices[0]
+          ? String((parsed.choices[0] as Record<string, unknown>).message && typeof (parsed.choices[0] as Record<string, unknown>).message === "object"
+            ? ((parsed.choices[0] as Record<string, unknown>).message as Record<string, unknown>).content ?? ""
+            : "")
+          : raw;
+  const excerpt = outputText.replace(/\s+/g, " ").trim().slice(0, 500);
+  if (!response.ok) {
+    const errorText = excerpt || `HTTP ${response.status}`;
+    return { ok: false, status: response.status, message: errorText, responseText: excerpt || undefined, latencyMs: Date.now() - startedAt, model: requestedModel };
+  }
+  return { ok: true, status: response.status, message: excerpt || "Model responded successfully", responseText: excerpt || undefined, latencyMs: Date.now() - startedAt, model: requestedModel };
 }
 
 export class UsageRouterManager {
@@ -985,33 +1030,88 @@ export class UsageRouterManager {
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(30_000),
       });
-      const raw = await response.text();
-      let parsed: Record<string, unknown> | undefined;
-      try {
-        const value = JSON.parse(raw) as unknown;
-        if (value && typeof value === "object" && !Array.isArray(value)) parsed = value as Record<string, unknown>;
-      } catch {
-        // Some providers return plain text or an SSE body. Keep a short excerpt.
-      }
-      const outputText = typeof parsed?.output_text === "string"
-        ? parsed.output_text
-        : typeof parsed?.response === "string"
-          ? parsed.response
-          : typeof parsed?.text === "string"
-            ? parsed.text
-            : Array.isArray(parsed?.choices) && typeof parsed.choices[0] === "object" && parsed.choices[0]
-              ? String((parsed.choices[0] as Record<string, unknown>).message && typeof (parsed.choices[0] as Record<string, unknown>).message === "object"
-                ? ((parsed.choices[0] as Record<string, unknown>).message as Record<string, unknown>).content ?? ""
-                : "")
-              : raw;
-      const excerpt = outputText.replace(/\s+/g, " ").trim().slice(0, 500);
-      if (!response.ok) {
-        const errorText = excerpt || `HTTP ${response.status}`;
-        return { ok: false, status: response.status, message: errorText, responseText: excerpt || undefined, latencyMs: Date.now() - startedAt, model: requestedModel };
-      }
-      return { ok: true, status: response.status, message: excerpt || "Model responded successfully", responseText: excerpt || undefined, latencyMs: Date.now() - startedAt, model: requestedModel };
+      return collectModelTestResult(response, requestedModel, startedAt);
     } catch (error) {
       return { ok: false, status: 502, message: error instanceof Error ? error.message : String(error), latencyMs: Date.now() - startedAt, model: requestedModel };
+    }
+  }
+
+  /**
+   * Test an unsaved account/model binding through an isolated, short-lived
+   * Gateway document. The live Gateway and catalog are never changed.
+   */
+  async testModelRequestPreview(input: ModelRequestPreviewInput): Promise<ModelRequestTestResult> {
+    const envName = input.envName.trim();
+    const accountName = input.accountName.trim();
+    const requestedModel = input.model.trim();
+    const prompt = input.prompt?.trim() || "你是什么模型";
+    if (!envName || !accountName || !requestedModel || !input.route.routeId || !input.route.exposedModelId) {
+      return { ok: false, status: 400, message: "Environment, account, model, and preview route are required", latencyMs: 0, model: requestedModel };
+    }
+
+    const state = await this.ensureService();
+    const previewGatewayId = `preview-${randomUUID()}`;
+    const previewGroupId = input.route.routeGroupId?.trim() || `preview-group-${randomUUID()}`;
+    const now = Date.now();
+    const previewGroup: EnvironmentGatewayRouteGroup = {
+      id: previewGroupId,
+      exposedModelId: input.route.exposedModelId,
+      routeIds: [input.route.routeId],
+      strategy: "order",
+      sessionPolicy: "off",
+      fallbackEnabled: false,
+      ...(input.route.capabilities ? { capabilities: input.route.capabilities } : {}),
+    };
+    const previewGateway: EnvironmentGateway = {
+      gatewayId: previewGatewayId,
+      envName,
+      routeIds: [input.route.routeId],
+      routeGroups: { [previewGroupId]: previewGroup },
+      defaultRouteId: input.route.routeId,
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const localRouteToken = randomBytes(32).toString("hex");
+    const startedAt = Date.now();
+    try {
+      await this.admin<void>(`/admin/routes/${encodeURIComponent(input.route.routeId)}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(input.route),
+      });
+      if (input.hydrateRouteSecret !== false) {
+        await this.admin<void>(`/admin/routes/${encodeURIComponent(input.route.routeId)}/secret`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            upstreamApiKey: input.upstreamApiKey ?? "",
+            localRouteToken,
+            authMode: input.authMode ?? "apikey",
+            accountId: input.accountId,
+          }),
+        });
+      }
+      await this.admin<void>("/admin/gateway-previews", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(previewGateway),
+      });
+      const headers = new Headers({ "content-type": "application/json" });
+      headers.set("x-codex-account", encodeURIComponent(accountName));
+      headers.set("x-codex-account-encoding", "uri");
+      const response = await fetch(`${buildLocalGatewayBaseUrl(state.port, previewGatewayId).replace("/gateways/", "/gateway-previews/")}/responses`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ model: requestedModel, input: prompt, max_output_tokens: 64 }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      return await collectModelTestResult(response, requestedModel, startedAt);
+    } catch (error) {
+      return { ok: false, status: 502, message: error instanceof Error ? error.message : String(error), latencyMs: Date.now() - startedAt, model: requestedModel };
+    } finally {
+      await this.admin<void>(`/admin/gateway-previews/${encodeURIComponent(previewGatewayId)}`, { method: "DELETE" }).catch(() => undefined);
+      await this.admin<void>(`/admin/routes/${encodeURIComponent(input.route.routeId)}`, { method: "DELETE" }).catch(() => undefined);
     }
   }
 

@@ -20,6 +20,12 @@ export interface ConversionMetadata {
 }
 export interface ConversionOptions {
     toolLossPolicy?: ToolLossPolicy;
+    /**
+     * Role used for developer instructions when encoding Chat Completions.
+     * Most compatible providers only accept `system`; preserve `developer`
+     * only when the route explicitly opts into it.
+     */
+    instructionRole?: "auto" | "system" | "developer";
     /** Capability observations for the selected provider/model/protocol route. */
     capabilityProfile?: CapabilityProfile;
     /** Safe mode omits unknown hosted tools; allow preserves legacy conversion. */

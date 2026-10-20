@@ -98,6 +98,7 @@ export function adaptProtocolRequest(
   targetProtocol: RouteProtocol,
   body: Record<string, unknown>,
   upstreamModel?: string,
+  instructionRole: "auto" | "system" | "developer" = "auto",
 ): Record<string, unknown> {
   if (sourceProtocol === targetProtocol) return upstreamModel ? { ...body, model: upstreamModel } : body;
   const normalized = sourceToResponses(sourceProtocol, body, upstreamModel);
@@ -105,7 +106,7 @@ export function adaptProtocolRequest(
   if (targetProtocol === "anthropic" || targetProtocol === "gemini") return adaptResponsesRequest(targetProtocol, normalized, upstreamModel);
   return {
     model: upstreamModel ?? normalized.model,
-    messages: normalizeMessages(normalized.input),
+    messages: normalizeMessages(normalized.input, instructionRole),
     ...(normalized.stream !== undefined ? { stream: normalized.stream } : {}),
     ...(normalized.tools !== undefined ? { tools: normalized.tools } : {}),
     ...(normalized.reasoning !== undefined ? { reasoning: normalized.reasoning } : {}),
@@ -208,13 +209,14 @@ function responseToCanonical(protocol: RouteProtocol, body: Record<string, unkno
   return { id: "gemini", text, ...(body.usageMetadata && typeof body.usageMetadata === "object" ? { usage: { input_tokens: Number((body.usageMetadata as Record<string, unknown>).promptTokenCount ?? 0), output_tokens: Number((body.usageMetadata as Record<string, unknown>).candidatesTokenCount ?? 0) } } : {}) };
 }
 
-function normalizeMessages(input: unknown): Array<{ role: string; content: unknown }> {
+function normalizeMessages(input: unknown, instructionRole: "auto" | "system" | "developer" = "auto"): Array<{ role: string; content: unknown }> {
   if (typeof input === "string") return [{ role: "user", content: input }];
   if (!Array.isArray(input)) return [{ role: "user", content: String(input ?? "") }];
   return input.map((item) => {
     if (item && typeof item === "object" && !Array.isArray(item)) {
       const record = item as Record<string, unknown>;
-      return { role: typeof record.role === "string" ? record.role : "user", content: record.content ?? record.text ?? record.parts ?? "" };
+      const role = typeof record.role === "string" ? record.role : "user";
+      return { role: role === "developer" && instructionRole !== "developer" ? "system" : role, content: record.content ?? record.text ?? record.parts ?? "" };
     }
     return { role: "user", content: String(item) };
   });

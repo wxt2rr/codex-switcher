@@ -25,6 +25,17 @@ test("the IR encodes a tool, reasoning and system message for every protocol", (
         assert.ok(JSON.stringify(body).includes("rules"));
     }
 });
+test("the Chat Completions codec downgrades developer messages to system", () => {
+    const request = decodeGatewayRequest("responses", {
+        model: "m",
+        input: [{ role: "developer", content: "rules" }, { role: "user", content: "hello" }],
+    }, context);
+    const body = encodeGatewayRequest("chat_completions", request, "upstream");
+    assert.deepEqual(body.messages, [
+        { role: "system", content: "rules" },
+        { role: "user", content: "hello" },
+    ]);
+});
 test("response events round-trip across non-streaming protocol envelopes", () => {
     const body = { id: "resp-1", output: [{ type: "message", content: [{ type: "output_text", text: "hello" }] }], usage: { input_tokens: 2, output_tokens: 3 } };
     const events = decodeGatewayResponse("responses", body);

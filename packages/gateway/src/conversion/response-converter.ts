@@ -31,7 +31,15 @@ export function decodeResponseEvents(protocol: GatewayProtocol, body: JsonObject
   else if (protocol === "anthropic") decodeAnthropic(body, events);
   else decodeGemini(body, events);
   const usage = decodeUsage(protocol, body) ?? (isObject(body.response) ? decodeUsage(protocol, body.response) : undefined);
-  if (usage) events.push({ type: "usage", usage });
+  if (usage) {
+    // Usage belongs to the terminal response and must be emitted before the
+    // terminal event on a stream. Codex treats response.completed as terminal
+    // and may ignore frames that arrive after it.
+    const terminalIndex = events.findIndex((event) => event.type === "message_end" || event.type === "error");
+    const usageEvent: ConversionResponseEvent = { type: "usage", usage };
+    if (terminalIndex >= 0) events.splice(terminalIndex, 0, usageEvent);
+    else events.push(usageEvent);
+  }
   if (!events.some((event) => event.type === "message_end" || event.type === "error")) events.push({ type: "message_end" });
   return events;
 }

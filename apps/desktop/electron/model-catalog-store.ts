@@ -152,6 +152,7 @@ export function createModelCatalogStore(path: string): ModelCatalogStore {
       const uniqueIds = [...new Set(modelIds)];
       const missing = uniqueIds.find((id) => !knownIds.has(id));
       if (missing) throw new Error(`Model '${missing}' not found`);
+      assertAccountModelsAvailable(snapshot, accountKey, uniqueIds);
       if (uniqueIds.length === 0) delete snapshot.accountBindings[accountKey];
       else snapshot.accountBindings[accountKey] = uniqueIds;
       if (optionsByModel !== undefined) {
@@ -178,90 +179,7 @@ export function createModelCatalogStore(path: string): ModelCatalogStore {
     },
     async setAccountBindingsFromCatalog(input) {
       const snapshot = await readSnapshot(path);
-      const uniqueSourceIds = [...new Set(input.modelIds)];
-      const sourceById = new Map(snapshot.models.map((model) => [model.id, model]));
-      const missing = uniqueSourceIds.find((id) => !sourceById.has(id));
-      if (missing) throw new Error(`Model '${missing}' not found`);
-
-      const existingByProviderKey = new Map(snapshot.models.flatMap((model) => {
-        const key = typeof model.entry.provider_model_key === "string" ? model.entry.provider_model_key.trim() : "";
-        return key ? [[key, model] as const] : [];
-      }));
-      const selectedIds: string[] = [];
-      const nextOptions: Record<string, ModelBindingOptions> = {};
-
-      for (const sourceId of uniqueSourceIds) {
-        const source = sourceById.get(sourceId)!;
-        const sourceOptions = snapshot.accountBindingOptions?.[input.accountKey]?.[sourceId] ?? {};
-        const configuredUpstreamId = sourceOptions.upstreamModelId?.trim();
-        const entryUpstreamId = resolveCatalogUpstreamModelId(source.entry);
-        const upstreamModelId = configuredUpstreamId || entryUpstreamId;
-        const providerModelKey = `${input.providerId}:${upstreamModelId}`;
-        let target = existingByProviderKey.get(providerModelKey);
-
-        if (!target) {
-          const slug = uniqueProviderModelSlug(snapshot.models, input.providerId, upstreamModelId, providerModelKey);
-          const entry = normalizeCustomModelInput({
-            ...source.entry,
-            slug,
-            display_name: source.entry.display_name,
-            provider_id: input.providerId,
-            ...(input.providerDisplayName ? { provider_display_name: input.providerDisplayName } : {}),
-            provider_model_key: providerModelKey,
-            upstream_model_id: upstreamModelId,
-            model_source: "manual",
-            protocol: input.protocol,
-            wire_api: input.protocol,
-            api_protocol: input.protocol,
-            supported_protocols: [input.protocol],
-          });
-          const now = new Date().toISOString();
-          target = { id: randomUUID(), entry, createdAt: now, updatedAt: now };
-          snapshot.models.push(target);
-          existingByProviderKey.set(providerModelKey, target);
-        } else {
-          const existingProtocols = Array.isArray(target.entry.supported_protocols)
-            ? target.entry.supported_protocols.filter((value): value is string => typeof value === "string")
-            : [];
-          const nextDisplayName = input.providerDisplayName?.trim()
-            || (typeof target.entry.provider_display_name === "string" ? target.entry.provider_display_name.trim() : "");
-          const missingProtocol = !existingProtocols.includes(input.protocol)
-            || target.entry.protocol !== input.protocol
-            || target.entry.wire_api !== input.protocol
-            || target.entry.api_protocol !== input.protocol;
-          const mismatchedUpstreamId = target.entry.upstream_model_id !== upstreamModelId;
-          const mismatchedProviderId = target.entry.provider_id !== input.providerId;
-          const mismatchedDisplayName = Boolean(nextDisplayName && target.entry.provider_display_name !== nextDisplayName);
-          if (mismatchedDisplayName || missingProtocol || mismatchedUpstreamId || mismatchedProviderId) {
-            target.entry = normalizeCustomModelInput({
-              ...target.entry,
-              provider_id: input.providerId,
-              provider_model_key: providerModelKey,
-              upstream_model_id: upstreamModelId,
-              protocol: input.protocol,
-              wire_api: input.protocol,
-              api_protocol: input.protocol,
-              ...(nextDisplayName ? { provider_display_name: nextDisplayName } : {}),
-              supported_protocols: [...new Set([...existingProtocols, input.protocol])],
-            });
-            target.updatedAt = new Date().toISOString();
-          }
-        }
-
-        selectedIds.push(target.id);
-        const { upstreamModelId: _upstreamModelId, ...sourceBindingOptions } = sourceOptions;
-        const bindingOptions = normalizeModelBindingOptions(sourceBindingOptions);
-        if (Object.keys(bindingOptions).length) nextOptions[target.id] = bindingOptions;
-      }
-
-      if (selectedIds.length) snapshot.accountBindings[input.accountKey] = [...new Set(selectedIds)];
-      else delete snapshot.accountBindings[input.accountKey];
-      if (Object.keys(nextOptions).length) {
-        snapshot.accountBindingOptions ??= {};
-        snapshot.accountBindingOptions[input.accountKey] = nextOptions;
-      } else if (snapshot.accountBindingOptions) {
-        delete snapshot.accountBindingOptions[input.accountKey];
-      }
+      projectAccountBindingsFromCatalog(snapshot, input);
       await writeSnapshot(path, snapshot);
       return snapshot;
     },
@@ -271,6 +189,7 @@ export function createModelCatalogStore(path: string): ModelCatalogStore {
         throw new Error(`Model '${modelId}' not found`);
       }
       const selectedKeys = new Set(accountKeys);
+      for (const accountKey of selectedKeys) assertAccountModelsAvailable(snapshot, accountKey, [modelId]);
       const allKeys = new Set([...Object.keys(snapshot.accountBindings), ...selectedKeys]);
       for (const accountKey of allKeys) {
         const withoutModel = (snapshot.accountBindings[accountKey] ?? []).filter((id) => id !== modelId);
@@ -387,6 +306,153 @@ export function createModelCatalogStore(path: string): ModelCatalogStore {
       return snapshot;
     },
   };
+}
+
+/**
+ * Applies the same account/provider rebinding used by saveAccountModelBindings
+ * to an in-memory snapshot. Preview requests use this projection so they can
+ * compile the exact route that saving would create without mutating the
+ * catalog on disk.
+ */
+export function projectAccountBindingsFromCatalog(
+  snapshot: ModelCatalogSnapshot,
+  input: Parameters<ModelCatalogStore["setAccountBindingsFromCatalog"]>[0],
+): ModelCatalogSnapshot {
+  const uniqueSourceIds = [...new Set(input.modelIds)];
+  const sourceById = new Map(snapshot.models.map((model) => [model.id, model]));
+  const missing = uniqueSourceIds.find((id) => !sourceById.has(id));
+  if (missing) throw new Error(`Model '${missing}' not found`);
+  assertAccountModelsAvailable(snapshot, input.accountKey, uniqueSourceIds);
+
+  const existingByProviderKey = new Map(snapshot.models.flatMap((model) => {
+    const key = typeof model.entry.provider_model_key === "string" ? model.entry.provider_model_key.trim() : "";
+    return key ? [[key, model] as const] : [];
+  }));
+  const selectedIds: string[] = [];
+  const nextOptions: Record<string, ModelBindingOptions> = {};
+
+  for (const sourceId of uniqueSourceIds) {
+    const source = sourceById.get(sourceId)!;
+    const sourceOptions = snapshot.accountBindingOptions?.[input.accountKey]?.[sourceId] ?? {};
+    const configuredUpstreamId = sourceOptions.upstreamModelId?.trim();
+    const entryUpstreamId = resolveCatalogUpstreamModelId(source.entry);
+    const upstreamModelId = configuredUpstreamId || entryUpstreamId;
+    const providerModelKey = `${input.providerId}:${upstreamModelId}`;
+    let target = existingByProviderKey.get(providerModelKey);
+
+    if (!target) {
+      const slug = uniqueProviderModelSlug(snapshot.models, input.providerId, upstreamModelId, providerModelKey);
+      const entry = normalizeCustomModelInput({
+        ...source.entry,
+        slug,
+        display_name: source.entry.display_name,
+        provider_id: input.providerId,
+        ...(input.providerDisplayName ? { provider_display_name: input.providerDisplayName } : {}),
+        provider_model_key: providerModelKey,
+        upstream_model_id: upstreamModelId,
+        model_source: "manual",
+        protocol: input.protocol,
+        wire_api: input.protocol,
+        api_protocol: input.protocol,
+        supported_protocols: [input.protocol],
+      });
+      const now = new Date().toISOString();
+      target = { id: randomUUID(), entry, createdAt: now, updatedAt: now };
+      snapshot.models.push(target);
+      existingByProviderKey.set(providerModelKey, target);
+    } else {
+      const existingProtocols = Array.isArray(target.entry.supported_protocols)
+        ? target.entry.supported_protocols.filter((value): value is string => typeof value === "string")
+        : [];
+      const nextDisplayName = input.providerDisplayName?.trim()
+        || (typeof target.entry.provider_display_name === "string" ? target.entry.provider_display_name.trim() : "");
+      const missingProtocol = !existingProtocols.includes(input.protocol)
+        || target.entry.protocol !== input.protocol
+        || target.entry.wire_api !== input.protocol
+        || target.entry.api_protocol !== input.protocol;
+      const mismatchedUpstreamId = target.entry.upstream_model_id !== upstreamModelId;
+      const mismatchedProviderId = target.entry.provider_id !== input.providerId;
+      const mismatchedDisplayName = Boolean(nextDisplayName && target.entry.provider_display_name !== nextDisplayName);
+      if (mismatchedDisplayName || missingProtocol || mismatchedUpstreamId || mismatchedProviderId) {
+        target.entry = normalizeCustomModelInput({
+          ...target.entry,
+          provider_id: input.providerId,
+          provider_model_key: providerModelKey,
+          upstream_model_id: upstreamModelId,
+          protocol: input.protocol,
+          wire_api: input.protocol,
+          api_protocol: input.protocol,
+          ...(nextDisplayName ? { provider_display_name: nextDisplayName } : {}),
+          supported_protocols: [...new Set([...existingProtocols, input.protocol])],
+        });
+        target.updatedAt = new Date().toISOString();
+      }
+    }
+
+    selectedIds.push(target.id);
+    const { upstreamModelId: _upstreamModelId, ...sourceBindingOptions } = sourceOptions;
+    const bindingOptions = normalizeModelBindingOptions(sourceBindingOptions);
+    if (Object.keys(bindingOptions).length) nextOptions[target.id] = bindingOptions;
+
+    // A provider may return an empty model list even though the user knows a
+    // model is available and explicitly selects it from the shared catalog.
+    // Keep that explicit choice routeable. Without this marker, a successful
+    // empty discovery is treated as authoritative and the gateway compiler
+    // drops the just-selected model before the preview/save path can use it.
+    const discovery = snapshot.accountModelDiscoveries?.[input.accountKey];
+    if (discovery?.state === "ready") {
+      const providerModelKey = typeof target.entry.provider_model_key === "string"
+        ? target.entry.provider_model_key.trim()
+        : `${input.providerId}:${upstreamModelId}`;
+      const now = new Date().toISOString();
+      const previous = discovery.models.find((model) => model.providerModelKey === providerModelKey);
+      const supportedProtocols = Array.isArray(target.entry.supported_protocols)
+        ? target.entry.supported_protocols.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        : [input.protocol];
+      const manualModel: AccountDiscoveredModel = {
+        providerModelKey,
+        providerId: input.providerId,
+        ...(input.providerDisplayName ? { providerDisplayName: input.providerDisplayName } : {}),
+        upstreamModelId,
+        displayName: target.entry.display_name,
+        protocols: [...new Set(supportedProtocols)],
+        capabilities: {
+          reasoning: Array.isArray(target.entry.supported_reasoning_levels)
+            || target.entry.supports_reasoning_summaries === true,
+          tools: target.entry.supports_parallel_tool_calls === true,
+          vision: Array.isArray(target.entry.input_modalities)
+            && target.entry.input_modalities.includes("image"),
+          streaming: target.entry.streaming !== false,
+        },
+        ...(typeof target.entry.context_window === "number" && target.entry.context_window > 0
+          ? { contextWindow: Math.floor(target.entry.context_window) }
+          : {}),
+        source: "manual",
+        status: "available",
+        firstSeenAt: previous?.firstSeenAt ?? now,
+        lastSeenAt: now,
+      };
+      snapshot.accountModelDiscoveries ??= {};
+      snapshot.accountModelDiscoveries[input.accountKey] = {
+        ...discovery,
+        providerId: input.providerId,
+        models: [
+          ...discovery.models.filter((model) => model.providerModelKey !== providerModelKey),
+          manualModel,
+        ],
+      };
+    }
+  }
+
+  if (selectedIds.length) snapshot.accountBindings[input.accountKey] = [...new Set(selectedIds)];
+  else delete snapshot.accountBindings[input.accountKey];
+  if (Object.keys(nextOptions).length) {
+    snapshot.accountBindingOptions ??= {};
+    snapshot.accountBindingOptions[input.accountKey] = nextOptions;
+  } else if (snapshot.accountBindingOptions) {
+    delete snapshot.accountBindingOptions[input.accountKey];
+  }
+  return snapshot;
 }
 
 export function normalizeCustomModelInput(value: Record<string, unknown>): ModelCatalogEntry {
@@ -620,6 +686,13 @@ export function resolveModelCatalogProviderId(providerId: string, baseUrl?: stri
   if (!new Set(["custom", "custom-openai"]).has(normalizedProviderId) || !baseUrl?.trim()) {
     return normalizedProviderId;
   }
+  // The account runtime points at the local Gateway while an environment
+  // Gateway is enabled. That listener is an ingress transport, not the
+  // upstream service identity; including its port and gateway id in the
+  // catalog key creates provider names that cannot match Gateway credentials.
+  if (/^https?:\/\/(?:127\.0\.0\.1|localhost):\d+\/(?:routes|pools|gateways)\//i.test(baseUrl.trim())) {
+    return normalizedProviderId;
+  }
   try {
     const url = new URL(baseUrl.trim());
     const host = `${url.hostname.toLowerCase()}${url.port ? `-${url.port}` : ""}`;
@@ -695,6 +768,33 @@ export function isModelAvailableForAccount(
   // after the provider stops advertising it. Failed or in-progress discovery
   // intentionally keeps the old binding as a recovery fallback.
   return discovery.state !== "ready";
+}
+
+/**
+ * Reject explicit bindings to models that a successful provider refresh
+ * marked unavailable. A discovery failure remains a recovery fallback, and a
+ * model without provider metadata remains a user-authored manual model.
+ */
+function assertAccountModelsAvailable(
+  snapshot: ModelCatalogSnapshot,
+  accountKey: string,
+  modelIds: readonly string[],
+): void {
+  const discovery = snapshot.accountModelDiscoveries?.[accountKey];
+  if (discovery?.state !== "ready") return;
+  const modelsById = new Map(snapshot.models.map((model) => [model.id, model]));
+  for (const modelId of modelIds) {
+    const model = modelsById.get(modelId);
+    if (!model) continue;
+    const providerModelKey = typeof model.entry.provider_model_key === "string"
+      ? model.entry.provider_model_key.trim()
+      : "";
+    if (!providerModelKey) continue;
+    const discovered = discovery.models.find((candidate) => candidate.providerModelKey === providerModelKey);
+    if (discovered?.status === "unavailable" || !discovered) {
+      throw new Error(`Model '${model.entry.display_name}' is no longer available from this provider; refresh the provider models and choose an available model`);
+    }
+  }
 }
 
 export function filterModelCatalogBindings(

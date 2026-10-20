@@ -61,6 +61,22 @@ test("converts every ingress protocol to every upstream protocol", () => {
   }
 });
 
+test("normalizes developer messages in the legacy Chat Completions adapter", () => {
+  const body = adaptProtocolRequest("responses", "chat_completions", {
+    model: "logical",
+    input: [{ role: "developer", content: "rules" }, { role: "user", content: "hello" }],
+  }, "upstream");
+  assert.deepEqual(body.messages, [
+    { role: "system", content: "rules" },
+    { role: "user", content: "hello" },
+  ]);
+  const explicit = adaptProtocolRequest("responses", "chat_completions", {
+    model: "logical",
+    input: [{ role: "developer", content: "rules" }],
+  }, "upstream", "developer");
+  assert.deepEqual(explicit.messages, [{ role: "developer", content: "rules" }]);
+});
+
 test("converts JSON and SSE responses back to the client protocol", () => {
   const upstream = { id: "r", content: [{ type: "text", text: "hello" }], usage: { input_tokens: 2, output_tokens: 3 } };
   const anthropic = adaptProtocolResponse("anthropic", "responses", upstream);

@@ -76,7 +76,7 @@ function encodeProtocolRequest(source, protocol, request, options, diagnostics) 
     if (protocol === "chat_completions") {
         return {
             model: request.model,
-            messages: request.messages.map(encodeChatMessage),
+            messages: request.messages.map((message) => encodeChatMessage(message, options.instructionRole)),
             stream: request.stream,
             ...(encodedTools ? { tools: encodedTools } : {}),
             ...(reasoning ? { reasoning } : {}),
@@ -198,11 +198,12 @@ function encodeResponsesPart(part) {
         return { type: "function_call_output", call_id: asString(part.value.call_id) ?? asString(part.value.tool_call_id) ?? "call", output: part.value.output ?? part.value.content ?? "" };
     return { type: part.type === "tool_use" ? "function_call" : part.type === "tool_result" ? "function_call_output" : "input_text", ...(isObject(part.value) ? part.value : { text: String(part.value) }) };
 }
-function encodeChatMessage(message) {
+function encodeChatMessage(message, instructionRole = "auto") {
     const toolFields = encodeChatToolFields(message.parts);
     const hasToolCall = message.parts.some((part) => part.type === "tool_use");
     const hasVisibleContent = message.parts.some((part) => part.type === "text" || part.type === "image" || part.type === "file");
-    const result = { role: message.role, ...(message.name ? { name: message.name } : {}), content: hasToolCall && !hasVisibleContent ? null : encodeChatContent(message.parts), ...toolFields };
+    const role = message.role === "developer" && instructionRole !== "developer" ? "system" : message.role;
+    const result = { role, ...(message.name ? { name: message.name } : {}), content: hasToolCall && !hasVisibleContent ? null : encodeChatContent(message.parts), ...toolFields };
     if (message.role === "tool" && isObject(message.parts[0]?.value)) {
         const value = message.parts[0].value;
         result.tool_call_id = asString(value.tool_call_id) ?? asString(value.call_id) ?? asString(value.id) ?? "call";

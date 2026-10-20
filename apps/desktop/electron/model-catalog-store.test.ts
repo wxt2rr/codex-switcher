@@ -8,7 +8,10 @@ import {
   createModelCatalogStore,
   filterModelCatalogBindings,
   formatCodexModelDisplayName,
+  isModelAvailableForAccount,
   normalizeCustomModelInput,
+  projectAccountBindingsFromCatalog,
+  resolveModelCatalogProviderId,
 } from "./model-catalog-store.js";
 
 const entry = {
@@ -218,6 +221,51 @@ test("account model discovery preserves selected history and marks missing model
   assert.equal(snapshot.accountModelDiscoveries?.["default/deepseek"]?.models[0]?.status, "unavailable");
 });
 
+test("a successful refresh prevents unavailable models from being rebound or projected", async () => {
+  const root = await mkdtemp(join(tmpdir(), "model-discovery-unavailable-binding-"));
+  const store = createModelCatalogStore(join(root, "models.json"));
+  await store.saveAccountModelDiscovery({
+    accountKey: "test/ourfree1",
+    providerId: "our-free-model",
+    state: "ready",
+    models: [{
+      providerModelKey: "our-free-model:stepfun/step-5-preview-free",
+      providerId: "our-free-model",
+      upstreamModelId: "stepfun/step-5-preview-free",
+      displayName: "StepFun Step 5 Preview Free",
+      protocols: ["responses"],
+      capabilities: { reasoning: true, tools: true, vision: false, streaming: true },
+      source: "discovery",
+    }],
+  });
+  const model = (await store.load()).models[0]!;
+  await store.saveAccountModelDiscovery({
+    accountKey: "test/ourfree1",
+    providerId: "our-free-model",
+    state: "ready",
+    models: [],
+  });
+
+  await assert.rejects(
+    store.setAccountBindings("test/ourfree1", [model.id]),
+    /no longer available from this provider/,
+  );
+  await assert.rejects(
+    store.setModelBindings(model.id, ["test/ourfree1"]),
+    /no longer available from this provider/,
+  );
+  const snapshot = await store.load();
+  assert.throws(
+    () => projectAccountBindingsFromCatalog(structuredClone(snapshot), {
+      accountKey: "test/ourfree1",
+      modelIds: [model.id],
+      providerId: "our-free-model",
+      protocol: "responses",
+    }),
+    /no longer available from this provider/,
+  );
+});
+
 test("provider switch migrates the selected account binding to the new provider model", async () => {
   const root = await mkdtemp(join(tmpdir(), "model-discovery-provider-switch-"));
   const store = createModelCatalogStore(join(root, "models.json"));
@@ -253,6 +301,67 @@ test("provider switch migrates the selected account binding to the new provider 
     weight: 2,
   });
   assert.equal(snapshot.accountBindings["test/阿里云"]?.includes(oldCatalogModel.id), false);
+});
+
+test("catalog binding projection creates the provider model without mutating the source snapshot", async () => {
+  const root = await mkdtemp(join(tmpdir(), "model-binding-projection-"));
+  const store = createModelCatalogStore(join(root, "models.json"));
+  const source = await store.saveModel({ entry: { slug: "openai:gpt-5.5", display_name: "GPT-5.5", upstream_model_id: "gpt-5.5" } });
+  const snapshot = await store.load();
+  const projected = projectAccountBindingsFromCatalog(structuredClone(snapshot), {
+    accountKey: "test/ckt-aicode",
+    modelIds: [source.id],
+    providerId: "custom-openai:ckt.cn",
+    providerDisplayName: "ckt-aicode",
+    protocol: "responses",
+  });
+
+  assert.deepEqual(snapshot.accountBindings, {});
+  const targetId = projected.accountBindings["test/ckt-aicode"]?.[0];
+  assert.ok(targetId);
+  const target = projected.models.find((model) => model.id === targetId);
+  assert.equal(target?.entry.slug, "custom-openai:ckt.cn:gpt-5.5");
+  assert.equal(target?.entry.upstream_model_id, "gpt-5.5");
+});
+
+test("manual fallback selection stays routeable after an empty discovery", async () => {
+  const root = await mkdtemp(join(tmpdir(), "model-binding-manual-fallback-"));
+  const store = createModelCatalogStore(join(root, "models.json"));
+  const source = await store.saveModel({ entry: {
+    slug: "openai:glm-5.3", display_name: "glm-5.3", upstream_model_id: "glm-5.3",
+    supported_protocols: ["responses"], input_modalities: ["text"],
+  } });
+  await store.saveAccountModelDiscovery({
+    accountKey: "test/ckt-aicode",
+    providerId: "custom-openai:127.0.0.1-17832:gateways-test",
+    state: "ready",
+    models: [],
+  });
+  const snapshot = await store.load();
+  const projected = projectAccountBindingsFromCatalog(structuredClone(snapshot), {
+    accountKey: "test/ckt-aicode",
+    modelIds: [source.id],
+    providerId: "custom-openai",
+    protocol: "responses",
+  });
+
+  const targetId = projected.accountBindings["test/ckt-aicode"]?.[0];
+  const target = projected.models.find((model) => model.id === targetId);
+  assert.ok(target);
+  assert.equal(isModelAvailableForAccount(projected, target, "test/ckt-aicode"), true);
+  assert.equal(projected.accountModelDiscoveries?.["test/ckt-aicode"]?.models[0]?.status, "available");
+  assert.equal(projected.accountModelDiscoveries?.["test/ckt-aicode"]?.models[0]?.source, "manual");
+});
+
+test("catalog provider identity ignores the local Gateway ingress URL", () => {
+  assert.equal(
+    resolveModelCatalogProviderId("custom-openai", "http://127.0.0.1:17832/gateways/test-gateway"),
+    "custom-openai",
+  );
+  assert.equal(
+    resolveModelCatalogProviderId("custom-openai", "https://aicode.ckt.cn/v1"),
+    "custom-openai:aicode.ckt.cn",
+  );
 });
 
 test("failed discovery preserves the previous models as stale", async () => {

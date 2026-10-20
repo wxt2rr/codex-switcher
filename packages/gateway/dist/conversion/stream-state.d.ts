@@ -19,6 +19,29 @@ export interface ResponseStreamState {
     };
     anthropicNextBlockIndex: number;
     anthropicToolBlockIndexes: Map<string, number>;
+    /** Output item bookkeeping used when emitting a native Responses stream. */
+    responseCreatedAt: number;
+    responseOutputIndex: number;
+    responseTextState?: {
+        itemId: string;
+        outputIndex: number;
+        text: string;
+        announced: boolean;
+    };
+    responseReasoningState?: {
+        itemId: string;
+        outputIndex: number;
+        text: string;
+        announced: boolean;
+    };
+    responseToolStates: Map<string, {
+        callId: string;
+        itemId: string;
+        outputIndex?: number;
+        name?: string;
+        arguments: string;
+        announced: boolean;
+    }>;
     usage: ConversionUsage;
     events: ConversionResponseEvent[];
 }

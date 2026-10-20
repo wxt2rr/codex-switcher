@@ -11,6 +11,12 @@ test("stream state preserves chunk order, tool argument deltas and final usage",
     assert.equal(JSON.stringify([...first.value, ...second.value]).includes("lo"), true);
     assert.equal(JSON.stringify([...first.value, ...second.value]).includes("{\\\"q\\\":"), true);
     assert.equal(final.value.some((event) => event.type === "response.completed"), true);
+    assert.equal(first.value.some((event) => event.type === "response.output_item.added"), true);
+    assert.equal(first.value.some((event) => event.type === "response.content_part.added"), true);
+    assert.equal(final.value.some((event) => event.type === "response.output_text.done"), true);
+    assert.equal(final.value.some((event) => event.type === "response.content_part.done"), true);
+    assert.equal(final.value.some((event) => event.type === "response.output_item.done"), true);
+    assert.equal(final.value.findIndex((event) => event.type === "response.usage") < final.value.findIndex((event) => event.type === "response.completed"), true);
     assert.equal(state.usage.inputTokens, 2);
     assert.equal(state.usage.outputTokens, 4);
     assert.equal(state.ended, true);

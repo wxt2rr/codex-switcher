@@ -39,7 +39,7 @@ test("gateway runtime dispatches across protocols and records usage", async () =
   const streamChunk = await runtime.convertStreamChunk(stream, { id: "chatcmpl-stream", choices: [{ delta: { content: "done" }, finish_reason: null }] });
   const streamEnd = await runtime.finalizeStream(stream);
   assert.equal(streamChunk.value[0]?.type, "response.created");
-  assert.equal(streamEnd.value[0]?.type, "response.completed");
+  assert.equal(streamEnd.value.some((event) => event.type === "response.completed"), true);
 
   const completion = await runtime.complete({
     dispatch,

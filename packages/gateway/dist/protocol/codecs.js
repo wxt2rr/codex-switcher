@@ -192,7 +192,11 @@ function messageToResponses(message) {
     return compactObject({ role: message.role, content: message.parts.map(partToOpenAI) });
 }
 function messageToChat(message) {
-    return compactObject({ role: message.role, content: message.parts.length === 1 && message.parts[0]?.type === "text" ? messageText(message) : message.parts.map(partToOpenAI) });
+    // Chat Completions providers commonly accept `system` but reject the newer
+    // `developer` role. The shared codec has no provider-specific role setting,
+    // so keep its default wire contract broadly compatible.
+    const role = message.role === "developer" ? "system" : message.role;
+    return compactObject({ role, content: message.parts.length === 1 && message.parts[0]?.type === "text" ? messageText(message) : message.parts.map(partToOpenAI) });
 }
 function messageToAnthropic(message) {
     return compactObject({ role: message.role === "tool" ? "user" : message.role, content: message.parts.map(partToAnthropicPart) });

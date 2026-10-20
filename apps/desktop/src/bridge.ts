@@ -204,6 +204,7 @@ export interface ModelRequestTestRequest {
   envName: string;
   accountName: string;
   model: string;
+  modelId?: string;
   upstreamModel?: string;
   prompt?: string;
 }

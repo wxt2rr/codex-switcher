@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -165,6 +166,57 @@ test("environment gateway materializes explicit catalog models without intent ro
     assert.equal(secondRoutes.some((route) => route.exposedModelId === "next-model"), true);
   } finally {
     await service?.close();
+  }
+});
+
+test("model request preview uses an isolated gateway route without changing saved routes", async () => {
+  let receivedModel = "";
+  const upstream = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { model?: string };
+    receivedModel = body.model ?? "";
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ output_text: "preview ok" }));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const address = upstream.address();
+  assert(address && typeof address !== "string");
+
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-manager-preview-"));
+  let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
+  const manager = new UsageRouterManager({
+    stateDir, serviceEntryPath: "unused",
+    launchService: async () => { service = await startUsageRouterService({ stateDir: join(stateDir, "usage-router") }); },
+  });
+  try {
+    const account = { envName: "work", accountName: "key", authMode: "apikey" as const, baseUrl: `http://127.0.0.1:${address.port}/v1`, apiKey: "sk-preview", providerId: "custom" };
+    await manager.enableEnvironmentGateway("work", [account], async () => undefined, {
+      model: { id: "model", exposedModelId: "catalog:model", strategy: "order", sessionPolicy: "off", fallbackEnabled: true },
+    }, [{
+      providerId: "custom", modelId: "custom/model", upstreamModel: "upstream-model", exposedModelId: "catalog:model",
+      routeGroupId: "model", accountNames: ["key"], protocols: ["responses"], capabilities: { streaming: true },
+    }]);
+
+    const savedRoutes = await manager.listRoutes();
+    const savedGateway = (await manager.listEnvironmentGateways())[0];
+    assert(savedGateway);
+    const savedRouteIds = savedRoutes.map((route) => route.routeId).sort();
+    const modelRoute = savedRoutes.find((route) => route.exposedModelId === "catalog:model");
+    assert(modelRoute);
+    const preview = await manager.testModelRequestPreview({
+      envName: "work", accountName: "key", model: "catalog:model", prompt: "你是什么模型",
+      route: { ...modelRoute, routeId: "preview-route-test", createdAt: Date.now(), updatedAt: Date.now() },
+      upstreamApiKey: "sk-preview", authMode: "apikey",
+    });
+    assert.equal(preview.ok, true);
+    assert.equal(receivedModel, "upstream-model");
+    assert.deepEqual((await manager.listRoutes()).map((route) => route.routeId).sort(), savedRouteIds);
+    assert.equal((await manager.listEnvironmentGateways())[0]?.gatewayId, savedGateway.gatewayId);
+  } finally {
+    await service?.close();
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    await rm(stateDir, { recursive: true, force: true });
   }
 });
 

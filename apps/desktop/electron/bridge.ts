@@ -43,6 +43,8 @@ import {
   isLocalRouterBaseUrl,
   resolveRouteDisplayBaseUrl,
   selectCompatibilityUpstreamBaseUrl,
+  type EnvironmentGateway,
+  type RouteTarget,
   type PricingProfile,
   type RouteCapabilities,
   type RouteProtocol,
@@ -108,7 +110,9 @@ import {
   createModelCatalogStore,
   accountModelBindingKey,
   filterModelCatalogBindings,
+  isModelAvailableForAccount,
   normalizeCustomModelInput,
+  projectAccountBindingsFromCatalog,
   resolveModelCatalogProviderId,
   type AccountDiscoveredModel,
   type ModelBindingOptions,
@@ -1052,15 +1056,127 @@ export async function toggleEnvironmentGateway(envName: string, enabled: boolean
 async function buildEnvironmentGatewayState(
   runtime: Awaited<ReturnType<typeof loadCoreRuntime>>,
   environment: Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>["envs"][string],
+  snapshotOverride?: ModelCatalogSnapshot,
 ): Promise<GatewayEnvironmentState> {
   const base = synchronizeGatewayAccountMetadata(
     environment,
     environment.gateway ?? runtime.buildLegacyGatewayEnvironmentState(environment),
     { rebindRoutes: true },
   );
-  const snapshot = await getModelCatalogStore().load();
+  const snapshot = snapshotOverride ?? await getModelCatalogStore().load();
   const bundledModels = await loadGatewayBundledModels(environment, snapshot);
   return applyModelCatalogBindings(environment, base, snapshot, bundledModels);
+}
+
+async function buildModelRequestPreview(
+  input: { envName: string; accountName: string; model: string; modelId?: string; prompt?: string },
+): Promise<Parameters<UsageRouterManager["testModelRequestPreview"]>[0] | undefined> {
+  // A preview is only meaningful when the environment is currently using the
+  // Gateway ingress. Direct account routing must keep using the direct test
+  // path so the button reflects the same runtime mode as the saved config.
+  if (!input.modelId) return undefined;
+  const activeGateways = await getUsageRouterManager().listPersistedEnvironmentGateways().catch(() => []);
+  if (!activeGateways.some((gateway) => gateway.envName === input.envName && gateway.enabled)) return undefined;
+
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const environment = state.envs[input.envName];
+  const account = environment?.accounts[input.accountName];
+  if (!environment || !account) throw new Error(`Account '${input.envName}/${input.accountName}' is not available`);
+
+  const catalog = await getModelCatalogStore().load();
+  const sourceModel = catalog.models.find((model) => model.id === input.modelId);
+  if (!sourceModel) throw new Error(`Model '${input.modelId}' is not present in the catalog`);
+
+  const accountKey = accountModelBindingKey(input.envName, input.accountName);
+  if (!isModelAvailableForAccount(catalog, sourceModel, accountKey)) {
+    throw new Error(`模型“${sourceModel.entry.display_name}”已不再由当前服务商提供，请刷新服务商模型列表后重新选择`);
+  }
+  const runtimeProviderId = resolveRuntimeProviderId(account);
+  const providerId = resolveModelCatalogProviderId(runtimeProviderId, account.runtime.openaiBaseUrl);
+  const providerDisplayName = runtimeProviderId === "custom" || runtimeProviderId === "custom-openai"
+    ? account.name.trim() || undefined
+    : undefined;
+  const protocol = account.authMode === "auth" ? "responses" as const : account.runtime.apiProtocol ?? "responses" as const;
+  const projected = projectAccountBindingsFromCatalog(structuredClone(catalog), {
+    accountKey,
+    modelIds: [sourceModel.id],
+    providerId,
+    ...(providerDisplayName ? { providerDisplayName } : {}),
+    protocol,
+  });
+  const targetModelId = projected.accountBindings[accountKey]?.[0];
+  const targetModel = targetModelId ? projected.models.find((model) => model.id === targetModelId) : undefined;
+  if (!targetModel) throw new Error(`Model '${input.model}' could not be bound to account '${input.envName}/${input.accountName}'`);
+
+  const gateway = await buildEnvironmentGatewayState(runtime, environment, projected);
+  const binding = buildGatewayRouteBindings(environment, gateway).find((candidate) => (
+    candidate.accountNames.includes(input.accountName)
+      && candidate.exposedModelId === targetModel.entry.slug
+      && candidate.upstreamModel.trim()
+  ));
+  if (!binding) throw new Error(`Gateway route for '${targetModel.entry.slug}' is not compatible with account '${input.envName}/${input.accountName}'`);
+
+  const routes = await getUsageRouterManager().listPersistedRoutes().catch(() => []);
+  const accountRoutes = routes.filter((route) => (
+    route.envName === input.envName
+      && route.accountName === input.accountName
+      && route.enabled
+  ));
+  // Older gateway states may contain only materialized model routes. Reuse
+  // the selected account's matching model route as the upstream source in
+  // that case; the saved gateway compiler treats both records as equivalent
+  // sources for the provider endpoint and credential.
+  const baseRoute = accountRoutes.find((route) => !route.exposedModelId)
+    ?? accountRoutes.find((route) => (
+      route.exposedModelId === targetModel.entry.slug
+        && route.providerId === binding.providerId
+        && route.upstreamModel === binding.upstreamModel
+    ))
+    ?? accountRoutes[0];
+  if (!baseRoute) throw new Error(`Gateway route for account '${input.envName}/${input.accountName}' is missing`);
+
+  const routeProtocol = binding.upstreamProtocolByAccount?.[input.accountName]
+    ?? binding.protocolByAccount?.[input.accountName]
+    ?? baseRoute.protocol;
+  const now = Date.now();
+  const route: RouteTarget = {
+    routeId: `preview-route-${randomUUID()}`,
+    envName: input.envName,
+    accountName: input.accountName,
+    upstreamBaseUrl: baseRoute.upstreamBaseUrl,
+    originalBaseUrl: baseRoute.originalBaseUrl,
+    protocol: routeProtocol,
+    providerId: binding.providerId,
+    exposedModelId: binding.exposedModelId,
+    routeGroupId: binding.routeGroupId,
+    upstreamModel: binding.upstreamModel,
+    capabilities: binding.capabilities,
+    capabilityProfile: binding.capabilityProfile,
+    reasoningProfile: baseRoute.reasoningProfile,
+    longConversationStrategy: baseRoute.longConversationStrategy,
+    instructionRole: baseRoute.instructionRole,
+    requestOverrides: baseRoute.requestOverrides,
+    requestHeaders: binding.requestHeadersByAccount?.[input.accountName] ?? baseRoute.requestHeaders,
+    proxyUrl: binding.proxyUrlByAccount?.[input.accountName] ?? baseRoute.proxyUrl,
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const accountRoute = getEnvironmentRouteAccounts(state, input.envName, gateway)
+    .find((candidate) => candidate.accountName === input.accountName);
+  if (!accountRoute) throw new Error(`Gateway credential for account '${input.envName}/${input.accountName}' is missing`);
+  return {
+    envName: input.envName,
+    accountName: input.accountName,
+    model: targetModel.entry.slug,
+    prompt: input.prompt,
+    route,
+    upstreamApiKey: accountRoute.apiKey,
+    authMode: accountRoute.providerAuthMethod === "none" ? "none" : accountRoute.authMode === "auth" ? "auth" : "apikey",
+    accountId: accountRoute.authAccountId,
+    hydrateRouteSecret: accountRoute.providerAuthMethod === "none" || Boolean(accountRoute.apiKey?.trim()),
+  };
 }
 
 async function loadGatewayBundledModels(
@@ -2015,10 +2131,39 @@ export async function testModelRequest(input: {
   envName: string;
   accountName: string;
   model: string;
+  modelId?: string;
   upstreamModel?: string;
   prompt?: string;
 }) {
-  return getUsageRouterManager().testModelRequest(input);
+  const manager = getUsageRouterManager();
+  const activeGateways = input.modelId
+    ? await manager.listPersistedEnvironmentGateways().catch(() => [])
+    : [];
+  const gatewayActive = activeGateways.some((gateway) => gateway.envName === input.envName && gateway.enabled);
+  if (gatewayActive) {
+    try {
+      const preview = await buildModelRequestPreview(input);
+      if (!preview) {
+        return {
+          ok: false,
+          status: 422,
+          message: "Unable to compile the selected model's Gateway preview route",
+          latencyMs: 0,
+          model: input.model.trim(),
+        };
+      }
+      return manager.testModelRequestPreview(preview);
+    } catch (error) {
+      return {
+        ok: false,
+        status: 422,
+        message: error instanceof Error ? error.message : String(error),
+        latencyMs: 0,
+        model: input.model.trim(),
+      };
+    }
+  }
+  return manager.testModelRequest(input);
 }
 
 export async function listAccountProjects(envName: string, _accountName: string): Promise<CodexProject[]> {

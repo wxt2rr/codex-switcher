@@ -334,6 +334,7 @@ export function AccountModelExposurePanel({
                     envName: envName!,
                     accountName: accountName!,
                     model: model.entry.slug,
+                    modelId: model.id,
                     ...(discovered?.upstreamModelId || fallbackUpstreamModel
                       ? { upstreamModel: discovered?.upstreamModelId ?? fallbackUpstreamModel }
                       : {}),

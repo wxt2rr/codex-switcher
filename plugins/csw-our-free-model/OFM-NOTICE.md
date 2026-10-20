@@ -5,10 +5,10 @@
 The full account-channel integration, standalone model runtime, EAC authorization,
 statistics and local management UI are from **Ebony-Vinyl/dsh-our-free-model**:
 https://github.com/Ebony-Vinyl/dsh-our-free-model
-Pinned commit: e9c4b70d913116284692d7b206a63f39ad6fe8cc (2026-10-11).
-88 upstream runtime/asset/license paths are retained under vendor/ofm; 80 are
-byte-for-byte copies. UPSTREAM.json records original and adapted hashes and the
-two omitted encrypted EAC data files. Eight adapted paths are documented: removing
+Pinned commit: 5923ebef0f55578ca21bb5555b7ba5adb51aef21 (2026-10-20).
+The current runtime source and model catalogue are retained under vendor/ofm;
+UPSTREAM.json records original and adapted hashes and the two omitted encrypted
+EAC data files. The adapted paths are documented: removing
 bundled Google OAuth defaults and the Loomy WeChat App ID, replacing vault.js with an empty stub, adding
 an Electron 31/Node compatibility fallback for undici's optional worker_threads.markAsUncloneable API, and adding
 an original EAC credential function to the standalone service, plus safe setup diagnostics in the EAC backend and both channel UI bundles, and selecting a verified original channel bundle through the service/Worker. The Worker also accepts harness messages/tools from the upstream native Anthropic gateway while retaining model enablement and reasoning/output-budget normalization.

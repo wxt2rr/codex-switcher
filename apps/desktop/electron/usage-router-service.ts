@@ -377,7 +377,13 @@ async function readJson(request: IncomingMessage, maxBytes = 1024 * 1024): Promi
 async function relayResponse(source: Response, target: ServerResponse, tap?: { push(chunk: Uint8Array): void }): Promise<void> {
   target.statusCode = source.status;
   source.headers.forEach((value, name) => {
-    if (!HOP_BY_HOP_HEADERS.has(name.toLowerCase()) && name.toLowerCase() !== "content-length") target.setHeader(name, value);
+    const normalizedName = name.toLowerCase();
+    // Node's fetch transparently decodes compressed upstream responses. Do
+    // not advertise the original encoding after relaying the decoded bytes,
+    // otherwise another fetch client tries to decompress them a second time.
+    if (!HOP_BY_HOP_HEADERS.has(normalizedName)
+      && normalizedName !== "content-length"
+      && normalizedName !== "content-encoding") target.setHeader(name, value);
   });
   if (source.body) {
     const reader = source.body.getReader();
@@ -709,7 +715,7 @@ async function convertRequestForRoute(
   body: Record<string, unknown>,
   upstreamModel: string | undefined,
   originModel: string | undefined,
-  route?: Pick<RouteTarget, "routeId" | "providerId" | "upstreamBaseUrl" | "capabilityProfile" | "capabilities">,
+  route?: Pick<RouteTarget, "routeId" | "providerId" | "upstreamBaseUrl" | "capabilityProfile" | "capabilities" | "instructionRole">,
 ): Promise<DesktopConvertedRequest> {
   const capabilityProfile = route
     ? capabilityProfileForRoute(route, target, upstreamModel ?? originModel)
@@ -720,7 +726,11 @@ async function convertRequestForRoute(
       target,
       body as unknown as import("../../../packages/gateway/dist/protocol.js").JsonObject,
       { originModelName: originModel, upstreamModelName: upstreamModel },
-      { toolLossPolicy: "allow", ...(hasCapabilityProfile ? { capabilityProfile, capabilityPolicy: "safe" as const } : {}) },
+      {
+        toolLossPolicy: "allow",
+        ...(route?.instructionRole ? { instructionRole: route.instructionRole } : {}),
+        ...(hasCapabilityProfile ? { capabilityProfile, capabilityPolicy: "safe" as const } : {}),
+      },
     );
   if (converted) {
     return {
@@ -730,7 +740,7 @@ async function convertRequestForRoute(
     };
   }
   return {
-    body: Buffer.from(JSON.stringify(adaptProtocolRequest(source, target, body, upstreamModel))),
+    body: Buffer.from(JSON.stringify(adaptProtocolRequest(source, target, body, upstreamModel, route?.instructionRole))),
     quality: "fair",
     diagnostics: [{
       code: useLegacyProtocolConversion() ? "legacy_conversion_forced" : "conversion_runtime_unavailable",
@@ -1673,6 +1683,9 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
   const routes = new Map((await store.listRoutes()).filter((route) => route.enabled).map((route) => [route.routeId, route]));
   const pools = new Map((await store.listPools()).filter((pool) => pool.enabled).map((pool) => [pool.poolId, pool]));
   const gateways = new Map((await store.listGateways()).filter((gateway) => gateway.enabled).map((gateway) => [gateway.gatewayId, gateway]));
+  // Preview gateways are process-local and intentionally bypass the
+  // persisted environment gateway table, which has one gateway per env.
+  const gatewayPreviews = new Map<string, EnvironmentGateway>();
   const gatewayHealth = new Map<string, { consecutiveFailures: number; cooldownUntil: number | null }>();
   const gatewayRouteMetrics = new Map<string, GatewayRouteMetricState>();
   const gatewayQuotaState = new Map<string, { windowStartedAt: number; requests: number; tokens: number }>();
@@ -1871,6 +1884,22 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           else gateways.delete(gateway.gatewayId);
           response.statusCode = 204; return response.end();
         }
+        if (url.pathname === "/admin/gateway-previews" && request.method === "PUT") {
+          const gateway = await readJson(request) as EnvironmentGateway;
+          if (!isValidEnvironmentGateway(gateway) || gateway.routeIds.length === 0
+            || gateway.defaultRouteId && !gateway.routeIds.includes(gateway.defaultRouteId)) {
+            return sendJson(response, 400, { error: "Invalid gateway preview" });
+          }
+          const missingRoute = gateway.routeIds.some((routeId) => !routes.has(routeId));
+          if (missingRoute) return sendJson(response, 400, { error: "Gateway preview route is missing" });
+          gatewayPreviews.set(gateway.gatewayId, gateway);
+          response.statusCode = 204; return response.end();
+        }
+        const gatewayPreviewDeleteMatch = url.pathname.match(/^\/admin\/gateway-previews\/([^/]+)$/);
+        if (gatewayPreviewDeleteMatch && request.method === "DELETE") {
+          gatewayPreviews.delete(decodeURIComponent(gatewayPreviewDeleteMatch[1]));
+          response.statusCode = 204; return response.end();
+        }
         const gatewayHealthMatch = url.pathname.match(/^\/admin\/gateways\/([^/]+)\/health$/);
         if (gatewayHealthMatch && request.method === "GET") {
           const gateway = gateways.get(decodeURIComponent(gatewayHealthMatch[1]));
@@ -2029,12 +2058,12 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
         }
         return sendJson(response, 404, { error: "Not found" });
       }
-      const gatewayMatch = url.pathname.match(/^\/gateways\/([^/]+)\/?(.*)$/);
+      const gatewayMatch = url.pathname.match(/^\/(gateways|gateway-previews)\/([^/]+)\/?(.*)$/);
       if (gatewayMatch) {
-        const gatewayId = decodeURIComponent(gatewayMatch[1]);
-        const gateway = gateways.get(gatewayId);
+        const gatewayId = decodeURIComponent(gatewayMatch[2]);
+        const gateway = gatewayMatch[1] === "gateway-previews" ? gatewayPreviews.get(gatewayId) : gateways.get(gatewayId);
         if (!gateway) return sendJson(response, 404, { error: "Gateway is disabled or missing" });
-        const gatewayRouteSuffix = gatewayMatch[2] || "responses";
+        const gatewayRouteSuffix = gatewayMatch[3] || "responses";
         const gatewayProtocol = detectGatewayProtocol(gatewayRouteSuffix);
         const gatewayRequestId = randomUUID();
         const upgradeRequested = hasUpgradeIntent(request.headers);
@@ -2228,7 +2257,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
             poolTokens.get(pool.poolId) ?? "",
             store,
             history,
-            `${gatewayMatch[2]}${url.search}`,
+            `${gatewayMatch[3]}${url.search}`,
             undefined,
             recordPoolEvent,
             allowedRouteIds,
@@ -2284,7 +2313,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           request,
           response,
           route,
-          `${gatewayMatch[2]}${url.search}`,
+          `${gatewayMatch[3]}${url.search}`,
           store,
           routeSecrets.get(route.routeId),
           bodyOverride,

@@ -51,6 +51,22 @@ test("request conversion preserves tool calls, tool results and developer instru
     assert.equal(anthropic.value.system, "developer policy");
     assert.deepEqual(anthropic.value.messages, [{ role: "user", content: "hello" }]);
 });
+test("request conversion normalizes developer messages for Chat Completions by default", async () => {
+    const request = {
+        model: "logical",
+        input: [{ role: "developer", content: "developer policy" }, { role: "user", content: "hello" }],
+    };
+    const compatible = await convertGatewayRequest("responses", "chat_completions", request, { upstreamModelName: "chat-model" });
+    assert.deepEqual(compatible.value.messages, [
+        { role: "system", content: "developer policy" },
+        { role: "user", content: "hello" },
+    ]);
+    const explicitDeveloper = await convertGatewayRequest("responses", "chat_completions", request, { upstreamModelName: "chat-model" }, { instructionRole: "developer" });
+    assert.deepEqual(explicitDeveloper.value.messages, [
+        { role: "developer", content: "developer policy" },
+        { role: "user", content: "hello" },
+    ]);
+});
 test("request conversion applies a route capability profile to hosted tools", async () => {
     const responses = {
         model: "logical",

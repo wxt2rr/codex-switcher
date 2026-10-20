@@ -185,6 +185,7 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     envName: string;
     accountName: string;
     model: string;
+    modelId?: string;
     upstreamModel?: string;
     prompt?: string;
   }) => ipcRenderer.invoke("desktop:testModelRequest", input),
