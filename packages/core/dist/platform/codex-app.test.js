@@ -3,7 +3,7 @@ import test from "node:test";
 import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildCodexAppLaunchSpec, launchCodexApp, launchNewCodexApp, restartCurrentCodexApp, stopManagedCodexApp, } from "./codex-app.js";
+import { buildCodexAppLaunchSpec, launchCodexApp, launchNewCodexApp, resolveWindowsSystemExecutable, restartCurrentCodexApp, stopManagedCodexApp, } from "./codex-app.js";
 import { listManagedAppInstances, readLastManagedAppInstanceId, readManagedAppPid, resolveManagedAppStatePaths, setManagedAppInstance, } from "./codex-app-runtime.js";
 test("launchCodexApp passes CODEX_HOME and managed marker to the runner", async () => {
     let received;
@@ -40,6 +40,15 @@ test("buildCodexAppLaunchSpec launches a Windows packaged AppID through Explorer
         args: ["shell:AppsFolder\\OpenAI.Codex_2p2nqsd0c76g0!App"],
         acceptEarlyExit: true,
     });
+});
+test("buildCodexAppLaunchSpec uses Windows system launcher paths when available", () => {
+    const appSpec = buildCodexAppLaunchSpec("shell:AppsFolder\\OpenAI.Codex_2p2nqsd0c76g0!App", { SystemRoot: "C:\\Windows" }, "win32");
+    assert.equal(appSpec.command, "C:\\Windows\\explorer.exe");
+    const cliSpec = buildCodexAppLaunchSpec("C:\\Program Files\\Codex\\Codex.exe", { SystemRoot: "C:\\Windows" }, "win32");
+    assert.equal(cliSpec.command, "C:\\Windows\\System32\\cmd.exe");
+});
+test("resolveWindowsSystemExecutable keeps launcher names when the system root is unavailable", () => {
+    assert.equal(resolveWindowsSystemExecutable("explorer.exe", {}), "explorer.exe");
 });
 test("buildCodexAppLaunchSpec isolates a non-Windows App instance with user-data-dir", () => {
     const spec = buildCodexAppLaunchSpec("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT", {}, "darwin", "/tmp/codex-switcher/app profile");

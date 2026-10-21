@@ -27,6 +27,12 @@ export interface StopManagedCodexAppInput {
 export declare function launchCodexApp(input: CodexAppLaunchInput, runner?: CodexAppRunner): Promise<CodexAppRunnerResult>;
 export declare function buildCodexAppLaunchSpec(appPath: string, env?: NodeJS.ProcessEnv, platform?: NodeJS.Platform, userDataDir?: string): CodexAppLaunchSpec;
 export declare function resolveWindowsAppLauncher(env?: NodeJS.ProcessEnv): string;
+/**
+ * GUI-launched Electron processes may not expose the Windows root in PATH.
+ * Resolve system-owned launchers directly so AppID activation does not rely
+ * on the caller's shell environment.
+ */
+export declare function resolveWindowsSystemExecutable(executable: string, env?: NodeJS.ProcessEnv): string;
 export declare function launchNewCodexApp(input: CodexAppActionInput, runner?: CodexAppRunner): Promise<CodexAppRunnerResult>;
 export declare function stopManagedCodexApp(input: StopManagedCodexAppInput, stopper?: ManagedAppStopper): Promise<boolean>;
 export declare function restartCurrentCodexApp(input: CodexAppActionInput, runner?: CodexAppRunner, stopper?: ManagedAppStopper): Promise<CodexAppRunnerResult>;

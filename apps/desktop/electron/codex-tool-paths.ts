@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import { access, mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { delimiter, dirname, isAbsolute, join } from "node:path";
+import { delimiter, dirname, isAbsolute, join, win32 as windowsPath } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -12,6 +12,40 @@ interface DesktopSettings { cliPath?: string; appPath?: string; }
 export interface CodexToolPathOptions { settingsPath: string; env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; validateCli?: (path: string) => Promise<void>; detectWindowsPackagedApp?: () => Promise<string>; }
 
 const WINDOWS_PACKAGED_APP_PREFIX = "shell:AppsFolder\\";
+
+function windowsSystemRoot(env: NodeJS.ProcessEnv = process.env): string {
+  return env.SystemRoot || env.WINDIR || "C:\\Windows";
+}
+
+function pathDelimiter(platform: NodeJS.Platform): string {
+  return platform === "win32" ? ";" : delimiter;
+}
+
+/**
+ * Windows exposes the PATH variable as `Path` in many GUI-launched Electron
+ * processes. Resolve the value case-insensitively so the desktop process does
+ * not accidentally discard system launchers before spawning PowerShell or
+ * Explorer.
+ */
+function readPathValue(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string[] {
+  const separator = pathDelimiter(platform);
+  if (platform !== "win32") return (env.PATH || "").split(separator).filter(Boolean);
+  const values = Object.entries(env)
+    .filter(([key]) => key.toLowerCase() === "path")
+    .map(([, value]) => value || "")
+    .flatMap((value) => value.split(separator).filter(Boolean));
+  return [...new Set(values)];
+}
+
+export function resolveWindowsSystemExecutable(
+  executable: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const root = env.SystemRoot || env.WINDIR;
+  if (!root) return executable;
+  const base = executable.toLowerCase() === "explorer.exe" ? root : windowsPath.join(root, "System32");
+  return windowsPath.join(base, executable);
+}
 
 export function normalizeWindowsPackagedAppTarget(value: string): string {
   const trimmed = value.trim();
@@ -24,7 +58,7 @@ export function normalizeWindowsPackagedAppTarget(value: string): string {
 async function isExecutable(path: string) { try { const info = await stat(path); if (!info.isFile()) return false; await access(path, constants.X_OK); return true; } catch { return false; } }
 async function readSettings(path: string): Promise<DesktopSettings> { try { return JSON.parse(await readFile(path, "utf8")) as DesktopSettings; } catch { return {}; } }
 async function writeSettings(path: string, value: DesktopSettings) { await mkdir(dirname(path), { recursive: true }); await writeFile(path, `${JSON.stringify(value, null, 2)}\n`); }
-function pathCandidates(command: string, env: NodeJS.ProcessEnv, platform: NodeJS.Platform) { const exts = platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""]; return (env.PATH || "").split(delimiter).filter(Boolean).flatMap((dir) => exts.map((ext) => join(dir, `${command}${ext}`))); }
+function pathCandidates(command: string, env: NodeJS.ProcessEnv, platform: NodeJS.Platform) { const exts = platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""]; return (env.PATH || "").split(pathDelimiter(platform)).filter(Boolean).flatMap((dir) => exts.map((ext) => join(dir, `${command}${ext}`))); }
 
 /**
  * Electron apps launched from Finder/Dock do not inherit the user's shell
@@ -52,15 +86,23 @@ export function buildCodexExecutionEnvironment(
           join(home, "Library", "pnpm"),
         ]
     : [];
-  const platformPaths = platform === "darwin"
+  const platformPaths = platform === "win32"
+    ? [
+        windowsPath.join(windowsSystemRoot(env), "System32"),
+        windowsPath.join(windowsSystemRoot(env), "System32", "Wbem"),
+        windowsSystemRoot(env),
+      ]
+    : platform === "darwin"
     ? ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "/usr/local/sbin"]
     : platform === "linux"
       ? ["/usr/local/bin", "/usr/bin"]
       : [];
   const codexDir = codexBin && isAbsolute(codexBin) ? dirname(codexBin) : "";
-  const existingPaths = (env.PATH || "").split(delimiter).filter(Boolean);
-  const path = [...new Set([codexDir, ...existingPaths, ...platformPaths, ...homePaths].filter(Boolean))].join(delimiter);
-  return { ...env, PATH: path };
+  const existingPaths = readPathValue(env, platform);
+  const path = [...new Set([codexDir, ...existingPaths, ...platformPaths, ...homePaths].filter(Boolean))].join(pathDelimiter(platform));
+  if (platform !== "win32") return { ...env, PATH: path };
+  const normalized = Object.fromEntries(Object.entries(env).filter(([key]) => key.toLowerCase() !== "path"));
+  return { ...normalized, PATH: path };
 }
 
 function knownCandidates(kind: CodexToolKind, env: NodeJS.ProcessEnv, platform: NodeJS.Platform) {
@@ -149,15 +191,16 @@ export function buildWindowsPackagedAppDetectionCommand(): string {
 
 async function detectWindowsPackagedApp(): Promise<string> {
   const command = buildWindowsPackagedAppDetectionCommand();
+  const env = buildCodexExecutionEnvironment(process.env, undefined, "win32");
   try {
-    const { stdout } = await execFileAsync("powershell.exe", [
+    const { stdout } = await execFileAsync(resolveWindowsSystemExecutable("powershell.exe", env), [
       "-NoProfile",
       "-NonInteractive",
       "-ExecutionPolicy",
       "Bypass",
       "-Command",
       command,
-    ], { encoding: "utf8", timeout: 10_000, windowsHide: true });
+    ], { encoding: "utf8", timeout: 10_000, windowsHide: true, env });
     return stdout.trim();
   } catch {
     return "";

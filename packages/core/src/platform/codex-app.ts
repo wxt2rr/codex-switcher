@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { join, win32 as windowsPath } from "node:path";
 import process from "node:process";
 
 import { isWindowsPackagedAppTarget, resolveCodexAppPath } from "./command-discovery.js";
@@ -112,7 +112,7 @@ export function buildCodexAppLaunchSpec(
 
   if (isWindowsPackagedAppTarget(appPath)) {
     return {
-      command: "explorer.exe",
+      command: resolveWindowsSystemExecutable("explorer.exe", env),
       args: [appPath],
       acceptEarlyExit: true,
     };
@@ -129,7 +129,7 @@ export function buildCodexAppLaunchSpec(
 
   if (launcher === "powershell" || launcher === "pwsh" || launcher === "powershell.exe") {
     return {
-      command: "powershell.exe",
+      command: resolveWindowsSystemExecutable("powershell.exe", env),
       args: [
         "-NoProfile",
         "-NonInteractive",
@@ -142,7 +142,7 @@ export function buildCodexAppLaunchSpec(
   }
 
   return {
-    command: "cmd.exe",
+    command: resolveWindowsSystemExecutable("cmd.exe", env),
     args: [
       "/d",
       "/s",
@@ -156,6 +156,21 @@ export function resolveWindowsAppLauncher(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
   return (env.CODEX_SWITCHER_WINDOWS_APP_LAUNCHER || "cmd").toLowerCase();
+}
+
+/**
+ * GUI-launched Electron processes may not expose the Windows root in PATH.
+ * Resolve system-owned launchers directly so AppID activation does not rely
+ * on the caller's shell environment.
+ */
+export function resolveWindowsSystemExecutable(
+  executable: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const root = env.SystemRoot || env.WINDIR;
+  if (!root) return executable;
+  const base = executable.toLowerCase() === "explorer.exe" ? root : windowsPath.join(root, "System32");
+  return windowsPath.join(base, executable);
 }
 
 export async function launchNewCodexApp(

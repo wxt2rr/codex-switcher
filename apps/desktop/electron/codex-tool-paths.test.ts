@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { delimiter, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { buildCodexExecutionEnvironment, buildWindowsPackagedAppDetectionCommand, getCodexToolStatus, resetCodexToolPath, saveCodexToolPath } from "./codex-tool-paths.js";
+import { buildCodexExecutionEnvironment, buildWindowsPackagedAppDetectionCommand, getCodexToolStatus, resetCodexToolPath, resolveWindowsSystemExecutable, saveCodexToolPath } from "./codex-tool-paths.js";
 async function executable(path: string) { await mkdir(dirname(path), { recursive: true }); await writeFile(path, "#!/bin/sh\necho codex-cli 1.0\n"); await chmod(path, 0o755); }
 test("Codex execution environment restores GUI Node lookup for an absolute CLI", () => {
   const environment = buildCodexExecutionEnvironment(
@@ -35,6 +35,36 @@ test("Codex execution environment keeps a user-local Node bin directory", () => 
   assert.equal(environment.PATH?.split(delimiter)[0], dirname(codexBin));
   assert.ok(environment.PATH?.includes(platform === "win32" ? join(home, "AppData", "Local", "Programs", "nodejs") : join(home, ".volta", "bin")));
   assert.ok(environment.PATH?.includes(platform === "win32" ? "C:\\Windows\\System32" : "/usr/bin"));
+});
+
+test("Windows execution environment merges Path casing and system launcher directories", () => {
+  const environment = buildCodexExecutionEnvironment(
+    {
+      USERPROFILE: "C:\\Users\\tester",
+      Path: "C:\\Users\\tester\\bin;C:\\Windows\\System32",
+      PATH: "C:\\Custom\\bin",
+      SystemRoot: "C:\\Windows",
+    },
+    undefined,
+    "win32",
+  );
+
+  assert.equal(environment.Path, undefined);
+  assert.ok(environment.PATH?.includes("C:\\Users\\tester\\bin"));
+  assert.ok(environment.PATH?.includes("C:\\Custom\\bin"));
+  assert.ok(environment.PATH?.includes("C:\\Windows\\System32"));
+  assert.ok(environment.PATH?.includes("C:\\Windows"));
+});
+
+test("Windows system launchers resolve to absolute paths when SystemRoot is available", () => {
+  assert.equal(
+    resolveWindowsSystemExecutable("explorer.exe", { SystemRoot: "C:\\Windows" }),
+    "C:\\Windows\\explorer.exe",
+  );
+  assert.equal(
+    resolveWindowsSystemExecutable("powershell.exe", { SystemRoot: "C:\\Windows" }),
+    "C:\\Windows\\System32\\powershell.exe",
+  );
 });
 
 test("CLI detection prefers an executable found on PATH", async () => { const root = await mkdtemp(join(tmpdir(), "codex-tools-")); const bin = join(root, "bin"); const cli = join(bin, "codex"); await executable(cli); const status = await getCodexToolStatus("cli", { settingsPath: join(root, "settings.json"), env: { HOME: root, PATH: [bin, "/bin"].join(delimiter) }, platform: "darwin" }); assert.equal(status.path, cli); assert.equal(status.source, "path"); });
