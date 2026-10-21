@@ -180,7 +180,10 @@ jobs:
           retention-days: 14
 
   package-linux:
-    runs-on: ubuntu-latest
+    # Ubuntu 26 currently blocks bubblewrap's loopback setup in the plugin
+    # sandbox smoke test. Pin the packaging runner until that image restores
+    # the required user/network namespace capability.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
