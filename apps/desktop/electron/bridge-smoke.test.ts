@@ -13,6 +13,21 @@ async function writeFileRecursive(path: string, content: string): Promise<void> 
   await writeFile(path, content, "utf8");
 }
 
+async function readBridgeSource(): Promise<string> {
+  const candidates = [
+    join(process.cwd(), "electron", "bridge.ts"),
+    join(process.cwd(), "apps", "desktop", "electron", "bridge.ts"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      return await readFile(candidate, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  throw new Error(`Unable to locate bridge.ts from ${process.cwd()}`);
+}
+
 test("electron bridge resolves log paths from env overrides and defaults", () => {
   const previousHome = process.env.HOME;
   const previousUserProfile = process.env.USERPROFILE;
@@ -95,7 +110,7 @@ test("electron bridge launches a new cli session after switching the cli target 
 });
 
 test("Windows packaged App projection rebuilds the model catalog in the projected home", async () => {
-  const source = await readFile(join(process.cwd(), "apps", "desktop", "electron", "bridge.ts"), "utf8");
+  const source = await readBridgeSource();
   const projectionStart = source.indexOf("materialize: async (projectionHome)");
   const catalogSync = source.indexOf(
     'synchronizeTargetModelCatalog(projectionState, "app", projectionHome)',
