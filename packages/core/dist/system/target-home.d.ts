@@ -12,6 +12,12 @@ export interface ApplyTargetHomeStateOptions {
      * target home must follow the environment gateway in that case.
      */
     gatewayBaseUrl?: string;
+    /**
+     * Windows packaged Codex Apps are activated by Explorer and cannot inherit
+     * the Switcher process environment. Use the local route token directly in
+     * the provider configuration when an environment variable is unavailable.
+     */
+    localRouterAuthMode?: "env" | "static";
 }
 export interface LegacyTargetHomeRepairEntry {
     envName: string;

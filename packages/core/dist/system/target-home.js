@@ -87,8 +87,16 @@ export async function applyTargetHomeState(options) {
         // A managed provider with authMethods=["none"] owns authentication inside
         // the gateway/plugin. Do not make Codex look up a nonexistent API key just
         // because the legacy account runtime uses preferred_auth_method="apikey".
-        localRouterAuthEnabled: targetRuntime.providerAuthMethod !== "none"
+        // Environment gateways do not authenticate the Codex ingress. For a
+        // direct Responses route the router also replaces the incoming bearer
+        // token with the hydrated upstream credential. Only the account-scoped
+        // Chat compatibility route needs a local bearer token from Codex.
+        localRouterAuthEnabled: !options.gatewayBaseUrl
+            && targetRuntime.apiProtocol === "chat_completions"
+            && targetRuntime.providerAuthMethod !== "none"
             && Boolean(readAuthApiKey(targetAuthData)),
+        localRouterAuthMode: options.localRouterAuthMode ?? "env",
+        localRouterToken: readAuthApiKey(targetAuthData),
     });
 }
 export async function clearTargetHomeState(homePath) {
@@ -146,7 +154,14 @@ async function writeManagedConfig(configPath, runtime, options = {}) {
             managedLines.push("requires_openai_auth = false");
         }
         else if (options.localRouterAuthEnabled !== false) {
-            managedLines.push('env_key = "OPENAI_API_KEY"');
+            if (options.localRouterAuthMode === "static") {
+                if (options.localRouterToken) {
+                    managedLines.push(`experimental_bearer_token = ${quoteTomlString(options.localRouterToken)}`);
+                }
+            }
+            else {
+                managedLines.push('env_key = "OPENAI_API_KEY"');
+            }
             managedLines.push("requires_openai_auth = false");
         }
         else {

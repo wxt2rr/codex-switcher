@@ -118,6 +118,11 @@ test("Windows packaged App projection rebuilds the model catalog in the projecte
   );
   assert.ok(projectionStart >= 0, "packaged App projection callback should exist");
   assert.ok(catalogSync > projectionStart, "packaged App projection should sync its model catalog");
+  assert.match(
+    source.slice(projectionStart, catalogSync),
+    /localRouterAuthMode:\s*"static"/,
+    "packaged App projection should avoid inherited environment credentials",
+  );
 });
 
 test("electron bridge returns a shell-neutral launch message for the CLI", async () => {

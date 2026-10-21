@@ -18,6 +18,12 @@ export interface ApplyTargetHomeStateOptions {
    * target home must follow the environment gateway in that case.
    */
   gatewayBaseUrl?: string;
+  /**
+   * Windows packaged Codex Apps are activated by Explorer and cannot inherit
+   * the Switcher process environment. Use the local route token directly in
+   * the provider configuration when an environment variable is unavailable.
+   */
+  localRouterAuthMode?: "env" | "static";
 }
 
 export interface LegacyTargetHomeRepairEntry {
@@ -142,8 +148,16 @@ export async function applyTargetHomeState(
     // A managed provider with authMethods=["none"] owns authentication inside
     // the gateway/plugin. Do not make Codex look up a nonexistent API key just
     // because the legacy account runtime uses preferred_auth_method="apikey".
-    localRouterAuthEnabled: targetRuntime.providerAuthMethod !== "none"
+    // Environment gateways do not authenticate the Codex ingress. For a
+    // direct Responses route the router also replaces the incoming bearer
+    // token with the hydrated upstream credential. Only the account-scoped
+    // Chat compatibility route needs a local bearer token from Codex.
+    localRouterAuthEnabled: !options.gatewayBaseUrl
+      && targetRuntime.apiProtocol === "chat_completions"
+      && targetRuntime.providerAuthMethod !== "none"
       && Boolean(readAuthApiKey(targetAuthData)),
+    localRouterAuthMode: options.localRouterAuthMode ?? "env",
+    localRouterToken: readAuthApiKey(targetAuthData),
   });
 }
 
@@ -155,7 +169,11 @@ export async function clearTargetHomeState(homePath: string): Promise<void> {
 async function writeManagedConfig(
   configPath: string,
   runtime: SwitcherState["envs"][string]["accounts"][string]["runtime"],
-  options: { localRouterAuthEnabled?: boolean } = {},
+  options: {
+    localRouterAuthEnabled?: boolean;
+    localRouterAuthMode?: "env" | "static";
+    localRouterToken?: string;
+  } = {},
 ) {
   const existing = await readText(configPath);
   const managedModelSlug = resolveManagedModelSlug(runtime);
@@ -209,7 +227,13 @@ async function writeManagedConfig(
       // model entitlement check before the request can reach the gateway.
       managedLines.push("requires_openai_auth = false");
     } else if (options.localRouterAuthEnabled !== false) {
-      managedLines.push('env_key = "OPENAI_API_KEY"');
+      if (options.localRouterAuthMode === "static") {
+        if (options.localRouterToken) {
+          managedLines.push(`experimental_bearer_token = ${quoteTomlString(options.localRouterToken)}`);
+        }
+      } else {
+        managedLines.push('env_key = "OPENAI_API_KEY"');
+      }
       managedLines.push("requires_openai_auth = false");
     } else {
       managedLines.push("requires_openai_auth = false");

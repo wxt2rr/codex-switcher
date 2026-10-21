@@ -89,6 +89,7 @@ test("target-home writer prefers the environment gateway over an account route",
             name: "proxy",
             authMode: "apikey",
             runtime: {
+              providerAuthMethod: "api_key",
               preferredAuthMethod: "apikey",
               apiProtocol: "chat_completions",
               openaiBaseUrlMode: "custom",
@@ -119,6 +120,7 @@ test("target-home writer prefers the environment gateway over an account route",
     assert.doesNotMatch(config, /\/routes\/account-route/);
     assert.match(config, /wire_api = "responses"/);
     assert.match(config, /requires_openai_auth = false/);
+    assert.doesNotMatch(config, /env_key = "OPENAI_API_KEY"/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -374,7 +376,7 @@ test("target-home writer pins the DeepSeek model for DeepSeek api key accounts",
     assert.match(config, /base_url = "http:\/\/127\.0\.0\.1:17832\/routes\/deepseek"/);
     assert.match(config, /wire_api = "responses"/);
     assert.match(config, /supports_websockets = false/);
-    assert.match(config, /env_key = "OPENAI_API_KEY"/);
+    assert.doesNotMatch(config, /env_key = "OPENAI_API_KEY"/);
     assert.doesNotMatch(config, /model = "gpt-5\.5"/);
     assert.match(config, /requires_openai_auth = false/);
     assert.doesNotMatch(config, /http_headers = \{ "x-openai-actor-authorization" = "codex-sw\.app" \}/);
@@ -473,6 +475,11 @@ test("target-home writer materializes an enabled Chat compatibility route withou
     assert.match(config, /requires_openai_auth = false/);
     assert.doesNotMatch(config, /http_headers = \{ "x-openai-actor-authorization" = "codex-sw\.app" \}/);
     assert.doesNotMatch(config, /sk-upstream-secret/);
+
+    await applyTargetHomeState({ state, target: "cli", localRouterAuthMode: "static" });
+    const staticConfig = await readFile(join(homePath, "config.toml"), "utf8");
+    assert.match(staticConfig, /experimental_bearer_token = "local-route-token"/);
+    assert.doesNotMatch(staticConfig, /env_key = "OPENAI_API_KEY"/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

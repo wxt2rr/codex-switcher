@@ -6355,6 +6355,7 @@ async function launchAppTarget(
             state: projectionState,
             target: "app",
             ...(gatewayBaseUrl ? { gatewayBaseUrl } : {}),
+            localRouterAuthMode: "static",
           });
           // Microsoft Store Codex does not reliably consume CODEX_HOME from
           // Explorer activation. Its effective home is the projected default
