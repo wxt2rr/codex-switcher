@@ -94,6 +94,17 @@ test("electron bridge launches a new cli session after switching the cli target 
   assert.equal(__testUtils.shouldLaunchCliAfterAccountSwitch("app"), false);
 });
 
+test("Windows packaged App projection rebuilds the model catalog in the projected home", async () => {
+  const source = await readFile(join(process.cwd(), "apps", "desktop", "electron", "bridge.ts"), "utf8");
+  const projectionStart = source.indexOf("materialize: async (projectionHome)");
+  const catalogSync = source.indexOf(
+    'synchronizeTargetModelCatalog(projectionState, "app", projectionHome)',
+    projectionStart,
+  );
+  assert.ok(projectionStart >= 0, "packaged App projection callback should exist");
+  assert.ok(catalogSync > projectionStart, "packaged App projection should sync its model catalog");
+});
+
 test("electron bridge returns a shell-neutral launch message for the CLI", async () => {
   assert.equal(__testUtils.getCliLaunchSuccessMessage(), "Opened CLI session");
 });

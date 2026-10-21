@@ -4024,50 +4024,63 @@ async function applyTargetHomeStateWithHistory(
       target,
       ...(gatewayBaseUrl ? { gatewayBaseUrl } : {}),
     });
-    const refreshedAccount = state.envs[pointer.env]?.accounts[pointer.account];
-    const cliStatus = await getCodexToolStatus("cli", getCodexToolPathOptions());
-    const catalogBaseUrl = refreshedAccount?.runtime.independentModelEnabled
-      ? refreshedAccount.runtime.independentModelBaseUrl ?? refreshedAccount.runtime.openaiBaseUrl
-      : refreshedAccount?.runtime.openaiBaseUrl;
-    const catalogPreset = refreshedAccount?.runtime.independentModelEnabled
-      ? resolveProviderDefaultPreset(catalogBaseUrl)
-      : resolveProviderModelPreset({ baseUrl: catalogBaseUrl, model: refreshedAccount?.runtime.model });
-    if (env.gateway?.mode === "gateway") {
-      await synchronizeEnvironmentGatewayModelCatalog({
-        homePath: env.path,
-        gateway: env.gateway,
-        environmentName: env.name,
-        diagnosticLogPath: resolveLogPath("switcher"),
-        loadBundledCatalog: cliStatus.available
-          ? () => loadBundledModelCatalog(cliStatus.path)
-          : undefined,
-      });
-    } else {
-      await synchronizeAccountModelCatalog({
-        envName: pointer.env,
-        accountName: pointer.account,
-        homePath: env.path,
-        store: getModelCatalogStore(),
-        providerId: refreshedAccount?.runtime.providerId,
-        baseUrl: catalogBaseUrl,
-        model: catalogPreset?.entries[0]?.slug
-          ?? refreshedAccount?.runtime.model
-          ?? (refreshedAccount?.runtime.independentModelEnabled
-            ? getProviderDefaultModelSlug(refreshedAccount.runtime.independentModelProviderId) ?? DEEPSEEK_DEFAULT_MODEL_SLUG
-            : undefined),
-        environmentName: pointer.env,
-        diagnosticLogPath: resolveLogPath("switcher"),
-        loadBundledCatalog: cliStatus.available
-          ? () => loadBundledModelCatalog(cliStatus.path)
-          : undefined,
-      });
-    }
+    await synchronizeTargetModelCatalog(state, target, env.path);
   } catch (error) {
     await restoreEnvFileSnapshot(env.path, before);
     throw error;
   }
   const after = await readEnvFileSnapshot(env.path);
   await recordEnvFileDiffHistory(envName, before, after, source);
+}
+
+async function synchronizeTargetModelCatalog(
+  state: Awaited<ReturnType<CoreRuntime["readLegacyState"]>>,
+  target: "cli" | "app",
+  homePath: string,
+): Promise<void> {
+  const pointer = state.targets[target];
+  const env = state.envs[pointer.env];
+  const account = env?.accounts[pointer.account];
+  if (!env || !account) return;
+
+  const cliStatus = await getCodexToolStatus("cli", getCodexToolPathOptions());
+  const catalogBaseUrl = account.runtime.independentModelEnabled
+    ? account.runtime.independentModelBaseUrl ?? account.runtime.openaiBaseUrl
+    : account.runtime.openaiBaseUrl;
+  const catalogPreset = account.runtime.independentModelEnabled
+    ? resolveProviderDefaultPreset(catalogBaseUrl)
+    : resolveProviderModelPreset({ baseUrl: catalogBaseUrl, model: account.runtime.model });
+  const loadBundledCatalog = cliStatus.available
+    ? () => loadBundledModelCatalog(cliStatus.path)
+    : undefined;
+
+  if (env.gateway?.mode === "gateway") {
+    await synchronizeEnvironmentGatewayModelCatalog({
+      homePath,
+      gateway: env.gateway,
+      environmentName: env.name,
+      diagnosticLogPath: resolveLogPath("switcher"),
+      loadBundledCatalog,
+    });
+    return;
+  }
+
+  await synchronizeAccountModelCatalog({
+    envName: pointer.env,
+    accountName: pointer.account,
+    homePath,
+    store: getModelCatalogStore(),
+    providerId: account.runtime.providerId,
+    baseUrl: catalogBaseUrl,
+    model: catalogPreset?.entries[0]?.slug
+      ?? account.runtime.model
+      ?? (account.runtime.independentModelEnabled
+        ? getProviderDefaultModelSlug(account.runtime.independentModelProviderId) ?? DEEPSEEK_DEFAULT_MODEL_SLUG
+        : undefined),
+    environmentName: pointer.env,
+    diagnosticLogPath: resolveLogPath("switcher"),
+    loadBundledCatalog,
+  });
 }
 
 /**
@@ -6343,6 +6356,11 @@ async function launchAppTarget(
             target: "app",
             ...(gatewayBaseUrl ? { gatewayBaseUrl } : {}),
           });
+          // Microsoft Store Codex does not reliably consume CODEX_HOME from
+          // Explorer activation. Its effective home is the projected default
+          // home, so regenerate the account or gateway catalog there after
+          // projecting config.toml and auth.json.
+          await synchronizeTargetModelCatalog(projectionState, "app", projectionHome);
         },
       });
     }
