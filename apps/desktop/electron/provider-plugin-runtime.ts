@@ -1,6 +1,9 @@
 import { join } from "node:path";
 import { dirname } from "node:path";
+import { resolve } from "node:path";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { readFile, stat, mkdir, rename, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 
 import type {
   GatewayPluginManifest,
@@ -157,13 +160,25 @@ async function getManager(stateDir: string) {
  */
 export function resolveProviderPluginDataDir(stateDir: string): string {
   if (process.platform !== "win32") return join(stateDir, "provider-plugin-data");
+  const localAppData = process.env.LOCALAPPDATA || join(process.env.USERPROFILE || stateDir, "AppData", "Local");
   const configured = process.env.CODEX_SWITCHER_PLUGIN_DATA_DIR?.trim();
-  if (configured) return configured;
-  return join(
-    process.env.LOCALAPPDATA || join(process.env.USERPROFILE || stateDir, "AppData", "Local"),
-    "codex-switcher",
-    "provider-plugin-data",
-  );
+  const candidates = [
+    configured,
+    join(localAppData, "codex-switcher", "provider-plugin-data"),
+    join(tmpdir(), "codex-switcher", "provider-plugin-data"),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const normalized = resolve(candidate).toLowerCase();
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    if (!probeWritableDirectory(candidate)) continue;
+    // The usage router is launched with the desktop process environment. Keep
+    // the selected path there so both managers attach to the same plugin data.
+    process.env.CODEX_SWITCHER_PLUGIN_DATA_DIR = candidate;
+    return candidate;
+  }
+  throw new Error(`No writable Provider plugin data directory was found (tried: ${candidates.join(", ")})`);
 }
 
 /**
@@ -173,12 +188,28 @@ export function resolveProviderPluginDataDir(stateDir: string): string {
  */
 export function resolvePluginDataFallbackDir(stateDir: string): string {
   const configured = process.env.CODEX_SWITCHER_PLUGIN_DATA_FALLBACK_DIR?.trim();
-  if (configured) return join(configured, "provider-plugin-data");
-  return join(
-    process.env.LOCALAPPDATA || join(process.env.USERPROFILE || stateDir, "AppData", "Local"),
-    "codex-switcher",
-    "provider-plugin-data",
-  );
+  const localAppData = process.env.LOCALAPPDATA || join(process.env.USERPROFILE || stateDir, "AppData", "Local");
+  const candidates = [
+    configured ? join(configured, "provider-plugin-data") : undefined,
+    join(localAppData, "codex-switcher", "provider-plugin-data"),
+    join(tmpdir(), "codex-switcher", "provider-plugin-data"),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  const selected = process.env.CODEX_SWITCHER_PLUGIN_DATA_DIR?.trim();
+  return candidates.find((candidate) => !selected || resolve(candidate).toLowerCase() !== resolve(selected).toLowerCase())
+    ?? join(tmpdir(), "codex-switcher", "provider-plugin-data");
+}
+
+function probeWritableDirectory(candidate: string): boolean {
+  let probe: string | undefined;
+  try {
+    mkdirSync(candidate, { recursive: true, mode: 0o700 });
+    probe = mkdtempSync(join(candidate, ".write-test-"));
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (probe) rmSync(probe, { recursive: true, force: true });
+  }
 }
 
 export interface ProviderPluginSettingsSnapshot {
