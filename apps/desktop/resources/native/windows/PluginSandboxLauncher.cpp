@@ -337,6 +337,7 @@ int wmain(int argc, wchar_t** argv) {
   DWORD timeoutMilliseconds = 15000;
   if (!readTimeoutMilliseconds(argc, argv, timeoutMilliseconds)) return fail(L"invalid AppContainer child timeout");
   const bool debug = hasFlag(argc, argv, L"--debug");
+  const bool persistent = hasFlag(argc, argv, L"--persistent");
   gDebug = debug;
   const auto trace = [debug](const wchar_t* message) {
     if (debug) std::wcerr << L"[sandbox] " << message << std::endl;
@@ -452,12 +453,42 @@ int wmain(int argc, wchar_t** argv) {
   }
   trace(L"created AppContainer process");
 
+  // Provider plugins keep the RPC process alive for the lifetime of the
+  // Gateway. Put the AppContainer child in a kill-on-close job so terminating
+  // this launcher during plugin shutdown cannot leave an orphaned Node process
+  // holding the plugin's stdio pipes open.
+  HANDLE job = CreateJobObjectW(nullptr, nullptr);
+  if (!job) {
+    TerminateProcess(process.hProcess, 125);
+    WaitForSingleObject(process.hProcess, 2000);
+    CloseHandle(process.hProcess);
+    DeleteProcThreadAttributeList(attributes);
+    HeapFree(GetProcessHeap(), 0, attributes);
+    FreeSid(appContainerSid);
+    return fail(L"cannot create AppContainer job", HRESULT_FROM_WIN32(GetLastError()));
+  }
+  JOBOBJECT_EXTENDED_LIMIT_INFORMATION jobInfo{};
+  jobInfo.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+  if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &jobInfo, sizeof(jobInfo))
+      || !AssignProcessToJobObject(job, process.hProcess)) {
+    const HRESULT error = HRESULT_FROM_WIN32(GetLastError());
+    CloseHandle(job);
+    TerminateProcess(process.hProcess, 125);
+    WaitForSingleObject(process.hProcess, 2000);
+    CloseHandle(process.hProcess);
+    DeleteProcThreadAttributeList(attributes);
+    HeapFree(GetProcessHeap(), 0, attributes);
+    FreeSid(appContainerSid);
+    return fail(L"cannot attach AppContainer process to job", error);
+  }
+
   CloseHandle(process.hThread);
-  const DWORD waitResult = WaitForSingleObject(process.hProcess, timeoutMilliseconds);
+  const DWORD waitResult = WaitForSingleObject(process.hProcess, persistent ? INFINITE : timeoutMilliseconds);
   trace(waitResult == WAIT_OBJECT_0 ? L"AppContainer process exited" : L"AppContainer process wait did not complete");
   if (waitResult == WAIT_TIMEOUT) {
     TerminateProcess(process.hProcess, 124);
     WaitForSingleObject(process.hProcess, 2000);
+    CloseHandle(job);
     CloseHandle(process.hProcess);
     DeleteProcThreadAttributeList(attributes);
     HeapFree(GetProcessHeap(), 0, attributes);
@@ -466,6 +497,7 @@ int wmain(int argc, wchar_t** argv) {
   }
   if (waitResult != WAIT_OBJECT_0) {
     const HRESULT error = HRESULT_FROM_WIN32(GetLastError());
+    CloseHandle(job);
     CloseHandle(process.hProcess);
     DeleteProcThreadAttributeList(attributes);
     HeapFree(GetProcessHeap(), 0, attributes);
@@ -474,6 +506,7 @@ int wmain(int argc, wchar_t** argv) {
   }
   DWORD exitCode = 1;
   GetExitCodeProcess(process.hProcess, &exitCode);
+  CloseHandle(job);
   CloseHandle(process.hProcess);
   DeleteProcThreadAttributeList(attributes);
   HeapFree(GetProcessHeap(), 0, attributes);

@@ -354,6 +354,8 @@ export function ProgressDialog({
   children,
   confirmLabel = "OK",
   busyLabel = "Working…",
+  showRunningIcon = true,
+  showBusyLabel = true,
   onConfirm,
 }: {
   open: boolean;
@@ -362,6 +364,8 @@ export function ProgressDialog({
   children: ReactNode;
   confirmLabel?: string;
   busyLabel?: string;
+  showRunningIcon?: boolean;
+  showBusyLabel?: boolean;
   onConfirm?: () => void;
 }) {
   const mounted = useDelayedUnmount(open);
@@ -386,17 +390,17 @@ export function ProgressDialog({
       >
         <div data-state={open ? "open" : "closed"} className={cn(dialogSurfaceClass, "max-w-[480px] rounded-[16px]")}>
           <div className="flex items-start gap-3">
-            <Icon className={cn("mt-0.5 size-5 shrink-0", iconClass, isRunning && "animate-spin")} aria-hidden="true" />
+            {(!isRunning || showRunningIcon) ? <Icon className={cn("mt-0.5 size-5 shrink-0", iconClass, isRunning && "animate-spin")} aria-hidden="true" /> : null}
             <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-neutral-950">{title}</h3>
           </div>
           <div className="mt-4 rounded-[10px] border border-black/[0.05] bg-[#fafbfc] p-4">{children}</div>
-          {isRunning ? (
+          {isRunning && showBusyLabel ? (
             <div className="mt-5 text-right text-[12px] text-slate-400">{busyLabel}</div>
-          ) : (
+          ) : !isRunning ? (
             <div className="mt-5 flex justify-end">
               <Button onClick={onConfirm}>{confirmLabel}</Button>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     </DialogPortal>

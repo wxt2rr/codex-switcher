@@ -1653,6 +1653,9 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
     const candidate = new pluginRuntime.ProviderPluginManager({
       rootDir: join(pluginStateDir, "provider-plugins"),
       settingsDir: join(pluginStateDir, "provider-plugin-settings"),
+      // A cold Windows AppContainer launch can spend several seconds creating
+      // ACLs and starting a managed provider before its first RPC response.
+      host: { timeoutMs: 30_000 },
       // The usage router runs in a separate process from the desktop host. It
       // must point provider plugins at the same persistent data directory as
       // the host-side plugin manager; otherwise managed plugins fall back to

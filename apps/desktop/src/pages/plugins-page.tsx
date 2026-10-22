@@ -5,7 +5,6 @@ import {
   Download,
   AlertTriangle,
   FileCode2,
-  LoaderCircle,
   PackageCheck,
   Puzzle,
   RefreshCw,
@@ -316,7 +315,8 @@ function PluginInstallDialog({
           ? (zh ? "插件安装完成" : "Plugin installed")
           : (zh ? "插件安装失败" : "Plugin installation failed")}
       confirmLabel={zh ? "确定" : "OK"}
-      busyLabel={zh ? "安装任务执行中…" : "Installation is in progress…"}
+      showRunningIcon={false}
+      showBusyLabel={false}
       onConfirm={() => {
         onClose();
         if (state.phase === "success") onSuccess(zh ? `${state.target.name} 已安装` : `${state.target.name} installed`);
@@ -325,27 +325,30 @@ function PluginInstallDialog({
       {state.phase === "running" ? (
         <div className="space-y-4" aria-live="polite">
           <div className="flex items-center gap-3">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30">
-              <LoaderCircle className="size-5 animate-spin" aria-hidden="true" />
-            </div>
             <div className="min-w-0">
               <div className="text-sm font-semibold text-neutral-800 dark:text-white">
                 {pluginInstallSteps[state.step]?.[zh ? "zh" : "en"]}
               </div>
               <div className="mt-1 truncate text-[12px] text-slate-500">{state.target.id}@{state.target.version}</div>
             </div>
-            <span className="ml-auto shrink-0 text-[12px] text-slate-400">{state.step + 1}/{pluginInstallSteps.length}</span>
+            <span className="ml-auto shrink-0 text-[12px] font-medium text-slate-500">{pluginInstallProgressPercent(state.step)}%</span>
           </div>
           <div
             role="progressbar"
             aria-label={zh ? "插件安装进度" : "Plugin installation progress"}
             aria-valuetext={pluginInstallSteps[state.step]?.[zh ? "zh" : "en"]}
-            className="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={pluginInstallProgressPercent(state.step)}
+            className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"
           >
-            <div className="plugin-install-progress h-full w-1/3 rounded-full bg-emerald-500" />
+            <div
+              className="h-full rounded-full bg-emerald-500 transition-[width] duration-300 ease-out"
+              style={{ width: `${pluginInstallProgressPercent(state.step)}%` }}
+            />
           </div>
           <p className="text-[12px] leading-5 text-slate-500">
-            {zh ? "正在完成来源下载、文件校验和隔离进程启动。完成前请不要关闭应用。" : "The source is downloaded, verified, and started in an isolated process. Keep the app open until it finishes."}
+            {zh ? "正在完成来源下载、文件校验和隔离进程启动，请稍候。" : "The source is being downloaded, verified, and started in an isolated process. Please wait."}
           </p>
         </div>
       ) : state.phase === "success" ? (
@@ -372,6 +375,11 @@ function PluginInstallDialog({
       )}
     </ProgressDialog>
   );
+}
+
+function pluginInstallProgressPercent(step: number): number {
+  const completedStep = Math.max(0, Math.min(step, pluginInstallSteps.length - 1));
+  return Math.min(90, Math.max(10, Math.round(((completedStep + 1) / pluginInstallSteps.length) * 90)));
 }
 
 function InstalledPluginCard({ plugin, update, zh, busy, onToggle, onSelect, onRollback, onRemove, onUpdate }: { plugin: ProviderPluginSnapshot; update?: ProviderPluginMarketEntry; zh: boolean; busy: boolean; onToggle: () => void; onSelect: () => void; onRollback: () => void; onRemove: () => void; onUpdate: (entry: ProviderPluginMarketEntry) => void }) {

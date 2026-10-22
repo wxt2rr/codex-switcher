@@ -127,6 +127,10 @@ async function getManager(stateDir: string) {
     const next = new runtime.ProviderPluginManager({
       rootDir: join(stateDir, "provider-plugins"),
       settingsDir: join(stateDir, "provider-plugin-settings"),
+      // Windows AppContainer startup includes ACL setup and the first launch
+      // of the managed provider service. Keep the host's safety deadline, but
+      // give that lifecycle handshake enough time on a cold install.
+      host: { timeoutMs: 30_000 },
       pluginDataDir: resolveProviderPluginDataDir(stateDir),
       ...(process.platform === "win32" ? {
         pluginDataFallbackDir: resolvePluginDataFallbackDir(stateDir),

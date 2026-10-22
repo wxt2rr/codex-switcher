@@ -74,6 +74,7 @@ test("Windows uses the explicit AppContainer launcher and forwards only declared
     "--cwd", "C:\\plugin",
     "--node", "C:\\Program Files\\nodejs\\node.exe",
     "--entry", "C:\\plugin\\index.js",
+    "--persistent",
     "--network",
   ]);
 });
