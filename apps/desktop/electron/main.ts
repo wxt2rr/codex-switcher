@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, net, shell, Tray, type IpcMainInvokeEvent } from "electron";
 import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -151,6 +151,45 @@ const appDir = dirname(currentDir);
 process.env.CODEX_SWITCHER_DESKTOP_RESOURCES_PATH = process.resourcesPath;
 let mainWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
+let startupLogPath: string | undefined;
+let startupFailureShown = false;
+
+function recordStartupDiagnostic(message: string, error?: unknown): void {
+  const detail = error instanceof Error ? `${error.name}: ${error.message}\n${error.stack ?? ""}` : error === undefined ? "" : String(error);
+  const line = `[${new Date().toISOString()}] ${message}${detail ? `\n${detail}` : ""}\n`;
+  if (!startupLogPath && app.isReady()) {
+    try {
+      startupLogPath = join(app.getPath("userData"), "startup.log");
+    } catch {
+      return;
+    }
+  }
+  if (!startupLogPath) return;
+  void mkdir(dirname(startupLogPath), { recursive: true })
+    .then(() => appendFile(startupLogPath!, line, "utf8"))
+    .catch(() => undefined);
+}
+
+function escapeHtml(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+}
+
+function showStartupFailure(error: unknown): void {
+  if (startupFailureShown) return;
+  startupFailureShown = true;
+  const message = error instanceof Error ? error.message : String(error);
+  recordStartupDiagnostic("Desktop startup failed", error);
+  const logPath = startupLogPath ?? "startup.log";
+  const html = `<!doctype html><meta charset="utf-8"><title>Codex Switcher 启动失败</title><style>body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#f2f2f7;color:#1f2937;padding:48px;line-height:1.6}main{max-width:760px;margin:auto;background:white;border:1px solid #e5e7eb;border-radius:16px;padding:28px;box-shadow:0 12px 36px #0f172a14}h1{font-size:20px;margin:0 0 12px}p{font-size:14px}pre{white-space:pre-wrap;overflow:auto;background:#f8fafc;border-radius:10px;padding:14px;font-size:12px;color:#991b1b}small{color:#64748b}</style><main><h1>Codex Switcher 启动失败</h1><p>应用没有成功加载界面。请重启应用；如果仍然失败，请把下面的错误和启动日志提供给开发者。</p><pre>${escapeHtml(message)}</pre><small>启动日志：${escapeHtml(logPath)}</small></main>`;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    void mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch((loadError) => recordStartupDiagnostic("Failed to show startup error page", loadError));
+    return;
+  }
+  const fallback = new BrowserWindow({ width: 900, height: 640, minWidth: 640, minHeight: 480, backgroundColor: "#f2f2f7", autoHideMenuBar: true, webPreferences: { contextIsolation: true, nodeIntegration: false } });
+  mainWindow = fallback;
+  fallback.on("closed", () => { if (mainWindow === fallback) mainWindow = undefined; });
+  void fallback.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch((loadError) => recordStartupDiagnostic("Failed to create startup error page", loadError));
+}
 
 function readConfiguredUpdateManifest(): DesktopUpdateManifest | undefined {
   const raw = process.env.CODEX_SWITCHER_UPDATE_MANIFEST_JSON?.trim();
@@ -290,6 +329,22 @@ async function createWindow() {
     }
   });
   mainWindow = window;
+  window.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    if (level >= 2) recordStartupDiagnostic(`Renderer console error (${sourceId}:${line})`, message);
+  });
+  window.webContents.on("preload-error", (_event, preloadPath, error) => {
+    recordStartupDiagnostic(`Preload failed: ${preloadPath}`, error);
+  });
+  window.webContents.on("render-process-gone", (_event, details) => {
+    recordStartupDiagnostic(`Renderer process exited (${details.reason})`, details.exitCode);
+    if (details.reason !== "clean-exit") showStartupFailure(new Error(`Renderer process exited unexpectedly (${details.reason})`));
+  });
+  window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (isMainFrame) {
+      recordStartupDiagnostic(`Main frame failed to load (${errorCode}) ${validatedURL}`, errorDescription);
+      showStartupFailure(new Error(`${errorDescription} (${errorCode})`));
+    }
+  });
   window.on("closed", () => {
     if (mainWindow === window) mainWindow = undefined;
   });
@@ -305,7 +360,21 @@ async function createWindow() {
     return;
   }
 
-  await window.loadFile(join(appDir, "..", "dist", "index.html"));
+  const rendererCandidates = [
+    join(appDir, "..", "dist", "index.html"),
+    join(app.getAppPath(), "dist", "index.html"),
+    join(process.resourcesPath, "app.asar", "dist", "index.html"),
+    join(process.resourcesPath, "app", "dist", "index.html"),
+  ];
+  const rendererPath = rendererCandidates.find((candidate) => existsSync(candidate));
+  if (!rendererPath) {
+    const message = `Renderer entry was not found. Checked:\n${rendererCandidates.join("\n")}`;
+    recordStartupDiagnostic(message);
+    showStartupFailure(new Error(message));
+    return;
+  }
+  recordStartupDiagnostic(`Loading renderer: ${rendererPath}`);
+  await window.loadFile(rendererPath);
 }
 
 function showMainWindow() {
@@ -443,10 +512,15 @@ app.whenReady().then(async () => {
 
   app.on("activate", async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      await createWindow();
+      await createWindow().catch((error) => showStartupFailure(error));
     }
     void synchronizeAppEnvironmentBadges().catch(() => undefined);
   });
+}).catch((error) => {
+  // Never leave a packaged Windows install with an unexplained blank window
+  // when a startup dependency or renderer entry point fails. Keep the process
+  // alive long enough to show the diagnostic page and write the real cause.
+  showStartupFailure(error);
 });
 
 let envHistoryCleanupTimer: NodeJS.Timeout | undefined;
