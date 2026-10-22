@@ -326,11 +326,24 @@ bool grantDirectoryAncestors(const std::wstring& path, PSID appContainerSid, std
   // traversal on each one. The grants are stored from the leaf upward, so the
   // vector's reverse destruction order restores them safely.
   std::filesystem::path current = std::filesystem::path(path).parent_path();
+  bool firstAncestor = true;
   while (!current.empty() && current != current.parent_path() && current != current.root_path()) {
     if (debug) std::wcerr << L"[sandbox] granting traversal: " << current.wstring() << std::endl;
     auto grant = std::make_unique<AclGrant>();
-    if (!grantDirectoryTraversal(current.wstring(), appContainerSid, *grant)) return false;
-    grants.push_back(std::move(grant));
+    if (grantDirectoryTraversal(current.wstring(), appContainerSid, *grant)) {
+      grants.push_back(std::move(grant));
+    } else if (firstAncestor) {
+      // The immediate parent is required for a lookup into the target. A
+      // failure here means the target cannot be reached by the AppContainer.
+      return false;
+    } else if (debug) {
+      // Higher-level system or CI directories can have protected ACLs even
+      // though the child path is already traversable through inherited rules.
+      // Do not make the entire sandbox unavailable when an optional ancestor
+      // refuses an additional ACE.
+      std::wcerr << L"[sandbox] keeping existing traversal ACL: " << current.wstring() << std::endl;
+    }
+    firstAncestor = false;
     current = current.parent_path();
   }
   return true;
