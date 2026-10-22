@@ -66,6 +66,7 @@ test("Windows uses the explicit AppContainer launcher and forwards only declared
     platform: "win32",
     windowsSandboxExecutable: process.execPath,
     nodeExecutable: "C:\\Program Files\\nodejs\\node.exe",
+    writablePaths: ["C:\\plugin-data"],
   });
   assert.equal(launch.command, process.execPath);
   assert.equal(launch.sandbox.kind, "windows-app-container");
@@ -75,6 +76,7 @@ test("Windows uses the explicit AppContainer launcher and forwards only declared
     "--node", "C:\\Program Files\\nodejs\\node.exe",
     "--entry", "C:\\plugin\\index.js",
     "--persistent",
+    "--writable-path", "C:\\plugin-data",
     "--network",
   ]);
 });

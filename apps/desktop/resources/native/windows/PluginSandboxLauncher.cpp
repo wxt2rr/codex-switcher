@@ -93,6 +93,14 @@ std::wstring valueFor(int argc, wchar_t** argv, const wchar_t* name) {
   return L"";
 }
 
+std::vector<std::wstring> valuesFor(int argc, wchar_t** argv, const wchar_t* name) {
+  std::vector<std::wstring> values;
+  for (int i = 1; i + 1 < argc; ++i) {
+    if (std::wstring(argv[i]) == name) values.emplace_back(argv[i + 1]);
+  }
+  return values;
+}
+
 bool hasFlag(int argc, wchar_t** argv, const wchar_t* name) {
   for (int i = 1; i < argc; ++i) {
     if (std::wstring(argv[i]) == name) return true;
@@ -333,6 +341,7 @@ int wmain(int argc, wchar_t** argv) {
   const std::wstring cwd = valueFor(argc, argv, L"--cwd");
   const std::wstring node = valueFor(argc, argv, L"--node");
   const std::wstring entry = valueFor(argc, argv, L"--entry");
+  const std::vector<std::wstring> writablePaths = valuesFor(argc, argv, L"--writable-path");
   if (profileName.empty() || cwd.empty() || node.empty() || entry.empty()) return fail(L"missing AppContainer launcher arguments");
   DWORD timeoutMilliseconds = 15000;
   if (!readTimeoutMilliseconds(argc, argv, timeoutMilliseconds)) return fail(L"invalid AppContainer child timeout");
@@ -383,6 +392,22 @@ int wmain(int argc, wchar_t** argv) {
     return fail(L"cannot grant AppContainer access to plugin directory", HRESULT_FROM_WIN32(GetLastError()));
   }
   trace(L"granted plugin directory ACL");
+
+  std::vector<std::unique_ptr<AclGrant>> writableGrants;
+  for (const auto& writablePath : writablePaths) {
+    if (writablePath.empty()) continue;
+    if (!grantDirectoryAncestors(writablePath, appContainerSid, writableGrants, debug)) {
+      FreeSid(appContainerSid);
+      return fail(L"cannot grant traversal to plugin data directory", HRESULT_FROM_WIN32(GetLastError()));
+    }
+    auto grant = std::make_unique<AclGrant>();
+    if (!grantDirectoryAccess(writablePath, appContainerSid, true, *grant)) {
+      FreeSid(appContainerSid);
+      return fail(L"cannot grant AppContainer access to plugin data directory", HRESULT_FROM_WIN32(GetLastError()));
+    }
+    writableGrants.push_back(std::move(grant));
+    if (debug) std::wcerr << L"[sandbox] granted writable path: " << writablePath << std::endl;
+  }
 
   SIZE_T attributeSize = 0;
   InitializeProcThreadAttributeList(nullptr, 1, 0, &attributeSize);

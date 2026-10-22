@@ -129,6 +129,9 @@ test("desktop package defines electron packaging entrypoints", () => {
   assert.doesNotMatch(windowsSandboxSource, /originalDacl/);
   assert.match(windowsSandboxSource, /FILE_TRAVERSE/);
   assert.match(windowsSandboxSource, /grantDirectoryAncestors/);
+  assert.match(windowsSandboxSource, /--writable-path/);
+  assert.match(windowsSandboxSource, /writablePaths/);
+  assert.match(windowsSandboxSource, /grantDirectoryAccess\(writablePath, appContainerSid, true/);
   assert.match(windowsSandboxSource, /--persistent/);
   assert.match(windowsSandboxSource, /readTimeoutMilliseconds/);
   assert.match(windowsSandboxSource, /WaitForSingleObject\(process\.hProcess, persistent \? INFINITE : timeoutMilliseconds\)/);

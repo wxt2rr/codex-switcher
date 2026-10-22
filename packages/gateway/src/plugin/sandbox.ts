@@ -95,6 +95,9 @@ export function buildPluginLaunchSpec(
     // it must wait for the child to exit instead of applying the short-lived
     // smoke-test timeout.
     const args = ["--profile", manifest.id, "--cwd", cwd, "--node", nodeExecutable, "--entry", entry, "--persistent"];
+    for (const writablePath of options.writablePaths ?? []) {
+      if (writablePath.trim()) args.push("--writable-path", writablePath);
+    }
     if (manifest.permissions.includes("network")) args.push("--network");
     if (manifest.permissions.includes("filesystem")) args.push("--filesystem");
     return {
