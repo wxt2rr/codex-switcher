@@ -317,12 +317,21 @@ bool grantDirectoryTraversal(const std::wstring& path, PSID appContainerSid, Acl
 }
 
 bool grantDirectoryAncestors(const std::wstring& path, PSID appContainerSid, std::vector<std::unique_ptr<AclGrant>>& grants, bool debug) {
+  // An AppContainer must be able to traverse every existing directory between
+  // the drive root and the target. Granting only the immediate parent is not
+  // sufficient for paths under AppData (for example
+  // `%APPDATA%\\codex-switcher\\provider-plugin-data\\<plugin>`): the
+  // container can see the target ACL but Windows still denies the lookup while
+  // walking one of its higher-level parents. Walk all ancestors and grant
+  // traversal on each one. The grants are stored from the leaf upward, so the
+  // vector's reverse destruction order restores them safely.
   std::filesystem::path current = std::filesystem::path(path).parent_path();
-  if (!current.empty() && current != current.parent_path() && current != current.root_path()) {
+  while (!current.empty() && current != current.parent_path() && current != current.root_path()) {
     if (debug) std::wcerr << L"[sandbox] granting traversal: " << current.wstring() << std::endl;
     auto grant = std::make_unique<AclGrant>();
     if (!grantDirectoryTraversal(current.wstring(), appContainerSid, *grant)) return false;
     grants.push_back(std::move(grant));
+    current = current.parent_path();
   }
   return true;
 }
