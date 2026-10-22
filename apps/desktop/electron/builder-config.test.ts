@@ -130,6 +130,7 @@ test("desktop package defines electron packaging entrypoints", () => {
   assert.match(windowsSandboxSource, /FILE_TRAVERSE/);
   assert.match(windowsSandboxSource, /grantDirectoryAncestors/);
   assert.match(windowsSandboxSource, /while \(!current\.empty\(\) && current != current\.parent_path\(\)/);
+  assert.match(windowsSandboxSource, /traversal already granted/);
   assert.match(windowsSandboxSource, /--writable-path/);
   assert.match(windowsSandboxSource, /writablePaths/);
   assert.match(windowsSandboxSource, /grantDirectoryAccess\(writablePath, appContainerSid, true/);
