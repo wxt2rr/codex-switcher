@@ -683,14 +683,17 @@ function uniqueProviderModelSlug(
 }
 
 /**
- * Custom OpenAI-compatible accounts share one transport adapter. Include the
- * normalized service origin in their catalog identity so equal model ids from
- * different gateways remain separate while accounts on the same gateway can
- * still share a model identity.
+ * OpenAI-compatible accounts share one transport adapter, but their model
+ * catalogs must still be isolated by the actual upstream service. In
+ * particular, an account that was created before provider metadata existed
+ * can still be stored as provider `openai` while pointing at a third-party
+ * endpoint. Keep the official OpenAI identity for api.openai.com and derive a
+ * stable custom identity for every other OpenAI-compatible origin.
  */
 export function resolveModelCatalogProviderId(providerId: string, baseUrl?: string): string {
   const normalizedProviderId = providerId.trim() || "custom";
-  if (!new Set(["custom", "custom-openai"]).has(normalizedProviderId) || !baseUrl?.trim()) {
+  const openAiCompatible = new Set(["openai", "custom", "custom-openai"]).has(normalizedProviderId);
+  if (!openAiCompatible || !baseUrl?.trim()) {
     return normalizedProviderId;
   }
   // The account runtime points at the local Gateway while an environment
@@ -702,10 +705,14 @@ export function resolveModelCatalogProviderId(providerId: string, baseUrl?: stri
   }
   try {
     const url = new URL(baseUrl.trim());
-    const host = `${url.hostname.toLowerCase()}${url.port ? `-${url.port}` : ""}`;
     const path = url.pathname.replace(/\/+$/, "").replace(/\/v\d+$/i, "");
+    if (normalizedProviderId === "openai" && url.hostname.toLowerCase() === "api.openai.com" && !path) {
+      return "openai";
+    }
+    const host = `${url.hostname.toLowerCase()}${url.port ? `-${url.port}` : ""}`;
     const pathKey = path.replace(/[^A-Za-z0-9._:-]+/g, "-").replace(/^-+|-+$/g, "");
-    return `${normalizedProviderId}:${host}${pathKey ? `:${pathKey}` : ""}`;
+    const identityProvider = normalizedProviderId === "openai" ? "custom-openai" : normalizedProviderId;
+    return `${identityProvider}:${host}${pathKey ? `:${pathKey}` : ""}`;
   } catch {
     return normalizedProviderId;
   }

@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import {
   __testUtils,
 } from "./bridge.js";
+import type { GatewayEnvironmentState } from "../../../packages/core/dist/gateway/model.js";
 
 async function writeFileRecursive(path: string, content: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
@@ -89,6 +90,51 @@ test("electron bridge validates imports and builds official Codex auth JSON", ()
   );
 });
 
+test("electron bridge resolves a legacy OpenAI account to its gateway upstream identity", () => {
+  const identity = __testUtils.resolveCatalogProviderIdentityForTest(
+    {
+      name: "wangxt",
+      gateway: {
+        credentials: {
+          ckt: {
+            id: "ckt",
+            providerId: "openai",
+            displayName: "ckt-aicode",
+            kind: "api_key",
+            secretRef: "account:wangxt:ckt-aicode",
+            supportedProtocols: ["responses"],
+            status: "active",
+          },
+        },
+        providers: {
+          openai: {
+            id: "openai",
+            displayName: "openai",
+            kind: "openai",
+            endpoints: { responses: "https://aicode.ckt.cn/v1" },
+            modelDiscovery: "manual",
+            enabled: true,
+          },
+        },
+      } as unknown as GatewayEnvironmentState,
+    },
+    "ckt-aicode",
+    {
+      name: "ckt-aicode",
+      authMode: "apikey",
+      runtime: {
+        openaiBaseUrlMode: "custom",
+        openaiBaseUrl: "http://127.0.0.1:17832/gateways/test",
+      },
+    },
+  );
+
+  assert.deepEqual(identity, {
+    providerId: "custom-openai:aicode.ckt.cn",
+    providerDisplayName: "ckt-aicode",
+  });
+});
+
 test("electron bridge plans post-switch follow-up actions by target", () => {
   assert.deepEqual(__testUtils.buildPostSwitchActions("app"), [
     {
@@ -113,7 +159,7 @@ test("Windows packaged App projection rebuilds the model catalog in the projecte
   const source = await readBridgeSource();
   const projectionStart = source.indexOf("materialize: async (projectionHome)");
   const catalogSync = source.indexOf(
-    'synchronizeTargetModelCatalog(projectionState, "app", projectionHome)',
+    'synchronizeTargetModelCatalog(runtime, projectionState, "app", projectionHome)',
     projectionStart,
   );
   assert.ok(projectionStart >= 0, "packaged App projection callback should exist");
@@ -123,6 +169,16 @@ test("Windows packaged App projection rebuilds the model catalog in the projecte
     /localRouterAuthMode:\s*"static"/,
     "packaged App projection should avoid inherited environment credentials",
   );
+});
+
+test("electron bridge synchronizes the target catalog before launching Codex App", async () => {
+  const source = await readBridgeSource();
+  const launchStart = source.indexOf("async function launchAppTarget(");
+  const catalogSync = source.indexOf('await synchronizeTargetModelCatalog(runtime, state, "app", env.path);', launchStart);
+  const supportLoad = source.indexOf("const support = await loadCoreSupportModules();", launchStart);
+  assert.ok(launchStart >= 0, "App launch helper should exist");
+  assert.ok(catalogSync > launchStart, "App launch should synchronize its catalog");
+  assert.ok(supportLoad > catalogSync, "App launch should load/start support only after catalog sync");
 });
 
 test("electron bridge returns a shell-neutral launch message for the CLI", async () => {

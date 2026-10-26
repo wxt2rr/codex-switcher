@@ -711,6 +711,66 @@ async function resolveAccountUpstreamBaseUrl(
   return selectCompatibilityUpstreamBaseUrl(routes, envName, accountName, runtimeBaseUrl);
 }
 
+type CatalogIdentityAccount = {
+  name: string;
+  authMode: string;
+  runtime: {
+    providerId?: string;
+    openaiBaseUrlMode: string;
+    openaiBaseUrl?: string;
+    apiProtocol?: GatewayProtocol;
+  };
+};
+
+/**
+ * Resolve the provider identity used by the Codex-facing model catalog.
+ *
+ * The account runtime stores the local Gateway URL after a gateway is
+ * enabled. That URL is only the ingress transport; the actual upstream
+ * service remains on the gateway provider definition. Use that upstream
+ * endpoint when available so legacy accounts with an empty/providerId=openai
+ * still get a unique identity such as custom-openai:aicode.ckt.cn.
+ */
+function resolveCatalogProviderIdentity(
+  environment: { name: string; gateway?: GatewayEnvironmentState },
+  accountName: string,
+  account: CatalogIdentityAccount,
+  gateway = environment.gateway,
+): { providerId: string; providerDisplayName?: string } {
+  const runtimeProviderId = account.runtime.providerId?.trim()
+    || (account.authMode === "auth" ? "chatgpt" : "openai");
+  const configuredBaseUrl = account.runtime.openaiBaseUrlMode === "custom"
+    ? account.runtime.openaiBaseUrl?.trim()
+    : undefined;
+  const secretRef = createAccountSecretRef(environment.name, accountName);
+  const credential = gateway
+    ? Object.values(gateway.credentials).find((candidate) => candidate.secretRef === secretRef)
+    : undefined;
+  const provider = credential ? gateway?.providers[credential.providerId] : undefined;
+  const protocol = account.authMode === "auth" ? "responses" : account.runtime.apiProtocol ?? "responses";
+  const upstreamBaseUrl = provider
+    ? protocol === "chat_completions"
+      ? provider.endpoints.chatCompletions ?? provider.endpoints.responses
+      : protocol === "anthropic"
+        ? provider.endpoints.anthropicMessages
+        : protocol === "gemini"
+          ? provider.endpoints.gemini
+          : provider.endpoints.responses
+    : undefined;
+  const baseUrl = configuredBaseUrl && !isLocalRouterBaseUrl(configuredBaseUrl)
+    ? configuredBaseUrl
+    : upstreamBaseUrl && !isLocalRouterBaseUrl(upstreamBaseUrl)
+      ? upstreamBaseUrl
+      : configuredBaseUrl;
+  const providerId = resolveModelCatalogProviderId(runtimeProviderId, baseUrl);
+  const providerDisplayName = providerId.startsWith("custom-openai:")
+    ? account.name.trim() || undefined
+    : runtimeProviderId === "custom" || runtimeProviderId === "custom-openai"
+      ? account.name.trim() || undefined
+      : undefined;
+  return { providerId, ...(providerDisplayName ? { providerDisplayName } : {}) };
+}
+
 function createEnvironmentRouteBaseUrlUpdater(
   runtime: Awaited<ReturnType<typeof loadCoreRuntime>>,
   envName: string,
@@ -1088,17 +1148,13 @@ async function buildModelRequestPreview(
   if (!sourceModel) throw new Error(`Model '${input.modelId}' is not present in the catalog`);
 
   const accountKey = accountModelBindingKey(input.envName, input.accountName);
-  const runtimeProviderId = resolveRuntimeProviderId(account);
-  const providerId = resolveModelCatalogProviderId(runtimeProviderId, account.runtime.openaiBaseUrl);
-  const providerDisplayName = runtimeProviderId === "custom" || runtimeProviderId === "custom-openai"
-    ? account.name.trim() || undefined
-    : undefined;
+  const catalogIdentity = resolveCatalogProviderIdentity(environment, input.accountName, account);
   const protocol = account.authMode === "auth" ? "responses" as const : account.runtime.apiProtocol ?? "responses" as const;
   const projected = projectAccountBindingsFromCatalog(structuredClone(catalog), {
     accountKey,
     modelIds: [sourceModel.id],
-    providerId,
-    ...(providerDisplayName ? { providerDisplayName } : {}),
+    providerId: catalogIdentity.providerId,
+    ...(catalogIdentity.providerDisplayName ? { providerDisplayName: catalogIdentity.providerDisplayName } : {}),
     protocol,
   });
   const targetModelId = projected.accountBindings[accountKey]?.[0];
@@ -3038,11 +3094,11 @@ export async function discoverAccountModels(envName: string, accountName: string
   const account = environment?.accounts[accountName];
   if (!environment || !account) throw new Error(`Account '${envName}/${accountName}' not found`);
 
+  const baseGateway = environment.gateway ?? await buildEnvironmentGatewayState(runtime, environment);
   const providerId = resolveRuntimeProviderId(account);
-  const catalogProviderId = resolveModelCatalogProviderId(providerId, account.runtime.openaiBaseUrl);
-  const providerDisplayName = providerId === "custom" || providerId === "custom-openai"
-    ? account.name.trim() || undefined
-    : undefined;
+  const catalogIdentity = resolveCatalogProviderIdentity(environment, accountName, account, baseGateway);
+  const catalogProviderId = catalogIdentity.providerId;
+  const providerDisplayName = catalogIdentity.providerDisplayName;
   const accountKey = accountModelBindingKey(envName, accountName);
   const persistedGatewayCredential = Object.values(environment.gateway?.credentials ?? {})
     .find((credential) => credential.secretRef === createAccountSecretRef(envName, accountName));
@@ -3060,7 +3116,6 @@ export async function discoverAccountModels(envName: string, accountName: string
   let gateway: GatewayEnvironmentState;
   let discoverySucceeded = false;
   try {
-    const baseGateway = environment.gateway ?? await buildEnvironmentGatewayState(runtime, environment);
     gateway = createGatewayAccountDiscoveryView(environment, baseGateway, accountName);
     const result = await discoverGatewayAccountModels({
       environment,
@@ -3274,16 +3329,15 @@ export async function setAccountModelBindings(accountKey: string, modelIds: stri
     const accountName = accountKey.slice(separator + 1);
     const runtime = await loadCoreRuntime();
     const state = await runtime.readLegacyState(getLegacyOptions());
-    const account = state.envs[envName]?.accounts[accountName];
+    const environment = state.envs[envName];
+    const account = environment?.accounts[accountName];
     if (!account) throw new Error(`Account '${envName}/${accountName}' not found`);
-    const runtimeProviderId = resolveRuntimeProviderId(account);
+    const catalogIdentity = resolveCatalogProviderIdentity(environment!, accountName, account);
     snapshot = await store.setAccountBindingsFromCatalog({
       accountKey,
       modelIds,
-      providerId: resolveModelCatalogProviderId(runtimeProviderId, account.runtime.openaiBaseUrl),
-      ...((runtimeProviderId === "custom" || runtimeProviderId === "custom-openai") && account.name.trim()
-        ? { providerDisplayName: account.name.trim() }
-        : {}),
+      providerId: catalogIdentity.providerId,
+      ...(catalogIdentity.providerDisplayName ? { providerDisplayName: catalogIdentity.providerDisplayName } : {}),
       protocol: account.authMode === "auth" ? "responses" : account.runtime.apiProtocol ?? "responses",
     });
   } else {
@@ -4020,7 +4074,7 @@ async function applyTargetHomeStateWithHistory(
       target,
       ...(gatewayBaseUrl ? { gatewayBaseUrl } : {}),
     });
-    await synchronizeTargetModelCatalog(state, target, env.path);
+    await synchronizeTargetModelCatalog(runtime, state, target, env.path);
   } catch (error) {
     await restoreEnvFileSnapshot(env.path, before);
     throw error;
@@ -4030,6 +4084,7 @@ async function applyTargetHomeStateWithHistory(
 }
 
 async function synchronizeTargetModelCatalog(
+  runtime: CoreRuntime,
   state: Awaited<ReturnType<CoreRuntime["readLegacyState"]>>,
   target: "cli" | "app",
   homePath: string,
@@ -4051,9 +4106,14 @@ async function synchronizeTargetModelCatalog(
     : undefined;
 
   if (env.gateway?.mode === "gateway") {
+    // Rebuild from the current model catalog instead of trusting a gateway
+    // snapshot that may have been written before the last account binding
+    // change. The generated route groups and the Codex-facing catalog must
+    // describe the same set of models before the App is launched.
+    const gateway = await buildEnvironmentGatewayState(runtime, env);
     await synchronizeEnvironmentGatewayModelCatalog({
       homePath,
-      gateway: env.gateway,
+      gateway,
       environmentName: env.name,
       diagnosticLogPath: resolveLogPath("switcher"),
       loadBundledCatalog,
@@ -5123,6 +5183,7 @@ end if
 export const __testUtils = {
   resolveLogPath,
   deriveAuthIdentityKey,
+  resolveCatalogProviderIdentityForTest: resolveCatalogProviderIdentity,
   saveAccountArtifactsForTest: saveAccountArtifacts,
   parseExternalCodexCredentials,
   buildCodexChatGptAuthJson,
@@ -6310,10 +6371,21 @@ async function launchAppTarget(
   runtime: CoreRuntime,
   mode: AppWindowLaunchMode = "reconcile",
 ): Promise<void> {
+  // Refresh an active gateway before the final catalog write. This keeps the
+  // route service and the catalog generated below on the same model-binding
+  // revision when the App is launched immediately after an account switch.
+  if (state.envs[state.targets.app.env]?.gateway?.mode === "gateway") {
+    state = await resynchronizeActiveEnvironmentGateways(runtime, state, state.targets.app.env);
+  }
   const env = state.envs[state.targets.app.env];
   if (!env) {
     throw new Error(`App env '${state.targets.app.env}' not found`);
   }
+  // A gateway catalog is consumed and cached by the Codex App Server during
+  // process startup. Make one final, awaited synchronization immediately
+  // before launching so a binding change cannot leave the server with the
+  // previous Plus-only catalog while config.toml points at the new one.
+  await synchronizeTargetModelCatalog(runtime, state, "app", env.path);
   const support = await loadCoreSupportModules();
   const account = state.envs[state.targets.app.env]?.accounts[state.targets.app.account];
   const apiKey = account?.runtime.apiProtocol === "chat_completions" && account.runtime.compatibilityRouteEnabled
@@ -6357,7 +6429,7 @@ async function launchAppTarget(
           // Explorer activation. Its effective home is the projected default
           // home, so regenerate the account or gateway catalog there after
           // projecting config.toml and auth.json.
-          await synchronizeTargetModelCatalog(projectionState, "app", projectionHome);
+          await synchronizeTargetModelCatalog(runtime, projectionState, "app", projectionHome);
         },
       });
     }

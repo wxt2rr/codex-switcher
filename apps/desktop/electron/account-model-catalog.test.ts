@@ -157,6 +157,101 @@ test("environment gateway catalog writes aggregated models for Codex App", async
   }
 });
 
+test("environment gateway catalog keeps a custom OpenAI endpoint separate from the bundled model", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-gateway-catalog-isolation-"));
+  const homePath = join(root, "home");
+  try {
+    await mkdir(homePath, { recursive: true });
+    await writeFile(join(homePath, "config.toml"), 'model = "gpt-6.1-sol"\n', "utf8");
+    const result = await synchronizeEnvironmentGatewayModelCatalog({
+      homePath,
+      environmentName: "wangxt",
+      gateway: {
+        schemaVersion: 1,
+        mode: "gateway",
+        gatewayId: "gateway-wangxt",
+        providers: {
+          chatgpt: {
+            id: "chatgpt",
+            displayName: "chatgpt",
+            kind: "chatgpt",
+            endpoints: { responses: "https://chatgpt.com/backend-api/codex" },
+            modelDiscovery: "preset",
+            enabled: true,
+          },
+          openai: {
+            id: "openai",
+            displayName: "openai",
+            kind: "openai",
+            endpoints: { responses: "https://aicode.ckt.cn/v1" },
+            modelDiscovery: "manual",
+            enabled: true,
+          },
+        },
+        credentials: {
+          plus: {
+            id: "plus",
+            providerId: "chatgpt",
+            displayName: "plus-0824",
+            kind: "auth",
+            secretRef: "account:wangxt:plus-0824",
+            supportedProtocols: ["responses"],
+            status: "active",
+          },
+          ckt: {
+            id: "ckt",
+            providerId: "openai",
+            displayName: "ckt-aicode",
+            kind: "api_key",
+            secretRef: "account:wangxt:ckt-aicode",
+            supportedProtocols: ["responses"],
+            status: "active",
+          },
+        },
+        models: {
+          "catalog-model:ckt:gpt-6.1-sol": {
+            id: "catalog-model:ckt:gpt-6.1-sol",
+            providerId: "openai",
+            upstreamModelId: "gpt-6.1-sol",
+            displayName: "ckt-aicode:6.1-sol",
+            protocols: ["responses"],
+            capabilities: {},
+            enabled: true,
+          },
+        },
+        routeGroups: {
+          cktRoute: {
+            id: "catalog-route-group:wangxt:custom-openai:aicode.ckt.cn:gpt-6.1-sol",
+            displayName: "ckt-aicode:6.1-sol",
+            exposedModelId: "custom-openai:aicode.ckt.cn:gpt-6.1-sol",
+            members: [{
+              providerId: "openai",
+              modelId: "catalog-model:ckt:gpt-6.1-sol",
+              credentialSelector: { credentialIds: ["ckt"] },
+              priority: 0,
+              weight: 1,
+            }],
+            strategy: "smart",
+            sessionPolicy: "auto",
+            fallbackEnabled: true,
+          },
+        },
+        catalogVersion: 1,
+      },
+      loadBundledCatalog: async () => ({ models: [{ slug: "gpt-6.1-sol", display_name: "GPT-6.1-Sol" }] }),
+    });
+
+    const catalog = JSON.parse(await readFile(result.catalogPath!, "utf8")) as { models: Array<{ slug: string; display_name: string }> };
+    assert.deepEqual(catalog.models.map((model) => model.slug), [
+      "gpt-6.1-sol",
+      "custom-openai:aicode.ckt.cn:gpt-6.1-sol",
+    ]);
+    assert.equal(catalog.models[1]?.display_name, "ckt-aicode:6.1-sol");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("account catalog keeps custom models when Codex CLI is unavailable", async () => {
   const root = await mkdtemp(join(tmpdir(), "account-model-catalog-no-cli-"));
   const store = createModelCatalogStore(join(root, "custom-models.json"));

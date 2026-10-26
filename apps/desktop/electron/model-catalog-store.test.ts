@@ -437,6 +437,14 @@ test("catalog provider identity ignores the local Gateway ingress URL", () => {
     resolveModelCatalogProviderId("custom-openai", "https://aicode.ckt.cn/v1"),
     "custom-openai:aicode.ckt.cn",
   );
+  assert.equal(
+    resolveModelCatalogProviderId("openai", "https://aicode.ckt.cn/v1"),
+    "custom-openai:aicode.ckt.cn",
+  );
+  assert.equal(
+    resolveModelCatalogProviderId("openai", "https://api.openai.com/v1"),
+    "openai",
+  );
 });
 
 test("failed discovery preserves the previous models as stale", async () => {
