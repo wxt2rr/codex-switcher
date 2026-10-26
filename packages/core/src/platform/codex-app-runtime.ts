@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, readdir, rm } from "node:fs/promises";
+import { rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { writeFileAtomically } from "../system/atomic-file.js";
@@ -123,7 +125,15 @@ export async function clearManagedAppInstance(
   instanceId: string,
   removalOptions?: ManagedAppProfileRemovalOptions,
 ): Promise<void> {
-  await removeManagedAppProfile(join(paths.appProfilesDir, instanceId), removalOptions);
+  const profilePath = join(paths.appProfilesDir, instanceId);
+  try {
+    await removeManagedAppProfile(profilePath, removalOptions);
+  } catch (error) {
+    if (!isRecoverableProfileCleanupError(error)) throw error;
+    const quarantinePath = `${profilePath}.cleanup-${randomUUID()}`;
+    await rename(profilePath, quarantinePath).catch(() => { throw error; });
+    void removeManagedAppProfile(quarantinePath, removalOptions).catch(() => undefined);
+  }
   await rm(join(paths.appInstancesDir, `${instanceId}.pid`), { force: true });
   await rm(join(paths.appInstancesDir, `${instanceId}.target`), { force: true });
   const current = await readLastManagedAppInstanceId(paths);
@@ -137,6 +147,11 @@ export async function clearManagedAppInstance(
     }
     await rm(paths.appLastInstanceFile, { force: true });
   }
+}
+
+function isRecoverableProfileCleanupError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return new Set(["ENOTEMPTY", "EBUSY", "EPERM", "EACCES"]).has(code ?? "");
 }
 
 export async function removeManagedAppProfile(

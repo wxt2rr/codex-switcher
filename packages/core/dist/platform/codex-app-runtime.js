@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, readdir, rm } from "node:fs/promises";
+import { rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { writeFileAtomically } from "../system/atomic-file.js";
 /** App instances are scoped by environment. Older records may still contain env/account. */
@@ -84,7 +86,17 @@ export async function setManagedAppInstance(paths, input) {
     await writeManagedAppPid(paths, input.pid);
 }
 export async function clearManagedAppInstance(paths, instanceId, removalOptions) {
-    await removeManagedAppProfile(join(paths.appProfilesDir, instanceId), removalOptions);
+    const profilePath = join(paths.appProfilesDir, instanceId);
+    try {
+        await removeManagedAppProfile(profilePath, removalOptions);
+    }
+    catch (error) {
+        if (!isRecoverableProfileCleanupError(error))
+            throw error;
+        const quarantinePath = `${profilePath}.cleanup-${randomUUID()}`;
+        await rename(profilePath, quarantinePath).catch(() => { throw error; });
+        void removeManagedAppProfile(quarantinePath, removalOptions).catch(() => undefined);
+    }
     await rm(join(paths.appInstancesDir, `${instanceId}.pid`), { force: true });
     await rm(join(paths.appInstancesDir, `${instanceId}.target`), { force: true });
     const current = await readLastManagedAppInstanceId(paths);
@@ -98,6 +110,10 @@ export async function clearManagedAppInstance(paths, instanceId, removalOptions)
         }
         await rm(paths.appLastInstanceFile, { force: true });
     }
+}
+function isRecoverableProfileCleanupError(error) {
+    const code = error.code;
+    return new Set(["ENOTEMPTY", "EBUSY", "EPERM", "EACCES"]).has(code ?? "");
 }
 export async function removeManagedAppProfile(profilePath, options = {}) {
     const remove = options.remove ?? ((path) => rm(path, { recursive: true, force: true }));

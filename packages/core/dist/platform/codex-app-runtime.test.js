@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -104,6 +104,33 @@ test("instance metadata remains recoverable when profile cleanup fails", async (
         assert.deepEqual(await listManagedAppInstances(paths), [
             { instanceId: "instance-1", pid: 2468, targetKey: "env/account" },
         ]);
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+test("instance cleanup quarantines a profile when deletion races with Codex shutdown", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-app-runtime-quarantine-"));
+    try {
+        const paths = resolveManagedAppStatePaths(root);
+        const profile = join(paths.appProfilesDir, "instance-1");
+        await mkdir(profile, { recursive: true });
+        await setManagedAppInstance(paths, { instanceId: "instance-1", pid: 2468, targetKey: "env/account" });
+        await clearManagedAppInstance(paths, "instance-1", {
+            maxRetries: 0,
+            async remove(path) {
+                if (path === profile) {
+                    const error = new Error("permission denied");
+                    error.code = "EACCES";
+                    throw error;
+                }
+                await rm(path, { recursive: true, force: true });
+            },
+            async delay() { },
+        });
+        assert.equal((await listManagedAppInstances(paths)).length, 0);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        assert.deepEqual(await readdir(paths.appProfilesDir), []);
     }
     finally {
         await rm(root, { recursive: true, force: true });
