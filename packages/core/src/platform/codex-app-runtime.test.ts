@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -68,6 +68,41 @@ test("profile removal retries transient Chromium directory races", async () => {
     async delay() {},
   });
   assert.equal(attempts, 3);
+});
+
+test("profile removal retries transient permission errors", async () => {
+  let attempts = 0;
+  await removeManagedAppProfile("/tmp/profile", {
+    maxRetries: 2,
+    retryDelayMs: 1,
+    async remove() {
+      attempts += 1;
+      if (attempts < 2) {
+        const error = new Error("permission denied") as NodeJS.ErrnoException;
+        error.code = "EACCES";
+        throw error;
+      }
+    },
+    async delay() {},
+  });
+  assert.equal(attempts, 2);
+});
+
+test("profile removal repairs read-only directories before retrying", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-app-runtime-read-only-"));
+  const profile = join(root, "profile");
+  const runtime = join(profile, "artifact-sessions", "runtime-generations", "generation-test", "runtime");
+  try {
+    await mkdir(join(runtime, "bin"), { recursive: true });
+    await chmod(join(profile, "artifact-sessions", "runtime-generations", "generation-test"), 0o500);
+    await chmod(runtime, 0o500);
+    await removeManagedAppProfile(profile, { retryDelayMs: 1 });
+    await assert.rejects(access(profile));
+  } finally {
+    await chmod(join(profile, "artifact-sessions", "runtime-generations", "generation-test"), 0o700).catch(() => undefined);
+    await chmod(runtime, 0o700).catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("instance metadata remains recoverable when profile cleanup fails", async () => {

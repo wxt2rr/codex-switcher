@@ -8,6 +8,7 @@ import {
   createModelCatalogStore,
   filterModelCatalogBindings,
   formatCodexModelDisplayName,
+  allowsManualProviderRebinding,
   isModelAvailableForAccount,
   normalizeCustomModelInput,
   projectAccountBindingsFromCatalog,
@@ -353,6 +354,80 @@ test("manual fallback selection stays routeable after an empty discovery", async
   assert.equal(projected.accountModelDiscoveries?.["test/ckt-aicode"]?.models[0]?.source, "manual");
 });
 
+test("manual fallback rebinds a stale provider-keyed model after an empty discovery", async () => {
+  const root = await mkdtemp(join(tmpdir(), "model-binding-provider-rebind-fallback-"));
+  const store = createModelCatalogStore(join(root, "models.json"));
+  const source = await store.saveModel({ entry: {
+    slug: "openai:gpt-6.1-sol",
+    display_name: "GPT-6.1 Sol",
+    provider_id: "openai",
+    provider_model_key: "openai:gpt-6.1-sol",
+    upstream_model_id: "gpt-6.1-sol",
+  } });
+  await store.saveAccountModelDiscovery({
+    accountKey: "default/ckt-aicode",
+    providerId: "custom-openai:aicode.ckt.cn",
+    state: "ready",
+    models: [],
+  });
+
+  const snapshot = await store.load();
+  assert.equal(allowsManualProviderRebinding(snapshot, "default/ckt-aicode"), true);
+  const projected = projectAccountBindingsFromCatalog(structuredClone(snapshot), {
+    accountKey: "default/ckt-aicode",
+    modelIds: [source.id],
+    providerId: "custom-openai:aicode.ckt.cn",
+    providerDisplayName: "ckt-aicode",
+    protocol: "responses",
+  });
+
+  const targetId = projected.accountBindings["default/ckt-aicode"]?.[0];
+  assert.ok(targetId);
+  const target = projected.models.find((model) => model.id === targetId);
+  assert.equal(target?.entry.provider_id, "custom-openai:aicode.ckt.cn");
+  assert.equal(target?.entry.provider_model_key, "custom-openai:aicode.ckt.cn:gpt-6.1-sol");
+  assert.equal(target?.entry.upstream_model_id, "gpt-6.1-sol");
+  assert.equal(projected.accountModelDiscoveries?.["default/ckt-aicode"]?.models[0]?.source, "manual");
+
+  const persisted = await store.setAccountBindingsFromCatalog({
+    accountKey: "default/ckt-aicode",
+    modelIds: [source.id],
+    providerId: "custom-openai:aicode.ckt.cn",
+    providerDisplayName: "ckt-aicode",
+    protocol: "responses",
+  });
+  const persistedTargetId = persisted.accountBindings["default/ckt-aicode"]?.[0];
+  const persistedTarget = persisted.models.find((model) => model.id === persistedTargetId);
+  assert.equal(persistedTarget?.entry.provider_model_key, "custom-openai:aicode.ckt.cn:gpt-6.1-sol");
+});
+
+test("manual provider rebinding remains disabled while a discovery result is available", async () => {
+  const snapshot = {
+    version: 1 as const,
+    models: [],
+    accountBindings: {},
+    accountModelDiscoveries: {
+      "default/ckt-aicode": {
+        providerId: "custom-openai:aicode.ckt.cn",
+        state: "ready" as const,
+        models: [{
+          providerModelKey: "custom-openai:aicode.ckt.cn:gpt-6.1-sol",
+          providerId: "custom-openai:aicode.ckt.cn",
+          upstreamModelId: "gpt-6.1-sol",
+          displayName: "GPT-6.1 Sol",
+          protocols: ["responses"],
+          capabilities: { reasoning: true, tools: true, vision: false, streaming: true },
+          source: "discovery" as const,
+          status: "available" as const,
+          firstSeenAt: "2026-01-01T00:00:00.000Z",
+          lastSeenAt: "2026-01-01T00:00:00.000Z",
+        }],
+      },
+    },
+  };
+  assert.equal(allowsManualProviderRebinding(snapshot, "default/ckt-aicode"), false);
+});
+
 test("catalog provider identity ignores the local Gateway ingress URL", () => {
   assert.equal(
     resolveModelCatalogProviderId("custom-openai", "http://127.0.0.1:17832/gateways/test-gateway"),
@@ -393,6 +468,7 @@ test("failed discovery preserves the previous models as stale", async () => {
   assert.equal(accountSnapshot?.state, "failed");
   assert.equal(accountSnapshot?.models[0]?.status, "stale");
   assert.equal(accountSnapshot?.lastError, "upstream unavailable");
+  assert.equal(allowsManualProviderRebinding(snapshot, "default/account"), true);
 });
 
 test("removing an account clears its discovery and binding relations", async () => {

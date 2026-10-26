@@ -109,7 +109,7 @@ export function AccountModelExposurePanel({
 
   const discovery = snapshot.accountModelDiscoveries?.[accountKey];
   const catalogFallback = discovery?.state === "failed"
-    || (discovery?.state === "ready" && !discovery.models.some((model) => model.status === "available"));
+    || (discovery?.state === "ready" && discovery.models.length === 0);
   const discoveryByProviderKey = useMemo(
     () => discoveryByProviderKeyOf(snapshot, accountKey),
     [snapshot, accountKey],

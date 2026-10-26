@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { writeFileAtomically } from "../system/atomic-file.js";
@@ -146,16 +146,34 @@ export async function removeManagedAppProfile(
   const remove = options.remove ?? ((path: string) => rm(path, { recursive: true, force: true }));
   const delay = options.delay ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const maxRetries = options.maxRetries ?? 8;
+  let permissionsPrepared = false;
   for (let attempt = 0; ; attempt += 1) {
     try {
       await remove(profilePath);
       return;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
-      if (!new Set(["ENOTEMPTY", "EBUSY", "EPERM"]).has(code ?? "") || attempt >= maxRetries) throw error;
+      if (code === "EACCES" && !permissionsPrepared) {
+        permissionsPrepared = true;
+        await makeManagedAppProfileWritable(profilePath).catch(() => undefined);
+      }
+      if (!new Set(["ENOTEMPTY", "EBUSY", "EPERM", "EACCES"]).has(code ?? "") || attempt >= maxRetries) throw error;
       await delay((options.retryDelayMs ?? 75) * (attempt + 1));
     }
   }
+}
+
+async function makeManagedAppProfileWritable(profilePath: string): Promise<void> {
+  const visit = async (path: string): Promise<void> => {
+    const info = await lstat(path);
+    if (info.isSymbolicLink()) return;
+    await chmod(path, info.mode | (info.isDirectory() ? 0o700 : 0o600));
+    if (!info.isDirectory()) return;
+    for (const entry of await readdir(path, { withFileTypes: true })) {
+      await visit(join(path, entry.name));
+    }
+  };
+  await visit(profilePath);
 }
 
 export type ManagedAppStopper = (pid: number, applicationName?: string) => Promise<boolean>;

@@ -110,7 +110,6 @@ import {
   createModelCatalogStore,
   accountModelBindingKey,
   filterModelCatalogBindings,
-  isModelAvailableForAccount,
   normalizeCustomModelInput,
   projectAccountBindingsFromCatalog,
   resolveModelCatalogProviderId,
@@ -1089,9 +1088,6 @@ async function buildModelRequestPreview(
   if (!sourceModel) throw new Error(`Model '${input.modelId}' is not present in the catalog`);
 
   const accountKey = accountModelBindingKey(input.envName, input.accountName);
-  if (!isModelAvailableForAccount(catalog, sourceModel, accountKey)) {
-    throw new Error(`模型“${sourceModel.entry.display_name}”已不再由当前服务商提供，请刷新服务商模型列表后重新选择`);
-  }
   const runtimeProviderId = resolveRuntimeProviderId(account);
   const providerId = resolveModelCatalogProviderId(runtimeProviderId, account.runtime.openaiBaseUrl);
   const providerDisplayName = runtimeProviderId === "custom" || runtimeProviderId === "custom-openai"

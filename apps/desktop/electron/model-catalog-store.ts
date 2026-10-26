@@ -322,7 +322,14 @@ export function projectAccountBindingsFromCatalog(
   const sourceById = new Map(snapshot.models.map((model) => [model.id, model]));
   const missing = uniqueSourceIds.find((id) => !sourceById.has(id));
   if (missing) throw new Error(`Model '${missing}' not found`);
-  assertAccountModelsAvailable(snapshot, input.accountKey, uniqueSourceIds);
+  // When discovery failed or returned no available models, this projection is
+  // the explicit manual fallback path. The selected catalog model will be
+  // rebound to input.providerId below, so validating its old provider key here
+  // would reject the replacement before it can be created. Successful
+  // discovery remains authoritative and keeps the strict availability guard.
+  if (!allowsManualProviderRebinding(snapshot, input.accountKey)) {
+    assertAccountModelsAvailable(snapshot, input.accountKey, uniqueSourceIds);
+  }
 
   const existingByProviderKey = new Map(snapshot.models.flatMap((model) => {
     const key = typeof model.entry.provider_model_key === "string" ? model.entry.provider_model_key.trim() : "";
@@ -768,6 +775,24 @@ export function isModelAvailableForAccount(
   // after the provider stops advertising it. Failed or in-progress discovery
   // intentionally keeps the old binding as a recovery fallback.
   return discovery.state !== "ready";
+}
+
+/**
+ * A provider with no discovery entries cannot prove which of the shared
+ * catalog models it supports. An explicit user selection is therefore treated
+ * as a manual provider rebind. This is intentionally narrower than a generic
+ * "no available" check: a successful refresh that marks historical entries
+ * unavailable remains authoritative and must still reject those entries.
+ */
+export function allowsManualProviderRebinding(
+  snapshot: ModelCatalogSnapshot,
+  accountKey: string,
+): boolean {
+  const discovery = snapshot.accountModelDiscoveries?.[accountKey];
+  if (!discovery) return false;
+  if (discovery.state === "failed") return true;
+  return discovery.state === "ready"
+    && discovery.models.length === 0;
 }
 
 /**
