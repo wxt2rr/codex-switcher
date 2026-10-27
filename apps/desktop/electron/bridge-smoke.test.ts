@@ -21,7 +21,9 @@ async function readBridgeSource(): Promise<string> {
   ];
   for (const candidate of candidates) {
     try {
-      return await readFile(candidate, "utf8");
+      // Keep source-structure assertions independent of the checkout's line
+      // ending configuration (Windows runners commonly use CRLF).
+      return (await readFile(candidate, "utf8")).replaceAll("\r\n", "\n");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }

@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { appendFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, posix } from "node:path";
 
 import {
   accountModelBindingKey,
@@ -65,9 +65,9 @@ export function resolveCodexAppBundledCliCandidates(
       : "";
   if (!bundlePath) return [];
   return [
-    join(bundlePath, "Contents", "Resources", "codex-cli", "CodexCLI.app", "Contents", "MacOS", "codex"),
-    join(bundlePath, "Contents", "Resources", "codex-cli", "bin", "codex"),
-    join(bundlePath, "Contents", "Resources", "codex"),
+    posix.join(bundlePath, "Contents", "Resources", "codex-cli", "CodexCLI.app", "Contents", "MacOS", "codex"),
+    posix.join(bundlePath, "Contents", "Resources", "codex-cli", "bin", "codex"),
+    posix.join(bundlePath, "Contents", "Resources", "codex"),
   ];
 }
 

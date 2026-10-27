@@ -2454,6 +2454,10 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
         server.closeIdleConnections();
         await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
         await capabilityWriteQueue;
+        // Pool requests enqueue telemetry writes after the response is sent.
+        // Wait for that queue before callers remove a temporary state directory
+        // (and before a production restart can race the next process).
+        await eventLogQueue;
         await store.close();
         await pluginManager?.close().catch(() => undefined);
         await closeUpstreamProxyAgents();
