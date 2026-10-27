@@ -187,15 +187,16 @@ test("desktop bridge forwards calls to injected electron api", async () => {
     },
     listCustomModels: async () => ({ version: 1, models: [], accountBindings: {} }),
     listGatewayCapabilityObservations: async () => [],
-    discoverAccountModels: async () => ({ version: 1, models: [], accountBindings: {} }),
+    discoverAccountModels: async () => ({ snapshot: { version: 1, models: [], accountBindings: {} }, appRefresh: { required: false, runningWindows: 0 } }),
     refreshAllAccountModels: async () => ({ version: 1, models: [], accountBindings: {} }),
     listProviderCatalog: async () => [],
     importProviderCredential: async () => ({ message: "ok" }),
     refreshProviderCredential: async () => ({ message: "ok" }),
-    saveCustomModel: async () => ({ version: 1, models: [], accountBindings: {} }),
-    deleteCustomModel: async () => ({ version: 1, models: [], accountBindings: {} }),
-    setAccountModelBindings: async () => ({ version: 1, models: [], accountBindings: {} }),
-    setModelAccountBindings: async () => ({ version: 1, models: [], accountBindings: {} }),
+    refreshCodexAppModelCatalog: async () => ({ message: "ok" }),
+    saveCustomModel: async () => ({ snapshot: { version: 1, models: [], accountBindings: {} }, appRefresh: { required: false, runningWindows: 0 } }),
+    deleteCustomModel: async () => ({ snapshot: { version: 1, models: [], accountBindings: {} }, appRefresh: { required: false, runningWindows: 0 } }),
+    setAccountModelBindings: async () => ({ snapshot: { version: 1, models: [], accountBindings: {} }, appRefresh: { required: false, runningWindows: 0 } }),
+    setModelAccountBindings: async () => ({ snapshot: { version: 1, models: [], accountBindings: {} }, appRefresh: { required: false, runningWindows: 0 } }),
     logoutAccount: async (envName, accountName, target) => {
       calls.push(`logoutAccount:${envName}:${accountName}:${target}`);
       return { message: "ok" };

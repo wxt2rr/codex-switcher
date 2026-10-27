@@ -119,6 +119,7 @@ import {
   listGatewayCapabilityObservations,
   discoverAccountModels,
   refreshAllAccountModels,
+  refreshCodexAppModelCatalog,
   listProviderCatalog,
   saveCustomModel,
   deleteCustomModel,
@@ -700,6 +701,7 @@ function registerHandlers() {
   ipcMain.handle("desktop:discoverAccountModels", (_event: IpcMainInvokeEvent, envName: string, accountName: string) =>
     discoverAccountModels(envName, accountName));
   ipcMain.handle("desktop:refreshAllAccountModels", () => refreshAllAccountModels());
+  ipcMain.handle("desktop:refreshCodexAppModelCatalog", () => refreshCodexAppModelCatalog());
   ipcMain.handle("desktop:listProviderCatalog", () => listProviderCatalog());
   ipcMain.handle("desktop:saveCustomModel", (_event: IpcMainInvokeEvent, request) =>
     saveCustomModel(request)

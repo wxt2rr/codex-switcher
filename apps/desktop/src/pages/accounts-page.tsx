@@ -40,7 +40,7 @@ import { Field, Input, Select, Textarea } from "../components/form-primitives";
 import type { AccountRequestHealth, AccountSummary, OverviewPayload } from "../desktop-model";
 import { providerIconUrls } from "../components/provider-icon";
 import { AccountModelExposurePanel } from "../components/account-model-exposure-panel";
-import type { AccountCompatibilityStatus, CodexProject, DesktopBridge, DesktopLaunchStrategy, ProviderCatalogItem, ProviderCredentialImportRequest } from "../bridge";
+import type { AccountCompatibilityStatus, CodexProject, DesktopBridge, DesktopLaunchStrategy, ModelCatalogAppRefreshRequirement, ProviderCatalogItem, ProviderCredentialImportRequest } from "../bridge";
 import { resolveDesktopBridge } from "../bridge";
 import { getDesktopCopy } from "../desktop-copy";
 import { localizeAuthMode } from "../desktop-utils";
@@ -216,6 +216,7 @@ export function AccountsPage({
   bridge,
   onOpenModelSettings,
   onSuccess,
+  onAppRefreshRequired,
   onError,
 }: {
   overview: OverviewPayload;
@@ -273,6 +274,7 @@ export function AccountsPage({
   bridge: DesktopBridge;
   onOpenModelSettings: () => void;
   onSuccess: (message: string) => void;
+  onAppRefreshRequired: (request: ModelCatalogAppRefreshRequirement) => void;
   onError: (error: unknown) => void;
 }) {
   const [defaultEnvironment, setDefaultEnvironment] = useState(readDefaultAccountEnvironment);
@@ -1082,6 +1084,7 @@ export function AccountsPage({
         onOpenModelSettings={onOpenModelSettings}
         onClose={() => setModelExposureOpen(false)}
         onSaved={() => onSuccess(language === "zh" ? "账号模型暴露配置已保存" : "Account model exposure saved")}
+        onAppRefreshRequired={onAppRefreshRequired}
         onError={onError}
       />
 
@@ -1886,14 +1889,17 @@ function CardTargetButton({
           disabled && "cursor-not-allowed opacity-55",
         )}
       >
-        <div
-          className="responsive-action flex h-full min-w-[64px] cursor-default items-center justify-center gap-1.5 px-3 text-[12px] font-medium"
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onSelect(primaryStrategy)}
+          className="motion-interactive-color responsive-action flex h-full min-w-[64px] cursor-pointer items-center justify-center gap-1.5 px-3 text-[12px] font-medium disabled:cursor-not-allowed"
           aria-label={label}
           title={label}
         >
           {icon}
           <span className="responsive-action-label">{label}</span>
-        </div>
+        </button>
         <button
           type="button"
           className={cn(

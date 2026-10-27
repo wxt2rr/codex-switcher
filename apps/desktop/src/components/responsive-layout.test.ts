@@ -185,7 +185,7 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.match(accounts, /copyTargetEnvironments/);
   assert.match(accounts, /<RowActionSubmenu/);
   assert.match(accounts, /<ChevronRight/);
-  assert.doesNotMatch(accounts, /onClick=\{\(\) => onSelect\(primaryStrategy\)\}/);
+  assert.match(accounts, /onClick=\{\(\) => onSelect\(primaryStrategy\)\}/);
   assert.match(accounts, /onMouseLeave=\{\(\) => setProjectOpen\(false\)\}/);
   assert.match(accounts, /key: "multi-window"/);
   assert.match(accounts, /disabled: !account\.isCurrentApp/);

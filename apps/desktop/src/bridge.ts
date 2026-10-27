@@ -458,6 +458,15 @@ export interface ModelCatalogSnapshot {
   accountBindingOptions?: Record<string, Record<string, ModelBindingOptions>>;
   accountModelDiscoveries?: Record<string, AccountModelDiscoverySnapshot>;
 }
+export interface ModelCatalogAppRefreshRequirement {
+  required: boolean;
+  envName?: string;
+  runningWindows: number;
+}
+export interface ModelCatalogMutationResult {
+  snapshot: ModelCatalogSnapshot;
+  appRefresh: ModelCatalogAppRefreshRequirement;
+}
 export interface SaveCustomModelRequest { id?: string; entry: Record<string, unknown>; }
 
 export interface GatewayCapabilityObservationEntry {
@@ -584,13 +593,14 @@ export interface DesktopElectronApi {
   updateIndependentModel(request: DesktopIndependentModelRequest): Promise<DesktopActionResult>;
   listCustomModels(): Promise<ModelCatalogSnapshot>;
   listGatewayCapabilityObservations(): Promise<GatewayCapabilityObservationEntry[]>;
-  discoverAccountModels(envName: string, accountName: string): Promise<ModelCatalogSnapshot>;
+  discoverAccountModels(envName: string, accountName: string): Promise<ModelCatalogMutationResult>;
   refreshAllAccountModels(): Promise<ModelCatalogSnapshot>;
   listProviderCatalog(): Promise<ProviderCatalogItem[]>;
-  saveCustomModel(request: SaveCustomModelRequest): Promise<ModelCatalogSnapshot>;
-  deleteCustomModel(id: string): Promise<ModelCatalogSnapshot>;
-  setAccountModelBindings(accountKey: string, modelIds: string[]): Promise<ModelCatalogSnapshot>;
-  setModelAccountBindings(modelId: string, accountKeys: string[], optionsByAccount?: Record<string, ModelBindingOptions>): Promise<ModelCatalogSnapshot>;
+  refreshCodexAppModelCatalog(): Promise<DesktopActionResult>;
+  saveCustomModel(request: SaveCustomModelRequest): Promise<ModelCatalogMutationResult>;
+  deleteCustomModel(id: string): Promise<ModelCatalogMutationResult>;
+  setAccountModelBindings(accountKey: string, modelIds: string[]): Promise<ModelCatalogMutationResult>;
+  setModelAccountBindings(modelId: string, accountKeys: string[], optionsByAccount?: Record<string, ModelBindingOptions>): Promise<ModelCatalogMutationResult>;
   logoutAccount(envName: string, accountName: string, target: "cli" | "app" | "both"): Promise<DesktopActionResult>;
   deleteAccount(envName: string, accountName: string): Promise<DesktopActionResult>;
   copyAccount(sourceEnvName: string, sourceAccountName: string, targetEnvName: string): Promise<DesktopActionResult>;
@@ -718,13 +728,14 @@ export interface DesktopBridge {
   updateIndependentModel(request: DesktopIndependentModelRequest): Promise<DesktopActionResult>;
   listCustomModels(): Promise<ModelCatalogSnapshot>;
   listGatewayCapabilityObservations(): Promise<GatewayCapabilityObservationEntry[]>;
-  discoverAccountModels(envName: string, accountName: string): Promise<ModelCatalogSnapshot>;
+  discoverAccountModels(envName: string, accountName: string): Promise<ModelCatalogMutationResult>;
   refreshAllAccountModels(): Promise<ModelCatalogSnapshot>;
   listProviderCatalog(): Promise<ProviderCatalogItem[]>;
-  saveCustomModel(request: SaveCustomModelRequest): Promise<ModelCatalogSnapshot>;
-  deleteCustomModel(id: string): Promise<ModelCatalogSnapshot>;
-  setAccountModelBindings(accountKey: string, modelIds: string[]): Promise<ModelCatalogSnapshot>;
-  setModelAccountBindings(modelId: string, accountKeys: string[], optionsByAccount?: Record<string, ModelBindingOptions>): Promise<ModelCatalogSnapshot>;
+  refreshCodexAppModelCatalog(): Promise<DesktopActionResult>;
+  saveCustomModel(request: SaveCustomModelRequest): Promise<ModelCatalogMutationResult>;
+  deleteCustomModel(id: string): Promise<ModelCatalogMutationResult>;
+  setAccountModelBindings(accountKey: string, modelIds: string[]): Promise<ModelCatalogMutationResult>;
+  setModelAccountBindings(modelId: string, accountKeys: string[], optionsByAccount?: Record<string, ModelBindingOptions>): Promise<ModelCatalogMutationResult>;
   logoutAccount(envName: string, accountName: string, target: "cli" | "app" | "both"): Promise<DesktopActionResult>;
   deleteAccount(envName: string, accountName: string): Promise<DesktopActionResult>;
   copyAccount(sourceEnvName: string, sourceAccountName: string, targetEnvName: string): Promise<DesktopActionResult>;
@@ -850,6 +861,7 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       listGatewayCapabilityObservations: unavailable,
       discoverAccountModels: unavailable,
       refreshAllAccountModels: unavailable,
+      refreshCodexAppModelCatalog: unavailable,
       listProviderCatalog: unavailable,
       saveCustomModel: unavailable,
       deleteCustomModel: unavailable,
@@ -1100,13 +1112,14 @@ function createBrowserPreviewBridge(): DesktopBridge {
     updateIndependentModel: () => browserPreviewAction(),
     listCustomModels: async () => ({ version: 1, models: [], accountBindings: {} }),
     listGatewayCapabilityObservations: async () => [],
-    discoverAccountModels: async () => ({ version: 1, models: [], accountBindings: {} }),
+    discoverAccountModels: async () => ({ snapshot: { version: 1, models: [], accountBindings: {} }, appRefresh: { required: false, runningWindows: 0 } }),
     refreshAllAccountModels: async () => ({ version: 1, models: [], accountBindings: {} }),
     listProviderCatalog: async () => [],
-    saveCustomModel: async () => ({ version: 1, models: [], accountBindings: {} }),
-    deleteCustomModel: async () => ({ version: 1, models: [], accountBindings: {} }),
-    setAccountModelBindings: async () => ({ version: 1, models: [], accountBindings: {} }),
-    setModelAccountBindings: async () => ({ version: 1, models: [], accountBindings: {} }),
+    refreshCodexAppModelCatalog: () => browserPreviewAction(),
+    saveCustomModel: async () => ({ snapshot: { version: 1, models: [], accountBindings: {} }, appRefresh: { required: false, runningWindows: 0 } }),
+    deleteCustomModel: async () => ({ snapshot: { version: 1, models: [], accountBindings: {} }, appRefresh: { required: false, runningWindows: 0 } }),
+    setAccountModelBindings: async () => ({ snapshot: { version: 1, models: [], accountBindings: {} }, appRefresh: { required: false, runningWindows: 0 } }),
+    setModelAccountBindings: async () => ({ snapshot: { version: 1, models: [], accountBindings: {} }, appRefresh: { required: false, runningWindows: 0 } }),
     logoutAccount: () => browserPreviewAction(),
     deleteAccount: () => browserPreviewAction(),
     copyAccount: () => browserPreviewAction(),

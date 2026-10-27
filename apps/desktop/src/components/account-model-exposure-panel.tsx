@@ -4,6 +4,7 @@ import { Check, CircleHelp, Info, RefreshCw, Search } from "lucide-react";
 import type {
   AccountModelDiscoverySnapshot,
   DesktopBridge,
+  ModelCatalogAppRefreshRequirement,
   ModelCatalogSnapshot,
   ProviderCatalogItem,
 } from "../bridge";
@@ -56,6 +57,7 @@ export function AccountModelExposurePanel({
   onOpenModelSettings,
   onClose,
   onSaved,
+  onAppRefreshRequired,
   onError,
 }: {
   open: boolean;
@@ -67,6 +69,7 @@ export function AccountModelExposurePanel({
   onOpenModelSettings: () => void;
   onClose: () => void;
   onSaved?: () => void;
+  onAppRefreshRequired?: (request: ModelCatalogAppRefreshRequirement) => void;
   onError: (error: unknown) => void;
 }) {
   const zh = language === "zh";
@@ -84,9 +87,11 @@ export function AccountModelExposurePanel({
     if (!accountKey || !envName || !accountName) return;
     discover ? setRefreshing(true) : setLoading(true);
     try {
-      const next = discover
+      const result = discover
         ? await bridge.discoverAccountModels(envName, accountName)
-        : await bridge.listCustomModels();
+        : undefined;
+      const next = result?.snapshot ?? await bridge.listCustomModels();
+      if (result?.appRefresh.required) onAppRefreshRequired?.(result.appRefresh);
       setSnapshot(next);
       setSelectedIds(next.accountBindings[accountKey] ?? []);
     } catch (error) {
@@ -152,7 +157,9 @@ export function AccountModelExposurePanel({
     if (!accountKey) return;
     setSaving(true);
     try {
-      setSnapshot(await bridge.setAccountModelBindings(accountKey, selectedIds));
+      const result = await bridge.setAccountModelBindings(accountKey, selectedIds);
+      setSnapshot(result.snapshot);
+      if (result.appRefresh.required) onAppRefreshRequired?.(result.appRefresh);
       onSaved?.();
       onClose();
     } catch (error) {

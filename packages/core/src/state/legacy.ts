@@ -224,6 +224,7 @@ export async function writeLegacyGateway(
   const v2Path = getGatewayV2Path(options.stateDir, options.envName);
   const previousLegacy = await readOptionalText(path);
   const previousV2 = await readOptionalText(v2Path);
+  const nextLegacy = `${JSON.stringify(options.gateway, null, 2)}\n`;
 
   // Keep the historical schema as the compatibility source of truth while
   // also materializing the v2 gateway document for the new runtime.
@@ -239,24 +240,54 @@ export async function writeLegacyGateway(
     }
   }
   if (previousV2State && previousV2State.gatewayId === nextV2.gatewayId) {
-    nextV2 = {
+    const candidate = {
       ...nextV2,
       environmentId: previousV2State.environmentId,
-      revision: previousV2State.revision + 1,
-      sourceSchemaVersion: 2,
+      sourceSchemaVersion: 2 as const,
       listener: previousV2State.listener,
       agentBindings: previousV2State.agentBindings,
     };
+    // Gateway restoration is intentionally idempotent. Rewriting the v2
+    // document on every reconciliation only to increment revision causes
+    // downstream watchers to observe a change even when routes are identical.
+    nextV2 = sameGatewayV2Payload(previousV2State, candidate)
+      ? previousV2State
+      : { ...candidate, revision: previousV2State.revision + 1 };
   }
 
+  const nextV2Text = previousV2State && nextV2 === previousV2State && previousV2 !== undefined
+    ? previousV2
+    : `${JSON.stringify(nextV2, null, 2)}\n`;
+
+  if (previousLegacy === nextLegacy && previousV2 === nextV2Text) return;
+
   try {
-    await atomicWrite(path, `${JSON.stringify(options.gateway, null, 2)}\n`);
-    await writeLegacyGatewayV2({ stateDir: options.stateDir, envName: options.envName, gateway: nextV2 });
+    await atomicWrite(path, nextLegacy);
+    await atomicWrite(v2Path, nextV2Text);
   } catch (error) {
     await restoreOptionalText(path, previousLegacy).catch(() => undefined);
     await restoreOptionalText(v2Path, previousV2).catch(() => undefined);
     throw error;
   }
+}
+
+function sameGatewayV2Payload(
+  left: GatewayEnvironmentStateV2,
+  right: GatewayEnvironmentStateV2,
+): boolean {
+  const normalize = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(normalize);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(
+        Object.entries(value)
+          .filter(([key]) => key !== "revision")
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, entry]) => [key, normalize(entry)]),
+      );
+    }
+    return value;
+  };
+  return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
 }
 
 export async function clearLegacyGateway(

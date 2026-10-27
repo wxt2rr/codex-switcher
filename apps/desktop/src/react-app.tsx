@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { mergeAccountUsageMetrics, mergeOverviewWithAuthMetrics } from "@/auth-metrics";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "./components/admin-primitives";
 import { useTheme } from "@/components/theme-provider";
-import type { AccountPoolInput, AccountPoolStatus, AppEnvironmentBadgeStatus, AppPresenceStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexConversationInspectionResult, CodexConversationRepairResult, CodexHistorySyncResult, CodexToolStatus, DesktopAutoUpdateStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry, DesktopLaunchStrategy, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, LaunchAtLoginStatus, ProviderCatalogItem, ProviderCredentialImportRequest, RouterLifecycleSettings, RouterPortSettings } from "./bridge";
+import type { AccountPoolInput, AccountPoolStatus, AppEnvironmentBadgeStatus, AppPresenceStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexConversationInspectionResult, CodexConversationRepairResult, CodexHistorySyncResult, CodexToolStatus, DesktopAutoUpdateStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry, DesktopLaunchStrategy, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, LaunchAtLoginStatus, ModelCatalogAppRefreshRequirement, ProviderCatalogItem, ProviderCredentialImportRequest, RouterLifecycleSettings, RouterPortSettings } from "./bridge";
 import { DesktopShell } from "./components/desktop-shell";
 import type { AccountSummary, AuthMetricsPayload, EnvironmentRouteStatus, NavView, OverviewPayload } from "./desktop-model";
 import { resolveDesktopBridge } from "./bridge";
@@ -112,6 +113,8 @@ export function App() {
     return window.localStorage.getItem(SKIPPED_UPDATE_VERSION_KEY);
   });
   const [autoUpdateActionBusy, setAutoUpdateActionBusy] = useState(false);
+  const [modelCatalogRefreshRequest, setModelCatalogRefreshRequest] = useState<ModelCatalogAppRefreshRequirement | null>(null);
+  const [modelCatalogRefreshBusy, setModelCatalogRefreshBusy] = useState(false);
   const authMetricsRequestRef = useRef(0);
   const authMetricsInFlightRef = useRef(false);
   const proxyDraftDirtyRef = useRef(false);
@@ -323,9 +326,11 @@ export function App() {
     }
     setInitialLoadingStage("restoring-routes");
     await refreshOverview({ loadMetrics: true });
-    // Keep cached discovery snapshots fresh on startup while preserving the
-    // user's existing per-account exposure selections.
-    void bridge.refreshAllAccountModels().catch(setErrorMessage);
+    // Do not discover every provider during startup. Discovery mutates the
+    // gateway/model catalog and Codex App watches those files; running it here
+    // can make the App restart while the switcher is still restoring routes.
+    // Keep the cached snapshot until the user explicitly refreshes discovery
+    // from the account/model UI.
   }
 
   async function handleCliTerminalSelection(id: CliTerminalId) {
@@ -576,6 +581,28 @@ export function App() {
 
   function setErrorMessage(error: unknown) {
     setMessage(buildDesktopNotice(language, "error", error instanceof Error ? error.message : String(error)));
+  }
+
+  function requestModelCatalogRefresh(request: ModelCatalogAppRefreshRequirement) {
+    if (request.required) setModelCatalogRefreshRequest(request);
+  }
+
+  async function confirmModelCatalogRefresh() {
+    setModelCatalogRefreshBusy(true);
+    try {
+      await bridge.refreshCodexAppModelCatalog();
+      setModelCatalogRefreshRequest(null);
+      setSuccessMessage(language === "zh" ? "Codex App 已重启，模型列表已刷新" : language === "ja" ? "Codex App を再起動し、モデル一覧を更新しました" : "Codex App restarted and the model list was refreshed");
+    } catch (error) {
+      setErrorMessage(error);
+    } finally {
+      setModelCatalogRefreshBusy(false);
+    }
+  }
+
+  function cancelModelCatalogRefresh() {
+    setModelCatalogRefreshRequest(null);
+    setSuccessMessage(language === "zh" ? "模型配置已保存，Codex App 尚未刷新" : language === "ja" ? "モデル設定は保存されました。Codex App はまだ更新されていません" : "Model settings were saved; Codex App has not been refreshed");
   }
 
   async function handleCheckForAutoUpdate() {
@@ -1434,6 +1461,7 @@ export function App() {
           bridge={bridge}
           onOpenModelSettings={() => setView("models")}
           onSuccess={setSuccessMessage}
+          onAppRefreshRequired={requestModelCatalogRefresh}
           onError={setErrorMessage}
         />
       ) : null}
@@ -1446,6 +1474,7 @@ export function App() {
           bridge={bridge}
           onSuccess={setSuccessMessage}
           onError={setErrorMessage}
+          onAppRefreshRequired={requestModelCatalogRefresh}
         />
       ) : null}
 
@@ -1530,6 +1559,39 @@ export function App() {
       ) : null}
 
       {view === "usage" ? <UsagePage overview={overview} language={language} bridge={bridge} /> : null}
+
+      <ConfirmDialog
+        open={Boolean(modelCatalogRefreshRequest)}
+        title={language === "zh" ? "刷新 Codex App 模型列表？" : language === "ja" ? "Codex App のモデル一覧を更新しますか？" : "Refresh the Codex App model list?"}
+        description={language === "zh"
+          ? "模型配置已保存。Codex App 会在启动时缓存模型列表，需要重启当前 App 才能看到最新配置。"
+          : language === "ja"
+            ? "モデル設定は保存されました。Codex App は起動時にモデル一覧をキャッシュするため、最新設定を反映するには再起動が必要です。"
+            : "The model settings were saved. Codex App caches its model list at startup, so the current App must restart to load the latest configuration."}
+        impact={modelCatalogRefreshRequest ? (
+          <div className="space-y-2 text-[12px] text-slate-600">
+            <div className="flex justify-between gap-4">
+              <span>{language === "zh" ? "环境" : language === "ja" ? "環境" : "Environment"}</span>
+              <span className="font-medium text-neutral-800">{modelCatalogRefreshRequest.envName ?? "-"}</span>
+            </div>
+            <div className="flex justify-between gap-4">
+              <span>{language === "zh" ? "当前窗口" : language === "ja" ? "実行中のウィンドウ" : "Running windows"}</span>
+              <span className="font-medium text-neutral-800">{modelCatalogRefreshRequest.runningWindows}</span>
+            </div>
+            <div className="pt-1 text-slate-500">
+              {language === "zh" ? "重启会短暂中断当前 Codex App 窗口。" : language === "ja" ? "再起動中は Codex App のウィンドウが一時的に中断されます。" : "Restarting briefly interrupts the current Codex App windows."}
+            </div>
+          </div>
+        ) : null}
+        confirmLabel={modelCatalogRefreshBusy
+          ? (language === "zh" ? "正在重启…" : language === "ja" ? "再起動中…" : "Restarting…")
+          : (language === "zh" ? "立即重启并刷新" : language === "ja" ? "再起動して更新" : "Restart and refresh")}
+        confirmDisabled={modelCatalogRefreshBusy}
+        cancelLabel={language === "zh" ? "稍后" : language === "ja" ? "後で" : "Later"}
+        tone="default"
+        onConfirm={() => void confirmModelCatalogRefresh()}
+        onCancel={cancelModelCatalogRefresh}
+      />
     </DesktopShell>
   );
 }

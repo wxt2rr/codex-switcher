@@ -120,9 +120,12 @@ import {
   type SaveCustomModelInput,
 } from "./model-catalog-store.js";
 import {
+  mergeBundledModelCatalogs,
   loadBundledModelCatalog,
+  resolveCodexAppBundledCliCandidates,
   synchronizeAccountModelCatalog,
   synchronizeEnvironmentGatewayModelCatalog,
+  type BundledModelCatalog,
 } from "./account-model-catalog.js";
 import { applyModelCatalogBindings, inspectGatewayModelBindings } from "./gateway-model-bindings.js";
 import {
@@ -160,11 +163,24 @@ import {
   type SkillSnapshotOptions,
   type UpdateSkillInput,
 } from "./skill-manager.js";
+
 import {
   inspectGeneratedImageRecoverySkill,
   reconcileGeneratedImageRecoverySkill,
   type CodexSkillEnvironment,
 } from "./generated-image-recovery-skill.js";
+
+export interface ModelCatalogAppRefreshRequirement {
+  required: boolean;
+  envName?: string;
+  runningWindows: number;
+}
+
+export interface ModelCatalogMutationResult {
+  snapshot: ModelCatalogSnapshot;
+  appRefresh: ModelCatalogAppRefreshRequirement;
+}
+
 import { AppEnvironmentBadgeManager, createUnsupportedBadgeAdapter, type AppEnvironmentBadgeStatus } from "./app-environment-badges.js";
 import type { DesktopAutoUpdateStatus } from "./auto-update.js";
 import type { GatewayAdminConfiguration, LaunchAtLoginStatus, SaveGatewayAdminConfigurationRequest } from "../src/bridge.js";
@@ -206,6 +222,37 @@ import {
 
 const execFileAsync = promisify(execFile);
 const currentDir = resolveCurrentDir();
+
+// Codex App Server reads the model catalog during process startup and keeps
+// the resulting model list in memory. Serialize every managed-home/catalog
+// mutation and App launch so an old catalog cannot win a race with a new
+// window, and so a binding update can restart the active environment safely.
+let appTargetLifecycleQueue: Promise<void> = Promise.resolve();
+let bundledCatalogPromise: Promise<BundledModelCatalog | undefined> | undefined;
+
+async function withAppTargetLifecycleLock<T>(action: () => Promise<T>): Promise<T> {
+  const previous = appTargetLifecycleQueue;
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  appTargetLifecycleQueue = previous.then(() => gate);
+  await previous;
+  try {
+    return await action();
+  } finally {
+    release();
+  }
+}
+
+async function mutateModelCatalog<T>(
+  mutation: () => Promise<T>,
+  accountKey?: string,
+): Promise<{ result: T; appRefresh: ModelCatalogAppRefreshRequirement }> {
+  return withAppTargetLifecycleLock(async () => {
+    const result = await mutation();
+    const appRefresh = await resynchronizeActiveModelCatalogsUnlocked(accountKey, { updateAppHome: false });
+    return { result, appRefresh };
+  });
+}
 
 const AUTH_METRICS_TTL_MS = 60_000;
 
@@ -774,6 +821,7 @@ function resolveCatalogProviderIdentity(
 function createEnvironmentRouteBaseUrlUpdater(
   runtime: Awaited<ReturnType<typeof loadCoreRuntime>>,
   envName: string,
+  options: { applyTargetHome?: boolean } = {},
 ) {
   return async (accountName: string, baseUrl: string) => {
     const currentState = await runtime.readLegacyState(getLegacyOptions());
@@ -792,16 +840,18 @@ function createEnvironmentRouteBaseUrlUpdater(
     const updated = next.envs[envName]?.accounts[accountName];
     if (!updated) throw new Error(`Unable to update '${envName}/${accountName}'`);
     await runtime.writeLegacyRuntime({ stateDir: getStateDir(), envName, accountName, runtime: updated.runtime });
-    try {
-      await applyEnvironmentRouteToActiveTarget(runtime, next, envName, accountName);
-    } catch (error) {
-      await runtime.writeLegacyRuntime({
-        stateDir: getStateDir(),
-        envName,
-        accountName,
-        runtime: current.runtime,
-      });
-      throw error;
+    if (options.applyTargetHome !== false) {
+      try {
+        await applyEnvironmentRouteToActiveTarget(runtime, next, envName, accountName);
+      } catch (error) {
+        await runtime.writeLegacyRuntime({
+          stateDir: getStateDir(),
+          envName,
+          accountName,
+          runtime: current.runtime,
+        });
+        throw error;
+      }
     }
   };
 }
@@ -810,8 +860,9 @@ function createAccountPoolRuntimeUpdater(
   runtime: Awaited<ReturnType<typeof loadCoreRuntime>>,
   envName: string,
   protocol: "responses" | "chat_completions",
+  options: { applyTargetHome?: boolean } = {},
 ) {
-  if (protocol === "responses") return createEnvironmentRouteBaseUrlUpdater(runtime, envName);
+  if (protocol === "responses") return createEnvironmentRouteBaseUrlUpdater(runtime, envName, options);
   return async (accountName: string, baseUrl: string) => {
     const state = await runtime.readLegacyState(getLegacyOptions());
     const account = state.envs[envName]?.accounts[accountName];
@@ -945,6 +996,7 @@ async function restoreEnabledRoutes(): Promise<void> {
 
   const runtime = await loadCoreRuntime();
   let initialState = await runtime.readLegacyState(getLegacyOptions());
+  const runningAppEnvironments = await findRunningManagedAppEnvironments(initialState);
   const gatewayEnvironments = new Set(gateways.map((gateway) => gateway.envName));
   for (const pool of pools) {
     if (!initialState.envs[pool.envName]) {
@@ -961,7 +1013,9 @@ async function restoreEnabledRoutes(): Promise<void> {
       weights: Object.fromEntries(pool.members.map((member) => [member.accountName, member.weight])),
       sessionTtlMinutes: pool.sessionTtlMinutes, maxFailoverAttempts: pool.maxFailoverAttempts,
       maxSameAccountFailures: pool.maxSameAccountFailures,
-    }, poolAccounts, createAccountPoolRuntimeUpdater(runtime, pool.envName, pool.protocol));
+    }, poolAccounts, createAccountPoolRuntimeUpdater(runtime, pool.envName, pool.protocol, {
+      applyTargetHome: !runningAppEnvironments.has(pool.envName),
+    }));
   }
   const responseEnvNames = Array.from(new Set(
     routes
@@ -976,7 +1030,9 @@ async function restoreEnabledRoutes(): Promise<void> {
     await manager.enableEnvironment(
       envName,
       getEnvironmentRouteAccounts(initialState, envName),
-      createEnvironmentRouteBaseUrlUpdater(runtime, envName),
+      createEnvironmentRouteBaseUrlUpdater(runtime, envName, {
+        applyTargetHome: !runningAppEnvironments.has(envName),
+      }),
     );
   }
 
@@ -1025,12 +1081,18 @@ async function restoreEnabledRoutes(): Promise<void> {
       ...generated,
       mode: "gateway",
       gatewayId: persistedGateway.gatewayId ?? generated.gatewayId,
-      catalogVersion: generated.catalogVersion + 1,
+      // Restoring the same compiled gateway must not manufacture a new
+      // catalog version. A synthetic increment makes every startup look like
+      // a model change and can wake Codex App's config watcher repeatedly.
+      catalogVersion: generated.catalogVersion,
     };
     await runtime.writeLegacyGateway({ stateDir: getStateDir(), envName: environment.name, gateway });
     initialState = await runtime.readLegacyState(getLegacyOptions());
     const accounts = await getEnvironmentGatewayRouteAccounts(initialState, environment.name, gateway);
-    const updateBaseUrl = createEnvironmentRouteBaseUrlUpdater(runtime, environment.name);
+    const updateTargetHome = !runningAppEnvironments.has(environment.name);
+    const updateBaseUrl = createEnvironmentRouteBaseUrlUpdater(runtime, environment.name, {
+      applyTargetHome: updateTargetHome,
+    });
     await manager.enableEnvironmentGateway(
       environment.name,
       accounts,
@@ -1040,21 +1102,33 @@ async function restoreEnabledRoutes(): Promise<void> {
       gateway.routeRules ?? [],
       gateway.defaultRouteGroupId,
     );
-    const cliStatus = await getCodexToolStatus("cli", getCodexToolPathOptions());
-    await synchronizeEnvironmentGatewayModelCatalog({
-      homePath: environment.path,
-      gateway,
-      environmentName: environment.name,
-      diagnosticLogPath: resolveLogPath("switcher"),
-      loadBundledCatalog: cliStatus.available
-        ? () => loadBundledModelCatalog(cliStatus.path)
-        : undefined,
-    });
-    // Reapply the target home after restoring the gateway. This also migrates
-    // an older config.toml that still declared OPENAI_API_KEY for a managed
-    // authMethods=["none"] provider.
-    await reapplyEnvironmentTargetHomes(runtime, initialState, environment.name, "restore");
+    if (updateTargetHome) {
+      const bundledCatalog = await loadBundledCatalogForCurrentInstall();
+      await synchronizeEnvironmentGatewayModelCatalog({
+        homePath: environment.path,
+        gateway,
+        environmentName: environment.name,
+        diagnosticLogPath: resolveLogPath("switcher"),
+        loadBundledCatalog: bundledCatalog ? async () => bundledCatalog : undefined,
+      });
+      // Reapply the target home after restoring the gateway. This also
+      // migrates an older config.toml that still declared OPENAI_API_KEY for
+      // a managed authMethods=["none"] provider.
+      await reapplyEnvironmentTargetHomes(runtime, initialState, environment.name, "restore");
+    }
   }
+}
+
+async function findRunningManagedAppEnvironments(
+  state: Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>,
+): Promise<ReadonlySet<string>> {
+  const support = await loadCoreSupportModules();
+  const paths = support.resolveManagedAppStatePaths(getStateDir());
+  const entries = await Promise.all(Object.keys(state.envs).map(async (envName) => {
+    const count = await support.reconcileManagedAppInstanceCount(paths, envName).catch(() => 0);
+    return (count ?? 0) > 0 ? envName : undefined;
+  }));
+  return new Set(entries.filter((envName): envName is string => Boolean(envName)));
 }
 
 export async function toggleEnvironmentRoute(envName: string, enabled: boolean) {
@@ -1231,18 +1305,56 @@ async function buildModelRequestPreview(
   };
 }
 
+/**
+ * Load the union of the standalone CLI and Codex App bundled catalogs.
+ *
+ * The App Server is launched from the App's embedded CodexCLI binary, which
+ * can be newer than the standalone `codex` on PATH.  A gateway catalog built
+ * from PATH alone would therefore omit App-only official models.  Prefer the
+ * App catalog when both binaries contain the same slug, then add CLI-only
+ * entries for compatibility with the shared environment home.
+ */
+async function loadBundledCatalogForCurrentInstall(): Promise<BundledModelCatalog | undefined> {
+  if (!bundledCatalogPromise) {
+    bundledCatalogPromise = loadBundledCatalogForCurrentInstallUncached();
+  }
+  return bundledCatalogPromise;
+}
+
+async function loadBundledCatalogForCurrentInstallUncached(): Promise<BundledModelCatalog | undefined> {
+  const statuses = await listCodexToolStatuses(getCodexToolPathOptions());
+  const cliStatus = statuses.find((status) => status.kind === "cli");
+  const appStatus = statuses.find((status) => status.kind === "app");
+  const appBundledCandidates = appStatus?.available
+    ? resolveCodexAppBundledCliCandidates(appStatus.path)
+    : [];
+  const candidates = [
+    ...appBundledCandidates,
+    // On Windows the detected app path can itself be a usable CLI shim. On
+    // macOS, however, the app path is a GUI executable; invoking it with
+    // `debug models --bundled` can block startup while Codex opens a window.
+    ...(appStatus?.available && appBundledCandidates.length === 0 ? [appStatus.path] : []),
+    ...(cliStatus?.available ? [cliStatus.path] : []),
+  ];
+  const catalogs: BundledModelCatalog[] = [];
+  for (const path of [...new Set(candidates.filter(Boolean))]) {
+    try {
+      catalogs.push(await loadBundledModelCatalog(path));
+    } catch {
+      // A missing embedded CLI, a GUI executable, or a stale standalone CLI
+      // must not prevent another valid catalog source from being used.
+    }
+  }
+  return catalogs.length ? mergeBundledModelCatalogs(...catalogs) : undefined;
+}
+
 async function loadGatewayBundledModels(
   environment: { name: string; path: string },
   snapshot: ModelCatalogSnapshot,
 ): Promise<ModelCatalogEntry[]> {
-  const cliStatus = await getCodexToolStatus("cli", getCodexToolPathOptions());
-  if (cliStatus.available) {
-    try {
-      return (await loadBundledModelCatalog(cliStatus.path)).models;
-    } catch {
-      // A stale or partially installed CLI should not prevent the gateway
-      // from starting. Fall back to the last synchronized catalog below.
-    }
+  const bundled = await loadBundledCatalogForCurrentInstall();
+  if (bundled) {
+    return bundled.models;
   }
 
   try {
@@ -1430,13 +1542,13 @@ export async function discoverGatewayAdminModels(input: { envName: string; provi
     catalogVersion: gateway.catalogVersion + (result.models.length ? 1 : 0),
   };
   await runtime.writeLegacyGateway({ stateDir: getStateDir(), envName: input.envName, gateway: nextGateway });
-  const cliStatus = await getCodexToolStatus("cli", getCodexToolPathOptions());
+  const bundledCatalog = await loadBundledCatalogForCurrentInstall();
   await synchronizeEnvironmentGatewayModelCatalog({
     homePath: environment.path,
     gateway: nextGateway,
     environmentName: input.envName,
     diagnosticLogPath: resolveLogPath("switcher"),
-    loadBundledCatalog: cliStatus.available ? () => loadBundledModelCatalog(cliStatus.path) : undefined,
+    loadBundledCatalog: bundledCatalog ? async () => bundledCatalog : undefined,
   });
   const activeGateway = (await getUsageRouterManager().listPersistedEnvironmentGateways()).find((item) => item.envName === input.envName && item.enabled);
   if (activeGateway) {
@@ -2860,7 +2972,7 @@ export async function refreshProviderCredential(input: {
     runtime: { ...account.runtime, providerAuthMethod },
   });
   await discoverAccountModels(input.envName, input.account);
-  await resynchronizeActiveModelCatalogs(accountModelBindingKey(input.envName, input.account));
+  await resynchronizeActiveModelCatalogs(accountModelBindingKey(input.envName, input.account), { updateAppHome: false });
   await syncEnvironmentRouteIfEnabled(input.envName).catch(() => undefined);
   return {
     message: `Refreshed ${providerId} credential for ${input.envName}/${input.account}`,
@@ -2911,11 +3023,15 @@ export async function detectCodexToolPaths() {
 }
 
 export async function setCodexToolPath(kind: CodexToolKind, path: string) {
-  return saveCodexToolPath(kind, path, getCodexToolPathOptions());
+  const result = await saveCodexToolPath(kind, path, getCodexToolPathOptions());
+  bundledCatalogPromise = undefined;
+  return result;
 }
 
 export async function clearCodexToolPath(kind: CodexToolKind) {
-  return resetCodexToolPath(kind, getCodexToolPathOptions());
+  const result = await resetCodexToolPath(kind, getCodexToolPathOptions());
+  bundledCatalogPromise = undefined;
+  return result;
 }
 
 export async function getCliAutoResumeSettings(): Promise<CliAutoResumeSettings> {
@@ -3087,7 +3203,7 @@ export async function listGatewayCapabilityObservations(): Promise<GatewayCapabi
 }
 
 /** Discovers and persists the models visible to one environment account. */
-export async function discoverAccountModels(envName: string, accountName: string): Promise<ModelCatalogSnapshot> {
+export async function discoverAccountModels(envName: string, accountName: string): Promise<ModelCatalogMutationResult> {
   const runtime = await loadCoreRuntime();
   const state = await runtime.readLegacyState(getLegacyOptions());
   const environment = state.envs[envName];
@@ -3109,12 +3225,16 @@ export async function discoverAccountModels(envName: string, accountName: string
     gatewayProviderIdBeforeSync: persistedGatewayProviderId,
     gatewayProviderMismatch: persistedGatewayProviderId !== undefined && persistedGatewayProviderId !== providerId,
   };
+  let appRefresh: ModelCatalogAppRefreshRequirement = { required: false, runningWindows: 0 };
   const store = getModelCatalogStore();
-  await store.saveAccountModelDiscovery({ accountKey, providerId: catalogProviderId, state: "discovering" });
+  await withAppTargetLifecycleLock(() => store.saveAccountModelDiscovery({
+    accountKey,
+    providerId: catalogProviderId,
+    state: "discovering",
+  }));
   await appendModelDiscoveryLog({ envName, accountName, accountKey, providerId, state: "discovering", ...discoveryLogContext });
 
   let gateway: GatewayEnvironmentState;
-  let discoverySucceeded = false;
   try {
     gateway = createGatewayAccountDiscoveryView(environment, baseGateway, accountName);
     const result = await discoverGatewayAccountModels({
@@ -3142,12 +3262,25 @@ export async function discoverAccountModels(envName: string, accountName: string
       source: model.source ?? "discovery",
       status: "available",
     }));
-    await store.saveAccountModelDiscovery({
-      accountKey,
-      providerId: catalogProviderId,
-      state: "ready",
-      models,
-      discoveredAt: new Date().toISOString(),
+    await withAppTargetLifecycleLock(async () => {
+      await store.saveAccountModelDiscovery({
+        accountKey,
+        providerId: catalogProviderId,
+        state: "ready",
+        models,
+        discoveredAt: new Date().toISOString(),
+      });
+      // Keep the final discovery write and its projected gateway catalog in
+      // the same critical section as App launch and binding mutations.
+      // Discovery can add the model that the user is about to bind. If the
+      // active App Server was started before this write, it will keep serving
+      // its old in-memory catalog until it is restarted. Use the same refresh
+      // path as explicit binding changes so discovery and binding cannot leave
+      // the picker stale depending on which operation completed last.
+      appRefresh = await resynchronizeActiveModelCatalogsUnlocked(accountKey, { updateAppHome: false }).catch(() => ({
+        required: false,
+        runningWindows: 0,
+      }));
     });
     await appendModelDiscoveryLog({
       envName,
@@ -3159,15 +3292,14 @@ export async function discoverAccountModels(envName: string, accountName: string
       modelIds: models.map((model) => model.upstreamModelId),
       ...discoveryLogContext,
     });
-    discoverySucceeded = true;
   } catch (error) {
     const message = sanitizeModelDiscoveryError(error);
-    await store.saveAccountModelDiscovery({
+    await withAppTargetLifecycleLock(() => store.saveAccountModelDiscovery({
       accountKey,
       providerId: catalogProviderId,
       state: "failed",
       lastError: message,
-    });
+    }));
     await appendModelDiscoveryLog({
       envName,
       accountName,
@@ -3182,11 +3314,9 @@ export async function discoverAccountModels(envName: string, accountName: string
 
   // Do not persist a half-repaired gateway after a failed discovery. A
   // successful result is rebuilt from the synchronized account/provider and
-  // model-catalog state below.
-  if (discoverySucceeded) {
-    await resynchronizeActiveModelCatalogs(accountKey).catch(() => undefined);
-  }
-  return listCustomModels();
+  // model-catalog state in the same critical section as the final discovery
+  // write above.
+  return { snapshot: await listCustomModels(), appRefresh };
 }
 
 /** Refreshes every known account without changing its existing exposure picks. */
@@ -3242,6 +3372,22 @@ async function appendModelDiscoveryLog(details: {
     ...(details.gatewayCredentialFound !== undefined ? { gatewayCredentialFound: details.gatewayCredentialFound } : {}),
     ...(details.gatewayProviderIdBeforeSync ? { gatewayProviderIdBeforeSync: details.gatewayProviderIdBeforeSync } : {}),
     ...(details.gatewayProviderMismatch ? { gatewayProviderMismatch: true } : {}),
+  })}\n`, "utf8").catch(() => undefined);
+}
+
+async function appendAppLifecycleLog(details: {
+  event: "app_launch_started" | "app_catalog_ready" | "app_launch_completed" | "app_launch_failed";
+  envName: string;
+  accountName: string;
+  mode: AppWindowLaunchMode;
+  codexHome: string;
+  catalogPath: string;
+  desiredCount?: number;
+  error?: string;
+}): Promise<void> {
+  await appendFile(resolveLogPath("switcher"), `${JSON.stringify({
+    at: new Date().toISOString(),
+    ...details,
   })}\n`, "utf8").catch(() => undefined);
 }
 
@@ -3306,45 +3452,49 @@ export async function listProviderCatalog() {
 }
 
 export async function saveCustomModel(input: SaveCustomModelInput) {
-  await getModelCatalogStore().saveModel(input);
-  await resynchronizeActiveModelCatalogs();
-  return listCustomModels();
+  const { appRefresh } = await mutateModelCatalog(
+    () => getModelCatalogStore().saveModel(input),
+  );
+  return { snapshot: await listCustomModels(), appRefresh } satisfies ModelCatalogMutationResult;
 }
 
 export async function deleteCustomModel(id: string) {
-  await getModelCatalogStore().deleteModel(id);
-  await resynchronizeActiveModelCatalogs();
-  return listCustomModels();
+  const { appRefresh } = await mutateModelCatalog(
+    () => getModelCatalogStore().deleteModel(id),
+  );
+  return { snapshot: await listCustomModels(), appRefresh } satisfies ModelCatalogMutationResult;
 }
 
 export async function setAccountModelBindings(accountKey: string, modelIds: string[]) {
-  const store = getModelCatalogStore();
-  const currentCatalog = await store.load();
-  const discovery = currentCatalog.accountModelDiscoveries?.[accountKey];
-  let snapshot: ModelCatalogSnapshot;
-  if (discovery?.state === "failed" || (discovery?.state === "ready" && !discovery.models.some((model) => model.status === "available"))) {
-    const separator = accountKey.indexOf("/");
-    if (separator < 1 || separator === accountKey.length - 1) throw new Error(`Invalid account model key '${accountKey}'`);
-    const envName = accountKey.slice(0, separator);
-    const accountName = accountKey.slice(separator + 1);
-    const runtime = await loadCoreRuntime();
-    const state = await runtime.readLegacyState(getLegacyOptions());
-    const environment = state.envs[envName];
-    const account = environment?.accounts[accountName];
-    if (!account) throw new Error(`Account '${envName}/${accountName}' not found`);
-    const catalogIdentity = resolveCatalogProviderIdentity(environment!, accountName, account);
-    snapshot = await store.setAccountBindingsFromCatalog({
-      accountKey,
-      modelIds,
-      providerId: catalogIdentity.providerId,
-      ...(catalogIdentity.providerDisplayName ? { providerDisplayName: catalogIdentity.providerDisplayName } : {}),
-      protocol: account.authMode === "auth" ? "responses" : account.runtime.apiProtocol ?? "responses",
-    });
-  } else {
-    snapshot = await store.setAccountBindings(accountKey, modelIds);
-  }
-  await resynchronizeActiveModelCatalogs(accountKey);
-  return filterModelCatalogBindings(snapshot, await loadKnownAccountKeys());
+  const { result: snapshot, appRefresh } = await mutateModelCatalog(async () => {
+    const store = getModelCatalogStore();
+    const currentCatalog = await store.load();
+    const discovery = currentCatalog.accountModelDiscoveries?.[accountKey];
+    if (discovery?.state === "failed" || (discovery?.state === "ready" && !discovery.models.some((model) => model.status === "available"))) {
+      const separator = accountKey.indexOf("/");
+      if (separator < 1 || separator === accountKey.length - 1) throw new Error(`Invalid account model key '${accountKey}'`);
+      const envName = accountKey.slice(0, separator);
+      const accountName = accountKey.slice(separator + 1);
+      const runtime = await loadCoreRuntime();
+      const state = await runtime.readLegacyState(getLegacyOptions());
+      const environment = state.envs[envName];
+      const account = environment?.accounts[accountName];
+      if (!account) throw new Error(`Account '${envName}/${accountName}' not found`);
+      const catalogIdentity = resolveCatalogProviderIdentity(environment!, accountName, account);
+      return store.setAccountBindingsFromCatalog({
+        accountKey,
+        modelIds,
+        providerId: catalogIdentity.providerId,
+        ...(catalogIdentity.providerDisplayName ? { providerDisplayName: catalogIdentity.providerDisplayName } : {}),
+        protocol: account.authMode === "auth" ? "responses" : account.runtime.apiProtocol ?? "responses",
+      });
+    }
+    return store.setAccountBindings(accountKey, modelIds);
+  }, accountKey);
+  return {
+    snapshot: filterModelCatalogBindings(snapshot, await loadKnownAccountKeys()),
+    appRefresh,
+  } satisfies ModelCatalogMutationResult;
 }
 
 export async function setModelAccountBindings(
@@ -3352,9 +3502,13 @@ export async function setModelAccountBindings(
   accountKeys: string[],
   optionsByAccount?: Record<string, ModelBindingOptions>,
 ) {
-  const snapshot = await getModelCatalogStore().setModelBindings(modelId, accountKeys, optionsByAccount);
-  await resynchronizeActiveModelCatalogs();
-  return filterModelCatalogBindings(snapshot, await loadKnownAccountKeys());
+  const { result: snapshot, appRefresh } = await mutateModelCatalog(
+    () => getModelCatalogStore().setModelBindings(modelId, accountKeys, optionsByAccount),
+  );
+  return {
+    snapshot: filterModelCatalogBindings(snapshot, await loadKnownAccountKeys()),
+    appRefresh,
+  } satisfies ModelCatalogMutationResult;
 }
 
 async function loadKnownAccountKeys(): Promise<ReadonlySet<string>> {
@@ -3366,16 +3520,39 @@ async function loadKnownAccountKeys(): Promise<ReadonlySet<string>> {
   );
 }
 
-async function resynchronizeActiveModelCatalogs(accountKey?: string): Promise<void> {
+async function resynchronizeActiveModelCatalogs(
+  accountKey?: string,
+  options: { restartRunningApp?: boolean; updateAppHome?: boolean } = {},
+): Promise<ModelCatalogAppRefreshRequirement> {
+  return withAppTargetLifecycleLock(() => resynchronizeActiveModelCatalogsUnlocked(accountKey, options));
+}
+
+async function resynchronizeActiveModelCatalogsUnlocked(
+  accountKey?: string,
+  options: { restartRunningApp?: boolean; updateAppHome?: boolean } = {},
+): Promise<ModelCatalogAppRefreshRequirement> {
   const runtime = await loadCoreRuntime();
   let state = await runtime.readLegacyState(getLegacyOptions());
-  state = await resynchronizeActiveEnvironmentGateways(runtime, state);
+  // Keep the live router's route records current after a catalog mutation,
+  // but do not project the same state into the active App home while the user
+  // is still deciding whether to restart Codex. Writing config.toml or the
+  // catalog JSON here causes Codex App's file watcher to restart it.
+  state = await resynchronizeActiveEnvironmentGatewaysUnlocked(runtime, state, undefined, {
+    updateTargetHome: options.updateAppHome !== false,
+  });
+  const appEnvironmentName = state.targets.app.env;
   for (const target of ["cli", "app"] as const) {
     const pointer = state.targets[target];
     const targetKey = `${pointer.env}/${pointer.account}`;
     const gatewayActive = state.envs[pointer.env]?.gateway?.mode === "gateway";
+    // The CLI and App may intentionally share one managed environment home.
+    // Do not rewrite either target's projected files while a model mutation is
+    // waiting for confirmation; Codex App watches those files and can restart
+    // itself even when the switcher did not request a restart.
+    if (options.updateAppHome === false && pointer.env === appEnvironmentName) continue;
+    if (target === "app" && options.updateAppHome === false) continue;
     if (!accountKey || targetKey === accountKey || gatewayActive) {
-      await applyTargetHomeStateWithHistory(
+      await applyTargetHomeStateWithHistoryUnlocked(
         runtime,
         state,
         target,
@@ -3383,12 +3560,55 @@ async function resynchronizeActiveModelCatalogs(accountKey?: string): Promise<vo
       );
     }
   }
+
+  // Codex App Server caches model_catalog_json at startup. Report whether the
+  // currently selected environment has a running App that needs confirmation;
+  // only the explicit refresh action below passes restartRunningApp=true.
+  let appRefresh: ModelCatalogAppRefreshRequirement = { required: false, runningWindows: 0 };
+  if (state.envs[state.targets.app.env]) {
+    const support = await loadCoreSupportModules();
+    const paths = support.resolveManagedAppStatePaths(getStateDir());
+    const runningCount = await support.reconcileManagedAppInstanceCount(paths, state.targets.app.env).catch(() => undefined);
+    if (runningCount !== undefined && runningCount > 0) {
+      appRefresh = {
+        required: true,
+        envName: state.targets.app.env,
+        runningWindows: runningCount,
+      };
+    }
+    if (options.restartRunningApp && appRefresh.required) {
+      await launchAppTargetUnlocked(state, runtime, "reconcile");
+    }
+  }
+  return appRefresh;
 }
 
 async function resynchronizeActiveEnvironmentGateways(
   runtime: Awaited<ReturnType<typeof loadCoreRuntime>>,
   initialState: Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>,
   onlyEnvName?: string,
+): Promise<Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>> {
+  return withAppTargetLifecycleLock(() => resynchronizeActiveEnvironmentGatewaysUnlocked(runtime, initialState, onlyEnvName));
+}
+
+/**
+ * Rebuild the active target catalog and restart the currently managed Codex
+ * App after the user explicitly confirms a model-list refresh.
+ */
+export async function refreshCodexAppModelCatalog(): Promise<DesktopActionResult> {
+  const refresh = await resynchronizeActiveModelCatalogs(undefined, { restartRunningApp: true, updateAppHome: true });
+  return {
+    message: refresh.required
+      ? `Codex App model catalog refreshed for ${refresh.envName ?? "the active environment"}`
+      : "No running managed Codex App required a model catalog refresh",
+  };
+}
+
+async function resynchronizeActiveEnvironmentGatewaysUnlocked(
+  runtime: Awaited<ReturnType<typeof loadCoreRuntime>>,
+  initialState: Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>,
+  onlyEnvName?: string,
+  options: { updateTargetHome?: boolean } = {},
 ): Promise<Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>> {
   let state = initialState;
   const activeGateways = (await getUsageRouterManager().listPersistedEnvironmentGateways())
@@ -3401,12 +3621,17 @@ async function resynchronizeActiveEnvironmentGateways(
       ...generated,
       mode: "gateway",
       gatewayId: activeGateway.gatewayId ?? generated.gatewayId,
-      catalogVersion: generated.catalogVersion + 1,
+      // Reconciliation is a no-op when the compiled route/catalog is
+      // unchanged. Keep the persisted version stable so repeated discovery
+      // cannot create a restart loop in Codex App.
+      catalogVersion: generated.catalogVersion,
     };
     await runtime.writeLegacyGateway({ stateDir: getStateDir(), envName: environment.name, gateway });
     state = await runtime.readLegacyState(getLegacyOptions());
     const accounts = await getEnvironmentGatewayRouteAccounts(state, environment.name, gateway);
-    const updateBaseUrl = createEnvironmentRouteBaseUrlUpdater(runtime, environment.name);
+    const updateBaseUrl = createEnvironmentRouteBaseUrlUpdater(runtime, environment.name, {
+      applyTargetHome: options.updateTargetHome !== false,
+    });
     await getUsageRouterManager().enableEnvironmentGateway(
       environment.name,
       accounts,
@@ -3416,16 +3641,16 @@ async function resynchronizeActiveEnvironmentGateways(
       gateway.routeRules ?? [],
       gateway.defaultRouteGroupId,
     );
-    const cliStatus = await getCodexToolStatus("cli", getCodexToolPathOptions());
-    await synchronizeEnvironmentGatewayModelCatalog({
-      homePath: environment.path,
-      gateway,
-      environmentName: environment.name,
-      diagnosticLogPath: resolveLogPath("switcher"),
-      loadBundledCatalog: cliStatus.available
-        ? () => loadBundledModelCatalog(cliStatus.path)
-        : undefined,
-    });
+    if (options.updateTargetHome !== false) {
+      const bundledCatalog = await loadBundledCatalogForCurrentInstall();
+      await synchronizeEnvironmentGatewayModelCatalog({
+        homePath: environment.path,
+        gateway,
+        environmentName: environment.name,
+        diagnosticLogPath: resolveLogPath("switcher"),
+        loadBundledCatalog: bundledCatalog ? async () => bundledCatalog : undefined,
+      });
+    }
   }
   return state;
 }
@@ -4057,6 +4282,15 @@ async function applyTargetHomeStateWithHistory(
   target: "cli" | "app",
   source: EnvFileHistorySource,
 ): Promise<void> {
+  await withAppTargetLifecycleLock(() => applyTargetHomeStateWithHistoryUnlocked(runtime, state, target, source));
+}
+
+async function applyTargetHomeStateWithHistoryUnlocked(
+  runtime: CoreRuntime,
+  state: Awaited<ReturnType<CoreRuntime["readLegacyState"]>>,
+  target: "cli" | "app",
+  source: EnvFileHistorySource,
+): Promise<void> {
   const envName = state.targets[target].env;
   const env = state.envs[envName];
   if (!env) {
@@ -4094,16 +4328,14 @@ async function synchronizeTargetModelCatalog(
   const account = env?.accounts[pointer.account];
   if (!env || !account) return;
 
-  const cliStatus = await getCodexToolStatus("cli", getCodexToolPathOptions());
   const catalogBaseUrl = account.runtime.independentModelEnabled
     ? account.runtime.independentModelBaseUrl ?? account.runtime.openaiBaseUrl
     : account.runtime.openaiBaseUrl;
   const catalogPreset = account.runtime.independentModelEnabled
     ? resolveProviderDefaultPreset(catalogBaseUrl)
     : resolveProviderModelPreset({ baseUrl: catalogBaseUrl, model: account.runtime.model });
-  const loadBundledCatalog = cliStatus.available
-    ? () => loadBundledModelCatalog(cliStatus.path)
-    : undefined;
+  const bundledCatalog = await loadBundledCatalogForCurrentInstall();
+  const loadBundledCatalog = bundledCatalog ? async () => bundledCatalog : undefined;
 
   if (env.gateway?.mode === "gateway") {
     // Rebuild from the current model catalog instead of trusting a gateway
@@ -6371,21 +6603,47 @@ async function launchAppTarget(
   runtime: CoreRuntime,
   mode: AppWindowLaunchMode = "reconcile",
 ): Promise<void> {
+  await withAppTargetLifecycleLock(() => launchAppTargetUnlocked(state, runtime, mode));
+}
+
+async function launchAppTargetUnlocked(
+  state: Awaited<ReturnType<CoreRuntime["readLegacyState"]>>,
+  runtime: CoreRuntime,
+  mode: AppWindowLaunchMode = "reconcile",
+): Promise<void> {
   // Refresh an active gateway before the final catalog write. This keeps the
   // route service and the catalog generated below on the same model-binding
   // revision when the App is launched immediately after an account switch.
   if (state.envs[state.targets.app.env]?.gateway?.mode === "gateway") {
-    state = await resynchronizeActiveEnvironmentGateways(runtime, state, state.targets.app.env);
+    state = await resynchronizeActiveEnvironmentGatewaysUnlocked(runtime, state, state.targets.app.env);
   }
   const env = state.envs[state.targets.app.env];
   if (!env) {
     throw new Error(`App env '${state.targets.app.env}' not found`);
   }
+  const catalogPath = join(env.path, "model-catalogs", "codex-switcher-gateway-models.json");
+  const accountName = state.targets.app.account;
+  await appendAppLifecycleLog({
+    event: "app_launch_started",
+    envName: state.targets.app.env,
+    accountName,
+    mode,
+    codexHome: env.path,
+    catalogPath,
+  });
   // A gateway catalog is consumed and cached by the Codex App Server during
   // process startup. Make one final, awaited synchronization immediately
   // before launching so a binding change cannot leave the server with the
   // previous Plus-only catalog while config.toml points at the new one.
   await synchronizeTargetModelCatalog(runtime, state, "app", env.path);
+  await appendAppLifecycleLog({
+    event: "app_catalog_ready",
+    envName: state.targets.app.env,
+    accountName,
+    mode,
+    codexHome: env.path,
+    catalogPath,
+  });
   const support = await loadCoreSupportModules();
   const account = state.envs[state.targets.app.env]?.accounts[state.targets.app.account];
   const apiKey = account?.runtime.apiProtocol === "chat_completions" && account.runtime.compatibilityRouteEnabled
@@ -6446,8 +6704,27 @@ async function launchAppTarget(
         restart: async () => { throw new Error("Invalid packaged App window launch plan"); },
         launchNew,
       });
+      await appendAppLifecycleLog({
+        event: "app_launch_completed",
+        envName: state.targets.app.env,
+        accountName,
+        mode,
+        codexHome: defaultHome,
+        catalogPath: join(defaultHome, "model-catalogs", "codex-switcher-gateway-models.json"),
+        desiredCount,
+      });
       scheduleAppEnvironmentBadgeSync();
     } catch (error) {
+      await appendAppLifecycleLog({
+        event: "app_launch_failed",
+        envName: state.targets.app.env,
+        accountName,
+        mode,
+        codexHome: defaultHome,
+        catalogPath: join(defaultHome, "model-catalogs", "codex-switcher-gateway-models.json"),
+        desiredCount,
+        error: error instanceof Error ? error.message : String(error),
+      });
       await persistPartialWindowCount(state.targets.app.env, mode, error);
       throw error;
     }
@@ -6465,8 +6742,27 @@ async function launchAppTarget(
       restart: async () => { await support.restartCurrentCodexApp(launchInput); },
       launchNew: async () => { await support.launchNewCodexApp(launchInput); },
     });
+    await appendAppLifecycleLog({
+      event: "app_launch_completed",
+      envName: state.targets.app.env,
+      accountName,
+      mode,
+      codexHome: env.path,
+      catalogPath,
+      desiredCount,
+    });
     scheduleAppEnvironmentBadgeSync();
   } catch (error) {
+    await appendAppLifecycleLog({
+      event: "app_launch_failed",
+      envName: state.targets.app.env,
+      accountName,
+      mode,
+      codexHome: env.path,
+      catalogPath,
+      desiredCount,
+      error: error instanceof Error ? error.message : String(error),
+    });
     await persistPartialWindowCount(state.targets.app.env, mode, error);
     throw error;
   }

@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { buildBundledCatalogCommand, synchronizeAccountModelCatalog, synchronizeEnvironmentGatewayModelCatalog } from "./account-model-catalog.js";
+import {
+  buildBundledCatalogCommand,
+  mergeBundledModelCatalogs,
+  resolveCodexAppBundledCliCandidates,
+  synchronizeAccountModelCatalog,
+  synchronizeEnvironmentGatewayModelCatalog,
+} from "./account-model-catalog.js";
 import { createModelCatalogStore } from "./model-catalog-store.js";
 
 test("account catalog merges bundled models with the account's bound custom models", async () => {
@@ -34,6 +40,18 @@ test("account catalog merges bundled models with the account's bound custom mode
   assert.ok(Array.isArray(generated.models[0].supported_reasoning_levels));
   assert.equal(generated.models[0].supported_in_api, true);
   assert.match(await readFile(configPath, "utf8"), /model_catalog_json = /);
+
+  const before = await stat(result.catalogPath!);
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  await synchronizeAccountModelCatalog({
+    envName: "work",
+    accountName: "alice",
+    homePath: join(root, "home"),
+    store,
+    loadBundledCatalog: async () => ({ models: [{ slug: "gpt-official", display_name: "Official" }] }),
+  });
+  const after = await stat(result.catalogPath!);
+  assert.equal(after.mtimeMs, before.mtimeMs);
 });
 
 test("account catalog prefixes discovered provider aliases in Codex display names", async () => {
@@ -324,6 +342,37 @@ test("bundled catalog command wraps Windows command shims", () => {
     command: "cmd.exe",
     args: ["/d", "/s", "/c", '"C:\\Tools\\codex.cmd" debug models --bundled'],
   });
+});
+
+test("bundled catalogs prefer the Codex App entry while retaining CLI-only models", () => {
+  const merged = mergeBundledModelCatalogs(
+    { models: [
+      { slug: "gpt-6.1-sol", display_name: "GPT-6.1-Sol (App)" },
+      { slug: "gpt-6-astra", display_name: "GPT-6-Astra" },
+    ] },
+    { models: [
+      { slug: "gpt-6.1-sol", display_name: "GPT-6.1-Sol (CLI)" },
+      { slug: "gpt-5.5", display_name: "GPT-5.5" },
+    ] },
+  );
+
+  assert.deepEqual(merged.models.map((model) => model.slug), ["gpt-6.1-sol", "gpt-6-astra", "gpt-5.5"]);
+  assert.equal(merged.models[0]?.display_name, "GPT-6.1-Sol (App)");
+});
+
+test("macOS App path resolves its embedded Codex CLI candidates", () => {
+  assert.deepEqual(
+    resolveCodexAppBundledCliCandidates(
+      "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+      "darwin",
+    ),
+    [
+      "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+      "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
+      "/Applications/ChatGPT.app/Contents/Resources/codex",
+    ],
+  );
+  assert.deepEqual(resolveCodexAppBundledCliCandidates("OpenAI.Codex_2p2nqsd0c76g0!App", "win32"), []);
 });
 
 test("DeepSeek official model preset replaces models.json with only the DeepSeek entries", async () => {

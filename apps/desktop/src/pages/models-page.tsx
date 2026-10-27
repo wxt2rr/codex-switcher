@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Braces, FilePenLine, Pencil, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 
-import type { CustomModelRecord, DesktopBridge, GatewayCapabilityObservationEntry, ModelCatalogEntry, ModelCatalogSnapshot, ProviderCatalogItem } from "../bridge";
+import type { CustomModelRecord, DesktopBridge, GatewayCapabilityObservationEntry, ModelCatalogAppRefreshRequirement, ModelCatalogEntry, ModelCatalogSnapshot, ProviderCatalogItem } from "../bridge";
 import type { OverviewPayload } from "../desktop-model";
 import type { UiLanguage } from "../i18n";
 import {
@@ -107,6 +107,7 @@ export function ModelsPage({
   bridge,
   onSuccess,
   onError,
+  onAppRefreshRequired,
 }: {
   overview: OverviewPayload;
   language: UiLanguage;
@@ -114,6 +115,7 @@ export function ModelsPage({
   bridge: DesktopBridge;
   onSuccess: (message: string) => void;
   onError: (error: unknown) => void;
+  onAppRefreshRequired: (request: ModelCatalogAppRefreshRequirement) => void;
 }) {
   const zh = language === "zh";
   const [snapshot, setSnapshot] = useState<ModelCatalogSnapshot>({ version: 1, models: [], accountBindings: {} });
@@ -201,7 +203,8 @@ export function ModelsPage({
     setRefreshing(true);
     try {
       for (const account of overview.accounts) {
-        await bridge.discoverAccountModels(account.envName, account.name);
+        const result = await bridge.discoverAccountModels(account.envName, account.name);
+        if (result.appRefresh.required) onAppRefreshRequired(result.appRefresh);
       }
       setSnapshot(await bridge.listCustomModels());
       setCapabilityObservations(await bridge.listGatewayCapabilityObservations());
@@ -250,7 +253,9 @@ export function ModelsPage({
     setBusy(true);
     try {
       const entry = mode === "json" ? parseSingleModelCatalog(jsonDraft) : draft;
-      setSnapshot(await bridge.saveCustomModel({ id: activeModelId, entry }));
+      const result = await bridge.saveCustomModel({ id: activeModelId, entry });
+      setSnapshot(result.snapshot);
+      if (result.appRefresh.required) onAppRefreshRequired(result.appRefresh);
       setEditorOpen(false);
       onSuccess(zh ? "模型已保存" : "Model saved");
     } catch (error) {
@@ -264,7 +269,9 @@ export function ModelsPage({
     if (!activeModelId) return;
     setBusy(true);
     try {
-      setSnapshot(await bridge.deleteCustomModel(activeModelId));
+      const result = await bridge.deleteCustomModel(activeModelId);
+      setSnapshot(result.snapshot);
+      if (result.appRefresh.required) onAppRefreshRequired(result.appRefresh);
       setDeleteOpen(false);
       onSuccess(zh ? "模型已删除" : "Model deleted");
     } catch (error) {

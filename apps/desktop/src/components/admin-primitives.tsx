@@ -299,6 +299,7 @@ export function ConfirmDialog({
   description,
   impact,
   confirmLabel,
+  confirmDisabled = false,
   cancelLabel = "Cancel",
   tone = "destructive",
   onConfirm,
@@ -309,6 +310,7 @@ export function ConfirmDialog({
   description?: string;
   impact?: ReactNode;
   confirmLabel: string;
+  confirmDisabled?: boolean;
   cancelLabel?: string;
   tone?: "default" | "destructive";
   onConfirm: () => void;
@@ -335,6 +337,7 @@ export function ConfirmDialog({
             <Button
               variant={tone === "destructive" ? "destructive" : "default"}
               onClick={onConfirm}
+              disabled={confirmDisabled}
             >
               {confirmLabel}
             </Button>

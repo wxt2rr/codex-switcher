@@ -23,6 +23,54 @@ export interface BundledModelCatalog {
   models: ModelCatalogEntry[];
 }
 
+/**
+ * Merge model catalogs from the CLI and the Codex App's embedded CLI.
+ *
+ * The App and the standalone CLI can be released at different times.  The
+ * App server consumes the generated catalog at startup, so using only the
+ * standalone CLI's bundled list can silently hide a model that the App
+ * itself supports (for example gpt-6.1-sol).  Keep the first entry for a
+ * slug so callers can put the target App catalog first and make its richer,
+ * newer metadata authoritative when both binaries contain the same model.
+ */
+export function mergeBundledModelCatalogs(
+  ...catalogs: readonly BundledModelCatalog[]
+): BundledModelCatalog {
+  const bySlug = new Map<string, ModelCatalogEntry>();
+  for (const catalog of catalogs) {
+    for (const model of catalog.models) {
+      if (!bySlug.has(model.slug)) bySlug.set(model.slug, model);
+    }
+  }
+  return { models: [...bySlug.values()] };
+}
+
+/**
+ * Return the conventional Codex CLI locations embedded in a macOS App.
+ * `getCodexToolStatus("app")` returns the executable inside Contents/MacOS,
+ * while the CLI used by App Server lives under Contents/Resources.
+ */
+export function resolveCodexAppBundledCliCandidates(
+  appPath: string,
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  const trimmed = appPath.trim();
+  if (!trimmed || platform !== "darwin") return [];
+  const contentsMarker = "/Contents/";
+  const markerIndex = trimmed.indexOf(contentsMarker);
+  const bundlePath = markerIndex > 0 && trimmed.slice(0, markerIndex).endsWith(".app")
+    ? trimmed.slice(0, markerIndex)
+    : trimmed.endsWith(".app")
+      ? trimmed
+      : "";
+  if (!bundlePath) return [];
+  return [
+    join(bundlePath, "Contents", "Resources", "codex-cli", "CodexCLI.app", "Contents", "MacOS", "codex"),
+    join(bundlePath, "Contents", "Resources", "codex-cli", "bin", "codex"),
+    join(bundlePath, "Contents", "Resources", "codex"),
+  ];
+}
+
 export function buildBundledCatalogCommand(
   codexBin: string,
   platform: NodeJS.Platform = process.platform,
@@ -255,6 +303,16 @@ async function atomicWriteJson(path: string, value: unknown): Promise<void> {
 }
 
 async function atomicWriteText(path: string, value: string): Promise<void> {
+  // The Codex App watches config.toml and model catalogs. Reconciliation is
+  // intentionally repeatable, so keep the inode/mtime unchanged when the
+  // serialized content is already current; otherwise every background model
+  // discovery can look like a configuration change to the App.
+  const existing = await readFile(path, "utf8").catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (existing === value) return;
+
   await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {

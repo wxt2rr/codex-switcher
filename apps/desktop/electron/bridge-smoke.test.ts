@@ -181,6 +181,37 @@ test("electron bridge synchronizes the target catalog before launching Codex App
   assert.ok(supportLoad > catalogSync, "App launch should load/start support only after catalog sync");
 });
 
+test("electron bridge serializes catalog writes and defers App refresh until confirmation", async () => {
+  const source = await readBridgeSource();
+  assert.match(source, /withAppTargetLifecycleLock/);
+  assert.match(source, /restartRunningApp\?: boolean/);
+  assert.match(source, /updateTargetHome\?: boolean/);
+  assert.match(source, /applyTargetHome: options\.updateTargetHome !== false/);
+  assert.match(source, /if \(options\.updateTargetHome !== false\) \{/);
+  assert.match(source, /findRunningManagedAppEnvironments/);
+  assert.match(source, /const updateTargetHome = !runningAppEnvironments\.has\(environment\.name\)/);
+  assert.match(source, /resynchronizeActiveModelCatalogsUnlocked\(accountKey, \{ updateAppHome: false \}\)/);
+  const confirmRefresh = source.indexOf("export async function refreshCodexAppModelCatalog");
+  const explicitRefreshCall = source.indexOf('resynchronizeActiveModelCatalogs(undefined, { restartRunningApp: true, updateAppHome: true })', confirmRefresh);
+  const restartCheck = source.indexOf("if (options.restartRunningApp");
+  const launchRefresh = source.indexOf('launchAppTargetUnlocked(state, runtime, "reconcile")', restartCheck);
+  assert.ok(confirmRefresh >= 0, "the explicit App refresh action should exist");
+  assert.ok(explicitRefreshCall > confirmRefresh, "the explicit action should request a running App refresh");
+  assert.ok(restartCheck >= 0, "the explicit App refresh should inspect the running App");
+  assert.ok(launchRefresh > restartCheck, "only the explicit refresh action should restart the active App");
+});
+
+test("electron bridge reports an App refresh requirement after account model discovery", async () => {
+  const source = await readBridgeSource();
+  const discoveryWrite = source.indexOf('await store.saveAccountModelDiscovery({\n        accountKey,\n        providerId: catalogProviderId,\n        state: "ready"');
+  const discoveryRefresh = source.indexOf(
+    'resynchronizeActiveModelCatalogsUnlocked(accountKey, { updateAppHome: false })',
+    discoveryWrite,
+  );
+  assert.ok(discoveryWrite >= 0, "successful account discovery should persist its ready snapshot");
+  assert.ok(discoveryRefresh > discoveryWrite, "successful account discovery should only prepare an App refresh");
+});
+
 test("electron bridge returns a shell-neutral launch message for the CLI", async () => {
   assert.equal(__testUtils.getCliLaunchSuccessMessage(), "Opened CLI session");
 });

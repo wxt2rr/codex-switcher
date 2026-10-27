@@ -129,6 +129,7 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   discoverAccountModels: (envName: string, accountName: string) =>
     ipcRenderer.invoke("desktop:discoverAccountModels", envName, accountName),
   refreshAllAccountModels: () => ipcRenderer.invoke("desktop:refreshAllAccountModels"),
+  refreshCodexAppModelCatalog: () => ipcRenderer.invoke("desktop:refreshCodexAppModelCatalog"),
   listProviderCatalog: () => ipcRenderer.invoke("desktop:listProviderCatalog"),
   saveCustomModel: (request: { id?: string; entry: Record<string, unknown> }) =>
     ipcRenderer.invoke("desktop:saveCustomModel", request),

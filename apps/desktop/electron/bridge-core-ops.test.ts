@@ -984,7 +984,7 @@ test("desktop bridge compiles model page bindings into the environment gateway c
     const model = await bridge.saveCustomModel({
       entry: { slug: "shared-work-model", display_name: "Shared Work Model" },
     });
-    const modelId = model.models.find((item) => item.entry.slug === "shared-work-model")?.id;
+    const modelId = model.snapshot.models.find((item) => item.entry.slug === "shared-work-model")?.id;
     assert.ok(modelId);
     await bridge.setModelAccountBindings(modelId, ["work/alpha", "work/beta"]);
 
