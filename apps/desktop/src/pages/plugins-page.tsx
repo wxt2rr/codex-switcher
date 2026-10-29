@@ -209,6 +209,7 @@ export function PluginsPage({
         search={query}
         searchPlaceholder={zh ? "搜索插件、服务商或能力" : "Search plugins, providers, or capabilities"}
         onSearchChange={setQuery}
+        layout="stacked"
         actions={(
           <div className="flex flex-wrap items-center justify-end gap-2">
             <span className="hidden text-[11px] text-slate-400 xl:inline">{(tab === "installed" ? filteredInstalled.length : filteredMarket.length)} / {tab === "installed" ? installed.length : market.length}</span>

@@ -47,10 +47,44 @@ test("plugin provider adapter registers in the shared registry and supports mode
   const models = await adapter.discoverModels({} as never, account, "secret-value");
   assert.equal(models[0]?.providerId, "provider-plugin");
   assert.equal(models[0]?.id, "plugin-model");
+  assert.equal(models[0]?.capabilities.vision, true);
   const quota = await adapter.readQuota({} as never, account, "secret-value");
   assert.equal(quota?.tokensRemaining, 42);
   assert.equal(requests[0]?.params?.secret, "secret-value");
   assert.equal(requests[0]?.params?.secretRef, "secure:account-1");
+});
+
+test("plugin provider adapter preserves an explicit text-only vision declaration", async () => {
+  const transport: PluginTransport = {
+    async send(request) {
+      return {
+        jsonrpc: "2.0",
+        id: request.id,
+        result: request.method === "provider.models"
+          ? { models: [{ id: "text-only", capabilities: { vision: false } }] }
+          : undefined,
+      };
+    },
+    async close() {},
+  };
+  const host = new PluginHost(transport, {
+    manifest: { id: "text-only-plugin", name: "Text Only Plugin", version: "1.0.0", apiVersion: 1, entry: "index.js", permissions: ["provider"] },
+  });
+  const adapter = createPluginProviderAdapter({
+    id: "text-only-plugin",
+    displayName: "Text Only Plugin",
+    authMethods: ["none"],
+    endpoints: [{ protocol: "responses", baseUrl: "http://127.0.0.1:1/v1", modelsPath: "/models" }],
+    host,
+  });
+  const models = await adapter.discoverModels({} as never, {
+    accountId: "account-1",
+    displayName: "Account",
+    authMethod: "none",
+    secretRef: "",
+    status: "active",
+  }, "");
+  assert.equal(models[0]?.capabilities.vision, false);
 });
 
 test("plugin provider secrets require the explicit secrets permission", async () => {

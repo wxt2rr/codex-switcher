@@ -9,7 +9,8 @@ test("stream state preserves chunk order, tool argument deltas and final usage",
     assert.equal(first.value[0]?.type, "response.created");
     assert.equal(JSON.stringify([...first.value, ...second.value]).includes("hel"), true);
     assert.equal(JSON.stringify([...first.value, ...second.value]).includes("lo"), true);
-    assert.equal(JSON.stringify([...first.value, ...second.value]).includes("{\\\"q\\\":"), true);
+    assert.equal(JSON.stringify([...first.value, ...second.value]).includes("function_call_arguments.delta"), false);
+    assert.equal(JSON.stringify(final.value).includes("{\\\"q\\\":\\\"hi\\\"}"), true);
     assert.equal(final.value.some((event) => event.type === "response.completed"), true);
     assert.equal(first.value.some((event) => event.type === "response.output_item.added"), true);
     assert.equal(first.value.some((event) => event.type === "response.content_part.added"), true);
@@ -20,6 +21,89 @@ test("stream state preserves chunk order, tool argument deltas and final usage",
     assert.equal(state.usage.inputTokens, 2);
     assert.equal(state.usage.outputTokens, 4);
     assert.equal(state.ended, true);
+});
+test("stream state joins indexed Chat fragments when only the first fragment has an id", async () => {
+    const state = createResponseStreamState("chat_completions", "responses");
+    await convertStreamChunk(state, {
+        id: "chat-indexed-id",
+        choices: [{ delta: { tool_calls: [{ index: 0, id: "call-weather", function: { name: "lookup", arguments: "{\"q\":" } }] }, finish_reason: null }],
+    });
+    const continuation = await convertStreamChunk(state, {
+        id: "chat-indexed-id",
+        choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "\"weather\"}" } }] }, finish_reason: null }],
+    });
+    const terminal = await finalizeResponseStream(state, "tool_calls");
+    const completed = terminal.value.find((event) => event.type === "response.completed");
+    assert.ok(completed);
+    assert.equal(completed.response.output instanceof Array, true);
+    assert.equal(JSON.stringify([...continuation.value, ...terminal.value]).includes("call-weather"), true);
+});
+test("stream state suppresses empty and malformed tool calls", async () => {
+    const state = createResponseStreamState("chat_completions", "responses", { requestId: "invalid-stream" });
+    const result = await convertStreamChunk(state, { id: "chat-invalid", choices: [{ delta: { tool_calls: [
+                        { index: 0, id: "empty", function: { name: "empty", arguments: "" } },
+                        { index: 1, id: "bad", function: { name: "bad", arguments: "{oops" } },
+                        { index: 2, id: "valid", function: { name: "valid", arguments: "{}" } },
+                    ] }, finish_reason: "tool_calls" }] });
+    const serialized = JSON.stringify(result.value);
+    assert.equal(serialized.includes('"call_id":"empty"'), false);
+    assert.equal(serialized.includes('"call_id":"bad"'), false);
+    assert.equal(serialized.includes('"call_id":"valid"'), true);
+    assert.equal(serialized.includes('"arguments":""'), false);
+});
+test("stream state fails when tool_calls contains no valid call", async () => {
+    const state = createResponseStreamState("chat_completions", "responses", { requestId: "invalid-only-stream" });
+    const result = await convertStreamChunk(state, { id: "chat-invalid-only", choices: [{ delta: {
+                    content: "我来看一下这个项目的结构和说明文件。",
+                    tool_calls: [{ index: 0, id: "broken", function: { name: "read", arguments: "" } }],
+                }, finish_reason: "tool_calls" }] });
+    const failed = result.value.find((event) => event.type === "response.failed");
+    assert.deepEqual(failed?.response?.error, {
+        code: "upstream_invalid_tool_call",
+        message: "Upstream finished with 'tool_calls' but returned no valid tool call arguments; the provider likely emitted an empty or malformed tool call: read(arguments=empty)",
+    });
+    assert.equal(result.value.some((event) => event.type === "response.completed"), false);
+    assert.equal(state.ended, true);
+});
+test("stream state preserves object tool arguments", async () => {
+    const state = createResponseStreamState("chat_completions", "responses", { requestId: "object-stream" });
+    const result = await convertStreamChunk(state, { id: "chat-object", choices: [{ delta: {
+                    tool_calls: [{ index: 0, id: "object-call", function: { name: "read", arguments: { path: "README.md" } } }],
+                }, finish_reason: "tool_calls" }] });
+    assert.equal(JSON.stringify(result.value).includes('{\\"path\\":\\"README.md\\"}'), true);
+});
+test("Responses-to-Chat streaming emits only complete tool arguments", async () => {
+    const state = createResponseStreamState("responses", "chat_completions", { requestId: "responses-to-chat" });
+    const first = await convertStreamChunk(state, {
+        type: "response.function_call_arguments.delta",
+        call_id: "call-1",
+        name: "lookup",
+        delta: "{\"q\":"
+    });
+    assert.equal(first.value.some((event) => Array.isArray(event.choices)
+        && event.choices.some((choice) => {
+            const delta = choice.delta;
+            return Array.isArray(delta?.tool_calls);
+        })), false);
+    const final = await convertStreamChunk(state, {
+        type: "response.completed",
+        response: { id: "responses-to-chat", status: "completed" },
+    });
+    const toolChunk = final.value.find((event) => Array.isArray(event.choices)
+        && event.choices.some((choice) => Array.isArray(choice.delta?.tool_calls)));
+    const delta = (toolChunk?.choices?.[0])?.delta;
+    const toolCall = delta?.tool_calls?.[0];
+    assert.equal(toolCall?.function?.arguments, undefined);
+    // A split call is only emitted once the terminal frame supplies the rest.
+    const complete = createResponseStreamState("responses", "chat_completions", { requestId: "responses-to-chat-complete" });
+    await convertStreamChunk(complete, { type: "response.function_call_arguments.delta", call_id: "call-2", name: "lookup", delta: "{\"q\":" });
+    const completeResult = await convertStreamChunk(complete, { type: "response.function_call_arguments.delta", call_id: "call-2", delta: "\"x\"}" });
+    assert.equal(completeResult.value.length, 0);
+    const completeFinal = await convertStreamChunk(complete, { type: "response.completed", response: { status: "completed" } });
+    const completeTool = completeFinal.value.find((event) => Array.isArray(event.choices)
+        && event.choices.some((choice) => Array.isArray(choice.delta?.tool_calls)));
+    const completeDelta = (completeTool?.choices?.[0])?.delta;
+    assert.equal(((completeDelta?.tool_calls)[0]?.function).arguments, "{\"q\":\"x\"}");
 });
 test("stream finalization emits a terminal event and rejects reuse", async () => {
     const state = createResponseStreamState("responses", "chat_completions", { requestId: "stream-2" });

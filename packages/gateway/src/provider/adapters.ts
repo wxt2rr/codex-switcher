@@ -132,7 +132,7 @@ export interface ProviderModel {
   providerId: string;
   iconKey?: string;
   protocols: GatewayProtocol[];
-  capabilities: { reasoning: boolean; tools: boolean; vision: boolean; streaming: boolean };
+  capabilities: { reasoning: boolean; tools: boolean; vision?: boolean; streaming: boolean };
   capabilityProfile?: Record<string, CapabilityObservation>;
   contextWindow?: number;
   source: "preset" | "discovery" | "manual";
@@ -419,7 +419,8 @@ export function normalizeBuiltInProviderId(id: string): BuiltInProviderId {
 function presetsToModels(definition: ProviderDefinition, endpoints = definition.endpoints): ProviderModel[] { return definition.presets.map((id) => modelFor(definition, id, "preset", endpoints)); }
 function modelFor(definition: ProviderDefinition, id: string, source: ProviderModel["source"], endpoints = definition.endpoints): ProviderModel {
   const protocols = [...new Set(endpoints.map((endpoint) => endpoint.protocol))];
-  return { id, displayName: id, providerId: definition.id, iconKey: definition.iconKey, protocols, capabilities: { reasoning: /reason|o[1-9]|opus|sonnet|think/i.test(id), tools: true, vision: /vision|gemini|claude|gpt-4/i.test(id), streaming: true }, source };
+  const knownVisionModel = /vision|gemini|claude|gpt-4/i.test(id);
+  return { id, displayName: id, providerId: definition.id, iconKey: definition.iconKey, protocols, capabilities: { reasoning: /reason|o[1-9]|opus|sonnet|think/i.test(id), tools: true, ...(knownVisionModel ? { vision: true } : {}), streaming: true }, source };
 }
 function requestContext(account: ProviderAccountRef): ProviderHttpRequestContext {
   return { accountId: account.accountId, ...(account.proxyUrl ? { proxyUrl: account.proxyUrl } : {}) };

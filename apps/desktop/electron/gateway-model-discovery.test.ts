@@ -33,6 +33,7 @@ test("desktop gateway model discovery resolves a legacy credential and returns m
 
   assert.equal(result.credentialsUsed, 1);
   assert.ok(result.models.some((model) => model.id === "openai/gpt-desktop-discovered"));
+  assert.equal(result.models.find((model) => model.id === "openai/gpt-desktop-discovered")?.capabilities.vision, true);
   assert.doesNotMatch(JSON.stringify(result), /secret-not-output/);
 });
 
@@ -67,6 +68,7 @@ test("desktop account discovery is scoped to the selected account", async () => 
   assert.equal(result.accountName, "primary");
   const ids = result.models.map((model) => model.upstreamModelId);
   assert.ok(ids.includes("primary-only-model"));
+  assert.equal(result.models.find((model) => model.upstreamModelId === "primary-only-model")?.capabilities.vision, true);
   assert.equal(ids.includes("other-only-model"), false);
 });
 

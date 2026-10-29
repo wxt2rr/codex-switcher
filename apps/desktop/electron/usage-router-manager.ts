@@ -145,6 +145,18 @@ export interface GatewayCapabilityObservationEntry {
   evidence?: string;
 }
 
+/**
+ * Keep smoke tests on the strict Responses wire shape used by Codex App.
+ * Codex's official backend requires `input` to be an array even though some
+ * OpenAI-compatible endpoints also accept a plain string.
+ */
+function buildResponsesTestInput(prompt: string): Array<{
+  role: "user";
+  content: Array<{ type: "input_text"; text: string }>;
+}> {
+  return [{ role: "user", content: [{ type: "input_text", text: prompt }] }];
+}
+
 export interface ModelRequestTestInput {
   envName: string;
   accountName: string;
@@ -236,8 +248,41 @@ async function collectModelTestResult(
   } catch {
     // Some providers return plain text or an SSE body. Keep a short excerpt.
   }
+  const responseBody = parsed?.response && typeof parsed.response === "object" && !Array.isArray(parsed.response)
+    ? parsed.response as Record<string, unknown>
+    : parsed;
+  const responseError = responseBody?.error && typeof responseBody.error === "object" && !Array.isArray(responseBody.error)
+    ? responseBody.error as Record<string, unknown>
+    : parsed?.error && typeof parsed.error === "object" && !Array.isArray(parsed.error)
+      ? parsed.error as Record<string, unknown>
+      : undefined;
+  const responseErrorMessage = typeof responseError?.message === "string" ? responseError.message : undefined;
+  const responseStatus = typeof responseBody?.status === "string" ? responseBody.status : undefined;
+  const output = Array.isArray(responseBody?.output) ? responseBody.output : undefined;
+  const hasUsableOutput = output?.some((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+    const entry = item as Record<string, unknown>;
+    if (entry.type === "function_call" || entry.type === "custom_tool_call" || entry.type === "tool_search_call") return true;
+    if (entry.type !== "message" && entry.type !== undefined) return false;
+    const content = entry.content;
+    if (typeof content === "string") return content.trim().length > 0;
+    return Array.isArray(content) && content.some((part) => part && typeof part === "object" && !Array.isArray(part)
+      && typeof (part as Record<string, unknown>).text === "string"
+      && String((part as Record<string, unknown>).text).trim().length > 0);
+  }) ?? undefined;
+  const responseOutputText = output?.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const entry = item as Record<string, unknown>;
+    if (entry.type !== "message") return [];
+    if (typeof entry.content === "string") return [entry.content];
+    if (!Array.isArray(entry.content)) return [];
+    return entry.content.flatMap((part) => part && typeof part === "object" && !Array.isArray(part)
+      && typeof (part as Record<string, unknown>).text === "string" ? [String((part as Record<string, unknown>).text)] : []);
+  }).join(" ");
   const outputText = typeof parsed?.output_text === "string"
     ? parsed.output_text
+    : responseOutputText
+      ? responseOutputText
     : typeof parsed?.response === "string"
       ? parsed.response
       : typeof parsed?.text === "string"
@@ -248,9 +293,15 @@ async function collectModelTestResult(
             : "")
           : raw;
   const excerpt = outputText.replace(/\s+/g, " ").trim().slice(0, 500);
-  if (!response.ok) {
-    const errorText = excerpt || `HTTP ${response.status}`;
+  if (!response.ok || responseStatus === "failed" || responseErrorMessage) {
+    const errorText = responseErrorMessage || excerpt || `HTTP ${response.status}`;
     return { ok: false, status: response.status, message: errorText, responseText: excerpt || undefined, latencyMs: Date.now() - startedAt, model: requestedModel };
+  }
+  if (output && !hasUsableOutput) {
+    return { ok: false, status: response.status, message: "Model completed without assistant text or an executable tool call", responseText: undefined, latencyMs: Date.now() - startedAt, model: requestedModel };
+  }
+  if (!excerpt && !output?.length) {
+    return { ok: false, status: response.status, message: "Model returned an empty response", responseText: undefined, latencyMs: Date.now() - startedAt, model: requestedModel };
   }
   return { ok: true, status: response.status, message: excerpt || "Model responded successfully", responseText: excerpt || undefined, latencyMs: Date.now() - startedAt, model: requestedModel };
 }
@@ -938,13 +989,13 @@ export class UsageRouterManager {
     };
     const result = await runCompatibilityCheck({ probe: async (stage, signal) => {
       if (stage === "auth" || stage === "text") {
-        const { content } = await execute({ input: "Reply with OK." }, signal);
+        const { content } = await execute({ input: buildResponsesTestInput("Reply with OK.") }, signal);
         if (!content.includes("output_text")) throw new Error("No text output");
       } else if (stage === "stream") {
-        const { content } = await execute({ input: "Reply with OK.", stream: true }, signal);
+        const { content } = await execute({ input: buildResponsesTestInput("Reply with OK."), stream: true }, signal);
         if (!content.includes("response.output_text.delta")) throw new Error("No streaming text delta");
       } else if (stage === "sequential_tool") {
-        const first = await execute({ input: "Call echo_probe once.", tools: [{ type: "function", name: "echo_probe",
+        const first = await execute({ input: buildResponsesTestInput("Call echo_probe once."), tools: [{ type: "function", name: "echo_probe",
           description: "Echo a value", parameters: { type: "object", properties: { value: { type: "string" } }, required: ["value"] } }],
           tool_choice: { type: "function", name: "echo_probe" } }, signal);
         const payload = JSON.parse(first.content) as { id?: string; output?: Array<Record<string, unknown>> };
@@ -952,13 +1003,13 @@ export class UsageRouterManager {
         if (!payload.id || typeof call?.call_id !== "string") throw new Error("No sequential tool call");
         await execute({ previous_response_id: payload.id, input: [{ type: "function_call_output", call_id: call.call_id, output: "probe-ok" }] }, signal);
       } else if (stage === "parallel_tool") {
-        const { content } = await execute({ input: "Call echo_a and echo_b.", tools: ["echo_a", "echo_b"].map((name) => ({
+        const { content } = await execute({ input: buildResponsesTestInput("Call echo_a and echo_b."), tools: ["echo_a", "echo_b"].map((name) => ({
           type: "function", name, parameters: { type: "object", properties: {} },
         })), tool_choice: "required" }, signal);
         const payload = JSON.parse(content) as { output?: Array<Record<string, unknown>> };
         if ((payload.output?.filter((item) => item.type === "function_call").length ?? 0) < 2) throw new Error("No parallel tool calls");
       } else {
-        const { content } = await execute({ input: "Think briefly, then answer OK.", reasoning: { effort: "low" } }, signal);
+        const { content } = await execute({ input: buildResponsesTestInput("Think briefly, then answer OK."), reasoning: { effort: "low" } }, signal);
         const payload = JSON.parse(content) as { output?: Array<Record<string, unknown>> };
         if (!payload.output?.some((item) => item.type === "reasoning")) throw new Error("No explicit reasoning item");
       }
@@ -1002,7 +1053,7 @@ export class UsageRouterManager {
       // ASCII-safe and let the local router decode it before route selection.
       headers.set("x-codex-account", encodeURIComponent(accountName));
       headers.set("x-codex-account-encoding", "uri");
-      body = { model: requestedModel, input: prompt, max_output_tokens: 64 };
+      body = { model: requestedModel, input: buildResponsesTestInput(prompt), max_output_tokens: 64 };
     } else {
       const protocol: RouteProtocol = route!.protocol;
       const routeBase = buildLocalRouteBaseUrl(state.port, route!.routeId);
@@ -1014,7 +1065,7 @@ export class UsageRouterManager {
         body = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
       } else {
         endpoint = `${routeBase}/responses`;
-        body = { model: upstreamModel, input: prompt, max_output_tokens: 64 };
+        body = { model: upstreamModel, input: buildResponsesTestInput(prompt), max_output_tokens: 64 };
         if (protocol === "chat_completions") {
           const token = (await this.readRouteTokens()).routes[route!.routeId];
           if (token) headers.set("authorization", `Bearer ${token}`);
@@ -1103,7 +1154,7 @@ export class UsageRouterManager {
       const response = await fetch(`${buildLocalGatewayBaseUrl(state.port, previewGatewayId).replace("/gateways/", "/gateway-previews/")}/responses`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ model: requestedModel, input: prompt, max_output_tokens: 64 }),
+        body: JSON.stringify({ model: requestedModel, input: buildResponsesTestInput(prompt), max_output_tokens: 64 }),
         signal: AbortSignal.timeout(30_000),
       });
       return await collectModelTestResult(response, requestedModel, startedAt);

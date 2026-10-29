@@ -174,8 +174,9 @@ test("model request preview uses an isolated gateway route without changing save
   const upstream = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
-    const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { model?: string };
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { model?: string; input?: unknown };
     receivedModel = body.model ?? "";
+    assert.deepEqual(body.input, [{ role: "user", content: [{ type: "input_text", text: "你是什么模型" }] }]);
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({ output_text: "preview ok" }));
   });
@@ -213,6 +214,53 @@ test("model request preview uses an isolated gateway route without changing save
     assert.equal(receivedModel, "upstream-model");
     assert.deepEqual((await manager.listRoutes()).map((route) => route.routeId).sort(), savedRouteIds);
     assert.equal((await manager.listEnvironmentGateways())[0]?.gatewayId, savedGateway.gatewayId);
+  } finally {
+    await service?.close();
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("model request test rejects a failed or reasoning-only Responses result", async () => {
+  let mode: "failed" | "reasoning" = "failed";
+  const upstream = createServer(async (_request, response) => {
+    response.setHeader("content-type", "application/json");
+    if (mode === "failed") {
+      response.end(JSON.stringify({ id: "failed", status: "failed", output: [], error: { code: "upstream_invalid_tool_call", message: "invalid tool arguments" } }));
+      return;
+    }
+    response.end(JSON.stringify({ id: "reasoning-only", status: "completed", output: [{ type: "reasoning", summary: [{ type: "summary_text", text: "thinking" }] }] }));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const address = upstream.address();
+  assert(address && typeof address !== "string");
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-manager-test-result-"));
+  let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
+  const manager = new UsageRouterManager({
+    stateDir, serviceEntryPath: "unused",
+    launchService: async () => { service = await startUsageRouterService({ stateDir: join(stateDir, "usage-router") }); },
+  });
+  try {
+    const route = {
+      routeId: "test-result-route", envName: "work", accountName: "key", upstreamBaseUrl: `http://127.0.0.1:${address.port}/v1`,
+      originalBaseUrl: "default", protocol: "responses" as const, upstreamModel: "test-model", reasoningProfile: "auto" as const,
+      exposedModelId: "test-model",
+      enabled: true, createdAt: Date.now(), updatedAt: Date.now(),
+    };
+    const failed = await manager.testModelRequestPreview({
+      envName: "work", accountName: "key", model: "test-model", route,
+      upstreamApiKey: "sk-test", authMode: "apikey",
+    });
+    assert.equal(failed.ok, false);
+    assert.match(failed.message, /invalid tool arguments/);
+
+    mode = "reasoning";
+    const reasoningOnly = await manager.testModelRequestPreview({
+      envName: "work", accountName: "key", model: "test-model", route,
+      upstreamApiKey: "sk-test", authMode: "apikey",
+    });
+    assert.equal(reasoningOnly.ok, false);
+    assert.match(reasoningOnly.message, /without assistant text/);
   } finally {
     await service?.close();
     await new Promise<void>((resolve) => upstream.close(() => resolve()));

@@ -7,11 +7,28 @@ import { join } from "node:path";
 import {
   buildBundledCatalogCommand,
   mergeBundledModelCatalogs,
+  normalizeBundledModelEntry,
   resolveCodexAppBundledCliCandidates,
   synchronizeAccountModelCatalog,
   synchronizeEnvironmentGatewayModelCatalog,
 } from "./account-model-catalog.js";
 import { createModelCatalogStore } from "./model-catalog-store.js";
+
+test("bundled Codex models are provider-neutral candidates", () => {
+  const entry = normalizeBundledModelEntry({
+    slug: "gpt-6.1-sol",
+    display_name: "GPT-6.1-Sol",
+    provider_id: "openai",
+    provider_model_key: "openai:gpt-6.1-sol",
+    upstream_model_id: "gpt-6.1-sol",
+  });
+
+  assert.equal(entry.provider_id, "codex-bundled");
+  assert.equal(entry.provider_display_name, "Codex 内置");
+  assert.equal(entry.model_source, "bundled");
+  assert.equal(entry.provider_model_key, undefined);
+  assert.equal(entry.upstream_model_id, undefined);
+});
 
 test("account catalog merges bundled models with the account's bound custom models", async () => {
   const root = await mkdtemp(join(tmpdir(), "account-model-catalog-"));
@@ -107,6 +124,31 @@ test("account catalog prefixes managed provider models to avoid bundled collisio
   const generated = JSON.parse(await readFile(result.catalogPath!, "utf8")) as { models: Array<Record<string, unknown>> };
   assert.equal(generated.models.find((model) => model.slug === "our-free-model:kimi-k3")?.display_name, "ourfree1:kimi-k3");
   assert.equal(generated.models.find((model) => model.slug === "kimi-k3")?.display_name, "Kimi K3");
+});
+
+test("account catalog does not duplicate a selected Codex bundled model", async () => {
+  const root = await mkdtemp(join(tmpdir(), "account-model-catalog-bundled-selection-"));
+  const store = createModelCatalogStore(join(root, "custom-models.json"));
+  const bundled = await store.saveModel({ entry: {
+    slug: "gpt-6.1-sol",
+    display_name: "GPT-6.1-Sol",
+    provider_id: "codex-bundled",
+    provider_display_name: "Codex 内置",
+    model_source: "bundled",
+  } });
+  await store.setAccountBindings("work/plus", [bundled.id]);
+
+  const result = await synchronizeAccountModelCatalog({
+    envName: "work",
+    accountName: "plus",
+    homePath: join(root, "home"),
+    store,
+    loadBundledCatalog: async () => ({ models: [{ slug: "gpt-6.1-sol", display_name: "GPT-6.1-Sol" }] }),
+  });
+
+  assert.equal(result.enabled, true);
+  const generated = JSON.parse(await readFile(result.catalogPath!, "utf8")) as { models: Array<Record<string, unknown>> };
+  assert.deepEqual(generated.models.map((model) => model.slug), ["gpt-6.1-sol"]);
 });
 
 test("account catalog removes model_catalog_json when the account has no bindings", async () => {

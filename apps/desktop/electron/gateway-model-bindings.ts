@@ -55,6 +55,10 @@ export function applyModelCatalogBindings(
       const model = modelsById.get(modelId);
       if (!model) continue;
       if (!isModelAvailableForAccount(snapshot, model, accountKey)) continue;
+      // Subscription accounts already receive the Codex App's bundled models
+      // through addBundledModelBindings below. Do not compile a second
+      // catalog route from the same bundled entry.
+      if (account.authMode === "auth" && model.entry.model_source === "bundled") continue;
       const binding = resolveModelBinding(snapshot, model, accountKey);
       if (!binding.enabled) continue;
       addModelBinding(next, environment, accountName, credentialId, model, binding);

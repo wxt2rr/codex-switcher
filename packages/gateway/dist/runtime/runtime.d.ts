@@ -1,6 +1,7 @@
 import type { GatewayCapability, GatewayProtocol, JsonObject } from "../protocol.js";
 import { convertGatewayRequest } from "../conversion/request-converter.js";
 import { type ResponseStreamState } from "../conversion/stream-state.js";
+import { ToolExchangeHistory } from "../conversion/tool-exchange-history.js";
 import type { ConversionOptions, ConversionResult } from "../conversion/types.js";
 import type { GatewayRequestIR } from "../request/request-ir.js";
 import { type RouteEngineState, type RouteGroupNode, type RouteFailureClass, type RouteResolveResult, type RuntimeRouteCandidate } from "../routing/engine.js";
@@ -16,6 +17,7 @@ export interface GatewayRuntimeOptions {
     pricingProfiles?: readonly UsagePricingProfile[];
     middleware?: GatewayMiddlewareRegistry;
     now?: () => number;
+    toolHistory?: ToolExchangeHistory;
 }
 export interface GatewayDispatchInput {
     requestId?: string;
@@ -99,7 +101,9 @@ export declare class GatewayRuntime {
     private readonly now;
     private readonly options;
     private readonly trace;
+    private readonly toolHistory;
     private readonly streamMiddlewareContexts;
+    private readonly streamDispatches;
     constructor(options: GatewayRuntimeOptions);
     dispatch(input: GatewayDispatchInput): Promise<GatewayDispatchResult>;
     dispatchWithFallback<T>(input: GatewayDispatchInput, send: (dispatch: GatewayDispatchResult, attempt: number) => Promise<GatewayTransportResult<T>> | GatewayTransportResult<T>): Promise<GatewayFallbackResult<T>>;
@@ -109,6 +113,7 @@ export declare class GatewayRuntime {
     convertStreamChunk(state: ResponseStreamState, upstreamBody: JsonObject): Promise<GatewayStreamResult>;
     finalizeStream(state: ResponseStreamState, reason?: string): Promise<GatewayStreamResult>;
     failStream(state: ResponseStreamState, code: string, message: string): Promise<GatewayStreamResult>;
+    private recordStreamToolHistory;
     private createMiddlewareContext;
     private createMiddlewareContextFromDispatch;
     private createMiddlewareContextFromStream;

@@ -926,18 +926,23 @@ test("desktop bridge custom model listing seeds built-in provider models without
     await writeFileRecursive(join(root, "default-home", "config.toml"), "model = 'gpt-5'\n");
 
     const catalog = await bridge.listCustomModels();
-    assert.deepEqual(
-      catalog.models.map((model) => model.entry.slug),
-      [
-        "deepseek-v4-flash",
-        "deepseek-v4-pro",
-        "mimo-v2.5-pro",
-        "mimo-v2.5",
-        "kimi-k3",
-        "glm-5.3",
-        "glm-5.2",
-      ],
-    );
+    const modelSlugs = catalog.models.map((model) => model.entry.slug);
+    assert.deepEqual(modelSlugs.slice(0, 7), [
+      "deepseek-v4-flash",
+      "deepseek-v4-pro",
+      "mimo-v2.5-pro",
+      "mimo-v2.5",
+      "kimi-k3",
+      "glm-5.3",
+      "glm-5.2",
+    ]);
+    // Codex App bundled models are installation-dependent. When an App/CLI is
+    // available, they are imported as provider-neutral candidates rather than
+    // being treated as OpenAI account discoveries.
+    for (const bundled of catalog.models.filter((model) => model.entry.model_source === "bundled")) {
+      assert.equal(bundled.entry.provider_id, "codex-bundled");
+      assert.equal(bundled.entry.provider_model_key, undefined);
+    }
     assert.deepEqual(catalog.accountBindings, {});
   } finally {
     restoreEnv(previousEnv);

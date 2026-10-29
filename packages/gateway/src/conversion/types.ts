@@ -18,6 +18,7 @@ export interface ConversionMetadata {
   reasoning?: ReasoningConversionState;
   toolState?: JsonObject;
   providerDialect?: string;
+  upstreamEndpoint?: string;
   options?: JsonObject;
 }
 
@@ -35,6 +36,8 @@ export interface ConversionOptions {
   capabilityPolicy?: "safe" | "allow";
   mediaResolver?: MediaResolver;
   emitSequenceNumber?: boolean;
+  /** Provider dialect for Chat token budget serialization. */
+  chatMaxTokensField?: "max_tokens" | "max_completion_tokens";
 }
 
 export interface MediaResolver {

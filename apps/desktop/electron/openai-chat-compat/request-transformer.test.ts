@@ -144,3 +144,13 @@ test("filters opaque compaction history in continuity mode and returns a warning
   assert.equal((result.body.messages as unknown[]).length, 2);
   assert.doesNotMatch(JSON.stringify(result.body), /secret/);
 });
+
+test("rewrites Moonshot tool schemas only for Moonshot/Kimi endpoints", () => {
+  const request = { model: "k3", tools: [{ type: "function", name: "demo", parameters: { properties: { value: { $ref: "#/defs/value", type: "string" } } } }], input: "hello" };
+  const kimi = transformResponsesRequest({ request, upstreamEndpoint: "https://api.kimi.com/coding" });
+  const kimiSchema = ((kimi.body.tools as Array<Record<string, unknown>>)[0]!.function as Record<string, unknown>).parameters as Record<string, unknown>;
+  assert.deepEqual((kimiSchema.properties as Record<string, unknown>).value, { type: "string", allOf: [{ $ref: "#/defs/value" }] });
+  const openai = transformResponsesRequest({ request, upstreamEndpoint: "https://api.openai.com/v1" });
+  const openaiSchema = ((openai.body.tools as Array<Record<string, unknown>>)[0]!.function as Record<string, unknown>).parameters as Record<string, unknown>;
+  assert.deepEqual((openaiSchema.properties as Record<string, unknown>).value, { $ref: "#/defs/value", type: "string" });
+});

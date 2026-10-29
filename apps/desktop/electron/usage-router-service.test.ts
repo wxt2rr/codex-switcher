@@ -1533,6 +1533,137 @@ test("environment Gateway converts Responses requests and Chat SSE responses thr
   }
 });
 
+test("environment Gateway restores previous Responses tool calls before converting to Chat", async () => {
+  const upstreamBodies: Array<Record<string, unknown>> = [];
+  const upstream = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    upstreamBodies.push(JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>);
+    response.setHeader("content-type", "application/json");
+    if (upstreamBodies.length === 1) {
+      response.end(JSON.stringify({ id: "chat-tool-turn", choices: [{
+        message: { role: "assistant", content: null, tool_calls: [{ id: "call-weather", type: "function", function: { name: "weather", arguments: "{\"city\":\"Shanghai\"}" } }] },
+        finish_reason: "tool_calls",
+      }] }));
+      return;
+    }
+    response.end(JSON.stringify({ id: "chat-final-turn", choices: [{ message: { role: "assistant", content: "It is sunny." }, finish_reason: "stop" }] }));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const address = upstream.address(); assert(address && typeof address !== "string");
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-tool-history-gateway-"));
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+  const route = {
+    routeId: "route-tool-history", envName: "work", accountName: "chat", providerId: "chat-provider",
+    exposedModelId: "tool-history-model", upstreamModel: "chat-tool-model", upstreamBaseUrl: `http://127.0.0.1:${address.port}/v1`,
+    originalBaseUrl: "default", protocol: "chat_completions" as const, reasoningProfile: "auto" as const,
+    capabilities: { tools: true },
+    enabled: true, createdAt: 1, updatedAt: 1,
+  };
+  const gateway = {
+    gatewayId: "gateway-tool-history", envName: "work", routeIds: [route.routeId], defaultRouteId: route.routeId,
+    routeGroups: { "tool-history-model": { id: "tool-history-model", exposedModelId: "tool-history-model", routeIds: [route.routeId], strategy: "order" as const, sessionPolicy: "off" as const, fallbackEnabled: true, capabilities: { tools: true } } },
+    enabled: true, createdAt: 1, updatedAt: 1,
+  };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  try {
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(route) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}/secret`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ upstreamApiKey: "sk-chat", localRouteToken: "local-tool-history" }) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway) })).status, 204);
+
+    const first = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
+      method: "POST", headers: { authorization: "Bearer local-tool-history", "content-type": "application/json" },
+      body: JSON.stringify({ model: "tool-history-model", input: "What is the weather?", tools: [{ type: "function", name: "weather", parameters: { type: "object" } }] }),
+    });
+    assert.equal(first.status, 200, await first.clone().text());
+    const firstBody = await first.json() as { id: string; output: Array<{ type: string; call_id?: string }> };
+    assert.equal(firstBody.output.some((item) => item.type === "function_call" && item.call_id === "call-weather"), true);
+
+    const second = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
+      method: "POST", headers: { authorization: "Bearer local-tool-history", "content-type": "application/json" },
+      body: JSON.stringify({ model: "tool-history-model", previous_response_id: firstBody.id, input: [{ type: "function_call_output", call_id: "call-weather", output: "Shanghai: sunny" }] }),
+    });
+    assert.equal(second.status, 200);
+    assert.match(JSON.stringify(await second.json()), /sunny/);
+    const secondMessages = upstreamBodies[1]?.messages as Array<Record<string, unknown>>;
+    assert.equal(secondMessages[0]?.role, "assistant");
+    assert.equal((secondMessages[0]?.tool_calls as Array<Record<string, unknown>>)[0]?.id, "call-weather");
+    assert.equal(secondMessages[1]?.role, "tool");
+    assert.equal(secondMessages[1]?.tool_call_id, "call-weather");
+  } finally {
+    await service.close();
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
+});
+
+test("environment Gateway persists converted streaming tool calls before the next turn", async () => {
+  const upstreamBodies: Array<Record<string, unknown>> = [];
+  const upstream = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    upstreamBodies.push(JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>);
+    if (upstreamBodies.length === 1) {
+      response.setHeader("content-type", "text/event-stream");
+      const firstToolChunk = { id: "chat-stream-tool", choices: [{ delta: { tool_calls: [{ index: 0, id: "call-stream", type: "function", function: { name: "lookup", arguments: "{\"q\":" } }] }, finish_reason: null }] };
+      const secondToolChunk = { id: "chat-stream-tool", choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "\"weather\"}" } }] }, finish_reason: null }] };
+      response.end([
+        `data: ${JSON.stringify(firstToolChunk)}\n\n`,
+        `data: ${JSON.stringify(secondToolChunk)}\n\n`,
+        `data: ${JSON.stringify({ id: "chat-stream-tool", choices: [{ delta: {}, finish_reason: "tool_calls" }] })}\n\n`,
+        "data: [DONE]\n\n",
+      ].join(""));
+      return;
+    }
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ id: "chat-stream-final", choices: [{ message: { role: "assistant", content: "done" }, finish_reason: "stop" }] }));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const address = upstream.address(); assert(address && typeof address !== "string");
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-stream-tool-history-"));
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+  const route = {
+    routeId: "route-stream-tool-history", envName: "work", accountName: "chat", providerId: "chat-provider",
+    exposedModelId: "stream-tool-history-model", upstreamModel: "chat-stream-tool-model", upstreamBaseUrl: `http://127.0.0.1:${address.port}/v1`,
+    originalBaseUrl: "default", protocol: "chat_completions" as const, reasoningProfile: "auto" as const,
+    capabilities: { tools: true, streaming: true }, enabled: true, createdAt: 1, updatedAt: 1,
+  };
+  const gateway = {
+    gatewayId: "gateway-stream-tool-history", envName: "work", routeIds: [route.routeId], defaultRouteId: route.routeId,
+    routeGroups: { "stream-tool-history-model": { id: "stream-tool-history-model", exposedModelId: "stream-tool-history-model", routeIds: [route.routeId], strategy: "order" as const, sessionPolicy: "off" as const, fallbackEnabled: true, capabilities: { tools: true, streaming: true } } },
+    enabled: true, createdAt: 1, updatedAt: 1,
+  };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  try {
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(route) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}/secret`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ upstreamApiKey: "sk-chat", localRouteToken: "local-stream-tool-history" }) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway) })).status, 204);
+
+    const first = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
+      method: "POST", headers: { authorization: "Bearer local-stream-tool-history", "content-type": "application/json" },
+      body: JSON.stringify({ model: "stream-tool-history-model", stream: true, input: "lookup weather", tools: [{ type: "function", name: "lookup", parameters: { type: "object" } }] }),
+    });
+    const streamText = await first.text();
+    assert.equal(first.status, 200, streamText);
+    const completedLine = streamText.split(/\r?\n/).find((line) => line.startsWith("data: ") && line.includes('"type":"response.completed"'));
+    assert.ok(completedLine);
+    const firstResponse = JSON.parse(completedLine!.slice("data: ".length)) as { response: { id: string } };
+
+    const second = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
+      method: "POST", headers: { authorization: "Bearer local-stream-tool-history", "content-type": "application/json" },
+      body: JSON.stringify({ model: "stream-tool-history-model", previous_response_id: firstResponse.response.id, input: [{ type: "function_call_output", call_id: "call-stream", output: "sunny" }] }),
+    });
+    assert.equal(second.status, 200);
+    assert.match(JSON.stringify(await second.json()), /done/);
+    const messages = upstreamBodies[1]?.messages as Array<Record<string, unknown>>;
+    assert.equal(messages[0]?.role, "assistant");
+    assert.equal(messages[1]?.role, "tool");
+    assert.equal(messages[1]?.tool_call_id, "call-stream");
+  } finally {
+    await service.close();
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
+});
+
 test("environment Gateway usage strategy uses live per-route request metrics", async () => {
   const upstreamAccounts: string[] = [];
   const upstream = createServer(async (request, response) => {

@@ -28,6 +28,7 @@ import {
 
 function providerLabel(providerId: string, providerCatalog: ProviderCatalogItem[], zh: boolean, displayName?: string): string {
   if (displayName?.trim()) return displayName.trim();
+  if (providerId === "codex-bundled") return zh ? "Codex 内置" : "Codex built-in";
   if (providerId === "custom") return zh ? "手动配置" : "Manual";
   return providerCatalog.find((provider) => provider.id === providerId)?.displayName ?? providerId;
 }
@@ -290,6 +291,7 @@ export function ModelsPage({
         searchPlaceholder={zh ? "搜索模型、服务商或标识" : "Search models, providers, or ids"}
         onSearchChange={setQuery}
         showFilter={false}
+        layout="stacked"
         actions={(
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Select
@@ -361,7 +363,7 @@ export function ModelsPage({
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
                 <SoftBadge label={providerLabel(providerId, providerCatalog, zh, String(model.entry.provider_display_name ?? ""))} className="h-5 max-w-[150px] truncate rounded-md px-2 text-[10px]" />
-                <SoftBadge label={model.entry.model_source === "discovered" ? (zh ? "服务商发现" : "Discovered") : (zh ? "手动配置" : "Manual")} className="h-5 rounded-md px-2 text-[10px]" />
+                <SoftBadge label={model.entry.model_source === "bundled" ? (zh ? "Codex 内置" : "Codex built-in") : model.entry.model_source === "discovered" ? (zh ? "服务商发现" : "Discovered") : (zh ? "手动配置" : "Manual")} className="h-5 rounded-md px-2 text-[10px]" />
                 {discoveryInfo ? <SoftBadge tone={statusTone} label={discoveryStatusLabel(discoveryInfo.status, zh)} className="h-5 rounded-md px-2 text-[10px]" /> : null}
                 {modelCapabilityObservations.slice(0, 3).map((entry) => <SoftBadge key={`${entry.key}/${entry.capability}`} tone={entry.status === "supported" ? "success" : entry.status === "unsupported" ? "warn" : "neutral"} label={`${capabilityLabel(entry.capability, zh)} · ${capabilityStatusLabel(entry.status, zh)}`} className="h-5 max-w-[150px] truncate rounded-md px-2 text-[10px]" />)}
               </div>
@@ -382,8 +384,14 @@ export function ModelsPage({
                         : {}),
                     } : undefined}
                   />
-                  <Button size="sm" variant="ghost" onClick={() => openEditor(model)}><Pencil className="size-3.5" />{zh ? "编辑" : "Edit"}</Button>
-                  <IconActionButton icon={<Trash2 className="size-3.5" />} label={zh ? "删除" : "Delete"} onClick={() => openDelete(model)} tone="danger" />
+                  {model.entry.model_source === "bundled" ? (
+                    <span className="text-[11px] text-slate-400">{zh ? "随 Codex App 自动同步" : "Synced from Codex App"}</span>
+                  ) : (
+                    <>
+                      <Button size="sm" variant="ghost" onClick={() => openEditor(model)}><Pencil className="size-3.5" />{zh ? "编辑" : "Edit"}</Button>
+                      <IconActionButton icon={<Trash2 className="size-3.5" />} label={zh ? "删除" : "Delete"} onClick={() => openDelete(model)} tone="danger" />
+                    </>
+                  )}
                 </div>
               </div>
             </ListCard>

@@ -77,7 +77,7 @@ export interface ProviderModel {
     capabilities: {
         reasoning: boolean;
         tools: boolean;
-        vision: boolean;
+        vision?: boolean;
         streaming: boolean;
     };
     capabilityProfile?: Record<string, CapabilityObservation>;

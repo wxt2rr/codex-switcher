@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -165,9 +165,115 @@ test("account model discovery persists a sanitized snapshot and creates a catalo
   assert.equal(snapshot.accountModelDiscoveries?.["work/kimi"]?.models[0]?.upstreamModelId, "kimi-k3");
   assert.equal(snapshot.models[0]?.entry.slug, "kimi:kimi-k3");
   assert.equal(snapshot.models[0]?.entry.provider_model_key, "kimi:kimi-k3");
+  assert.deepEqual(snapshot.models[0]?.entry.input_modalities, ["text"]);
   const raw = await readFile(path, "utf8");
   assert.equal(raw.includes("sk-should-not-be-written"), false);
   assert.equal(raw.includes("OPENAI_API_KEY"), false);
+});
+
+test("account discovery defaults omitted vision metadata to image input", async () => {
+  const root = await mkdtemp(join(tmpdir(), "model-discovery-vision-default-"));
+  const store = createModelCatalogStore(join(root, "models.json"));
+  await store.saveAccountModelDiscovery({
+    accountKey: "test/provider",
+    providerId: "provider",
+    state: "ready",
+    models: [{
+      providerModelKey: "provider:model",
+      providerId: "provider",
+      upstreamModelId: "model",
+      displayName: "Model",
+      protocols: ["responses"],
+      capabilities: { reasoning: false, tools: true, streaming: true },
+      source: "discovery",
+    }],
+  });
+
+  const snapshot = await store.load();
+  assert.equal(snapshot.accountModelDiscoveries?.["test/provider"]?.models[0]?.capabilities.vision, true);
+  assert.deepEqual(snapshot.models[0]?.entry.input_modalities, ["text", "image"]);
+});
+
+test("account discovery keeps ordinary tools separate from parallel tool calls", async () => {
+  const root = await mkdtemp(join(tmpdir(), "model-discovery-parallel-capability-"));
+  const store = createModelCatalogStore(join(root, "models.json"));
+  await store.saveAccountModelDiscovery({
+    accountKey: "test/aliyun",
+    providerId: "qwen",
+    state: "ready",
+    models: [{
+      providerModelKey: "qwen:qwen-plus",
+      providerId: "qwen",
+      upstreamModelId: "qwen-plus",
+      displayName: "Qwen Plus",
+      protocols: ["chat_completions"],
+      capabilities: { reasoning: true, tools: true, vision: false, streaming: true },
+      source: "discovery",
+    }],
+  });
+  const snapshot = await store.load();
+  const entry = snapshot.models[0]?.entry;
+  assert.equal(entry?.tools, undefined);
+  assert.equal(entry?.supports_parallel_tool_calls, false);
+
+  await store.saveAccountModelDiscovery({
+    accountKey: "test/aliyun",
+    providerId: "qwen",
+    state: "ready",
+    models: [{
+      providerModelKey: "qwen:qwen-plus",
+      providerId: "qwen",
+      upstreamModelId: "qwen-plus",
+      displayName: "Qwen Plus",
+      protocols: ["chat_completions"],
+      capabilities: { reasoning: true, tools: true, parallelToolCalls: true, vision: false, streaming: true },
+      source: "discovery",
+    }],
+  });
+  const optedIn = await store.load();
+  assert.equal(optedIn.models[0]?.entry.supports_parallel_tool_calls, true);
+});
+
+test("repairs legacy discovered catalogs that inferred parallel support from tools", async () => {
+  const root = await mkdtemp(join(tmpdir(), "model-discovery-parallel-migration-"));
+  const path = join(root, "models.json");
+  await writeFile(path, JSON.stringify({
+    version: 1,
+    models: [{
+      id: "legacy-qwen",
+      entry: {
+        slug: "qwen:qwen-plus",
+        display_name: "Qwen Plus",
+        provider_id: "qwen",
+        provider_model_key: "qwen:qwen-plus",
+        model_source: "discovered",
+        supports_parallel_tool_calls: true,
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }],
+    accountBindings: {},
+    accountModelDiscoveries: {
+      "test/aliyun": {
+        providerId: "qwen",
+        state: "ready",
+        models: [{
+          providerModelKey: "qwen:qwen-plus",
+          providerId: "qwen",
+          upstreamModelId: "qwen-plus",
+          displayName: "Qwen Plus",
+          protocols: ["chat_completions"],
+          capabilities: { reasoning: true, tools: true, vision: false, streaming: true },
+          source: "discovery",
+          status: "available",
+          firstSeenAt: "2026-01-01T00:00:00.000Z",
+          lastSeenAt: "2026-01-01T00:00:00.000Z",
+        }],
+      },
+    },
+  }), "utf8");
+  const store = createModelCatalogStore(path);
+  assert.equal((await store.load()).models[0]?.entry.supports_parallel_tool_calls, false);
 });
 
 test("account discovery reuses a matching provider preset instead of duplicating it", async () => {
@@ -426,6 +532,84 @@ test("manual provider rebinding remains disabled while a discovery result is ava
     },
   };
   assert.equal(allowsManualProviderRebinding(snapshot, "default/ckt-aicode"), false);
+});
+
+test("bundled model selection can be rebound to an active provider", async () => {
+  const root = await mkdtemp(join(tmpdir(), "model-binding-bundled-provider-"));
+  const store = createModelCatalogStore(join(root, "models.json"));
+  const source = await store.saveModel({ entry: {
+    slug: "gpt-6.1-sol",
+    display_name: "GPT-6.1 Sol",
+    provider_id: "codex-bundled",
+    provider_display_name: "Codex 内置",
+    model_source: "bundled",
+  } });
+  await store.saveAccountModelDiscovery({
+    accountKey: "default/ckt-aicode",
+    providerId: "custom-openai:aicode.ckt.cn",
+    state: "ready",
+    models: [{
+      providerModelKey: "custom-openai:aicode.ckt.cn:gpt-5.5",
+      providerId: "custom-openai:aicode.ckt.cn",
+      upstreamModelId: "gpt-5.5",
+      displayName: "gpt-5.5",
+      protocols: ["responses"],
+      capabilities: { reasoning: true, tools: true, vision: true, streaming: true },
+      source: "discovery",
+      status: "available",
+    }],
+  });
+
+  const projected = projectAccountBindingsFromCatalog(await store.load(), {
+    accountKey: "default/ckt-aicode",
+    modelIds: [source.id],
+    providerId: "custom-openai:aicode.ckt.cn",
+    providerDisplayName: "ckt-aicode",
+    protocol: "responses",
+  });
+  const targetId = projected.accountBindings["default/ckt-aicode"]?.[0];
+  const target = projected.models.find((model) => model.id === targetId);
+  assert.ok(target);
+  assert.equal(target.entry.provider_model_key, "custom-openai:aicode.ckt.cn:gpt-6.1-sol");
+  assert.equal(target.entry.model_source, "manual");
+});
+
+test("bundled selection reuses a provider discovery when the upstream is advertised", async () => {
+  const root = await mkdtemp(join(tmpdir(), "model-binding-bundled-discovered-"));
+  const store = createModelCatalogStore(join(root, "models.json"));
+  const source = await store.saveModel({ entry: {
+    slug: "gpt-6.1-sol",
+    display_name: "GPT-6.1 Sol",
+    provider_id: "codex-bundled",
+    model_source: "bundled",
+  } });
+  await store.saveAccountModelDiscovery({
+    accountKey: "default/ckt-aicode",
+    providerId: "custom-openai:aicode.ckt.cn",
+    state: "ready",
+    models: [{
+      providerModelKey: "custom-openai:aicode.ckt.cn:gpt-6.1-sol",
+      providerId: "custom-openai:aicode.ckt.cn",
+      upstreamModelId: "gpt-6.1-sol",
+      displayName: "gpt-6.1-sol",
+      protocols: ["responses"],
+      capabilities: { reasoning: true, tools: true, vision: true, streaming: true },
+      source: "discovery",
+      status: "available",
+    }],
+  });
+
+  const projected = projectAccountBindingsFromCatalog(await store.load(), {
+    accountKey: "default/ckt-aicode",
+    modelIds: [source.id],
+    providerId: "custom-openai:aicode.ckt.cn",
+    protocol: "responses",
+  });
+  const targetId = projected.accountBindings["default/ckt-aicode"]?.[0];
+  const target = projected.models.find((model) => model.id === targetId);
+  assert.equal(target?.entry.provider_model_key, "custom-openai:aicode.ckt.cn:gpt-6.1-sol");
+  assert.equal(target?.entry.model_source, "discovered");
+  assert.equal(projected.accountModelDiscoveries?.["default/ckt-aicode"]?.models[0]?.source, "discovery");
 });
 
 test("catalog provider identity ignores the local Gateway ingress URL", () => {

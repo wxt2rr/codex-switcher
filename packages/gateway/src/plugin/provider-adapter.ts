@@ -182,7 +182,12 @@ function normalizeModels(value: unknown, providerId: string): ProviderModel[] {
       displayName: typeof item.displayName === "string" && item.displayName.trim() ? item.displayName : item.id,
       providerId,
       protocols: protocols.length ? protocols : ["responses"],
-      capabilities: { reasoning: capabilities.reasoning === true, tools: capabilities.tools !== false, vision: capabilities.vision === true, streaming: capabilities.streaming !== false },
+      capabilities: {
+        reasoning: capabilities.reasoning === true,
+        tools: capabilities.tools !== false,
+        ...(capabilities.vision === false ? { vision: false } : { vision: true }),
+        streaming: capabilities.streaming !== false,
+      },
       ...(Object.keys(capabilityProfile).length ? { capabilityProfile: capabilityProfile as ProviderModel["capabilityProfile"] } : {}),
       ...(typeof item.contextWindow === "number" ? { contextWindow: item.contextWindow } : {}),
       source: item.source === "preset" || item.source === "manual" ? item.source : "discovery",

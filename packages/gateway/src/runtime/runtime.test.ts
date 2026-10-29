@@ -57,6 +57,72 @@ test("gateway runtime dispatches across protocols and records usage", async () =
   assert.equal(runtime.ledger.traces("trace-1").length, 6);
 });
 
+test("gateway runtime restores a previous Responses tool turn for a Chat route", async () => {
+  const runtime = new GatewayRuntime({
+    candidates: [{ id: "chat-tool-route", providerId: "openai", credentialId: "key", modelId: "chat-tool", protocol: "chat_completions", capabilities: ["tools"], priority: 0, weight: 1, healthy: true }],
+    groups: {},
+  });
+  const first = await runtime.dispatch({
+    environmentId: "env", agentId: "codex", protocol: "responses", model: "chat-tool", sessionId: "session-tools",
+    body: { model: "chat-tool", input: "lookup", tools: [{ type: "function", function: { name: "lookup", parameters: { type: "object" } } }] },
+  });
+  const firstCompletion = await runtime.complete({
+    dispatch: first,
+    upstreamBody: { id: "chat-tool-turn", choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "call-1", type: "function", function: { name: "lookup", arguments: "{}" } }] }, finish_reason: "tool_calls" }] },
+  });
+  const firstResponse = firstCompletion.responseBody as { id: string; output: Array<{ type: string; call_id: string }> };
+  assert.equal(firstResponse.output[0]?.call_id, "call-1");
+
+  const second = await runtime.dispatch({
+    environmentId: "env", agentId: "codex", protocol: "responses", model: "chat-tool", sessionId: "session-tools",
+    body: { model: "chat-tool", previous_response_id: firstResponse.id, input: [{ type: "function_call_output", call_id: "call-1", output: "done" }] },
+  });
+  assert.deepEqual(second.upstreamBody.messages, [
+    { role: "assistant", content: null, tool_calls: [{ id: "call-1", type: "function", function: { name: "lookup", arguments: "{}" } }] },
+    { role: "tool", name: "lookup", content: "done", tool_call_id: "call-1" },
+  ]);
+});
+
+test("gateway runtime keeps completed tool calls when a stream is cancelled", async () => {
+  const runtime = new GatewayRuntime({
+    candidates: [{ id: "chat-cancel-route", providerId: "openai", credentialId: "key", modelId: "chat-cancel", protocol: "chat_completions", capabilities: ["tools", "streaming"], priority: 0, weight: 1, healthy: true }],
+    groups: {},
+  });
+  const dispatch = await runtime.dispatch({
+    environmentId: "env", agentId: "codex", protocol: "responses", model: "chat-cancel", sessionId: "session-cancel",
+    body: { model: "chat-cancel", stream: true, input: "lookup", tools: [{ type: "function", function: { name: "lookup", parameters: { type: "object" } } }] },
+  });
+  const stream = runtime.createResponseStream(dispatch);
+  await runtime.convertStreamChunk(stream, { id: "chat-cancel-response", choices: [{ delta: { tool_calls: [{ id: "call-cancel", index: 0, function: { name: "lookup", arguments: "{}" } }] }, finish_reason: null }] });
+  await runtime.finalizeStream(stream, "cancelled");
+  const next = await runtime.dispatch({
+    environmentId: "env", agentId: "codex", protocol: "responses", model: "chat-cancel", sessionId: "session-cancel",
+    body: { model: "chat-cancel", previous_response_id: stream.id, input: [{ type: "function_call_output", call_id: "call-cancel", output: "done" }] },
+  });
+  assert.equal((next.upstreamBody.messages as Array<Record<string, unknown>>)[0]?.role, "assistant");
+  assert.equal((next.upstreamBody.messages as Array<Record<string, unknown>>)[1]?.tool_call_id, "call-cancel");
+});
+
+test("gateway runtime keeps tool calls when stream conversion fails", async () => {
+  const runtime = new GatewayRuntime({
+    candidates: [{ id: "chat-fail-route", providerId: "openai", credentialId: "key", modelId: "chat-fail", protocol: "chat_completions", capabilities: ["tools", "streaming"], priority: 0, weight: 1, healthy: true }],
+    groups: {},
+  });
+  const dispatch = await runtime.dispatch({
+    environmentId: "env", agentId: "codex", protocol: "responses", model: "chat-fail", sessionId: "session-fail",
+    body: { model: "chat-fail", stream: true, input: "lookup", tools: [{ type: "function", function: { name: "lookup", parameters: { type: "object" } } }] },
+  });
+  const stream = runtime.createResponseStream(dispatch);
+  await runtime.convertStreamChunk(stream, { id: "chat-fail-response", choices: [{ delta: { tool_calls: [{ id: "call-fail", index: 0, function: { name: "lookup", arguments: "{}" } }] }, finish_reason: null }] });
+  await runtime.failStream(stream, "stream_error", "upstream disconnected");
+  const next = await runtime.dispatch({
+    environmentId: "env", agentId: "codex", protocol: "responses", model: "chat-fail", sessionId: "session-fail",
+    body: { model: "chat-fail", previous_response_id: stream.id, input: [{ type: "function_call_output", call_id: "call-fail", output: "done" }] },
+  });
+  assert.equal((next.upstreamBody.messages as Array<Record<string, unknown>>)[0]?.role, "assistant");
+  assert.equal((next.upstreamBody.messages as Array<Record<string, unknown>>)[1]?.tool_call_id, "call-fail");
+});
+
 test("gateway runtime isolates simultaneous requests from multiple agents", async () => {
   const runtime = new GatewayRuntime({
     candidates: [{ id: "shared-route", providerId: "openai", credentialId: "shared-key", modelId: "gpt-5", protocol: "chat_completions", capabilities: ["streaming"], priority: 0, weight: 1, healthy: true }],

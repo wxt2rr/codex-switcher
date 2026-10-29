@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
@@ -39,5 +39,15 @@ export class FileHistoryPersistence implements HistoryPersistence {
 
   async delete(routeId: string): Promise<void> {
     await rm(this.path(routeId), { force: true });
+    // Conversation-scoped snapshots share the route prefix. Remove them when
+    // a route/account is deleted so stale call ids cannot be reused later.
+    try {
+      const prefix = `${safeRouteId(routeId)}__conversation_`;
+      const entries = await readdir(this.directory);
+      await Promise.all(entries.filter((entry) => entry.startsWith(prefix) && entry.endsWith(".json"))
+        .map((entry) => rm(join(this.directory, entry), { force: true })));
+    } catch {
+      // Missing history directory is equivalent to an already-clean route.
+    }
   }
 }

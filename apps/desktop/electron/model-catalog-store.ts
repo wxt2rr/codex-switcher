@@ -36,7 +36,14 @@ export interface AccountDiscoveredModel {
   capabilities: {
     reasoning: boolean;
     tools: boolean;
-    vision: boolean;
+    /**
+     * Whether the upstream can execute more than one function call in the
+     * same assistant turn. This is intentionally separate from `tools`:
+     * ordinary tool support does not imply parallel tool support.
+     */
+    parallelToolCalls?: boolean;
+    /** Undefined means the provider did not report image support. Discovery defaults it to true. */
+    vision?: boolean;
     streaming: boolean;
   };
   contextWindow?: number;
@@ -413,6 +420,11 @@ export function projectAccountBindingsFromCatalog(
         : `${input.providerId}:${upstreamModelId}`;
       const now = new Date().toISOString();
       const previous = discovery.models.find((model) => model.providerModelKey === providerModelKey);
+      // A bundled candidate may already match a model returned by the current
+      // provider. Reusing that discovered record keeps the provider's
+      // authoritative capabilities and source status instead of downgrading it
+      // to a manual fallback merely because the user picked the bundled entry.
+      if (previous?.status === "available") continue;
       const supportedProtocols = Array.isArray(target.entry.supported_protocols)
         ? target.entry.supported_protocols.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
         : [input.protocol];
@@ -426,7 +438,8 @@ export function projectAccountBindingsFromCatalog(
         capabilities: {
           reasoning: Array.isArray(target.entry.supported_reasoning_levels)
             || target.entry.supports_reasoning_summaries === true,
-          tools: target.entry.supports_parallel_tool_calls === true,
+          tools: modelSupportsToolsForCatalogEntry(target.entry),
+          parallelToolCalls: target.entry.supports_parallel_tool_calls === true,
           vision: Array.isArray(target.entry.input_modalities)
             && target.entry.input_modalities.includes("image"),
           streaming: target.entry.streaming !== false,
@@ -503,7 +516,10 @@ export function normalizeCustomModelInput(value: Record<string, unknown>): Model
     default_reasoning_summary: "none",
     support_verbosity: false,
     truncation_policy: { mode: "bytes", limit: 10000 },
-    supports_parallel_tool_calls: true,
+    // Parallel calls are a stronger capability than ordinary function tools.
+    // Keep them opt-in: many OpenAI-compatible providers advertise tools but
+    // do not preserve multiple streamed calls (DashScope is one example).
+    supports_parallel_tool_calls: false,
     supports_image_detail_original: false,
     context_window: 128000,
     max_context_window: 128000,
@@ -600,8 +616,11 @@ function upsertDiscoveredCatalogModel(
     protocol: model.protocols.length === 1 ? model.protocols[0] : undefined,
     supported_protocols: model.protocols,
     supports_reasoning_summaries: model.capabilities.reasoning,
-    supports_parallel_tool_calls: model.capabilities.tools,
-    input_modalities: model.capabilities.vision ? ["text", "image"] : ["text"],
+    // The discovery endpoint currently reports ordinary function support, not
+    // parallel-call support. Do not promote one into the other. Providers can
+    // opt in explicitly through the optional capability field.
+    supports_parallel_tool_calls: model.capabilities.parallelToolCalls === true,
+    input_modalities: model.capabilities.vision !== false ? ["text", "image"] : ["text"],
     ...(model.contextWindow ? { context_window: model.contextWindow, max_context_window: model.contextWindow } : {}),
   });
   if (existing) {
@@ -722,9 +741,17 @@ function normalizeModelCapabilities(value: AccountDiscoveredModel["capabilities"
   return {
     reasoning: value?.reasoning === true,
     tools: value?.tools === true,
-    vision: value?.vision === true,
+    ...(value?.parallelToolCalls === true ? { parallelToolCalls: true } : {}),
+    // Most model endpoints omit vision metadata even though the model accepts
+    // multimodal input. Treat an omitted value as supported; an explicit false
+    // remains authoritative for known text-only models.
+    vision: value?.vision !== false,
     streaming: value?.streaming !== false,
   };
+}
+
+function modelSupportsToolsForCatalogEntry(entry: ModelCatalogEntry): boolean {
+  return entry.tools !== false && entry.supports_tools !== false && entry.tool_mode !== "disabled";
 }
 
 function dedupeDiscoveredModels(models: AccountDiscoveredModel[]): AccountDiscoveredModel[] {
@@ -866,7 +893,13 @@ async function readSnapshot(path: string): Promise<ModelCatalogSnapshot> {
   if (!isRecord(parsed) || (parsed.version !== undefined && parsed.version !== 1) || !Array.isArray(parsed.models) || !isRecord(parsed.accountBindings)) {
     throw new Error("Custom model catalog file is invalid");
   }
-  const models = parsed.models.map(validateModelRecord);
+  const accountModelDiscoveries = parsed.accountModelDiscoveries === undefined
+    ? undefined
+    : normalizeAccountModelDiscoveries(parsed.accountModelDiscoveries);
+  const models = reconcileDiscoveredParallelCapabilities(
+    parsed.models.map(validateModelRecord),
+    accountModelDiscoveries,
+  );
   const ids = new Set(models.map((model) => model.id));
   const accountBindings = Object.fromEntries(
     Object.entries(parsed.accountBindings).map(([key, value]) => {
@@ -879,9 +912,6 @@ async function readSnapshot(path: string): Promise<ModelCatalogSnapshot> {
   const accountBindingOptions = parsed.accountBindingOptions === undefined
     ? undefined
     : normalizeAccountBindingOptions(parsed.accountBindingOptions, ids);
-  const accountModelDiscoveries = parsed.accountModelDiscoveries === undefined
-    ? undefined
-    : normalizeAccountModelDiscoveries(parsed.accountModelDiscoveries);
   return {
     version: 1,
     models,
@@ -889,6 +919,34 @@ async function readSnapshot(path: string): Promise<ModelCatalogSnapshot> {
     ...(accountBindingOptions ? { accountBindingOptions } : {}),
     ...(accountModelDiscoveries ? { accountModelDiscoveries } : {}),
   };
+}
+
+/**
+ * Older catalogs incorrectly derived `supports_parallel_tool_calls` from the
+ * ordinary `tools` flag. Repair those generated entries at load time using
+ * the account discovery snapshots, where an explicit parallel capability is
+ * now represented independently. User-authored models without a discovery
+ * record are left untouched.
+ */
+function reconcileDiscoveredParallelCapabilities(
+  models: CustomModelRecord[],
+  discoveries: Record<string, AccountModelDiscoverySnapshot> | undefined,
+): CustomModelRecord[] {
+  const parallelByProviderKey = new Map<string, boolean>();
+  for (const discovery of Object.values(discoveries ?? {})) {
+    for (const model of discovery.models) {
+      const key = model.providerModelKey.trim();
+      if (!key) continue;
+      parallelByProviderKey.set(key, parallelByProviderKey.get(key) === true || model.capabilities.parallelToolCalls === true);
+    }
+  }
+  return models.map((model) => {
+    const entry = model.entry;
+    if (entry.model_source !== "discovered" || typeof entry.provider_model_key !== "string") return model;
+    const key = entry.provider_model_key.trim();
+    if (!key || parallelByProviderKey.get(key) === true || entry.supports_parallel_tool_calls !== true) return model;
+    return { ...model, entry: { ...entry, supports_parallel_tool_calls: false } };
+  });
 }
 
 function validateModelRecord(value: unknown): CustomModelRecord {
@@ -997,10 +1055,12 @@ function normalizeAccountModelDiscoveries(value: unknown): Record<string, Accoun
           ? {
               reasoning: rawModel.capabilities.reasoning === true,
               tools: rawModel.capabilities.tools === true,
-              vision: rawModel.capabilities.vision === true,
+              parallelToolCalls: rawModel.capabilities.parallelToolCalls === true
+                || rawModel.capabilities.parallel_tool_calls === true,
+              vision: rawModel.capabilities.vision !== false,
               streaming: rawModel.capabilities.streaming !== false,
             }
-          : { reasoning: false, tools: false, vision: false, streaming: true }),
+          : { reasoning: false, tools: false, streaming: true }),
         ...(typeof rawModel.contextWindow === "number" && Number.isFinite(rawModel.contextWindow) && rawModel.contextWindow > 0
           ? { contextWindow: Math.floor(rawModel.contextWindow) }
           : {}),

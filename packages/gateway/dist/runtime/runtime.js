@@ -4,6 +4,7 @@ import { convertGatewayRequest } from "../conversion/request-converter.js";
 import { convertGatewayResponse } from "../conversion/response-converter.js";
 import { convertStreamChunk, createResponseStreamState, failResponseStream, finalizeResponseStream } from "../conversion/stream-state.js";
 import { decodeUsage } from "../conversion/usage.js";
+import { ToolExchangeHistory } from "../conversion/tool-exchange-history.js";
 import { createGatewayRequestContext } from "../request/request-ir.js";
 import { classifyRouteFailure, isRetryableRouteFailure, resolveRoute } from "../routing/engine.js";
 import { ProviderRegistry } from "../provider/registry.js";
@@ -41,13 +42,16 @@ export class GatewayRuntime {
     now;
     options;
     trace;
+    toolHistory;
     streamMiddlewareContexts = new WeakMap();
+    streamDispatches = new WeakMap();
     constructor(options) {
         this.options = { ...options, candidates: [...options.candidates] };
         this.providerRegistry = options.providerRegistry ?? new ProviderRegistry();
         this.ledger = options.ledger ?? new UsageLedger();
         this.now = options.now ?? Date.now;
         this.trace = new UsageTrace(this.ledger, this.now);
+        this.toolHistory = options.toolHistory ?? new ToolExchangeHistory();
     }
     async dispatch(input) {
         const startedAt = input.now ?? this.now();
@@ -63,7 +67,7 @@ export class GatewayRuntime {
         if (middlewareRequest?.reject) {
             throw new GatewayMiddlewareRejectedError(middlewareRequest.reject.message, middlewareRequest.reject.status, middlewareRequest.reject.code);
         }
-        const requestBody = middlewareRequest?.body ?? input.body;
+        const requestBody = this.toolHistory.enrich(input.sessionId, input.protocol, middlewareRequest?.body ?? input.body);
         const requestedModel = middlewareRequest?.model ?? input.model;
         const context = createGatewayRequestContext({
             requestId,
@@ -160,6 +164,7 @@ export class GatewayRuntime {
             originModelName: request.context.logicalModelId,
             upstreamModelName: route.route.upstreamModelId,
             providerDialect: route.route.providerId,
+            upstreamEndpoint: provider.endpoints.find((endpoint) => endpoint.protocol === route.route.protocol)?.baseUrl,
         });
         return {
             request,
@@ -182,6 +187,9 @@ export class GatewayRuntime {
             originModelName: input.dispatch.upstreamModel,
             upstreamModelName: input.dispatch.request.context.logicalModelId,
         }) : undefined;
+        if (input.upstreamBody && input.status !== "error" && input.status !== "cancelled") {
+            this.toolHistory.record(input.dispatch.request.context.sessionId, input.dispatch.upstreamProtocol, input.upstreamBody);
+        }
         let responseBody = responseConversion?.value;
         if (responseBody && this.options.middleware) {
             const middlewareResponse = await this.options.middleware.runResponse(responseBody, input.dispatch.middlewareContext ?? this.createMiddlewareContextFromDispatch(input.dispatch));
@@ -237,6 +245,7 @@ export class GatewayRuntime {
         }, options);
         if (this.options.middleware)
             this.streamMiddlewareContexts.set(state, dispatch.middlewareContext ?? this.createMiddlewareContextFromDispatch(dispatch));
+        this.streamDispatches.set(state, dispatch);
         return state;
     }
     convertStreamChunk(state, upstreamBody) {
@@ -255,11 +264,36 @@ export class GatewayRuntime {
             return { ...result, value: nextEvents };
         });
     }
-    finalizeStream(state, reason) {
-        return finalizeResponseStream(state, reason);
+    async finalizeStream(state, reason) {
+        const result = await finalizeResponseStream(state, reason);
+        this.recordStreamToolHistory(state);
+        return result;
     }
-    failStream(state, code, message) {
-        return failResponseStream(state, code, message);
+    async failStream(state, code, message) {
+        const result = await failResponseStream(state, code, message);
+        this.recordStreamToolHistory(state);
+        return result;
+    }
+    recordStreamToolHistory(state) {
+        const dispatch = this.streamDispatches.get(state);
+        if (!dispatch)
+            return;
+        const calls = new Map();
+        for (const event of state.events) {
+            if (event.type !== "tool_call_delta")
+                continue;
+            const current = calls.get(event.callId) ?? { id: event.callId, name: event.name ?? "tool", arguments: "" };
+            current.name ||= event.name ?? "tool";
+            current.arguments += event.argumentsDelta ?? "";
+            calls.set(event.callId, current);
+        }
+        // Preserve partial tool calls even when the upstream stream is interrupted.
+        // The next Responses turn can then be paired and repaired deterministically
+        // instead of being sent as an orphan result.
+        this.toolHistory.recordCalls(dispatch.request.context.sessionId, state.id, [...calls.values()].flatMap((call) => {
+            const argumentsText = safeToolArguments(call.arguments);
+            return argumentsText ? [{ ...call, arguments: argumentsText }] : [];
+        }));
     }
     createMiddlewareContext(input) {
         return {
@@ -305,5 +339,16 @@ function transportFailureDetails(error) {
         };
     }
     return { status: null, firstByteStarted: false };
+}
+function safeToolArguments(value) {
+    if (!value.trim())
+        return undefined;
+    try {
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? value : undefined;
+    }
+    catch {
+        return undefined;
+    }
 }
 //# sourceMappingURL=runtime.js.map

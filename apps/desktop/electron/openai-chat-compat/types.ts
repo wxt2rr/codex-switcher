@@ -26,6 +26,15 @@ export interface ChatMessage {
   reasoning_content?: string;
 }
 
+export interface ToolExchangeDiagnostics {
+  orphanToolResults: number;
+  duplicateToolResults: number;
+  syntheticToolResults: number;
+  mergedAssistantMessages: number;
+  invalidToolCalls: number;
+  actions: string[];
+}
+
 export interface ToolRegistryEntry {
   originalType: "function" | "custom" | "namespace" | "tool_search";
   originalName: string;
@@ -44,6 +53,7 @@ export interface ToolRegistry {
 export interface TransformResponsesRequestInput {
   request: Record<string, unknown>;
   upstreamModel?: string;
+  upstreamEndpoint?: string;
   reasoningProfile?: ReasoningProfile;
   requestOverrides?: Record<string, unknown>;
   longConversationStrategy?: LongConversationStrategy;
@@ -55,4 +65,5 @@ export interface TransformedChatRequest {
   tools: ToolRegistry;
   requestedModel: string;
   warning?: string;
+  diagnostics?: ToolExchangeDiagnostics;
 }

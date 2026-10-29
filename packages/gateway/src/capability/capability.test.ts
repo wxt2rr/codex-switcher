@@ -5,6 +5,7 @@ import {
   classifyCapabilityMismatch,
   capabilityKey,
   capabilityProfileFromModel,
+  knownCapabilityProfile,
   filterUnsupportedHostedTools,
   planCapability,
 } from "../index.js";
@@ -28,6 +29,15 @@ test("capability registry prefers credential observations and can be snapshotted
 test("capability mismatch classifier identifies hosted search shape failures", () => {
   const result = classifyCapabilityMismatch({ status: 400, message: "'function' is a required property, expected an object - tools.0", requestedCapabilities: ["tools.hosted.web_search"] });
   assert.equal(result?.capability, "tools.hosted.web_search");
+});
+
+test("Kimi profiles advertise strict tool pairing and schema normalization", () => {
+  const profile = knownCapabilityProfile({ providerId: "moonshot", endpoint: "https://api.kimi.com/coding", protocol: "chat_completions", modelId: "k3" });
+  assert.equal(profile["tools.strict_pairing"]?.status, "supported");
+  assert.equal(profile["tools.requires_name"]?.status, "supported");
+  assert.equal(profile["schema.ref_siblings"]?.status, "supported");
+  const mismatch = classifyCapabilityMismatch({ status: 400, message: "tool message tool_call_id is not found", requestedCapabilities: ["tools.strict_pairing"] });
+  assert.equal(mismatch?.capability, "tools.strict_pairing");
 });
 
 test("generic capability errors do not poison a multi-tool observation", () => {

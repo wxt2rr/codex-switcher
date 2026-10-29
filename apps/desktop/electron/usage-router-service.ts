@@ -48,7 +48,7 @@ import {
 } from "./account-pool-routing.js";
 import { createUsageStore, type UsageStore } from "./usage-store.js";
 import { RouteSecretStore } from "./openai-chat-compat/route-secret-store.js";
-import { ConversationHistoryStore } from "./openai-chat-compat/history-store.js";
+import { ConversationHistoryStore, resolveHistoryScope } from "./openai-chat-compat/history-store.js";
 import { FileHistoryPersistence } from "./openai-chat-compat/history-persistence.js";
 import { handleChatCompatibilityRequest } from "./openai-chat-compat/compatibility-handler.js";
 import { loadGatewayPluginRuntime } from "./core-runtime.js";
@@ -60,6 +60,7 @@ import {
   convertGatewayResponseStreamAtRuntime,
   initializeGatewayConversionRuntime,
   useLegacyProtocolConversion,
+  type GatewayResponseStreamHooks,
 } from "./gateway-conversion-runtime.js";
 
 export interface UsageRouterServiceOptions {
@@ -580,6 +581,23 @@ class UsageTap {
   private sseBuffer = "";
   private latest: ReturnType<typeof extractTokenUsage> = null;
   private firstChunkAt: number | null = null;
+  private streamError: string | null = null;
+
+  private observe(value: unknown): void {
+    this.latest = extractTokenUsage(value) ?? this.latest;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    const body = value as Record<string, unknown>;
+    const response = body.response && typeof body.response === "object" && !Array.isArray(body.response)
+      ? body.response as Record<string, unknown>
+      : undefined;
+    const error = (response?.error && typeof response.error === "object" && !Array.isArray(response.error)
+      ? response.error
+      : body.error && typeof body.error === "object" && !Array.isArray(body.error) ? body.error : undefined) as Record<string, unknown> | undefined;
+    if (body.type === "response.failed" || error) {
+      const message = typeof error?.message === "string" ? error.message : typeof body.message === "string" ? body.message : undefined;
+      if (message) this.streamError = sanitizeRouterErrorMessage(message);
+    }
+  }
 
   push(chunk: Uint8Array): void {
     if (chunk.byteLength > 0 && this.firstChunkAt === null) this.firstChunkAt = Date.now();
@@ -592,7 +610,7 @@ class UsageTap {
       if (!line.startsWith("data:")) continue;
       const data = line.slice(5).trim();
       if (!data || data === "[DONE]") continue;
-      try { this.latest = extractTokenUsage(JSON.parse(data)) ?? this.latest; } catch { /* partial SSE line */ }
+      try { this.observe(JSON.parse(data)); } catch { /* partial SSE line */ }
     }
   }
 
@@ -606,7 +624,7 @@ class UsageTap {
     this.sseBuffer += finalText;
     if (this.sseBuffer.startsWith("data:")) {
       const data = this.sseBuffer.slice(5).trim();
-      try { this.latest = extractTokenUsage(JSON.parse(data)) ?? this.latest; } catch { /* incomplete final event */ }
+      try { this.observe(JSON.parse(data)); } catch { /* incomplete final event */ }
     }
     try { this.latest = extractTokenUsage(JSON.parse(this.text)) ?? this.latest; } catch { /* SSE or non-JSON */ }
     return this.latest;
@@ -622,7 +640,7 @@ class UsageTap {
   }
 
   errorSummary(status: number): string | null {
-    return status >= 400 ? extractSafeErrorMessage(this.text, `Upstream returned HTTP ${status}`) : null;
+    return this.streamError ?? (status >= 400 ? extractSafeErrorMessage(this.text, `Upstream returned HTTP ${status}`) : null);
   }
 }
 
@@ -657,6 +675,80 @@ interface DesktopConvertedRequest extends DesktopConversionTrace {
   body: Buffer;
 }
 
+interface ResponseHistoryCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+}
+
+function jsonObject(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function safeToolArguments(value: unknown): string {
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? value : "{}";
+    } catch {
+      return "{}";
+    }
+  }
+  return value && typeof value === "object" && !Array.isArray(value) ? JSON.stringify(value) : "{}";
+}
+
+function responseToolCalls(body: Record<string, unknown>): ResponseHistoryCall[] {
+  const response = jsonObject(body.response) ?? body;
+  const output = Array.isArray(response.output) ? response.output : [];
+  return output.flatMap((raw) => {
+    const item = jsonObject(raw);
+    if (!item || item.type !== "function_call") return [];
+    const id = typeof item.call_id === "string" ? item.call_id : typeof item.id === "string" ? item.id : "";
+    const name = typeof item.name === "string" && item.name.trim() ? item.name : "unknown_tool";
+    return id ? [{ id, type: "function" as const, function: { name, arguments: safeToolArguments(item.arguments) } }] : [];
+  });
+}
+
+function streamToolCalls(state: import("../../../packages/gateway/dist/conversion/index.js").ResponseStreamState): ResponseHistoryCall[] {
+  const calls = new Map<string, ResponseHistoryCall>();
+  for (const event of state.events) {
+    if (event.type !== "tool_call_delta") continue;
+    const current = calls.get(event.callId) ?? {
+      id: event.callId,
+      type: "function" as const,
+      function: { name: event.name?.trim() || "unknown_tool", arguments: "" },
+    };
+    if (event.name?.trim()) current.function.name = event.name.trim();
+    current.function.arguments += event.argumentsDelta ?? "";
+    calls.set(event.callId, current);
+  }
+  return [...calls.values()].map((call) => ({ ...call, function: { ...call.function, arguments: safeToolArguments(call.function.arguments) } }));
+}
+
+async function recordResponseToolHistory(
+  history: ConversationHistoryStore | undefined,
+  scope: string | undefined,
+  body: Record<string, unknown> | undefined,
+): Promise<void> {
+  if (!history || !scope || !body) return;
+  const response = jsonObject(body.response) ?? body;
+  const responseId = typeof response.id === "string" ? response.id : typeof body.responseId === "string" ? body.responseId : undefined;
+  const calls = responseToolCalls(body);
+  if (!responseId || !calls.length) return;
+  await history.recordResponse(scope, { responseId, createdAt: Date.now(), calls });
+}
+
+async function enrichResponsesHistory(
+  history: ConversationHistoryStore | undefined,
+  scope: string | undefined,
+  source: RouteProtocol,
+  target: RouteProtocol,
+  body: Record<string, unknown> | undefined,
+): Promise<Record<string, unknown> | undefined> {
+  if (!history || !scope || source !== "responses" || target === "responses" || !body) return body;
+  return (await history.enrichRequest(scope, body)).request;
+}
+
 function capabilityProfileForRoute(
   route: Pick<RouteTarget, "routeId" | "providerId" | "upstreamBaseUrl" | "capabilityProfile" | "capabilities">,
   protocol: RouteProtocol,
@@ -676,6 +768,7 @@ function requestedCapabilityIds(body: Record<string, unknown> | undefined): Capa
   const result = new Set<CapabilityId>();
   if (body?.stream === true) result.add("output.streaming");
   if (body?.reasoning !== undefined || body?.thinking !== undefined) result.add("output.reasoning");
+  if (body?.parallel_tool_calls === true) result.add("tools.parallel");
   if (!Array.isArray(body?.tools)) return [...result];
   for (const raw of body.tools) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
@@ -725,7 +818,7 @@ async function convertRequestForRoute(
       source,
       target,
       body as unknown as import("../../../packages/gateway/dist/protocol.js").JsonObject,
-      { originModelName: originModel, upstreamModelName: upstreamModel },
+      { originModelName: originModel, upstreamModelName: upstreamModel, upstreamEndpoint: route?.upstreamBaseUrl },
       {
         toolLossPolicy: "allow",
         ...(route?.instructionRole ? { instructionRole: route.instructionRole } : {}),
@@ -997,6 +1090,12 @@ async function proxyAccountPoolRequest(
       : route;
     let candidateBody = rewriteGatewayModel(body, effectiveUpstreamModel) ?? body;
     let candidateParsedBody = candidateBody.length ? parseRequestBody(candidateBody) : parsedBody;
+    let candidateHistoryScope: string | undefined;
+    if (pool.protocol === "responses" && effectiveRoute.protocol !== "responses" && candidateParsedBody && history) {
+      candidateHistoryScope = resolveHistoryScope(pool.poolId, candidateParsedBody);
+      candidateParsedBody = await enrichResponsesHistory(history, candidateHistoryScope, pool.protocol, effectiveRoute.protocol, candidateParsedBody);
+      candidateBody = Buffer.from(JSON.stringify(candidateParsedBody));
+    }
     if (candidateParsedBody) {
       const capabilityProfile = capabilityProfileForRoute(effectiveRoute, effectiveRoute.protocol, effectiveUpstreamModel, capabilityRegistry);
       const filtered = filterUnsupportedHostedTools(candidateParsedBody as import("../../../packages/gateway/dist/protocol.js").JsonObject, capabilityProfile, Object.keys(capabilityProfile).length ? "safe" : "allow");
@@ -1094,7 +1193,24 @@ async function proxyAccountPoolRequest(
         upstreamResponse = await convertUpstreamResponse(upstreamResponse, effectiveRoute.protocol, pool.protocol, {
           originModelName: typeof parsedBody?.model === "string" ? parsedBody.model : undefined,
           upstreamModelName: effectiveUpstreamModel,
-        });
+        }, pool.protocol === "responses" && candidateHistoryScope
+          ? {
+            onFinalized: async (state) => {
+              const calls = streamToolCalls(state);
+              if (!calls.length) return;
+              await history.recordResponse(candidateHistoryScope!, { responseId: state.id, createdAt: Date.now(), calls });
+            },
+          }
+          : undefined);
+      }
+      if (pool.protocol === "responses" && candidateHistoryScope
+        && !upstreamResponse.headers.get("content-type")?.includes("text/event-stream")) {
+        try {
+          const responseBody = await upstreamResponse.clone().json() as unknown;
+          await recordResponseToolHistory(history, candidateHistoryScope, jsonObject(responseBody));
+        } catch {
+          // History is best effort for non-JSON provider responses.
+        }
       }
     } catch (error) {
       const reason = classifyPoolFailure(null, error);
@@ -1229,6 +1345,8 @@ async function proxyRequest(
   middlewareContext?: RuntimeGatewayMiddlewareContext,
   capabilityRegistry?: CapabilityRegistry,
   persistCapabilityObservations?: () => void,
+  history?: ConversationHistoryStore,
+  historyScopeId?: string,
 ): Promise<void> {
   const startedAt = Date.now();
   const candidates = [route, ...fallbackRoutes.filter((candidate) => candidate.routeId !== route.routeId)];
@@ -1258,8 +1376,14 @@ async function proxyRequest(
     const candidateSecret = resolveSecret?.(candidate) ?? (candidate.routeId === route.routeId ? secret : undefined);
     let candidateBody = rewriteGatewayModel(requestBody, candidate.upstreamModel);
     candidateBody = normalizeAuthResponsesRequest(candidateBody, candidate, candidateSecret);
+    let candidateHistoryScope: string | undefined;
     if (candidateBody) {
-      const candidateParsedBody = parseRequestBody(candidateBody);
+      let candidateParsedBody = parseRequestBody(candidateBody);
+      if (incomingProtocol === "responses" && candidate.protocol !== "responses" && candidateParsedBody && history) {
+        candidateHistoryScope = resolveHistoryScope(historyScopeId ?? candidate.routeId, candidateParsedBody);
+        candidateParsedBody = await enrichResponsesHistory(history, candidateHistoryScope, incomingProtocol, candidate.protocol, candidateParsedBody);
+        candidateBody = Buffer.from(JSON.stringify(candidateParsedBody));
+      }
       if (candidateParsedBody) {
         const capabilityProfile = capabilityProfileForRoute(candidate, candidate.protocol, candidate.upstreamModel ?? incomingModel, capabilityRegistry);
         const filtered = filterUnsupportedHostedTools(candidateParsedBody as import("../../../packages/gateway/dist/protocol.js").JsonObject, capabilityProfile, Object.keys(capabilityProfile).length ? "safe" : "allow");
@@ -1338,8 +1462,25 @@ async function proxyRequest(
         ? await convertUpstreamResponse(response, candidate.protocol, incomingProtocol, {
           originModelName: incomingModel,
           upstreamModelName: candidate.upstreamModel,
-        })
+        }, incomingProtocol === "responses" && candidateHistoryScope
+          ? {
+            onFinalized: async (state) => {
+              const calls = streamToolCalls(state);
+              if (!calls.length) return;
+              await history?.recordResponse(candidateHistoryScope!, { responseId: state.id, createdAt: Date.now(), calls });
+            },
+          }
+          : undefined)
         : response;
+      if (incomingProtocol === "responses" && candidateHistoryScope
+        && !convertedResponse.headers.get("content-type")?.includes("text/event-stream")) {
+        try {
+          const responseBody = await convertedResponse.clone().json() as unknown;
+          await recordResponseToolHistory(history, candidateHistoryScope, jsonObject(responseBody));
+        } catch {
+          // A non-JSON provider response is relayed unchanged; history is best effort.
+        }
+      }
       const middlewareResponse = await applyGatewayMiddlewareResponse(convertedResponse, middleware, middlewareContext);
       const candidateRequestBody = candidateBody ? parseRequestBody(candidateBody) : undefined;
       const responseErrorMessage = !middlewareResponse.ok
@@ -1500,11 +1641,12 @@ async function convertUpstreamResponse(
   source: RouteProtocol,
   target: RouteProtocol,
   metadata: { requestId?: string; originModelName?: string; upstreamModelName?: string } = {},
+  hooks?: GatewayResponseStreamHooks,
 ): Promise<Response> {
   const contentType = response.headers.get("content-type") ?? "";
   if (!response.body) return response;
   if (contentType.includes("text/event-stream")) {
-    const streamed = useLegacyProtocolConversion() ? undefined : await convertGatewayResponseStreamAtRuntime(response, source, target, metadata, { emitSequenceNumber: true });
+    const streamed = useLegacyProtocolConversion() ? undefined : await convertGatewayResponseStreamAtRuntime(response, source, target, metadata, { emitSequenceNumber: true }, hooks);
     if (streamed) return streamed;
     const raw = await response.text();
     const converted = adaptProtocolSseChunk(source, target, raw);
@@ -2332,6 +2474,8 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           gatewayMiddlewareContext,
           capabilityRegistry,
           persistCapabilityObservations,
+          history,
+          gateway.gatewayId,
         );
       }
       const poolMatch = url.pathname.match(/^\/pools\/([^/]+)\/?(.*)$/);
@@ -2373,7 +2517,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
         (providerId) => providerId && pluginManager?.registry.has(providerId) ? pluginManager.registry.get(providerId) : undefined, {
           agentId: request.headers["x-codex-agent"]?.toString().trim() || null,
           ingressProtocol: route.protocol,
-        }, defaultProxyUrl, undefined, undefined, capabilityRegistry, persistCapabilityObservations);
+        }, defaultProxyUrl, undefined, undefined, capabilityRegistry, persistCapabilityObservations, history, route.routeId);
     } catch (error) {
       if (!response.headersSent) sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) });
       else response.destroy(error instanceof Error ? error : undefined);

@@ -7,6 +7,8 @@ import {
   type TransformResponsesRequestInput,
   type TransformedChatRequest,
 } from "./types.js";
+import { normalizeToolExchange } from "./tool-exchange-normalizer.js";
+import { normalizeMoonshotChatTools, upstreamRequiresMoonshotSchema } from "./moonshot-schema.js";
 
 const protectedOverrides = new Set(["model", "messages", "tools", "stream", "authorization", "base_url"]);
 
@@ -38,6 +40,21 @@ function chatContent(content: unknown): string | Array<Record<string, unknown>> 
       return { type: "image_url", image_url: { url, ...(typeof part.detail === "string" ? { detail: part.detail } : {}) } };
     }
     throw new CompatibilityError("UNSUPPORTED_ITEM", `Unsupported message content type '${part.type}'`);
+  });
+}
+
+function chatToolOutputContent(value: unknown): string | Array<Record<string, unknown>> {
+  if (typeof value === "string") return value;
+  if (!Array.isArray(value)) return JSON.stringify(value ?? "");
+  return value.map((raw) => {
+    const part = record(raw);
+    if (!part) return { type: "text", text: String(raw) };
+    if (part.type === "output_text" || part.type === "input_text" || part.type === "text") return { type: "text", text: typeof part.text === "string" ? part.text : JSON.stringify(part.text ?? "") };
+    if (part.type === "output_image" || part.type === "input_image" || part.type === "image_url") {
+      const url = typeof part.image_url === "string" ? part.image_url : record(part.image_url)?.url;
+      return { type: "image_url", image_url: { url: typeof url === "string" ? url : "" } };
+    }
+    return { type: "text", text: JSON.stringify(part) };
   });
 }
 
@@ -176,12 +193,19 @@ export function transformResponsesRequest(input: TransformResponsesRequestInput)
     }
     if (item.type === "function_call_output" || item.type === "custom_tool_call_output" || item.type === "tool_search_call_output") {
       flushCalls();
-      messages.push({ role: "tool", tool_call_id: text(item.call_id, "Tool output call_id"), content: text(item.output, "Tool output") });
+      messages.push({ role: "tool", tool_call_id: text(item.call_id, "Tool output call_id"), content: chatToolOutputContent(item.output) });
       return;
     }
     throw new CompatibilityError("UNSUPPORTED_ITEM", `Unsupported input item type '${item.type}'`);
   });
   flushCalls();
+
+  const normalized = normalizeToolExchange(messages, { includeToolName: true });
+  messages.splice(0, messages.length, ...normalized.messages);
+  if (normalized.diagnostics.orphanToolResults || normalized.diagnostics.syntheticToolResults || normalized.diagnostics.invalidToolCalls) {
+    const repairWarning = `工具历史已自动修复（孤立结果 ${normalized.diagnostics.orphanToolResults}、补全结果 ${normalized.diagnostics.syntheticToolResults}、非法调用 ${normalized.diagnostics.invalidToolCalls}）。`;
+    warning = warning ? `${warning} ${repairWarning}` : repairWarning;
+  }
 
   const stream = request.stream === true;
   const body: Record<string, unknown> = {
@@ -193,12 +217,23 @@ export function transformResponsesRequest(input: TransformResponsesRequestInput)
   };
   const toolChoice = transformToolChoice(request.tool_choice, registry);
   if (toolChoice !== undefined) body.tool_choice = toolChoice;
-  if (typeof request.max_output_tokens === "number") body.max_completion_tokens = request.max_output_tokens;
+  if (typeof request.parallel_tool_calls === "boolean") body.parallel_tool_calls = request.parallel_tool_calls;
+  if (typeof request.max_output_tokens === "number") {
+    const legacyMaxTokens = /(?:moonshot\.cn|moonshot\.ai|kimi\.com|dashscope\.aliyuncs\.com)/i.test(input.upstreamEndpoint ?? "");
+    body[legacyMaxTokens ? "max_tokens" : "max_completion_tokens"] = request.max_output_tokens;
+  }
   if (typeof request.temperature === "number") body.temperature = request.temperature;
   const reasoning = record(request.reasoning);
   if (reasoning && typeof reasoning.effort === "string") body.reasoning_effort = reasoning.effort;
   if (input.reasoningProfile === "reasoning_content") body.reasoning_format = "reasoning_content";
   if (input.reasoningProfile === "think_tags") body.reasoning_format = "think_tags";
   applyOverrides(body, input.requestOverrides);
-  return { body, tools: registry, requestedModel, warning };
+  if (upstreamRequiresMoonshotSchema(input.upstreamEndpoint)) {
+    const rewritten = normalizeMoonshotChatTools(body);
+    if (rewritten > 0) {
+      const schemaWarning = `已为 Kimi/Moonshot 重写 ${rewritten} 个不兼容的 JSON Schema 引用。`;
+      warning = warning ? `${warning} ${schemaWarning}` : schemaWarning;
+    }
+  }
+  return { body, tools: registry, requestedModel, warning, diagnostics: normalized.diagnostics };
 }

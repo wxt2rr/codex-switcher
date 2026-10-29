@@ -100,7 +100,7 @@ export async function discoverGatewayProviderModels(input: {
         upstreamModelId: model.id,
         displayName: model.displayName,
         protocols: model.protocols,
-        capabilities: model.capabilities,
+        capabilities: { ...model.capabilities, vision: model.capabilities.vision !== false },
         ...(model.capabilityProfile ? { capabilityProfile: model.capabilityProfile } : {}),
         enabled: true,
       });
@@ -182,7 +182,7 @@ export async function discoverGatewayAccountModels(input: {
     upstreamModelId: model.id,
     displayName: model.displayName,
     protocols: model.protocols,
-    capabilities: model.capabilities,
+    capabilities: { ...model.capabilities, vision: model.capabilities.vision !== false },
     ...(model.capabilityProfile ? { capabilityProfile: model.capabilityProfile } : {}),
     enabled: true,
     source: model.source,
@@ -228,7 +228,10 @@ async function discoverModelsWithPresetFallback(
       capabilities: {
         reasoning: /reason|o[1-9]|opus|sonnet|think/i.test(id),
         tools: true,
-        vision: /vision|gemini|claude|gpt-4/i.test(id),
+        // Preset fallback has no upstream capability metadata. Let the
+        // catalog apply its multimodal-by-default policy instead of treating
+        // an unknown value as an explicit text-only declaration.
+        vision: true,
         streaming: true,
       },
       source: "preset" as const,

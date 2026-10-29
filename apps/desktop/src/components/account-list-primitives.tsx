@@ -50,6 +50,7 @@ export function ListPageHeader({
   onSearchChange,
   showFilter = true,
   actions,
+  layout = "inline",
 }: {
   title: string;
   subtitle: string;
@@ -58,40 +59,61 @@ export function ListPageHeader({
   onSearchChange?: (value: string) => void;
   showFilter?: boolean;
   actions?: ReactNode;
+  layout?: "inline" | "stacked";
 }) {
+  const toolbar = (
+    <div className={cn("responsive-toolbar flex min-w-0 items-center gap-2.5", layout === "inline" ? "justify-start xl:justify-end" : "flex-wrap")}>
+      {onSearchChange ? (
+        <>
+          <div className="relative min-w-[220px] flex-1">
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+            <Input
+              value={search ?? ""}
+              onChange={(event) => onSearchChange(event.target.value)}
+              placeholder={searchPlaceholder}
+              className={cn(
+                "h-8 w-full rounded-lg border-transparent pl-10 text-[12px] shadow-none",
+                layout === "stacked" ? "bg-[#fbfbfc] focus:border-transparent focus:ring-0 dark:bg-[#1b2129]" : "bg-[#f3f4f6] dark:bg-[#1b2129]",
+              )}
+            />
+          </div>
+          {showFilter ? (
+            <button
+              type="button"
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[#f3f4f6] text-slate-600 dark:bg-[#1b2129] dark:text-slate-300"
+              aria-label="Filter"
+              title="Filter"
+            >
+              <SlidersHorizontal className="size-3.5" />
+            </button>
+          ) : null}
+        </>
+      ) : null}
+      {actions}
+    </div>
+  );
+
+  if (layout === "stacked") {
+    return (
+      <div className="flex shrink-0 flex-col gap-4">
+        <div>
+          <h2 className="text-[28px] font-semibold tracking-[-0.04em] text-neutral-950 dark:text-neutral-50">{title}</h2>
+          <p className="mt-1 text-[13px] leading-6 text-slate-500 dark:text-slate-400">{subtitle}</p>
+        </div>
+        <div className="rounded-[18px] bg-white px-3 py-2.5 shadow-[0_10px_30px_rgba(15,23,42,0.03)] ring-1 ring-black/[0.04] dark:bg-[#141a22] dark:ring-white/[0.07]">
+          {toolbar}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(220px,1fr)_minmax(0,1.8fr)] xl:items-start">
       <div>
         <h2 className="text-[28px] font-semibold tracking-[-0.04em] text-neutral-950 dark:text-neutral-50">{title}</h2>
         <p className="mt-1 text-[13px] leading-6 text-slate-500 dark:text-slate-400">{subtitle}</p>
       </div>
-
-      <div className="responsive-toolbar flex min-w-0 items-center justify-start gap-2.5 xl:justify-end">
-        {onSearchChange ? (
-          <>
-            <div className="relative min-w-[220px] flex-1">
-              <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-              <Input
-                value={search ?? ""}
-                onChange={(event) => onSearchChange(event.target.value)}
-                placeholder={searchPlaceholder}
-                className="h-8 w-full rounded-lg border-transparent bg-[#f3f4f6] pl-10 text-[12px] shadow-none dark:bg-[#1b2129]"
-              />
-            </div>
-            {showFilter ? (
-              <button
-                type="button"
-                className="flex size-8 items-center justify-center rounded-lg bg-[#f3f4f6] text-slate-600 dark:bg-[#1b2129] dark:text-slate-300"
-                aria-label="Filter"
-                title="Filter"
-              >
-                <SlidersHorizontal className="size-3.5" />
-              </button>
-            ) : null}
-          </>
-        ) : null}
-        {actions}
-      </div>
+      {toolbar}
     </div>
   );
 }

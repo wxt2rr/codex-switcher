@@ -256,7 +256,8 @@ export function normalizeBuiltInProviderId(id) {
 function presetsToModels(definition, endpoints = definition.endpoints) { return definition.presets.map((id) => modelFor(definition, id, "preset", endpoints)); }
 function modelFor(definition, id, source, endpoints = definition.endpoints) {
     const protocols = [...new Set(endpoints.map((endpoint) => endpoint.protocol))];
-    return { id, displayName: id, providerId: definition.id, iconKey: definition.iconKey, protocols, capabilities: { reasoning: /reason|o[1-9]|opus|sonnet|think/i.test(id), tools: true, vision: /vision|gemini|claude|gpt-4/i.test(id), streaming: true }, source };
+    const knownVisionModel = /vision|gemini|claude|gpt-4/i.test(id);
+    return { id, displayName: id, providerId: definition.id, iconKey: definition.iconKey, protocols, capabilities: { reasoning: /reason|o[1-9]|opus|sonnet|think/i.test(id), tools: true, ...(knownVisionModel ? { vision: true } : {}), streaming: true }, source };
 }
 function requestContext(account) {
     return { accountId: account.accountId, ...(account.proxyUrl ? { proxyUrl: account.proxyUrl } : {}) };

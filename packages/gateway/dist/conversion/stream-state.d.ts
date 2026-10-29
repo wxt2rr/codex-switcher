@@ -2,6 +2,14 @@ import type { GatewayProtocol, JsonObject } from "../protocol.js";
 import { type ConversionResponseEvent } from "./response-converter.js";
 import { type ConversionUsage } from "./usage.js";
 import type { ConversionMetadata, ConversionOptions, ConversionResult } from "./types.js";
+interface ResponseToolState {
+    callId: string;
+    itemId: string;
+    outputIndex?: number;
+    name?: string;
+    arguments: string;
+    announced: boolean;
+}
 export interface ResponseStreamState {
     readonly id: string;
     readonly source: GatewayProtocol;
@@ -34,14 +42,7 @@ export interface ResponseStreamState {
         text: string;
         announced: boolean;
     };
-    responseToolStates: Map<string, {
-        callId: string;
-        itemId: string;
-        outputIndex?: number;
-        name?: string;
-        arguments: string;
-        announced: boolean;
-    }>;
+    responseToolStates: Map<string, ResponseToolState>;
     usage: ConversionUsage;
     events: ConversionResponseEvent[];
 }
@@ -49,3 +50,4 @@ export declare function createResponseStreamState(source: GatewayProtocol, targe
 export declare function convertStreamChunk(state: ResponseStreamState, body: JsonObject): Promise<ConversionResult<JsonObject[]>>;
 export declare function finalizeResponseStream(state: ResponseStreamState, reason?: string): Promise<ConversionResult<JsonObject[]>>;
 export declare function failResponseStream(state: ResponseStreamState, code: string, message: string): Promise<ConversionResult<JsonObject[]>>;
+export {};

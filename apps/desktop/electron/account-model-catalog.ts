@@ -24,6 +24,33 @@ export interface BundledModelCatalog {
 }
 
 /**
+ * Turn a Codex bundled entry into a provider-neutral model candidate.
+ *
+ * Bundled entries describe what the installed Codex App can render, not which
+ * upstream account should receive the request.  Provider metadata from older
+ * bundled catalogs is therefore removed before the entry is persisted in the
+ * shared model catalog.  A later account binding can then rebind the same
+ * upstream model id to the selected provider without accidentally routing it
+ * through the official OpenAI provider.
+ */
+export function normalizeBundledModelEntry(value: ModelCatalogEntry): ModelCatalogEntry {
+  const {
+    provider_id: _providerId,
+    provider_model_key: _providerModelKey,
+    provider_display_name: _providerDisplayName,
+    upstream_model_id: _upstreamModelId,
+    model_source: _modelSource,
+    ...providerNeutralEntry
+  } = value;
+  return normalizeCodexCatalogEntry({
+    ...providerNeutralEntry,
+    provider_id: "codex-bundled",
+    provider_display_name: "Codex 内置",
+    model_source: "bundled",
+  });
+}
+
+/**
  * Merge model catalogs from the CLI and the Codex App's embedded CLI.
  *
  * The App and the standalone CLI can be released at different times.  The
@@ -155,7 +182,9 @@ export async function synchronizeAccountModelCatalog(options: {
   const byId = new Map(snapshot.models.map((model) => [model.id, model]));
   const customEntries = bindingIds.filter((id) => {
     const model = byId.get(id);
-    return model ? isModelAvailableForAccount(snapshot, model, accountModelBindingKey(options.envName, options.accountName)) : false;
+    return model
+      && model.entry.model_source !== "bundled"
+      && isModelAvailableForAccount(snapshot, model, accountModelBindingKey(options.envName, options.accountName));
   }).map((id) => {
     const model = byId.get(id);
     if (!model) throw new Error(`Bound custom model '${id}' no longer exists`);

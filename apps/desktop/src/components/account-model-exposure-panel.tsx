@@ -27,6 +27,7 @@ function accountKeyOf(envName: string, accountName: string): string {
 }
 
 function modelSourceLabel(source: string | undefined, zh: boolean): string {
+  if (source === "bundled") return zh ? "Codex 内置" : "Codex built-in";
   if (source === "discovered") return zh ? "服务商发现" : "Discovered";
   if (source === "preset") return zh ? "服务商预设" : "Provider preset";
   if (source === "cached") return zh ? "缓存模型" : "Cached";
@@ -43,6 +44,7 @@ function discoveryStateLabel(snapshot: AccountModelDiscoverySnapshot | undefined
 
 function providerLabel(providerId: string, providerCatalog: ProviderCatalogItem[], zh: boolean, displayName?: string): string {
   if (displayName?.trim()) return displayName.trim();
+  if (providerId === "codex-bundled") return zh ? "Codex 内置" : "Codex built-in";
   if (providerId === "custom") return zh ? "手动配置" : "Manual";
   return providerCatalog.find((provider) => provider.id === providerId)?.displayName ?? providerId;
 }
@@ -182,7 +184,7 @@ export function AccountModelExposurePanel({
   return (
     <SidePanel
       open={open}
-      title={zh ? "选择账号模型" : "Choose account models"}
+      title={zh ? "选择要启用的模型" : "Choose models to enable"}
       description={accountKey ? `${accountKey} · ${discoveryStateLabel(discovery, zh)}` : undefined}
       onClose={onClose}
       closeLabel={zh ? "关闭" : "Close"}
@@ -249,10 +251,11 @@ export function AccountModelExposurePanel({
             openOnHover={false}
             className="h-9 min-w-[100px] max-w-[130px] flex-1 bg-white text-[12px]"
           />
-          <Button type="button" variant="outline" onClick={() => void loadModels(true)} disabled={refreshing || loading || !accountKey}>
-            <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
-            {zh ? "刷新" : "Refresh"}
-          </Button>
+          <Tooltip content={zh ? "重新拉取模型列表" : "Refresh model list"}>
+            <Button type="button" variant="outline" size="icon" onClick={() => void loadModels(true)} disabled={refreshing || loading || !accountKey} aria-label={zh ? "刷新模型列表" : "Refresh model list"}>
+              <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
+            </Button>
+          </Tooltip>
           <Tooltip content={zh ? "找不到支持的模型？点击这里，去模型设置页新增自定义模型吧。" : "Can't find a supported model? Open Models to add a custom model."}>
             <button
               type="button"
@@ -264,11 +267,10 @@ export function AccountModelExposurePanel({
             </button>
           </Tooltip>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 text-[12px] text-slate-500">
-          <span>{loading ? (zh ? "正在加载目录…" : "Loading catalog…") : (zh ? `显示 ${candidates.length} 个模型，已选 ${selectedIds.length} 个` : `${candidates.length} shown, ${selectedIds.length} selected`)}</span>
+        <div className="flex shrink-0 items-center rounded-lg border border-black/[0.05] bg-[#fafbfc] px-3 py-2">
           <label
             className={cn(
-              "inline-flex items-center gap-1.5 font-medium text-neutral-800",
+              "inline-flex items-center gap-1.5 text-[12px] font-medium text-neutral-800",
               candidates.length === 0 ? "cursor-not-allowed opacity-50" : "cursor-pointer",
             )}
             title={zh ? "选择或取消当前筛选结果" : "Select or clear the current filtered results"}
@@ -284,6 +286,9 @@ export function AccountModelExposurePanel({
             />
             <span>{zh ? "全选" : "Select all"}</span>
           </label>
+          <span className="ml-3 text-[12px] text-slate-500">
+            {loading ? (zh ? "正在加载…" : "Loading…") : (zh ? `${selectedIds.length}/${candidates.length} 已选` : `${selectedIds.length}/${candidates.length} selected`)}
+          </span>
         </div>
         <div
           className={cn("min-h-0 flex-1 space-y-2 overflow-y-auto pr-1", refreshing && "pointer-events-none opacity-60")}
@@ -355,7 +360,7 @@ export function AccountModelExposurePanel({
           <span className="text-[11px] leading-5 text-slate-500">{zh ? "可在模型页面继续调整优先级、权重和上游模型名。" : "Adjust priority, weight, and upstream ids later on the Models page."}</span>
           <div className="flex shrink-0 gap-2">
             <Button type="button" variant="outline" onClick={onClose}>{zh ? "取消" : "Cancel"}</Button>
-            <Button type="button" onClick={() => void save()} disabled={saving || loading}>{saving ? (zh ? "保存中…" : "Saving…") : (zh ? "保存暴露模型" : "Save exposed models")}</Button>
+            <Button type="button" onClick={() => void save()} disabled={saving || loading || selectedIds.length === 0}>{saving ? (zh ? "保存中…" : "Saving…") : (zh ? `启用所选模型 (${selectedIds.length})` : `Enable selected (${selectedIds.length})`)}</Button>
           </div>
         </div>
       </div>

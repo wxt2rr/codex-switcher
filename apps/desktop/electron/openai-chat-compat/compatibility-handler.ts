@@ -1,6 +1,6 @@
 import { authorizeRouteToken, type RouteRuntimeSecret, type RouteTarget } from "../usage-routing-model.js";
 import { filterUnsupportedHostedTools, initializeGatewayCapabilityRuntime, type CapabilityProfile } from "../gateway-capability-runtime.js";
-import { ConversationHistoryStore } from "./history-store.js";
+import { ConversationHistoryStore, resolveHistoryScope } from "./history-store.js";
 import { transformResponsesRequest } from "./request-transformer.js";
 import { transformChatResponse } from "./response-transformer.js";
 import { transformChatStream } from "./stream-transformer.js";
@@ -53,7 +53,8 @@ export async function handleChatCompatibilityRequest(options: CompatibilityHandl
   if (!authorizeRouteToken(options.authorization, options.secret.localRouteToken)) {
     throw new CompatibilityError("INVALID_REQUEST", "Unauthorized route token", 401);
   }
-  const enriched = await options.history.enrichRequest(options.route.routeId, options.request);
+  const historyScope = resolveHistoryScope(options.route.routeId, options.request);
+  const enriched = await options.history.enrichRequest(historyScope, options.request);
   const capabilityRuntimeReady = await initializeGatewayCapabilityRuntime();
   const filtered = capabilityRuntimeReady
     ? filterUnsupportedHostedTools(
@@ -67,6 +68,7 @@ export async function handleChatCompatibilityRequest(options: CompatibilityHandl
     // sending the provider-specific id in the Chat request body.
     request: filtered.body as Record<string, unknown>,
     upstreamModel: resolveCompatibilityUpstreamModel(options.route, filtered.body.model),
+    upstreamEndpoint: options.route.upstreamBaseUrl,
     reasoningProfile: options.route.reasoningProfile,
     requestOverrides: options.route.requestOverrides,
     longConversationStrategy: options.route.longConversationStrategy ?? "safe",
@@ -92,7 +94,7 @@ export async function handleChatCompatibilityRequest(options: CompatibilityHandl
     const stream = transformChatStream({ body: upstream.body, model: transformed.requestedModel,
       warning: transformed.warning,
       registry: transformed.tools, signal: options.signal, onCompleted: async ({ responseId, calls }) => {
-        await options.history.recordResponse(options.route.routeId, { responseId, createdAt: Date.now(), calls });
+        await options.history.recordResponse(historyScope, { responseId, createdAt: Date.now(), calls });
       } });
     return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" } });
   }
@@ -100,7 +102,7 @@ export async function handleChatCompatibilityRequest(options: CompatibilityHandl
   const result = transformChatResponse(payload, {
     model: transformed.requestedModel, registry: transformed.tools, warning: transformed.warning,
   });
-  await options.history.recordResponse(options.route.routeId, {
+  await options.history.recordResponse(historyScope, {
     responseId: result.response.id,
     createdAt: Date.now(),
     calls: result.calls,

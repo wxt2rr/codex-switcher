@@ -8,6 +8,11 @@ import { getConfiguredResourcesPath, resolveRuntimeResource } from "./runtime-pa
 
 type GatewayConversionModule = typeof import("../../../packages/gateway/dist/conversion/index.js");
 
+export interface GatewayResponseStreamHooks {
+  /** Called once after a terminal or interrupted stream has been finalized. */
+  onFinalized?: (state: ResponseStreamState, reason: string) => void | Promise<void>;
+}
+
 let conversionModule: GatewayConversionModule | undefined;
 
 export function useLegacyProtocolConversion(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -97,6 +102,7 @@ export async function convertGatewayResponseStreamAtRuntime(
   target: GatewayProtocol,
   metadata: ConversionMetadata = {},
   options: ConversionOptions = {},
+  hooks: GatewayResponseStreamHooks = {},
 ): Promise<Response | undefined> {
   const state = await createGatewayResponseStreamStateAtRuntime(source, target, metadata, options);
   if (!state || !response.body) return undefined;
@@ -105,6 +111,16 @@ export async function convertGatewayResponseStreamAtRuntime(
   const encoder = new TextEncoder();
   let pending = "";
   let doneEmitted = false;
+  let hookCalled = false;
+  const notifyFinalized = async (reason: string): Promise<void> => {
+    if (hookCalled) return;
+    hookCalled = true;
+    try {
+      await hooks.onFinalized?.(state, reason);
+    } catch {
+      // History/telemetry persistence must never break the response stream.
+    }
+  };
 
   const output = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -128,6 +144,7 @@ export async function convertGatewayResponseStreamAtRuntime(
           if (data === "[DONE]") {
             const finalized = await finalizeGatewayResponseStreamAtRuntime(state);
             emit(finalized?.value ?? []);
+            await notifyFinalized("stop");
             emitDone();
             return;
           }
@@ -135,6 +152,7 @@ export async function convertGatewayResponseStreamAtRuntime(
           if (!isJsonObject(parsed)) return;
           const converted = await convertGatewayStreamChunkAtRuntime(state, parsed);
           emit(converted?.value ?? []);
+          if (state.ended) await notifyFinalized("stop");
         };
 
         try {
@@ -152,6 +170,9 @@ export async function convertGatewayResponseStreamAtRuntime(
           if (!state.ended) {
             const finalized = await finalizeGatewayResponseStreamAtRuntime(state);
             emit(finalized?.value ?? []);
+            await notifyFinalized("stop");
+          } else {
+            await notifyFinalized("stop");
           }
           emitDone();
           controller.close();
@@ -160,6 +181,7 @@ export async function convertGatewayResponseStreamAtRuntime(
             const failed = await failGatewayResponseStreamAtRuntime(state, "stream_conversion_failed", error instanceof Error ? error.message : String(error));
             emit(failed?.value ?? []);
           }
+          await notifyFinalized("error");
           emitDone();
           controller.close();
         }

@@ -6,6 +6,7 @@ import { convertGatewayRequest } from "../conversion/request-converter.js";
 import { convertGatewayResponse } from "../conversion/response-converter.js";
 import { convertStreamChunk, createResponseStreamState, failResponseStream, finalizeResponseStream, type ResponseStreamState } from "../conversion/stream-state.js";
 import { decodeUsage } from "../conversion/usage.js";
+import { ToolExchangeHistory } from "../conversion/tool-exchange-history.js";
 import type { ConversionOptions, ConversionResult } from "../conversion/types.js";
 import type { GatewayRequestIR } from "../request/request-ir.js";
 import { createGatewayRequestContext } from "../request/request-ir.js";
@@ -23,6 +24,7 @@ export interface GatewayRuntimeOptions {
   pricingProfiles?: readonly UsagePricingProfile[];
   middleware?: GatewayMiddlewareRegistry;
   now?: () => number;
+  toolHistory?: ToolExchangeHistory;
 }
 
 export interface GatewayDispatchInput {
@@ -123,7 +125,9 @@ export class GatewayRuntime {
   private readonly now: () => number;
   private readonly options: GatewayRuntimeOptions;
   private readonly trace: UsageTrace;
+  private readonly toolHistory: ToolExchangeHistory;
   private readonly streamMiddlewareContexts = new WeakMap<ResponseStreamState, GatewayMiddlewareContext>();
+  private readonly streamDispatches = new WeakMap<ResponseStreamState, GatewayDispatchResult>();
 
   constructor(options: GatewayRuntimeOptions) {
     this.options = { ...options, candidates: [...options.candidates] };
@@ -131,6 +135,7 @@ export class GatewayRuntime {
     this.ledger = options.ledger ?? new UsageLedger();
     this.now = options.now ?? Date.now;
     this.trace = new UsageTrace(this.ledger, this.now);
+    this.toolHistory = options.toolHistory ?? new ToolExchangeHistory();
   }
 
   async dispatch(input: GatewayDispatchInput): Promise<GatewayDispatchResult> {
@@ -147,7 +152,7 @@ export class GatewayRuntime {
     if (middlewareRequest?.reject) {
       throw new GatewayMiddlewareRejectedError(middlewareRequest.reject.message, middlewareRequest.reject.status, middlewareRequest.reject.code);
     }
-    const requestBody = middlewareRequest?.body ?? input.body;
+    const requestBody = this.toolHistory.enrich(input.sessionId, input.protocol, middlewareRequest?.body ?? input.body);
     const requestedModel = middlewareRequest?.model ?? input.model;
     const context = createGatewayRequestContext({
       requestId,
@@ -265,6 +270,7 @@ export class GatewayRuntime {
         originModelName: request.context.logicalModelId,
         upstreamModelName: route.route.upstreamModelId,
         providerDialect: route.route.providerId,
+        upstreamEndpoint: provider.endpoints.find((endpoint) => endpoint.protocol === route.route.protocol)?.baseUrl,
       },
     );
     return {
@@ -294,6 +300,9 @@ export class GatewayRuntime {
         upstreamModelName: input.dispatch.request.context.logicalModelId,
       },
     ) : undefined;
+    if (input.upstreamBody && input.status !== "error" && input.status !== "cancelled") {
+      this.toolHistory.record(input.dispatch.request.context.sessionId, input.dispatch.upstreamProtocol, input.upstreamBody);
+    }
     let responseBody = responseConversion?.value;
     if (responseBody && this.options.middleware) {
       const middlewareResponse = await this.options.middleware.runResponse(responseBody, input.dispatch.middlewareContext ?? this.createMiddlewareContextFromDispatch(input.dispatch));
@@ -353,6 +362,7 @@ export class GatewayRuntime {
       options,
     );
     if (this.options.middleware) this.streamMiddlewareContexts.set(state, dispatch.middlewareContext ?? this.createMiddlewareContextFromDispatch(dispatch));
+    this.streamDispatches.set(state, dispatch);
     return state;
   }
 
@@ -370,12 +380,36 @@ export class GatewayRuntime {
     });
   }
 
-  finalizeStream(state: ResponseStreamState, reason?: string): Promise<GatewayStreamResult> {
-    return finalizeResponseStream(state, reason);
+  async finalizeStream(state: ResponseStreamState, reason?: string): Promise<GatewayStreamResult> {
+    const result = await finalizeResponseStream(state, reason);
+    this.recordStreamToolHistory(state);
+    return result;
   }
 
-  failStream(state: ResponseStreamState, code: string, message: string): Promise<GatewayStreamResult> {
-    return failResponseStream(state, code, message);
+  async failStream(state: ResponseStreamState, code: string, message: string): Promise<GatewayStreamResult> {
+    const result = await failResponseStream(state, code, message);
+    this.recordStreamToolHistory(state);
+    return result;
+  }
+
+  private recordStreamToolHistory(state: ResponseStreamState): void {
+    const dispatch = this.streamDispatches.get(state);
+    if (!dispatch) return;
+    const calls = new Map<string, { id: string; name: string; arguments: string }>();
+    for (const event of state.events) {
+      if (event.type !== "tool_call_delta") continue;
+      const current = calls.get(event.callId) ?? { id: event.callId, name: event.name ?? "tool", arguments: "" };
+      current.name ||= event.name ?? "tool";
+      current.arguments += event.argumentsDelta ?? "";
+      calls.set(event.callId, current);
+    }
+    // Preserve partial tool calls even when the upstream stream is interrupted.
+    // The next Responses turn can then be paired and repaired deterministically
+    // instead of being sent as an orphan result.
+    this.toolHistory.recordCalls(dispatch.request.context.sessionId, state.id, [...calls.values()].flatMap((call) => {
+      const argumentsText = safeToolArguments(call.arguments);
+      return argumentsText ? [{ ...call, arguments: argumentsText }] : [];
+    }));
   }
 
   private createMiddlewareContext(input: { requestId: string; traceId: string; input: GatewayDispatchInput; model: string }): GatewayMiddlewareContext {
@@ -425,4 +459,14 @@ function transportFailureDetails(error: unknown): { status: number | null; first
     };
   }
   return { status: null, firstByteStarted: false };
+}
+
+function safeToolArguments(value: string): string | undefined {
+  if (!value.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }

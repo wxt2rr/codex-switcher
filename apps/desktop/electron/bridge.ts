@@ -122,6 +122,7 @@ import {
 import {
   mergeBundledModelCatalogs,
   loadBundledModelCatalog,
+  normalizeBundledModelEntry,
   resolveCodexAppBundledCliCandidates,
   synchronizeAccountModelCatalog,
   synchronizeEnvironmentGatewayModelCatalog,
@@ -647,7 +648,10 @@ function buildGatewayRouteBindings(
       capabilities: {
         reasoning: model.capabilities.reasoning === true,
         tools: model.capabilities.tools === true,
-        vision: model.capabilities.vision === true,
+        ...(model.capabilityProfile?.["tools.parallel"]?.status === "supported"
+          ? { parallelToolCalls: true }
+          : {}),
+        vision: model.capabilities.vision !== false,
         streaming: model.capabilities.streaming !== false,
       },
       ...(model.capabilityProfile ? { capabilityProfile: model.capabilityProfile } : {}),
@@ -3192,6 +3196,7 @@ function getModelCatalogStore() {
 export async function listCustomModels() {
   const store = getModelCatalogStore();
   await ensureProviderDefaultModels(store);
+  await ensureBundledModelCatalog(store);
   return filterModelCatalogBindings(
     await store.load(),
     await loadKnownAccountKeys(),
@@ -3256,7 +3261,10 @@ export async function discoverAccountModels(envName: string, accountName: string
       capabilities: {
         reasoning: model.capabilities.reasoning === true,
         tools: model.capabilities.tools === true,
-        vision: model.capabilities.vision === true,
+        ...(model.capabilityProfile?.["tools.parallel"]?.status === "supported"
+          ? { parallelToolCalls: true }
+          : {}),
+        vision: model.capabilities.vision !== false,
         streaming: model.capabilities.streaming !== false,
       },
       source: model.source ?? "discovery",
@@ -3470,7 +3478,10 @@ export async function setAccountModelBindings(accountKey: string, modelIds: stri
     const store = getModelCatalogStore();
     const currentCatalog = await store.load();
     const discovery = currentCatalog.accountModelDiscoveries?.[accountKey];
-    if (discovery?.state === "failed" || (discovery?.state === "ready" && !discovery.models.some((model) => model.status === "available"))) {
+    const hasBundledSelection = modelIds.some((modelId) => (
+      currentCatalog.models.find((model) => model.id === modelId)?.entry.model_source === "bundled"
+    ));
+    if (hasBundledSelection || discovery?.state === "failed" || (discovery?.state === "ready" && !discovery.models.some((model) => model.status === "available"))) {
       const separator = accountKey.indexOf("/");
       if (separator < 1 || separator === accountKey.length - 1) throw new Error(`Invalid account model key '${accountKey}'`);
       const envName = accountKey.slice(0, separator);
@@ -3480,6 +3491,13 @@ export async function setAccountModelBindings(accountKey: string, modelIds: stri
       const environment = state.envs[envName];
       const account = environment?.accounts[accountName];
       if (!account) throw new Error(`Account '${envName}/${accountName}' not found`);
+      // Codex subscriptions already receive the bundled catalog natively. Keep
+      // their explicit selection as-is; API-key accounts need a provider
+      // qualified alias so the same bundled model cannot collide with the
+      // official model slug in the gateway catalog.
+      if (hasBundledSelection && account.authMode === "auth") {
+        return store.setAccountBindings(accountKey, modelIds);
+      }
       const catalogIdentity = resolveCatalogProviderIdentity(environment!, accountName, account);
       return store.setAccountBindingsFromCatalog({
         accountKey,
@@ -4861,6 +4879,36 @@ async function ensureProviderDefaultModels(
   }
 
   return modelIds;
+}
+
+/**
+ * Keep the installed Codex App's bundled models available as global picker
+ * candidates.  These records intentionally have no provider model key: they
+ * describe the App's supported model surface and are rebound to the current
+ * account provider when selected.
+ */
+async function ensureBundledModelCatalog(
+  store: ReturnType<typeof getModelCatalogStore>,
+): Promise<void> {
+  const bundled = await loadBundledCatalogForCurrentInstall();
+  if (!bundled?.models.length) return;
+
+  const snapshot = await store.load();
+  const existingBySlug = new Map(snapshot.models.map((model) => [model.entry.slug, model]));
+  for (const rawEntry of bundled.models) {
+    if (rawEntry.supported_in_api === false) continue;
+    const entry = normalizeBundledModelEntry(rawEntry);
+    const existing = existingBySlug.get(entry.slug);
+    if (!existing) {
+      const created = await store.saveModel({ entry });
+      existingBySlug.set(created.entry.slug, created);
+      continue;
+    }
+    if (existing.entry.model_source === "bundled") {
+      const updated = await store.saveModel({ id: existing.id, entry });
+      existingBySlug.set(updated.entry.slug, updated);
+    }
+  }
 }
 
 async function ensureIndependentModelSlug(homePath: string, slug: string): Promise<void> {

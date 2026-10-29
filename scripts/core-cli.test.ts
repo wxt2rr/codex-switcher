@@ -159,7 +159,8 @@ test("core-cli applies pointer and target-home updates for both targets", async 
 
     const projectConfig = await readFile(join(projectHome, "config.toml"), "utf8");
     assert.match(projectConfig, /preferred_auth_method = "apikey"/);
-    assert.match(projectConfig, /openai_base_url = "https:\/\/project\.example\.test\/v1"/);
+    assert.match(projectConfig, /model_provider = "codex_switcher_router"/);
+    assert.match(projectConfig, /base_url = "https:\/\/project\.example\.test\/v1"/);
 
     const updatedRuntime = await runCoreCli(
       ["runtime-update", "project", "personal", "https://runtime.example.test/v1"],
@@ -168,7 +169,7 @@ test("core-cli applies pointer and target-home updates for both targets", async 
     assert.equal(updatedRuntime.stdout.trim(), "project/personal https://runtime.example.test/v1");
 
     const updatedConfig = await readFile(join(projectHome, "config.toml"), "utf8");
-    assert.match(updatedConfig, /openai_base_url = "https:\/\/runtime\.example\.test\/v1"/);
+    assert.match(updatedConfig, /base_url = "https:\/\/runtime\.example\.test\/v1"/);
 
     const switchedBack = await runCoreCli(["account-use", "default", "personal", "both"], env);
     assert.equal(switchedBack.stdout.trim(), "cli=default/personal app=default/personal");
@@ -412,7 +413,8 @@ test("executeAccountUse updates target pointers and target home for one target",
 
     const config = await readFile(join(projectHome, "config.toml"), "utf8");
     assert.match(config, /preferred_auth_method = "apikey"/);
-    assert.match(config, /openai_base_url = "https:\/\/project\.example\.test\/v1"/);
+    assert.match(config, /model_provider = "codex_switcher_router"/);
+    assert.match(config, /base_url = "https:\/\/project\.example\.test\/v1"/);
   } finally {
     if (previousEnv.CODEX_SWITCHER_STATE_DIR === undefined) {
       delete process.env.CODEX_SWITCHER_STATE_DIR;

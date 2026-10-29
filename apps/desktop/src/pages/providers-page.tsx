@@ -85,6 +85,7 @@ export function ProvidersPage({
         search={query}
         searchPlaceholder={zh ? "搜索服务商" : "Search providers"}
         onSearchChange={setQuery}
+        layout="stacked"
         actions={(
           <span className="hidden text-[11px] text-slate-400 xl:inline">{visibleItems.length} / {items.length}</span>
         )}

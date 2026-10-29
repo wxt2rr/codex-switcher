@@ -10,6 +10,11 @@ const ignoredDirectories = new Set([
   resolve(repoRoot, "node_modules"),
   resolve(repoRoot, "apps/desktop/release"),
 ]);
+const allowedAttributionFiles = new Set([
+  resolve(repoRoot, ".wxt/csw-our-free-model-managed-plugin.md"),
+  resolve(repoRoot, "plugins/csw-our-free-model/README.md"),
+  resolve(repoRoot, "plugins/csw-our-free-model/OFM-NOTICE.md"),
+]);
 
 async function collectFiles(directory: string): Promise<string[]> {
   const files: string[] = [];
@@ -31,6 +36,7 @@ async function collectFiles(directory: string): Promise<string[]> {
 test("submission files do not contain prohibited external terminology", async () => {
   const matches: string[] = [];
   for (const path of await collectFiles(repoRoot)) {
+    if (allowedAttributionFiles.has(resolve(path))) continue;
     const content = await readFile(path);
     if (content.includes(prohibitedSequence)) {
       matches.push(relative(repoRoot, path));

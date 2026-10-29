@@ -7,7 +7,7 @@ export type ConversionResponseEvent =
   | { type: "message_start"; responseId: string; role: "assistant" }
   | { type: "text_delta"; text: string }
   | { type: "reasoning_delta"; text: string }
-  | { type: "tool_call_delta"; callId: string; name?: string; argumentsDelta?: string }
+  | { type: "tool_call_delta"; callId: string; name?: string; argumentsDelta?: string; index?: number }
   | { type: "usage"; usage: ConversionUsage }
   | { type: "error"; code: string; message: string; retryable: boolean }
   | { type: "message_end"; reason?: string };
@@ -17,8 +17,29 @@ export interface ConvertedResponse {
   text: string;
   reasoning: string;
   toolCalls: Array<{ callId: string; name?: string; arguments: string }>;
+  invalidToolCalls: number;
   usage: ConversionUsage;
   endReason?: string;
+}
+
+/**
+ * Chat-compatible providers are allowed to stream tool arguments in arbitrary
+ * fragments.  Never expose an empty or malformed argument string to a
+ * Responses consumer: Codex parses this field as a JSON value and reports
+ * `EOF while parsing a value` for an empty string.
+ */
+function normalizeToolArguments(value: JsonValue | undefined): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      return isObject(parsed as JsonValue) ? trimmed : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return isObject(value) ? JSON.stringify(value) : undefined;
 }
 
 export function decodeResponseEvents(protocol: GatewayProtocol, body: JsonObject): ConversionResponseEvent[] {
@@ -49,6 +70,14 @@ export function encodeResponseEvents(protocol: GatewayProtocol, events: readonly
   if (error) return encodeError(protocol, error);
   const response = collectResponse(events, metadata);
   const model = metadata.upstreamModelName ?? metadata.originModelName;
+  if (response.invalidToolCalls > 0 && response.toolCalls.length === 0) {
+    return encodeError(protocol, {
+      type: "error",
+      code: "upstream_invalid_tool_call",
+      message: `Upstream finished with '${response.endReason ?? "unknown"}' but returned no valid tool call arguments (${response.invalidToolCalls} invalid call${response.invalidToolCalls === 1 ? "" : "s"})`,
+      retryable: false,
+    });
+  }
   if (protocol === "responses") {
     const output: JsonValue[] = [];
     if (response.text) output.push({ type: "message", role: "assistant", content: [{ type: "output_text", text: response.text }] });
@@ -101,7 +130,8 @@ function decodeResponses(body: JsonObject, events: ConversionResponseEvent[]): v
     return;
   }
   if (eventType === "response.function_call_arguments.delta") {
-    events.push({ type: "tool_call_delta", callId: asString(body.call_id) ?? asString(body.item_id) ?? "call", name: asString(body.name), argumentsDelta: asString(body.delta) ?? "" });
+    const name = asString(body.name);
+    events.push({ type: "tool_call_delta", callId: asString(body.call_id) ?? asString(body.item_id) ?? (name ? `name:${name}` : "call"), name, argumentsDelta: asString(body.delta) ?? "" });
     return;
   }
   if (eventType === "response.completed" || eventType === "response.incomplete") {
@@ -124,7 +154,8 @@ function decodeResponses(body: JsonObject, events: ConversionResponseEvent[]): v
         if (isObject(part) && asString(part.text ?? part.reasoning_text)) events.push({ type: "reasoning_delta", text: asString(part.text ?? part.reasoning_text) ?? "" });
       }
     } else if (type === "function_call") {
-      events.push({ type: "tool_call_delta", callId: asString(item.call_id) ?? "call", name: asString(item.name), argumentsDelta: asString(item.arguments) ?? "" });
+      const name = asString(item.name);
+      events.push({ type: "tool_call_delta", callId: asString(item.call_id) ?? asString(item.id) ?? (name ? `name:${name}` : "call"), name, argumentsDelta: normalizeToolArguments(item.arguments) ?? "" });
     }
   }
   events.push({ type: "message_end", reason: asString(body.status) === "incomplete" ? "incomplete" : undefined });
@@ -137,7 +168,18 @@ function decodeChat(body: JsonObject, events: ConversionResponseEvent[]): void {
     decodeContentPart(message.content, events);
     if (asString(message.reasoning_content)) events.push({ type: "reasoning_delta", text: asString(message.reasoning_content) ?? "" });
     if (asString(message.reasoning)) events.push({ type: "reasoning_delta", text: asString(message.reasoning) ?? "" });
-    for (const call of array(message.tool_calls)) if (isObject(call) && isObject(call.function)) events.push({ type: "tool_call_delta", callId: asString(call.id) ?? "call", name: asString(call.function.name), argumentsDelta: asString(call.function.arguments) ?? "" });
+    for (const call of array(message.tool_calls)) if (isObject(call)) {
+      // Standard Chat nests these fields under `function`, while some
+      // OpenAI-compatible providers put `name`/`arguments` on the call itself.
+      const fn = isObject(call.function) ? call.function : call;
+      const name = asString(fn.name);
+      const index = typeof call.index === "number" && Number.isFinite(call.index) ? call.index : undefined;
+      events.push({ type: "tool_call_delta", callId: asString(call.id) ?? (index !== undefined ? `index:${index}` : undefined) ?? (name ? `name:${name}` : "call"), name, argumentsDelta: argumentDelta(fn.arguments), ...(index !== undefined ? { index } : {}) });
+    }
+    if (isObject(message.function_call)) {
+      const name = asString(message.function_call.name);
+      events.push({ type: "tool_call_delta", callId: asString(message.function_call.id) ?? (name ? `name:${name}` : "call"), name, argumentsDelta: argumentDelta(message.function_call.arguments) });
+    }
   }
   const finish = choice ? asString(choice.finish_reason) : undefined;
   events.push({ type: "message_end", ...(finish ? { reason: finish } : {}) });
@@ -171,7 +213,7 @@ function decodeAnthropic(body: JsonObject, events: ConversionResponseEvent[]): v
     if (!isObject(part)) continue;
     const type = asString(part.type);
     if (type === "thinking") events.push({ type: "reasoning_delta", text: asString(part.thinking) ?? "" });
-    else if (type === "tool_use") events.push({ type: "tool_call_delta", callId: asString(part.id) ?? "call", name: asString(part.name), argumentsDelta: JSON.stringify(part.input ?? {}) });
+    else if (type === "tool_use") events.push({ type: "tool_call_delta", callId: asString(part.id) ?? "call", name: asString(part.name), argumentsDelta: normalizeToolArguments(part.input) ?? "" });
     else decodeContentPart(part, events);
   }
   events.push({ type: "message_end", ...(asString(body.stop_reason) ? { reason: asString(body.stop_reason) } : {}) });
@@ -183,7 +225,10 @@ function decodeGemini(body: JsonObject, events: ConversionResponseEvent[]): void
   for (const part of content ? array(content.parts) : []) {
     if (!isObject(part)) continue;
     if (part.thought === true) events.push({ type: "reasoning_delta", text: asString(part.text) ?? "" });
-    else if (isObject(part.functionCall)) events.push({ type: "tool_call_delta", callId: asString(part.functionCall.id) ?? "call", name: asString(part.functionCall.name), argumentsDelta: JSON.stringify(part.functionCall.args ?? {}) });
+    else if (isObject(part.functionCall)) {
+      const name = asString(part.functionCall.name);
+      events.push({ type: "tool_call_delta", callId: asString(part.functionCall.id) ?? (name ? `name:${name}` : "call"), name, argumentsDelta: normalizeToolArguments(part.functionCall.args) ?? "" });
+    }
     else decodeContentPart(part, events);
   }
   events.push({ type: "message_end", ...(candidate && asString(candidate.finishReason) ? { reason: asString(candidate.finishReason) } : {}) });
@@ -199,7 +244,7 @@ function decodeContentPart(value: JsonValue | undefined, events: ConversionRespo
 
 function collectResponse(events: readonly ConversionResponseEvent[], metadata: ConversionMetadata): ConvertedResponse {
   const first = events.find((event): event is Extract<ConversionResponseEvent, { type: "message_start" }> => event.type === "message_start");
-  const result: ConvertedResponse = { responseId: first?.responseId ?? metadata.requestId ?? "response", text: "", reasoning: "", toolCalls: [], usage: { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } };
+  const result: ConvertedResponse = { responseId: first?.responseId ?? metadata.requestId ?? "response", text: "", reasoning: "", toolCalls: [], invalidToolCalls: 0, usage: { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } };
   const calls = new Map<string, { callId: string; name?: string; arguments: string }>();
   for (const event of events) {
     if (event.type === "text_delta") result.text += event.text;
@@ -208,7 +253,14 @@ function collectResponse(events: readonly ConversionResponseEvent[], metadata: C
     else if (event.type === "usage") result.usage = event.usage;
     else if (event.type === "message_end") result.endReason = event.reason;
   }
-  result.toolCalls = [...calls.values()];
+  result.toolCalls = [...calls.values()].flatMap((call) => {
+    const argumentsText = normalizeToolArguments(call.arguments);
+    if (!call.name || !argumentsText) {
+      result.invalidToolCalls += 1;
+      return [];
+    }
+    return [{ ...call, arguments: argumentsText }];
+  });
   return result;
 }
 
@@ -219,6 +271,10 @@ function encodeError(protocol: GatewayProtocol, error: Extract<ConversionRespons
 }
 
 function parseJsonObject(value: string): JsonObject { try { const parsed: unknown = JSON.parse(value); return isObject(parsed as JsonValue) ? parsed as JsonObject : {}; } catch { return {}; } }
+function argumentDelta(value: JsonValue | undefined): string {
+  if (typeof value === "string") return value;
+  return isObject(value) ? JSON.stringify(value) : "";
+}
 function responseId(protocol: GatewayProtocol, body: JsonObject): string {
   if (isObject(body.response)) return asString(body.response.id) ?? asString(body.id) ?? `${protocol}-response`;
   return asString(body.id) ?? asString(body.responseId) ?? `${protocol}-response`;

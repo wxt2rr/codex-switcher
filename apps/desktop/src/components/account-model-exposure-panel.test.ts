@@ -72,6 +72,41 @@ test("account model candidates do not leak another account's discovered models",
   assert.deepEqual(candidates.map((candidate) => candidate.id).sort(), ["chatgpt", "manual"]);
 });
 
+test("Codex bundled models are available to every account without leaking discovery", () => {
+  const snapshot: ModelCatalogSnapshot = {
+    version: 1,
+    models: [
+      model("bundled", "gpt-6.1-sol", {
+        provider_id: "codex-bundled",
+        provider_display_name: "Codex 内置",
+        model_source: "bundled",
+      }),
+      model("other-account", "custom-openai:other-model", {
+        provider_id: "custom-openai:other.example",
+        provider_model_key: "custom-openai:other.example:other-model",
+        model_source: "discovered",
+      }),
+    ],
+    accountBindings: {},
+    accountModelDiscoveries: {
+      "default/ckt-aicode": {
+        providerId: "custom-openai:aicode.ckt.cn",
+        state: "ready",
+        models: [],
+      },
+    },
+  };
+
+  assert.deepEqual(
+    buildAccountModelCandidates(snapshot, "default/ckt-aicode", []).map((candidate) => candidate.id),
+    ["bundled"],
+  );
+  assert.equal(
+    providerIdForAccountModel(snapshot.models[0]!, new Map()),
+    "codex-bundled",
+  );
+});
+
 test("provider classification trusts the current account discovery snapshot", () => {
   const discovered = model("model", "openai:renamed", {
     provider_id: "openai",

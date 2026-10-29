@@ -16,6 +16,7 @@ export type ConversionResponseEvent = {
     callId: string;
     name?: string;
     argumentsDelta?: string;
+    index?: number;
 } | {
     type: "usage";
     usage: ConversionUsage;
@@ -37,6 +38,7 @@ export interface ConvertedResponse {
         name?: string;
         arguments: string;
     }>;
+    invalidToolCalls: number;
     usage: ConversionUsage;
     endReason?: string;
 }

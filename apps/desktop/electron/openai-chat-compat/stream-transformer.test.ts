@@ -35,6 +35,83 @@ test("translates text, reasoning, interleaved tools and usage into ordered Respo
   assert.equal(completedCalls, 2);
 });
 
+test("buffers Chat tool arguments and drops empty or malformed calls", async () => {
+  let completedCalls = 0;
+  const events = await readEvents(transformChatStream({
+    model: "model", registry: buildToolRegistry({}),
+    onCompleted: ({ calls }) => { completedCalls = calls.length; },
+    body: upstream([
+      { choices: [{ delta: { tool_calls: [
+        { index: 0, id: "empty", function: { name: "empty", arguments: "" } },
+        { index: 1, id: "bad", function: { name: "bad", arguments: "{oops" } },
+        { index: 2, id: "valid", function: { name: "valid", arguments: "{" } },
+      ] }, finish_reason: null }] },
+      { choices: [{ delta: { tool_calls: [{ index: 2, function: { arguments: "}" } }] }, finish_reason: "tool_calls" }] },
+      "[DONE]",
+    ]),
+  }));
+  const serialized = JSON.stringify(events);
+  assert.equal(serialized.includes('"call_id":"empty"'), false);
+  assert.equal(serialized.includes('"call_id":"bad"'), false);
+  assert.equal(serialized.includes('"call_id":"valid"'), true);
+  assert.equal(serialized.includes('"arguments":""'), false);
+  assert.equal(completedCalls, 1);
+});
+
+test("fails instead of silently completing when tool_calls has no valid call", async () => {
+  const events = await readEvents(transformChatStream({
+    model: "model", registry: buildToolRegistry({ tools: [{ type: "function", name: "read" }] }),
+    body: upstream([
+      { choices: [{ delta: { content: "我来看一下这个项目的结构和说明文件。", tool_calls: [{ index: 0, id: "broken", function: { name: "read", arguments: "" } }] }, finish_reason: "tool_calls" }] },
+      "[DONE]",
+    ]),
+  }));
+  assert.equal(events.at(-1)?.type, "response.failed");
+  assert.equal(events.at(-1)?.response.error.code, "upstream_protocol");
+  assert.match(events.at(-1)?.response.error.message, /no valid tool call arguments/);
+});
+
+test("accepts object arguments and plain text for custom tools in a stream", async () => {
+  let completedCalls = 0;
+  const events = await readEvents(transformChatStream({
+    model: "model", registry: buildToolRegistry({ tools: [{ type: "web_search" }] }),
+    onCompleted: ({ calls }) => { completedCalls = calls.length; },
+    body: upstream([
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: "search", function: { name: "web_search", arguments: "search project docs" } }] }, finish_reason: "tool_calls" }] },
+      "[DONE]",
+    ]),
+  }));
+  assert.equal(events.at(-1)?.type, "response.completed");
+  assert.equal(completedCalls, 1);
+  assert.equal(events.at(-1)?.response.output.some((item: { type?: string; arguments?: string }) => item.type === "function_call" && item.arguments === '{"input":"search project docs"}'), true);
+});
+
+test("accepts provider tool-call deltas with top-level name and arguments", async () => {
+  let completedCalls = 0;
+  const events = await readEvents(transformChatStream({
+    model: "model", registry: buildToolRegistry({ tools: [{ type: "function", name: "read" }] }),
+    onCompleted: ({ calls }) => { completedCalls = calls.length; },
+    body: upstream([
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: "top-level", name: "read", arguments: "{\"path\":\"README.md\"}" }] }, finish_reason: "tool_calls" }] },
+      "[DONE]",
+    ]),
+  }));
+  assert.equal(events.at(-1)?.type, "response.completed");
+  assert.equal(completedCalls, 1);
+  assert.equal(events.at(-1)?.response.output.some((item: { type?: string; arguments?: string }) => item.type === "function_call" && item.arguments === '{"path":"README.md"}'), true);
+});
+
+test("does not treat an empty tool_calls array as a tool-call attempt", async () => {
+  const events = await readEvents(transformChatStream({
+    model: "model", registry: buildToolRegistry({}),
+    body: upstream([
+      { choices: [{ delta: { content: "answer", tool_calls: [] }, finish_reason: "stop" }] },
+      "[DONE]",
+    ]),
+  }));
+  assert.equal(events.at(-1)?.type, "response.completed");
+});
+
 test("malformed upstream JSON produces a failed event", async () => {
   const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode("data: {bad}\n\n")); controller.close(); } });
   const events = await readEvents(transformChatStream({ model: "model", registry: buildToolRegistry({}), body }));

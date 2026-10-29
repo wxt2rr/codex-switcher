@@ -98,6 +98,11 @@ export function knownCapabilityProfile(context) {
     if ((provider === "openai" || provider === "chatgpt" || provider === "codex") && endpoint.includes("api.openai.com") && context.protocol === "responses") {
         result["tools.hosted.web_search"] = { status: "supported", source: "preset" };
     }
+    if (/(moonshot\.cn|moonshot\.ai|kimi\.com)/.test(endpoint) && context.protocol === "chat_completions") {
+        result["tools.strict_pairing"] = { status: "supported", source: "preset", evidence: "Kimi validates assistant/tool adjacency and call order strictly" };
+        result["tools.requires_name"] = { status: "supported", source: "preset", evidence: "Kimi resolves tool results using preceding call metadata" };
+        result["schema.ref_siblings"] = { status: "supported", source: "preset", evidence: "Gateway applies the Moonshot allOf compatibility rewrite" };
+    }
     return result;
 }
 export function mergeCapabilityProfiles(...profiles) {
@@ -128,11 +133,16 @@ export function classifyCapabilityMismatch(input) {
         ["tools.hosted.computer_use", [/computer[_ -]?use|computer tool|mouse|keyboard/]],
         ["tools.parallel", [/parallel.*tool|multiple tool|too many tool calls/]],
         ["tools.function", [/function.*tool|tool.*function|tool_calls|invalid tool/]],
+        ["tools.strict_pairing", [/tool_call_id.*not found|preceding.*tool|tool message.*follow|unresolvable tool/]],
+        ["schema.ref_siblings", [/\$ref.*sibling|moonshot.*schema|json schema.*ref/]],
     ];
     for (const [capability, patterns] of explicit) {
         if (requested.includes(capability) && patterns.some((pattern) => pattern.test(message))) {
             return { capability, status: "unsupported", source: "observed", statusCode: status, evidence };
         }
+    }
+    if (requested.includes("tools.function") && /tool_call_id.*not found|preceding.*tool|tool message.*follow|unresolvable tool/.test(message)) {
+        return { capability: "tools.strict_pairing", status: "unsupported", source: "observed", statusCode: status, evidence };
     }
     // Generic schema errors are only useful when the request contains one
     // Hosted Tool. With several hosted tools present, guessing would poison the
