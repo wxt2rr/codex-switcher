@@ -140,7 +140,7 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.match(accounts, /onImportProviderCredential/);
   assert.match(accounts, /服务商凭据|Provider credential/);
   assert.match(desktopCopy, /independentModelNotSet: "未设置独立模型"/);
-  assert.doesNotMatch(accounts, /CircleHelp/);
+  assert.match(accounts, /CircleHelp/);
   assert.doesNotMatch(accounts, /function TooltipHint/);
   assert.doesNotMatch(accounts, /getModelProviderHint/);
   assert.match(accounts, /bg-\[#afc8b4\]/);
@@ -331,7 +331,7 @@ test("desktop motion is restrained and respects reduced-motion preferences", () 
 });
 
 test("tooltips use a portal with delayed hover intent and collision handling", () => {
-  assert.doesNotMatch(accounts, /<Tooltip/);
+  assert.match(accounts, /<Tooltip/);
   assert.match(desktopShell, /<TooltipProvider>/);
   assert.match(tooltip, /TooltipPrimitive\.Portal/);
   assert.match(tooltip, /delayDuration=\{420\}/);
