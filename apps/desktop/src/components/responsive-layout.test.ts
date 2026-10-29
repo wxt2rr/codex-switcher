@@ -202,7 +202,7 @@ test("selected controls share the green theme treatment", () => {
   assert.match(css, /\.management-list-card:hover\s*\{[^}]*border-color:\s*var\(--selected-border-color\)/s);
   assert.match(primitives, /active\s*\?\s*"ui-selected-control"/);
   assert.match(accounts, /active \? "ui-selected-control"/);
-  assert.match(desktopShell, /\? "bg-\[#f1f3f5\] text-neutral-950 dark:bg-\[#1b2129\] dark:text-white"/);
+  assert.match(desktopShell, /\? "bg-\[#f1f3f5\] text-foreground dark:bg-\[#1b2129\] dark:text-white"/);
   assert.doesNotMatch(desktopShell, /ui-selected-control/);
   assert.match(environments, /\? "ui-selected-control rounded-lg border px-3 py-1\.5 text-xs font-semibold"/);
   assert.match(models, /mode === "form" \? "ui-selected-control"/);
@@ -237,7 +237,7 @@ test("all management record cards opt into the single-row responsive contract", 
   assert.match(environments, /ListStack/);
   assert.match(environments, /<ListStack>/);
   assert.match(environments, /title=\{env\.path\}/);
-  assert.match(environments, /font-mono text-\[11px\] text-slate-500/);
+  assert.match(environments, /font-mono text-\[11px\] text-muted-foreground/);
   assert.doesNotMatch(environments, /!rounded-none/);
   assert.doesNotMatch(environments, /!shadow-none/);
   assert.doesNotMatch(environments, /index % 2 \? "bg-\[#fafbfc\]" : "bg-white"/);
@@ -471,17 +471,14 @@ test("system tools use clear navigation and page naming", () => {
 });
 
 test("usage analytics uses semantic colors and destructive actions stay red", () => {
-  assert.match(usage, /text-blue-600/);
-  assert.match(usage, /text-emerald-600/);
-  assert.match(usage, /text-amber-600/);
-  assert.match(usage, /text-cyan-600/);
+  assert.match(usage, /text-primary/);
+  assert.match(usage, /text-warm-600/);
   assert.match(usage, /text-violet-600/);
   assert.match(environments, /variant="destructive"/);
-  assert.match(accounts, /text-rose-600 hover:bg-rose-50/);
+  assert.match(accounts, /text-destructive hover:bg-destructive\/10/);
   assert.match(models, /tone="danger"/);
-  assert.match(primitives, /bg-emerald-50 text-emerald-700/);
-  assert.match(primitives, /bg-emerald-50 text-emerald-700/);
-  assert.match(primitives, /bg-amber-50 text-amber-700/);
+  assert.match(primitives, /bg-primary\/10 text-primary/);
+  assert.match(primitives, /bg-warm-50 text-warm-600/);
   assert.match(css, /--color-rose-600: oklch\(0\.586 0\.253 17\.585\)/);
   assert.match(css, /--primary: var\(--cs-primary\)/);
 });
@@ -500,14 +497,14 @@ test("usage visualizations draw in once without replaying on background refresh"
 });
 
 test("environment route status uses a compact semantic indicator", () => {
-  assert.match(environments, /runtime\.tone === "success" \? "bg-emerald-500"/);
-  assert.match(environments, /runtime\.tone === "warn" \? "bg-amber-500"/);
+  assert.match(environments, /runtime\.tone === "success" \? "bg-primary\/100"/);
+  assert.match(environments, /runtime\.tone === "warn" \? "bg-warm-500"/);
   assert.match(environments, /网关已配置，服务未运行/);
   assert.match(environments, /gatewayIsRunning/);
-  assert.match(environments, /border-emerald-200 bg-emerald-50 text-emerald-700/);
+  assert.match(environments, /border-primary\/30 bg-primary\/10 text-primary/);
   assert.match(environments, /账号池 · \$\{poolStatus\.readyMembers\}\/\$\{poolStatus\.members\.length\}/);
   assert.match(environments, /aria-pressed=\{isGatewayEnabled\}/);
-  assert.match(accounts, /truncate text-\[10px\] font-medium text-emerald-700/);
+  assert.match(accounts, /truncate text-\[10px\] font-medium text-primary/);
 });
 
 test("usage Base URLs open a filterable paginated request details view", () => {
