@@ -84,6 +84,7 @@ import {
   clearCodexToolPath,
   toggleEnvironmentRoute,
   toggleEnvironmentGateway,
+  toggleEnvironmentLocalAgentAccess,
   listAccountPools,
   saveAccountPool,
   loadUsageSnapshot,
@@ -758,6 +759,8 @@ function registerHandlers() {
     toggleEnvironmentRoute(envName, enabled));
   ipcMain.handle("desktop:toggleEnvironmentGateway", (_event: IpcMainInvokeEvent, envName: string, enabled: boolean) =>
     toggleEnvironmentGateway(envName, enabled));
+  ipcMain.handle("desktop:toggleEnvironmentLocalAgentAccess", (_event: IpcMainInvokeEvent, envName: string, enabled: boolean) =>
+    toggleEnvironmentLocalAgentAccess(envName, enabled));
   ipcMain.handle("desktop:listAccountPools", () => listAccountPools());
   ipcMain.handle("desktop:saveAccountPool", (_event: IpcMainInvokeEvent, input) => saveAccountPool(input));
   ipcMain.handle("desktop:toggleAccountCompatibility", (_event: IpcMainInvokeEvent, input) =>

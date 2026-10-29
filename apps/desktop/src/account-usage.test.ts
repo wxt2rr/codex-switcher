@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   formatUsageResetHint,
+  formatUsageResetTime,
   getUsageProgressClass,
   localizeUsageMetricLabel,
   parseUsageMetric,
@@ -60,4 +61,22 @@ test("formatUsageResetHint uses compact hours and day-hour countdowns", () => {
   assert.equal(formatUsageResetHint("07-10 14:30", "zh", now), "4h 后重置");
   assert.equal(formatUsageResetHint("07-17 09:30", "zh", now), "6d23h 后重置");
   assert.equal(formatUsageResetHint("07-10 14:30", "en", now), "Resets in 4h");
+});
+
+test("formatUsageResetTime shows the exact local reset date", () => {
+  const now = new Date(2026, 6, 10, 10, 0);
+
+  assert.equal(formatUsageResetTime("07-10 14:30", "zh", now), "2026年7月10日 14:30");
+  assert.equal(formatUsageResetTime("07-10 14:30", "en", now), "Jul 10, 2026, 2:30 PM");
+  assert.equal(formatUsageResetTime("07-10 14:30", "ja", now), "2026年7月10日 14:30");
+});
+
+test("formatUsageResetTime resolves a passed reset to the next year", () => {
+  const now = new Date(2026, 6, 10, 15, 0);
+  assert.equal(formatUsageResetTime("07-10 14:30", "zh", now), "2027年7月10日 14:30");
+});
+
+test("formatUsageResetTime keeps an unsupported timestamp readable", () => {
+  assert.equal(formatUsageResetTime("unknown", "zh"), "unknown");
+  assert.equal(formatUsageResetTime(undefined, "zh"), undefined);
 });

@@ -108,6 +108,8 @@ export interface EnvironmentGateway {
   defaultRouteId?: string;
   poolId?: string;
   quota?: GatewayQuotaPolicy;
+  /** Enable the authenticated local `/v1/*` surface for other Agent clients. */
+  localAgentAccessEnabled?: boolean;
   enabled: boolean;
   createdAt: number;
   updatedAt: number;

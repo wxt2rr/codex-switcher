@@ -540,6 +540,27 @@ export function App() {
     finally { setBusy(false); }
   }
 
+  async function handleToggleEnvironmentLocalAgentAccess(envName: string, enabled: boolean) {
+    setBusy(true);
+    try {
+      const next = await bridge.toggleEnvironmentLocalAgentAccess(envName, enabled);
+      setRouteStatuses((current) => [...current.filter((item) => item.envName !== envName), next]);
+      setSuccessMessage(language === "zh"
+        ? `环境 ${envName} 的本机 Agent 接入已${enabled ? "开启" : "关闭"}`
+        : `Local Agent access ${enabled ? "enabled" : "disabled"} for ${envName}`);
+    } catch (error) {
+      setErrorMessage(error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleCopyLocalAgentValue(value: string, label: string) {
+    void bridge.writeClipboardText(value)
+      .then(() => setSuccessMessage(language === "zh" ? `${label} 已复制` : `${label} copied`))
+      .catch(setErrorMessage);
+  }
+
   async function handleSaveAccountPool(input: AccountPoolInput) {
     setBusy(true);
     try {
@@ -1390,6 +1411,8 @@ export function App() {
           onDeleteEnv={() => void handleDeleteEnv()}
           routeStatuses={routeStatuses}
           onToggleGateway={handleToggleEnvironmentGateway}
+          onToggleLocalAgentAccess={handleToggleEnvironmentLocalAgentAccess}
+          onCopyLocalAgentValue={handleCopyLocalAgentValue}
           accountPools={accountPools}
           onSaveAccountPool={handleSaveAccountPool}
         />

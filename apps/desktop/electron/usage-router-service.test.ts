@@ -675,6 +675,69 @@ test("environment gateway persists, selects an account route, and survives route
   await new Promise<void>((resolve) => upstream.close(() => resolve()));
 });
 
+test("local Agent surface exposes authenticated models and v1 protocol aliases without changing the Codex gateway", async () => {
+  let receivedPath = "";
+  let receivedAuthorization = "";
+  const upstream = createServer(async (request, response) => {
+    receivedPath = request.url ?? "";
+    receivedAuthorization = String(request.headers.authorization ?? "");
+    for await (const _chunk of request) { /* drain */ }
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ id: "local-agent-response", model: "upstream-model", output: [] }));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const address = upstream.address(); assert(address && typeof address !== "string");
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-local-agent-") );
+  const route = { routeId: "route-local-agent", envName: "work", accountName: "login",
+    upstreamBaseUrl: `http://127.0.0.1:${address.port}/v1`, originalBaseUrl: "default",
+    protocol: "responses" as const, exposedModelId: "gpt-local", upstreamModel: "upstream-model", reasoningProfile: "auto" as const,
+    enabled: true, createdAt: Date.now(), updatedAt: Date.now() };
+  const gateway = { gatewayId: "gateway-local-agent", envName: "work", routeIds: [route.routeId],
+    routeGroups: { shared: { id: "shared", exposedModelId: "gpt-shared", routeIds: [route.routeId], strategy: "order", sessionPolicy: "auto", fallbackEnabled: true } },
+    defaultRouteId: route.routeId, localAgentAccessEnabled: true, enabled: true, createdAt: Date.now(), updatedAt: Date.now() };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  try {
+    const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+    try {
+      assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(route) })).status, 204);
+      assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}/secret`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ authMode: "none", localRouteToken: "internal-token" }) })).status, 204);
+      assert.equal((await fetch(`${service.origin}/admin/gateways`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway) })).status, 204);
+      assert.equal((await fetch(`${service.origin}/admin/gateways/${gateway.gatewayId}/access`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ enabled: true, token: "agent-token" }) })).status, 204);
+
+      const disabled = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/v1/models`);
+      assert.equal(disabled.status, 401);
+      const models = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/v1/models`, { headers: { authorization: "Bearer agent-token" } });
+      assert.equal(models.status, 200);
+      assert.deepEqual((await models.json()).data.map((item: { id: string }) => item.id), ["gpt-local", "gpt-shared"]);
+
+      const response = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/v1/responses`, {
+        method: "POST",
+        headers: { authorization: "Bearer agent-token", "content-type": "application/json" },
+        body: JSON.stringify({ model: "gpt-local", input: "hello" }),
+      });
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).id, "local-agent-response");
+      assert.equal(receivedPath, "/v1/responses");
+      assert.equal(receivedAuthorization, "");
+
+      const internal = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
+        method: "POST",
+        headers: { authorization: "Bearer internal-token", "content-type": "application/json" },
+        body: JSON.stringify({ model: "gpt-local", input: "hello" }),
+      });
+      assert.equal(internal.status, 200);
+      await internal.arrayBuffer();
+
+      assert.equal((await fetch(`${service.origin}/admin/gateways/${gateway.gatewayId}/access`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ enabled: false }) })).status, 204);
+      assert.equal((await fetch(`${service.origin}/gateways/${gateway.gatewayId}/v1/models`, { headers: { authorization: "Bearer agent-token" } })).status, 404);
+    } finally {
+      await service.close();
+    }
+  } finally {
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
+});
+
 test("environment gateway delegates an installed provider plugin request before contacting the route URL", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-gateway-provider-plugin-"));
   await installTestProviderPlugin(stateDir);

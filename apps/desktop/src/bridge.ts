@@ -626,6 +626,7 @@ export interface DesktopElectronApi {
   getEnvironmentRouteStatuses(): Promise<EnvironmentRouteStatus[]>;
   toggleEnvironmentRoute(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
   toggleEnvironmentGateway(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
+  toggleEnvironmentLocalAgentAccess(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
   listAccountPools(): Promise<AccountPoolStatus[]>;
   saveAccountPool(input: AccountPoolInput): Promise<AccountPoolStatus | null>;
   toggleAccountCompatibility(input: AccountCompatibilityRequest): Promise<AccountCompatibilityStatus>;
@@ -761,6 +762,7 @@ export interface DesktopBridge {
   getEnvironmentRouteStatuses(): Promise<EnvironmentRouteStatus[]>;
   toggleEnvironmentRoute(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
   toggleEnvironmentGateway(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
+  toggleEnvironmentLocalAgentAccess(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
   listAccountPools(): Promise<AccountPoolStatus[]>;
   saveAccountPool(input: AccountPoolInput): Promise<AccountPoolStatus | null>;
   toggleAccountCompatibility(input: AccountCompatibilityRequest): Promise<AccountCompatibilityStatus>;
@@ -892,6 +894,7 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       getEnvironmentRouteStatuses: unavailable,
       toggleEnvironmentRoute: unavailable,
       toggleEnvironmentGateway: unavailable,
+      toggleEnvironmentLocalAgentAccess: unavailable,
       listAccountPools: unavailable,
       saveAccountPool: unavailable,
       toggleAccountCompatibility: unavailable,
@@ -1157,6 +1160,19 @@ function createBrowserPreviewBridge(): DesktopBridge {
       gatewayEnabled: enabled,
       gatewayId: enabled ? `gateway-${envName}` : undefined,
       localGatewayBaseUrl: enabled ? "http://127.0.0.1:17832/gateways/preview" : undefined,
+    }),
+    toggleEnvironmentLocalAgentAccess: async (envName, enabled) => ({
+      envName,
+      enabled: true,
+      routedAccounts: 2,
+      port: 17832,
+      gatewayEnabled: true,
+      gatewayId: `gateway-${envName}`,
+      localGatewayBaseUrl: "http://127.0.0.1:17832/gateways/preview",
+      localAgentAccessEnabled: enabled,
+      localAgentBaseUrl: enabled ? "http://127.0.0.1:17832/gateways/preview/v1" : undefined,
+      localAgentModelsUrl: enabled ? "http://127.0.0.1:17832/gateways/preview/v1/models" : undefined,
+      localAgentAccessToken: enabled ? "preview-local-agent-token" : undefined,
     }),
     listAccountPools: async () => [],
     saveAccountPool: async () => null,

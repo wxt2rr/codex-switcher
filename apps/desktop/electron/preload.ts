@@ -169,6 +169,8 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     ipcRenderer.invoke("desktop:toggleEnvironmentRoute", envName, enabled),
   toggleEnvironmentGateway: (envName: string, enabled: boolean) =>
     ipcRenderer.invoke("desktop:toggleEnvironmentGateway", envName, enabled),
+  toggleEnvironmentLocalAgentAccess: (envName: string, enabled: boolean) =>
+    ipcRenderer.invoke("desktop:toggleEnvironmentLocalAgentAccess", envName, enabled),
   listAccountPools: () => ipcRenderer.invoke("desktop:listAccountPools"),
   saveAccountPool: (input: unknown) => ipcRenderer.invoke("desktop:saveAccountPool", input),
   toggleAccountCompatibility: (input: {

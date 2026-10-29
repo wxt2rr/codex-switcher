@@ -187,7 +187,7 @@ export interface ModelRequestPreviewInput {
   hydrateRouteSecret?: boolean;
 }
 
-interface RouteTokenFile { routes: Record<string, string>; pools?: Record<string, string>; }
+interface RouteTokenFile { routes: Record<string, string>; pools?: Record<string, string>; gateways?: Record<string, string>; }
 
 export interface EnvironmentRouteStatus {
   envName: string;
@@ -201,6 +201,10 @@ export interface EnvironmentRouteStatus {
   gatewayEnabled?: boolean;
   gatewayId?: string;
   localGatewayBaseUrl?: string;
+  localAgentAccessEnabled?: boolean;
+  localAgentBaseUrl?: string;
+  localAgentModelsUrl?: string;
+  localAgentAccessToken?: string;
 }
 
 export interface UsageRouterManagerOptions {
@@ -317,7 +321,7 @@ export class UsageRouterManager {
 
   private async readRouteTokens(): Promise<RouteTokenFile> {
     try { return JSON.parse(await readFile(this.tokenPath(), "utf8")) as RouteTokenFile; }
-    catch { return { routes: {}, pools: {} }; }
+    catch { return { routes: {}, pools: {}, gateways: {} }; }
   }
 
   private async writeRouteTokens(value: RouteTokenFile): Promise<void> {
@@ -689,20 +693,54 @@ export class UsageRouterManager {
     const routes = await this.listRoutes();
     const pools = await this.listAccountPools();
     const gateways = await this.adminWithState<EnvironmentGateway[]>(state, "/admin/gateways");
+    const tokens = await this.readRouteTokens();
+    const gatewayDetails = (gateway: EnvironmentGateway | undefined) => {
+      if (!gateway) return {};
+      const localGatewayBaseUrl = buildLocalGatewayBaseUrl(state.port, gateway.gatewayId);
+      return {
+        gatewayEnabled: true,
+        gatewayId: gateway.gatewayId,
+        localGatewayBaseUrl,
+        ...(gateway.localAgentAccessEnabled ? {
+          localAgentAccessEnabled: true,
+          localAgentBaseUrl: `${localGatewayBaseUrl}/v1`,
+          localAgentModelsUrl: `${localGatewayBaseUrl}/v1/models`,
+          localAgentAccessToken: tokens.gateways?.[gateway.gatewayId],
+        } : { localAgentAccessEnabled: false }),
+      };
+    };
     return envNames.map((envName) => {
       const pool = pools.find((item) => item.envName === envName && item.enabled);
       const gateway = gateways.find((item) => item.envName === envName && item.enabled);
       if (pool) return {
         envName, enabled: true, routedAccounts: pool.members.length, port: state.port,
         poolEnabled: true, poolId: pool.poolId, poolMemberCount: pool.members.length, poolReadyMembers: pool.readyMembers,
-        gatewayEnabled: Boolean(gateway), gatewayId: gateway?.gatewayId,
-        localGatewayBaseUrl: gateway ? buildLocalGatewayBaseUrl(state.port, gateway.gatewayId) : undefined,
+        ...gatewayDetails(gateway),
       };
       const count = routes.filter((route) => route.envName === envName && route.enabled).length;
       return { envName, enabled: count > 0, routedAccounts: count, port: count > 0 ? state.port : null,
-        gatewayEnabled: Boolean(gateway), gatewayId: gateway?.gatewayId,
-        localGatewayBaseUrl: gateway ? buildLocalGatewayBaseUrl(state.port, gateway.gatewayId) : undefined };
+        ...gatewayDetails(gateway) };
     });
+  }
+
+  async setEnvironmentLocalAgentAccess(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus> {
+    const state = await this.ensureService();
+    const gateway = (await this.adminWithState<EnvironmentGateway[]>(state, "/admin/gateways"))
+      .find((item) => item.envName === envName && item.enabled);
+    if (!gateway) throw new Error(`Environment '${envName}' gateway is not enabled`);
+    const tokens = await this.readRouteTokens();
+    tokens.gateways ??= {};
+    const token = tokens.gateways[gateway.gatewayId] || randomBytes(32).toString("hex");
+    tokens.gateways[gateway.gatewayId] = token;
+    const nextGateway: EnvironmentGateway = { ...gateway, localAgentAccessEnabled: enabled, updatedAt: Date.now() };
+    await this.adminWithState<void>(state, "/admin/gateways", {
+      method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(nextGateway),
+    });
+    await this.adminWithState<void>(state, `/admin/gateways/${encodeURIComponent(gateway.gatewayId)}/access`, {
+      method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled, token }),
+    });
+    await this.writeRouteTokens(tokens);
+    return (await this.getEnvironmentStatuses([envName]))[0] ?? { envName, enabled: false, routedAccounts: 0, port: state.port };
   }
 
   async enableEnvironmentGateway(
@@ -847,6 +885,7 @@ export class UsageRouterManager {
       ...(routeRules.length ? { routeRules } : {}),
       defaultRouteId: defaultRoute?.routeId,
       ...(pool ? { poolId: pool.poolId } : {}),
+      ...(previous?.localAgentAccessEnabled ? { localAgentAccessEnabled: true } : {}),
       enabled: true,
       createdAt: previous?.createdAt ?? now,
       updatedAt: now,
@@ -857,13 +896,33 @@ export class UsageRouterManager {
       await this.admin<void>("/admin/gateways", {
         method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(gateway),
       });
+      const tokens = await this.readRouteTokens();
+      tokens.gateways ??= {};
+      const accessToken = tokens.gateways[gateway.gatewayId] || randomBytes(32).toString("hex");
+      tokens.gateways[gateway.gatewayId] = accessToken;
+      await this.writeRouteTokens(tokens);
+      await this.admin<void>(`/admin/gateways/${encodeURIComponent(gateway.gatewayId)}/access`, {
+        method: "PUT", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: gateway.localAgentAccessEnabled === true, token: accessToken }),
+      });
       for (const accountName of new Set(routes.map((route) => route.accountName))) {
         const route = baseRouteByAccount.get(accountName);
         if (!route) continue;
         await updateBaseUrl(accountName, localBaseUrl);
         changed.push(accountName);
       }
-      return { ...routeStatus, gatewayEnabled: true, gatewayId: gateway.gatewayId, localGatewayBaseUrl: localBaseUrl };
+      return {
+        ...routeStatus,
+        gatewayEnabled: true,
+        gatewayId: gateway.gatewayId,
+        localGatewayBaseUrl: localBaseUrl,
+        localAgentAccessEnabled: gateway.localAgentAccessEnabled === true,
+        ...(gateway.localAgentAccessEnabled ? {
+          localAgentBaseUrl: `${localBaseUrl}/v1`,
+          localAgentModelsUrl: `${localBaseUrl}/v1/models`,
+          localAgentAccessToken: accessToken,
+        } : {}),
+      };
     } catch (error) {
       await Promise.allSettled(routes.filter((route) => changed.includes(route.accountName)).map((route) =>
         updateBaseUrl(route.accountName, route.originalBaseUrl)));

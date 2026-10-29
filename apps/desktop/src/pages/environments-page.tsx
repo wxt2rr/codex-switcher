@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownToLine, CheckCircle2, CircleAlert, Ellipsis, FolderPlus, LoaderCircle, Network, Search, Shuffle, RotateCcw, Trash2, Wrench } from "lucide-react";
+import { ArrowDownToLine, CheckCircle2, CircleAlert, Copy, Ellipsis, FolderPlus, LoaderCircle, Network, RadioTower, Search, Shuffle, RotateCcw, Trash2, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useAdaptiveMenuLayout } from "../components/adaptive-menu-placement";
@@ -312,6 +312,8 @@ function EnvCard({
   routeStatus,
   canRoute,
   onToggleGateway,
+  onToggleLocalAgentAccess,
+  onCopyLocalAgentValue,
   poolStatus,
   onOpenPool,
 }: {
@@ -328,6 +330,8 @@ function EnvCard({
   routeStatus?: EnvironmentRouteStatus;
   canRoute: boolean;
   onToggleGateway: () => void;
+  onToggleLocalAgentAccess: () => void;
+  onCopyLocalAgentValue: (value: string, label: string) => void;
   poolStatus?: AccountPoolStatus;
   onOpenPool: () => void;
 }) {
@@ -386,6 +390,20 @@ function EnvCard({
           <Button
             size="sm"
             variant="outline"
+            className={cn(
+              routeStatus?.localAgentAccessEnabled && "border-primary/30 bg-primary/10 text-primary hover:border-primary/40 hover:bg-primary/20 hover:text-primary",
+            )}
+            onClick={onToggleLocalAgentAccess}
+            disabled={busy || !isGatewayEnabled}
+            aria-pressed={Boolean(routeStatus?.localAgentAccessEnabled)}
+            title={language === "zh" ? "仅允许本机其它 Agent 通过网关访问" : "Allow other local agents to use this gateway"}
+          >
+            <RadioTower className="size-4" />
+            {language === "zh" ? (routeStatus?.localAgentAccessEnabled ? "本机 Agent 已开启" : "本机 Agent") : language === "ja" ? (routeStatus?.localAgentAccessEnabled ? "ローカル Agent 有効" : "ローカル Agent") : (routeStatus?.localAgentAccessEnabled ? "Local agents on" : "Local agents")}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
             className={cn(poolStatus?.enabled && "border-primary/30 bg-primary/10 text-primary hover:border-primary/40 hover:bg-primary/20 hover:text-primary")}
             onClick={onOpenPool}
             disabled={busy || !canRoute}
@@ -416,6 +434,36 @@ function EnvCard({
           </div>
         </div>
       </div>
+      {routeStatus?.localAgentAccessEnabled ? (
+        <div className="rounded-xl border border-primary/15 bg-primary/[0.035] px-3.5 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-[11px] font-semibold text-neutral-800">{language === "zh" ? "本机 Agent 接入" : language === "ja" ? "ローカル Agent 接続" : "Local Agent access"}</div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">{language === "zh" ? `127.0.0.1:${routeStatus.port ?? "—"}，仅本机可访问，不对局域网或公网开放` : language === "ja" ? `127.0.0.1:${routeStatus.port ?? "—"} のみで待受けます` : `127.0.0.1:${routeStatus.port ?? "—"} · loopback only`}</div>
+            </div>
+            <div className="flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
+              {(["Responses", "Chat Completions", "Anthropic", "Gemini"] as const).map((protocol) => <SoftBadge key={protocol} tone="neutral" label={protocol} className="h-5 px-1.5 text-[9px]" />)}
+            </div>
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            {([
+              [language === "zh" ? "Base URL" : "Base URL", routeStatus.localAgentBaseUrl],
+              [language === "zh" ? "Models" : "Models", routeStatus.localAgentModelsUrl],
+              [language === "zh" ? "API Key" : "API Key", routeStatus.localAgentAccessToken],
+            ] as const).map(([label, value]) => value ? (
+              <div key={label} className="min-w-0 rounded-lg border border-black/[0.05] bg-white/70 px-2.5 py-2 dark:border-white/[0.07] dark:bg-white/[0.03]">
+                <div className="text-[10px] font-medium text-muted-foreground">{label}</div>
+                <div className="mt-1 flex min-w-0 items-center gap-1">
+                  <div className="min-w-0 flex-1 truncate font-mono text-[10px] text-neutral-700" title={value}>{label === "API Key" ? `${value.slice(0, 4)}••••${value.slice(-4)}` : value}</div>
+                  <button type="button" className="shrink-0 rounded p-1 text-muted-foreground hover:bg-black/[0.05] hover:text-neutral-800" onClick={() => onCopyLocalAgentValue(value, label)} aria-label={`${label} copy`}>
+                    <Copy className="size-3.5" />
+                  </button>
+                </div>
+              </div>
+            ) : null)}
+          </div>
+        </div>
+      ) : null}
     </ListCard>
   );
 }
@@ -444,6 +492,8 @@ export function EnvironmentsPage({
   onDeleteEnv,
   routeStatuses,
   onToggleGateway,
+  onToggleLocalAgentAccess,
+  onCopyLocalAgentValue,
   accountPools,
   onSaveAccountPool,
 }: {
@@ -470,6 +520,8 @@ export function EnvironmentsPage({
   onDeleteEnv: () => void;
   routeStatuses: EnvironmentRouteStatus[];
   onToggleGateway: (envName: string, enabled: boolean) => Promise<void>;
+  onToggleLocalAgentAccess: (envName: string, enabled: boolean) => Promise<void>;
+  onCopyLocalAgentValue: (value: string, label: string) => void;
   accountPools: AccountPoolStatus[];
   onSaveAccountPool: (input: AccountPoolInput) => Promise<boolean>;
 }) {
@@ -669,6 +721,11 @@ export function EnvironmentsPage({
                 const status = routeStatuses.find((item) => item.envName === env.name);
                 void onToggleGateway(env.name, !status?.gatewayEnabled);
               }}
+              onToggleLocalAgentAccess={() => {
+                const status = routeStatuses.find((item) => item.envName === env.name);
+                void onToggleLocalAgentAccess(env.name, !status?.localAgentAccessEnabled);
+              }}
+              onCopyLocalAgentValue={onCopyLocalAgentValue}
               onOpenPool={() => openPoolEditor(env.name)}
               onEdit={() => {
                 setEditEnvName(env.name);

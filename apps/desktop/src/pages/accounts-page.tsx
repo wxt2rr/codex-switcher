@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   CircleCheck,
+  CircleHelp,
   CircleX,
   Check,
   Copy,
@@ -22,6 +23,7 @@ import {
 
 import {
   formatUsageResetHint,
+  formatUsageResetTime,
   getUsageProgressClass,
   localizeUsageMetricLabel,
   parseUsageMetric,
@@ -45,6 +47,7 @@ import { resolveDesktopBridge } from "../bridge";
 import { getDesktopCopy } from "../desktop-copy";
 import { localizeAuthMode } from "../desktop-utils";
 import { getTranslations, type UiLanguage } from "../i18n";
+import { Tooltip } from "../components/ui/tooltip";
 
 function formatAccountAuthLabel(mode: string) {
   if (mode === "apikey") {
@@ -1700,6 +1703,9 @@ function CardUsageRow({
   const hasPercent = metric.percent !== null && !loading;
   const percentLabel = loading ? loadingLabel : localizeUsageMetricLabel(metric.label, language);
   const resetHint = hasPercent ? formatUsageResetHint(metric.timestamp, language) : percentLabel;
+  const exactResetTime = hasPercent ? formatUsageResetTime(metric.timestamp, language) : undefined;
+  const exactResetTimeLabel = language === "zh" ? "准确重置时间" : language === "ja" ? "正確なリセット時刻" : "Exact reset time";
+  const exactResetTimeAriaLabel = language === "zh" ? "查看准确重置时间" : language === "ja" ? "正確なリセット時刻を表示" : "View exact reset time";
 
   return (
     <div className="account-usage-row px-0.5 py-1">
@@ -1715,8 +1721,26 @@ function CardUsageRow({
       <span className="text-right text-[10px] font-semibold text-foreground [font-variant-numeric:tabular-nums]">
         {hasPercent ? `${percent}%` : ""}
       </span>
-      <span className="text-right text-[10px] font-medium text-muted-foreground [font-variant-numeric:tabular-nums]">
-        {resetHint}
+      <span className="inline-flex min-w-0 items-center justify-end gap-0.5 text-right text-[10px] font-medium text-muted-foreground [font-variant-numeric:tabular-nums]">
+        <span className="truncate">{resetHint}</span>
+        {exactResetTime ? (
+          <Tooltip
+            content={(
+              <div className="space-y-0.5">
+                <div>{exactResetTimeLabel}</div>
+                <div className="font-mono text-white/90">{exactResetTime}</div>
+              </div>
+            )}
+          >
+            <button
+              type="button"
+              aria-label={exactResetTimeAriaLabel}
+              className="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:bg-black/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              <CircleHelp className="size-3" />
+            </button>
+          </Tooltip>
+        ) : null}
       </span>
     </div>
   );

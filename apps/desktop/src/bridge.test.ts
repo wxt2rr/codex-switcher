@@ -296,6 +296,19 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       gatewayId: enabled ? `gateway-${envName}` : undefined,
       localGatewayBaseUrl: enabled ? "http://127.0.0.1:17832/gateways/preview" : undefined,
     }),
+    toggleEnvironmentLocalAgentAccess: async (envName, enabled) => ({
+      envName,
+      enabled: true,
+      routedAccounts: 1,
+      port: 17832,
+      gatewayEnabled: true,
+      gatewayId: `gateway-${envName}`,
+      localGatewayBaseUrl: "http://127.0.0.1:17832/gateways/preview",
+      localAgentAccessEnabled: enabled,
+      localAgentBaseUrl: enabled ? "http://127.0.0.1:17832/gateways/preview/v1" : undefined,
+      localAgentModelsUrl: enabled ? "http://127.0.0.1:17832/gateways/preview/v1/models" : undefined,
+      localAgentAccessToken: enabled ? "preview-local-agent-token" : undefined,
+    }),
     toggleAccountCompatibility: async (input) => {
       calls.push(`toggleAccountCompatibility:${input.envName}:${input.accountName}:${input.enabled}`);
       return { envName: input.envName, accountName: input.accountName, enabled: input.enabled, state: input.enabled ? "ready" : "disabled" };

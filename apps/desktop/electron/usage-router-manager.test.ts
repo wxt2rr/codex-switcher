@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -121,6 +121,36 @@ test("environment gateway shares one local base URL and restores all member URLs
     assert.deepEqual(await manager.listRoutes(), []);
   } finally {
     await service?.close();
+  }
+});
+
+test("environment gateway local Agent access toggles independently and persists its credential", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-manager-local-agent-"));
+  let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
+  const manager = new UsageRouterManager({
+    stateDir, serviceEntryPath: "unused",
+    launchService: async () => { service = await startUsageRouterService({ stateDir: join(stateDir, "usage-router") }); },
+  });
+  try {
+    await manager.enableEnvironmentGateway("work", [{
+      envName: "work", accountName: "login", authMode: "apikey", baseUrl: "https://api.example.com/v1", apiKey: "sk-key",
+    }], async () => undefined);
+    const enabled = await manager.setEnvironmentLocalAgentAccess("work", true);
+    assert.equal(enabled.localAgentAccessEnabled, true);
+    assert.match(enabled.localAgentBaseUrl ?? "", /\/v1$/);
+    assert.match(enabled.localAgentModelsUrl ?? "", /\/v1\/models$/);
+    assert.equal(enabled.localAgentAccessToken?.length, 64);
+    const saved = JSON.parse(await readFile(join(stateDir, "usage-router", "compatibility-route-tokens.json"), "utf8")) as { gateways?: Record<string, string> };
+    assert.equal(saved.gateways?.[enabled.gatewayId ?? ""], enabled.localAgentAccessToken);
+
+    const disabled = await manager.setEnvironmentLocalAgentAccess("work", false);
+    assert.equal(disabled.localAgentAccessEnabled, false);
+    assert.equal(disabled.localAgentBaseUrl, undefined);
+    const persisted = (await manager.getEnvironmentStatuses(["work"]))[0];
+    assert.equal(persisted?.localAgentAccessEnabled, false);
+  } finally {
+    await service?.close();
+    await rm(stateDir, { recursive: true, force: true });
   }
 });
 

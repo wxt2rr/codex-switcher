@@ -179,6 +179,9 @@ function ensureGatewayColumns(db: Database): void {
   if (!columns.has("route_rules_json")) {
     db.run("ALTER TABLE environment_gateways ADD COLUMN route_rules_json TEXT NOT NULL DEFAULT '[]'");
   }
+  if (!columns.has("local_agent_access_enabled")) {
+    db.run("ALTER TABLE environment_gateways ADD COLUMN local_agent_access_enabled INTEGER NOT NULL DEFAULT 0");
+  }
 }
 
 function parseOverrides(value: unknown): Record<string, unknown> | undefined {
@@ -395,6 +398,7 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
       route_groups_json TEXT NOT NULL DEFAULT '{}',
       route_rules_json TEXT NOT NULL DEFAULT '[]',
       quota_json TEXT,
+      local_agent_access_enabled INTEGER NOT NULL DEFAULT 0,
       default_route_id TEXT,
       pool_id TEXT,
       enabled INTEGER NOT NULL,
@@ -587,18 +591,19 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
       return mutate(() => db.run(
         `INSERT INTO environment_gateways (
            gateway_id, env_name, route_ids_json, route_groups_json, default_route_id, pool_id,
-           route_rules_json, quota_json, enabled, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           route_rules_json, quota_json, local_agent_access_enabled, enabled, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(gateway_id) DO UPDATE SET
            env_name=excluded.env_name, route_ids_json=excluded.route_ids_json,
            route_groups_json=excluded.route_groups_json,
            default_route_id=excluded.default_route_id, pool_id=excluded.pool_id,
            route_rules_json=excluded.route_rules_json,
            quota_json=excluded.quota_json,
+           local_agent_access_enabled=excluded.local_agent_access_enabled,
            enabled=excluded.enabled, updated_at=excluded.updated_at`,
         [gateway.gatewayId, gateway.envName, JSON.stringify(gateway.routeIds), JSON.stringify(gateway.routeGroups ?? {}), gateway.defaultRouteId ?? null,
           gateway.poolId ?? null, JSON.stringify(gateway.routeRules ?? []), gateway.quota ? JSON.stringify(gateway.quota) : null,
-          gateway.enabled ? 1 : 0, gateway.createdAt, gateway.updatedAt],
+          gateway.localAgentAccessEnabled ? 1 : 0, gateway.enabled ? 1 : 0, gateway.createdAt, gateway.updatedAt],
       ));
     },
     removeGateway(gatewayId) {
@@ -616,6 +621,7 @@ export async function createUsageStore(databasePath: string): Promise<UsageStore
           ...(Object.keys(routeGroups ?? {}).length > 0 ? { routeGroups } : {}),
           ...(routeRules.length > 0 ? { routeRules } : {}),
           ...(parseGatewayQuota(row.quota_json) ? { quota: parseGatewayQuota(row.quota_json) } : {}),
+          ...(Boolean(row.local_agent_access_enabled) ? { localAgentAccessEnabled: true } : {}),
           defaultRouteId: row.default_route_id ? String(row.default_route_id) : undefined,
           poolId: row.pool_id ? String(row.pool_id) : undefined,
           enabled: Boolean(row.enabled),

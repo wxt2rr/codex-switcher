@@ -70,7 +70,7 @@
     "plugin-sdk:build": "npm run build --workspace ./packages/plugin-sdk",
     "plugin-sdk:test": "npm run test --workspace ./packages/plugin-sdk",
     "plugin-sdk:example:test": "node --test scripts/plugin-sdk-example.test.mjs",
-    "our-free-model:test": "node --test plugins/csw-our-free-model/plugin-core.test.mjs plugins/csw-our-free-model/managed-runtime.test.mjs",
+    "our-free-model:test": "node --test plugins/csw-our-free-model/plugin-core.test.mjs plugins/csw-our-free-model/managed-runtime.test.mjs plugins/csw-our-free-model/upstream-sync.test.mjs",
     "core:cli": "tsx scripts/core-cli.ts",
     "desktop:build": "npm run build --workspace ./apps/desktop",
     "desktop:dev": "npm run electron:dev --workspace ./apps/desktop",

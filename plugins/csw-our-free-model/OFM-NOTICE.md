@@ -5,15 +5,24 @@
 The full account-channel integration, standalone model runtime, EAC authorization,
 statistics and local management UI are from **Ebony-Vinyl/dsh-our-free-model**:
 https://github.com/Ebony-Vinyl/dsh-our-free-model
-Pinned commit: 5923ebef0f55578ca21bb5555b7ba5adb51aef21 (2026-10-20).
+Base snapshot pinned commit: 5923ebef0f55578ca21bb5555b7ba5adb51aef21 (2026-10-20).
 The current runtime source and model catalogue are retained under vendor/ofm;
-UPSTREAM.json records original and adapted hashes and the two omitted encrypted
+UPSTREAM.json records original and adapted hashes, the two omitted encrypted
 EAC data files. The adapted paths are documented: removing
 bundled Google OAuth defaults and the Loomy WeChat App ID, replacing vault.js with an empty stub, adding
 an Electron 31/Node compatibility fallback for undici's optional worker_threads.markAsUncloneable API, and adding
 an original EAC credential function to the standalone service, plus safe setup diagnostics in the EAC backend and both channel UI bundles, and selecting a verified original channel bundle through the service/Worker. The Worker also accepts harness messages/tools from the upstream native Anthropic gateway while retaining model enablement and reasoning/output-budget normalization.
 The generator patches are scripts/ofm-google-config-patch.mjs, scripts/ofm-eac-setup-patch.mjs and scripts/ofm-channel-source-patch.mjs. These adaptations
 avoid publishing credential material and comply with repository secret scanning.
+The free-lane runtime files also include the upstream fixes through
+`ff30c4dd972cded56060033239cbffb447cd445d` (2026-10-29), recorded in
+`UPSTREAM.json`: real-timestamp persistent sessions, environment-context
+preservation, the optional Bun transport and proxy-handshake cancellation
+cleanup, and the current catalog display metadata. Automatic transport mode
+uses Bun when it is already installed; when Bun is unavailable it keeps the
+existing Node transport so installing this managed plugin does not add a new
+manual prerequisite. `OUR_FREE_MODEL_FREE_TRANSPORT=bun` opts into strict Bun
+mode, while `OUR_FREE_MODEL_FREE_TRANSPORT=node` is the explicit rollback.
 Normal startup downloads the complete original channel bundle, contracts, Qoder WASM and licenses from the official pinned source, verifies all file sizes and SHA-256 digests and loads it unchanged from a private runtime cache. Native Gemini OAuth defaults and Loomy WeChat configuration are used directly from that bundle; no extra local OAuth/App ID files or Loomy environment overrides are read. The public distribution-only fallback omits these defaults. Downloaded channel source is removed on uninstall. The remote gateway relays the native Loomy login listener and permits a session-bound Gemini callback return while retaining the registered localhost redirect URI. EAC installs the pinned original source in a private runtime cache by default; an explicitly selected local source overrides it. Server authorization/login/signature flow remains unchanged. No original vault decryption code, ciphertext or shards are distributed.
 The integration uses the upstream's published standalone entry point.
 Original MIT license: vendor/ofm/LICENSE. Channel-pack attribution and MIT license:

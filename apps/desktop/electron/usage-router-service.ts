@@ -20,6 +20,7 @@ import {
   type CapabilityRegistry,
 } from "./gateway-capability-runtime.js";
 import {
+  authorizeRouteToken,
   extractTokenUsage,
   type EnvironmentGateway,
   type GatewayRouteRuntimeMetrics,
@@ -1828,6 +1829,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
   const routes = new Map((await store.listRoutes()).filter((route) => route.enabled).map((route) => [route.routeId, route]));
   const pools = new Map((await store.listPools()).filter((pool) => pool.enabled).map((pool) => [pool.poolId, pool]));
   const gateways = new Map((await store.listGateways()).filter((gateway) => gateway.enabled).map((gateway) => [gateway.gatewayId, gateway]));
+  const gatewayAccessTokens = new Map<string, string>();
   // Preview gateways are process-local and intentionally bypass the
   // persisted environment gateway table, which has one gateway per env.
   const gatewayPreviews = new Map<string, EnvironmentGateway>();
@@ -1916,6 +1918,14 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
     persistence: new FileHistoryPersistence(join(options.stateDir, "chat-history")),
   });
   const statePath = join(options.stateDir, "router-state.json");
+  try {
+    const tokenFile = JSON.parse(await readFile(join(options.stateDir, "compatibility-route-tokens.json"), "utf8")) as { gateways?: Record<string, unknown> };
+    for (const [gatewayId, token] of Object.entries(tokenFile.gateways ?? {})) {
+      if (typeof token === "string" && token.trim()) gatewayAccessTokens.set(gatewayId, token);
+    }
+  } catch {
+    // The desktop manager hydrates access tokens after startup; an absent file is a first-run state.
+  }
   const portStatePath = join(options.stateDir, "router-port.json");
   const eventLogPath = join(options.stateDir, "router-events.jsonl");
   const capabilityStatePath = join(options.stateDir, "capability-observations.json");
@@ -2028,6 +2038,27 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           if (gateway.enabled) gateways.set(gateway.gatewayId, gateway);
           else gateways.delete(gateway.gatewayId);
           response.statusCode = 204; return response.end();
+        }
+        const gatewayAccessMatch = url.pathname.match(/^\/admin\/gateways\/([^/]+)\/access$/);
+        if (gatewayAccessMatch && request.method === "PUT") {
+          const gatewayId = decodeURIComponent(gatewayAccessMatch[1]);
+          const gateway = gateways.get(gatewayId);
+          if (!gateway) return sendJson(response, 404, { error: "Gateway is disabled or missing" });
+          const payload = await readJson(request) as { enabled?: unknown; token?: unknown };
+          if (payload.enabled === true) {
+            if (typeof payload.token !== "string" || !payload.token.trim()) {
+              return sendJson(response, 400, { error: "Local Agent access token is required" });
+            }
+            gatewayAccessTokens.set(gatewayId, payload.token.trim());
+          } else {
+            gatewayAccessTokens.delete(gatewayId);
+          }
+          const accessEnabled = payload.enabled === true;
+          const updatedGateway = { ...gateway, localAgentAccessEnabled: accessEnabled, updatedAt: Date.now() };
+          gateways.set(gatewayId, updatedGateway);
+          await store.upsertGateway(updatedGateway);
+          response.statusCode = 204;
+          return response.end();
         }
         if (url.pathname === "/admin/gateway-previews" && request.method === "PUT") {
           const gateway = await readJson(request) as EnvironmentGateway;
@@ -2208,11 +2239,63 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
         const gatewayId = decodeURIComponent(gatewayMatch[2]);
         const gateway = gatewayMatch[1] === "gateway-previews" ? gatewayPreviews.get(gatewayId) : gateways.get(gatewayId);
         if (!gateway) return sendJson(response, 404, { error: "Gateway is disabled or missing" });
-        const gatewayRouteSuffix = gatewayMatch[3] || "responses";
+        const rawGatewayRouteSuffix = gatewayMatch[3] || "responses";
+        const localAgentSurface = /^v1(?:\/|$)/i.test(rawGatewayRouteSuffix)
+          || /^v1beta(?:\/|$)/i.test(rawGatewayRouteSuffix);
+        if (localAgentSurface) {
+          if (gatewayMatch[1] !== "gateways" || !gateway.localAgentAccessEnabled) {
+            return sendJson(response, 404, {
+              error: "Local Agent access is disabled",
+              code: "LOCAL_AGENT_ACCESS_DISABLED",
+            });
+          }
+          const accessToken = gatewayAccessTokens.get(gatewayId);
+          if (!accessToken || !authorizeRouteToken(request.headers.authorization, accessToken)) {
+            response.setHeader("www-authenticate", "Bearer");
+            return sendJson(response, 401, {
+              error: "Local Agent access token is required",
+              code: "LOCAL_AGENT_UNAUTHORIZED",
+            });
+          }
+          // The local access token authenticates only the router ingress. It
+          // must never become an upstream credential, especially for managed
+          // no-auth provider plugins where no replacement Authorization header
+          // is added later in the proxy pipeline.
+          delete request.headers.authorization;
+        }
+        const gatewayRouteSuffix = /^v1(?:\/|$)/i.test(rawGatewayRouteSuffix)
+          ? rawGatewayRouteSuffix.replace(/^v1\/?/i, "") || "responses"
+          : rawGatewayRouteSuffix;
         const gatewayProtocol = detectGatewayProtocol(gatewayRouteSuffix);
         const gatewayRequestId = randomUUID();
         const upgradeRequested = hasUpgradeIntent(request.headers);
         const requestMethod = (request.method ?? "GET").toUpperCase();
+        const isModelsRoute = gatewayRouteSuffix.toLowerCase() === "models" || gatewayRouteSuffix.toLowerCase() === "v1beta/models";
+        if (localAgentSurface && isModelsRoute) {
+          if (requestMethod !== "GET" || upgradeRequested) {
+            response.setHeader("allow", "GET");
+            return sendJson(response, 405, { error: "Models endpoint only accepts HTTP GET requests", code: "GATEWAY_HTTP_ONLY" });
+          }
+          const ids = new Set<string>();
+          for (const group of Object.values(gateway.routeGroups ?? {})) {
+            if (group.exposedModelId?.trim()) ids.add(group.exposedModelId.trim());
+          }
+          for (const routeId of gateway.routeIds) {
+            const route = routes.get(routeId);
+            if (!route || !gatewayRouteAvailable(gateway, route)) continue;
+            if (route.exposedModelId?.trim()) ids.add(route.exposedModelId.trim());
+            else if (route.upstreamModel?.trim()) ids.add(route.upstreamModel.trim());
+          }
+          return sendJson(response, 200, {
+            object: "list",
+            data: [...ids].sort().map((id) => ({
+              id,
+              object: "model",
+              created: Math.floor(Date.now() / 1000),
+              owned_by: "codex-switcher",
+            })),
+          });
+        }
         if (gatewayProtocol === "responses" && (requestMethod !== "POST" || upgradeRequested)) {
           const rejectionCode = upgradeRequested ? "GATEWAY_WEBSOCKET_UNSUPPORTED" : "GATEWAY_HTTP_ONLY";
           void recordPoolEvent({
@@ -2402,7 +2485,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
             poolTokens.get(pool.poolId) ?? "",
             store,
             history,
-            `${gatewayMatch[3]}${url.search}`,
+            `${gatewayRouteSuffix}${url.search}`,
             undefined,
             recordPoolEvent,
             allowedRouteIds,
@@ -2458,7 +2541,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           request,
           response,
           route,
-          `${gatewayMatch[3]}${url.search}`,
+          `${gatewayRouteSuffix}${url.search}`,
           store,
           routeSecrets.get(route.routeId),
           bodyOverride,

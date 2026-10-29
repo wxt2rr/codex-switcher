@@ -12,6 +12,10 @@ export interface EnvironmentRouteStatus {
   gatewayEnabled?: boolean;
   gatewayId?: string;
   localGatewayBaseUrl?: string;
+  localAgentAccessEnabled?: boolean;
+  localAgentBaseUrl?: string;
+  localAgentModelsUrl?: string;
+  localAgentAccessToken?: string;
 }
 
 export interface UsageFilter {

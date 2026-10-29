@@ -573,5 +573,41 @@
       "sha256": "20b8931fe990b0b8b47597784309c02e26a6771f59ae51a5f1bb9a2b1aa6f5f8",
       "reason": "Replace the packaged vault with an empty stub; original EAC source is installed in a private runtime cache or selected locally."
     }
+  ],
+  "upstreamUpdates": [
+    {
+      "commit": "d72271bfc61148515756cb4e8cbc3ba416621478",
+      "date": "2026-10-29",
+      "paths": [
+        "src/upstream.js",
+        "src/egress.js",
+        "src/bun-fetch.js"
+      ],
+      "files": [
+        { "path": "src/upstream.js", "bytes": 28910, "originalSha256": "94d6b9efe9a118224541aff80a7572fd5646061dc5e894e6df346519b10febd1", "sha256": "94d6b9efe9a118224541aff80a7572fd5646061dc5e894e6df346519b10febd1" },
+        { "path": "src/egress.js", "bytes": 42183, "originalSha256": "02ebd6a9dc85e1f78c8fed9bf31d5a4bd4cc86cb7dbbfba2dfea68b2dcf4da66", "sha256": "ca7e2b047689ffcba119025c0d463d23b97c20e4a5abed1f42cc1902181d55db" },
+        { "path": "src/bun-fetch.js", "bytes": 7724, "originalSha256": "07d7f5506edf2458308fdebb10291cb500c2e583e9ff772d45f63d10dce8b9db", "sha256": "07d7f5506edf2458308fdebb10291cb500c2e583e9ff772d45f63d10dce8b9db" }
+      ],
+      "reason": "Synchronize the upstream free-lane fix: persist real-timestamp session ids, preserve the caller environment block, and add the optional Bun transport plus streaming cancellation support for official OpenCode inference."
+    },
+    {
+      "commit": "e59ba2f8377ee5f9380abfb20810ece090eb1853",
+      "date": "2026-10-29",
+      "paths": [
+        "src/egress.js"
+      ],
+      "reason": "Synchronize the upstream relay handshake cleanup so cancellation and relay disposal close sockets during proxy negotiation."
+    },
+    {
+      "commit": "ff30c4dd972cded56060033239cbffb447cd445d",
+      "date": "2026-10-29",
+      "paths": [
+        "src/catalog.js"
+      ],
+      "files": [
+        { "path": "src/catalog.js", "bytes": 28705, "originalSha256": "73a17a114fa1f9ff000503ff8af25e591e3cd4a98c93921e3f5472461e48eaab", "sha256": "73a17a114fa1f9ff000503ff8af25e591e3cd4a98c93921e3f5472461e48eaab" }
+      ],
+      "reason": "Synchronize the latest upstream catalog display metadata without replacing the project's locally curated runtime snapshot."
+    }
   ]
 }

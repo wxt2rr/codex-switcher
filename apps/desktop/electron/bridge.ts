@@ -1391,6 +1391,10 @@ async function reapplyEnvironmentTargetHomes(
   }
 }
 
+export async function toggleEnvironmentLocalAgentAccess(envName: string, enabled: boolean) {
+  return getUsageRouterManager().setEnvironmentLocalAgentAccess(envName, enabled);
+}
+
 export async function listAccountPools() {
   return getUsageRouterManager().listAccountPools();
 }
