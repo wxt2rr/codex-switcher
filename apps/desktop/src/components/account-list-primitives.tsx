@@ -66,7 +66,7 @@ export function ListPageHeader({
       {onSearchChange ? (
         <>
           <div className="relative min-w-[220px] flex-1">
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={search ?? ""}
               onChange={(event) => onSearchChange(event.target.value)}
@@ -80,7 +80,7 @@ export function ListPageHeader({
           {showFilter ? (
             <button
               type="button"
-              className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[#f3f4f6] text-slate-600 dark:bg-[#1b2129] dark:text-slate-300"
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[#f3f4f6] text-muted-foreground dark:bg-[#1b2129] dark:text-muted-foreground/60"
               aria-label="Filter"
               title="Filter"
             >
@@ -98,7 +98,7 @@ export function ListPageHeader({
       <div className="flex shrink-0 flex-col gap-4">
         <div>
           <h2 className="text-[28px] font-semibold tracking-[-0.04em] text-neutral-950 dark:text-neutral-50">{title}</h2>
-          <p className="mt-1 text-[13px] leading-6 text-slate-500 dark:text-slate-400">{subtitle}</p>
+          <p className="mt-1 text-[13px] leading-6 text-muted-foreground dark:text-muted-foreground">{subtitle}</p>
         </div>
         <div className="rounded-[18px] bg-white px-3 py-2.5 shadow-[0_10px_30px_rgba(15,23,42,0.03)] ring-1 ring-black/[0.04] dark:bg-[#141a22] dark:ring-white/[0.07]">
           {toolbar}
@@ -111,7 +111,7 @@ export function ListPageHeader({
     <div className="grid gap-4 xl:grid-cols-[minmax(220px,1fr)_minmax(0,1.8fr)] xl:items-start">
       <div>
         <h2 className="text-[28px] font-semibold tracking-[-0.04em] text-neutral-950 dark:text-neutral-50">{title}</h2>
-        <p className="mt-1 text-[13px] leading-6 text-slate-500 dark:text-slate-400">{subtitle}</p>
+        <p className="mt-1 text-[13px] leading-6 text-muted-foreground dark:text-muted-foreground">{subtitle}</p>
       </div>
       {toolbar}
     </div>
@@ -171,10 +171,10 @@ export function SoftBadge({
     <span
       className={cn(
         "inline-flex h-6 items-center rounded-md px-2.5 text-[13px] font-medium",
-        tone === "brand" && "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300",
-        tone === "success" && "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300",
-        tone === "warn" && "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300",
-        tone === "neutral" && "bg-slate-100 text-slate-500 dark:bg-[#202733] dark:text-slate-300",
+        tone === "brand" && "bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary-foreground",
+        tone === "success" && "bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary-foreground",
+        tone === "warn" && "bg-warm-50 text-warm-600 dark:bg-warm-950/50 dark:text-warm-300",
+        tone === "neutral" && "bg-accent text-muted-foreground dark:bg-[#202733] dark:text-muted-foreground/60",
         className,
       )}
     >
@@ -194,9 +194,9 @@ export function RunStatusBadge({
     <span
       className={cn(
         "inline-flex h-5 items-center rounded-md px-2 text-[10px] font-semibold",
-        tone === "success" && "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300",
-        tone === "warn" && "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300",
-        tone === "neutral" && "bg-slate-100 text-slate-500 dark:bg-[#202733] dark:text-slate-300",
+        tone === "success" && "bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary-foreground",
+        tone === "warn" && "bg-warm-50 text-warm-600 dark:bg-warm-950/50 dark:text-warm-300",
+        tone === "neutral" && "bg-accent text-muted-foreground dark:bg-[#202733] dark:text-muted-foreground/60",
       )}
     >
       {label}
@@ -225,7 +225,7 @@ export function IconActionButton({
       className={cn(
         "motion-interactive-color responsive-action flex h-9 min-w-[64px] items-center justify-center gap-1.5 rounded-lg border border-transparent px-3 text-[12px] font-medium",
         tone === "danger"
-          ? "bg-rose-50 text-rose-600 hover:bg-rose-100 hover:text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 dark:hover:bg-rose-950/60"
+          ? "bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive dark:bg-destructive/30 dark:text-destructive dark:hover:bg-destructive/40"
           : active
             ? "ui-selected-control"
             : "bg-[#f7f8fa] text-neutral-800 hover:bg-[#eef1f4] dark:bg-[#1b2129] dark:text-slate-100 dark:hover:bg-[#232a34]",
@@ -245,7 +245,7 @@ export function IconActionButton({
 
 export function Pager({ totalLabel }: { totalLabel: string }) {
   return (
-    <div className="mt-auto flex items-center justify-between pt-2 text-sm font-medium text-slate-500 dark:text-slate-400">
+    <div className="mt-auto flex items-center justify-between pt-2 text-sm font-medium text-muted-foreground dark:text-muted-foreground">
       <span>{totalLabel}</span>
       <div className="flex items-center gap-3">
         <span className="flex h-8 items-center rounded-lg bg-[#f3f4f6] px-3 text-xs text-slate-700 dark:bg-[#1b2129] dark:text-slate-200">

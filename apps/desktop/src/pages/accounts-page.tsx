@@ -567,10 +567,10 @@ export function AccountsPage({
         <div className="shrink-0 flex flex-col gap-4">
           <div className="flex items-start justify-between gap-6">
             <div className="space-y-1">
-              <h2 className="text-[28px] font-semibold tracking-[-0.04em] text-neutral-950">
+              <h2 className="text-[28px] font-semibold tracking-[-0.04em] text-foreground">
                 {language === "zh" ? "账号管理" : language === "ja" ? "アカウント管理" : "Account Management"}
               </h2>
-              <p className="text-[13px] leading-6 text-slate-500">
+              <p className="text-[13px] leading-6 text-muted-foreground">
                 {language === "zh" ? "统一管理订阅授权、服务商账号连接和运行时配置。模型绑定请在模型页面维护。" : language === "ja" ? "サブスクリプション認証、プロバイダー接続、ランタイム設定をまとめて管理します。モデルのバインドはモデル画面で管理します。" : "Manage subscription auth, provider connections, and runtime settings. Model bindings are managed on the Models page."}
               </p>
             </div>
@@ -579,7 +579,7 @@ export function AccountsPage({
           <div className="rounded-[18px] bg-white px-3 py-2.5 ring-1 ring-black/[0.04] shadow-[0_10px_30px_rgba(15,23,42,0.03)]">
             <div className="responsive-toolbar flex items-center gap-2.5">
               <div className="relative min-w-[220px] flex-1">
-                <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+                <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   data-account-search-input
                   value={search}
@@ -633,7 +633,7 @@ export function AccountsPage({
               <div className="flex h-8 items-center overflow-hidden rounded-lg bg-[#f3f4f6]">
                 <button
                   type="button"
-                  className="motion-interactive-color flex size-8 shrink-0 items-center justify-center text-slate-500 hover:bg-[#ebeef2] hover:text-neutral-800 disabled:cursor-wait"
+                  className="motion-interactive-color flex size-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-[#ebeef2] hover:text-foreground disabled:cursor-wait"
                   aria-label={language === "zh" ? "立即刷新用量" : "Refresh usage now"}
                   title={language === "zh" ? "立即刷新用量" : "Refresh usage now"}
                   onClick={onRefreshAuthMetrics}
@@ -661,7 +661,7 @@ export function AccountsPage({
                     />
                     <button
                       type="button"
-                      className="flex h-8 w-7 items-center justify-center text-slate-500 hover:text-neutral-900"
+                      className="flex h-8 w-7 items-center justify-center text-muted-foreground hover:text-foreground"
                       onClick={commitCustomRefreshInterval}
                       aria-label={language === "zh" ? "应用刷新频率" : "Apply refresh interval"}
                       title={language === "zh" ? "应用刷新频率" : "Apply refresh interval"}
@@ -824,7 +824,7 @@ export function AccountsPage({
             </Field>
           ) : null}
           {providerMode && managedProvider ? (
-            <div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800 dark:bg-emerald-950/20 dark:text-emerald-300">
+            <div className="rounded-lg bg-primary/10 px-3 py-2 text-xs leading-5 text-primary dark:bg-primary/20 dark:text-primary">
               {language === "zh" ? "插件会自动启动本机服务、发现模型并注入连接密钥。" : language === "ja" ? "プラグインがローカルサービスを起動し、モデルと接続キーを自動管理します。" : "The plugin starts the local service and manages model discovery and connection keys automatically."}
             </div>
           ) : null}
@@ -840,7 +840,7 @@ export function AccountsPage({
                 />
                 <button
                   type="button"
-                  className="motion-interactive-color absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 hover:bg-[#eef1f4] hover:text-neutral-700"
+                  className="motion-interactive-color absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-[#eef1f4] hover:text-foreground"
                   onClick={() => setShowApiKeyDraft((value) => !value)}
                   aria-label={
                     showApiKeyDraft
@@ -922,16 +922,16 @@ export function AccountsPage({
             </Field>
           ) : null}
           {loginModeNeedsApiKey && !providerMode && !isPresetApiKeyProvider && (apiProtocolDraft === "chat_completions" || compatibilityEnabled) && selectedAccount ? (
-            <div className="space-y-3 border-t border-neutral-200/80 pt-4">
+            <div className="space-y-3 border-t border-border/80 pt-4">
               <div className="flex items-center justify-between gap-4">
                 <div className="min-w-0">
-                  <div className="text-sm font-medium text-neutral-900">{language === "zh" ? "兼容路由" : "Compatibility route"}</div>
-                  <div className="mt-0.5 text-xs text-slate-500">{language === "zh" ? "仅为此账号转换 Responses 与 Chat Completions" : "Convert Responses and Chat Completions for this account only"}</div>
+                  <div className="text-sm font-medium text-foreground">{language === "zh" ? "兼容路由" : "Compatibility route"}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">{language === "zh" ? "仅为此账号转换 Responses 与 Chat Completions" : "Convert Responses and Chat Completions for this account only"}</div>
                 </div>
                 <button type="button" role="switch" aria-checked={compatibilityEnabled} disabled={compatibilityBusy}
                   onClick={toggleCompatibility}
-                  className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full disabled:opacity-60 ${compatibilityEnabled ? "bg-primary" : "bg-[#d1d1d6]"}`}>
-                  <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${compatibilityEnabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
+                  className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-lg disabled:opacity-60 ${compatibilityEnabled ? "bg-primary" : "bg-[#d1d1d6]"}`}>
+                  <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-lg bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${compatibilityEnabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
                 </button>
               </div>
               <Field label={language === "zh" ? "上游模型（可选）" : "Upstream model (optional)"}>
@@ -951,7 +951,7 @@ export function AccountsPage({
                     { value: "safe", label: language === "zh" ? "安全压缩（推荐）" : "Safe compaction (recommended)" },
                     { value: "continuity", label: language === "zh" ? "连续性优先" : "Prioritize continuity" },
                   ]} />
-                <div className="mt-1 text-xs leading-5 text-slate-500">
+                <div className="mt-1 text-xs leading-5 text-muted-foreground">
                   {compatibilityLongConversationStrategy === "safe"
                     ? (language === "zh" ? "自动整理长会话；遇到无法转换的压缩历史时提示新建会话。" : "Summarizes long chats and asks for a new chat when history cannot be converted.")
                     : (language === "zh" ? "尽量继续当前会话，但部分早期内容可能丢失。" : "Keeps the current chat when possible, but early context may be lost.")}
@@ -965,7 +965,7 @@ export function AccountsPage({
                     { value: "system", label: "system" },
                     { value: "developer", label: "developer" },
                   ]} />
-                <div className="mt-1 text-xs leading-5 text-slate-500">
+                <div className="mt-1 text-xs leading-5 text-muted-foreground">
                   {language === "zh" ? "自动使用兼容性更高的 system；仅在上游支持时选择 developer。" : "Auto uses the broadly compatible system role; choose developer only when supported upstream."}
                 </div>
               </Field>
@@ -973,9 +973,9 @@ export function AccountsPage({
                 <Textarea value={compatibilityOverrides} onChange={(event) => setCompatibilityOverrides(event.target.value)} placeholder='{"top_p": 0.9}' />
               </Field>
               <div className="flex items-center justify-between gap-3 text-xs">
-                <div className="flex min-w-0 items-center gap-1.5 text-slate-500">
+                <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
                   {compatibilityBusy ? <LoaderCircle className="size-3.5 animate-spin" />
-                    : compatibilityStatus?.state === "ready" ? <CircleCheck className="size-3.5 text-emerald-600" />
+                    : compatibilityStatus?.state === "ready" ? <CircleCheck className="size-3.5 text-primary" />
                       : compatibilityStatus?.state === "degraded" ? <CircleX className="size-3.5 text-red-600" /> : null}
                   <span className="truncate">{compatibilityCheck?.message ?? compatibilityStatus?.message ??
                     (compatibilityStatus?.state === "ready" ? (language === "zh" ? "路由已就绪" : "Route ready") :
@@ -1141,20 +1141,20 @@ export function AccountsPage({
           selectedAccount ? (
             <div className="space-y-2.5 text-sm">
               <div className="flex justify-between gap-4">
-                <span className="text-neutral-400">{pageCopy.common.account}</span>
-                <span className="font-medium text-neutral-700">{selectedAccount.name}</span>
+                <span className="text-muted-foreground">{pageCopy.common.account}</span>
+                <span className="font-medium text-foreground">{selectedAccount.name}</span>
               </div>
               <div className="flex justify-between gap-4">
-                <span className="text-neutral-400">{pageCopy.common.environment}</span>
-                <span className="font-medium text-neutral-700">{selectedAccount.envName}</span>
+                <span className="text-muted-foreground">{pageCopy.common.environment}</span>
+                <span className="font-medium text-foreground">{selectedAccount.envName}</span>
               </div>
               <div className="flex justify-between gap-4">
-                <span className="text-neutral-400">{pageCopy.accounts.target}</span>
-                <span className="font-medium text-neutral-700">{selectedTargetLabel}</span>
+                <span className="text-muted-foreground">{pageCopy.accounts.target}</span>
+                <span className="font-medium text-foreground">{selectedTargetLabel}</span>
               </div>
               <div className="flex justify-between gap-4">
-                <span className="text-neutral-400">{pageCopy.common.status}</span>
-                <span className="font-medium text-neutral-700">
+                <span className="text-muted-foreground">{pageCopy.common.status}</span>
+                <span className="font-medium text-foreground">
                   {selectedAccount.isCurrentCli || selectedAccount.isCurrentApp
                     ? `${selectedAccount.isCurrentCli ? `${text.labels.cli} ` : ""}${selectedAccount.isCurrentApp ? text.labels.app : ""}`.trim()
                     : pageCopy.common.standby}
@@ -1162,7 +1162,7 @@ export function AccountsPage({
               </div>
             </div>
           ) : (
-            <div className="text-sm text-neutral-400">{pageCopy.accounts.logoutMissing}</div>
+            <div className="text-sm text-muted-foreground">{pageCopy.accounts.logoutMissing}</div>
           )
         }
         confirmLabel={pageCopy.accounts.logoutConfirm}
@@ -1181,16 +1181,16 @@ export function AccountsPage({
           selectedAccount ? (
             <div className="space-y-2.5 text-sm">
               <div className="flex justify-between gap-4">
-                <span className="text-neutral-400">{pageCopy.common.account}</span>
-                <span className="font-medium text-neutral-700">{selectedAccount.name}</span>
+                <span className="text-muted-foreground">{pageCopy.common.account}</span>
+                <span className="font-medium text-foreground">{selectedAccount.name}</span>
               </div>
               <div className="flex justify-between gap-4">
-                <span className="text-neutral-400">{pageCopy.common.environment}</span>
-                <span className="font-medium text-neutral-700">{selectedAccount.envName}</span>
+                <span className="text-muted-foreground">{pageCopy.common.environment}</span>
+                <span className="font-medium text-foreground">{selectedAccount.envName}</span>
               </div>
               <div className="flex justify-between gap-4">
-                <span className="text-neutral-400">{pageCopy.common.status}</span>
-                <span className="font-medium text-neutral-700">
+                <span className="text-muted-foreground">{pageCopy.common.status}</span>
+                <span className="font-medium text-foreground">
                   {selectedAccount.isCurrentCli || selectedAccount.isCurrentApp
                     ? `${selectedAccount.isCurrentCli ? `${text.labels.cli} ` : ""}${selectedAccount.isCurrentApp ? text.labels.app : ""}`.trim()
                     : pageCopy.common.standby}
@@ -1198,7 +1198,7 @@ export function AccountsPage({
               </div>
             </div>
           ) : (
-            <div className="text-sm text-neutral-400">{pageCopy.accounts.deleteMissing}</div>
+            <div className="text-sm text-muted-foreground">{pageCopy.accounts.deleteMissing}</div>
           )
         }
         confirmLabel={pageCopy.accounts.deleteConfirm}
@@ -1304,14 +1304,14 @@ function AccountListCard({
     >
       <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
-            <h3 className="truncate text-[15px] font-semibold tracking-[-0.02em] text-neutral-950">{account.name}</h3>
+            <h3 className="truncate text-[15px] font-semibold tracking-[-0.02em] text-foreground">{account.name}</h3>
           </div>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             <SoftBadge tone={isAuth ? "brand" : "neutral"} label={formatAccountAuthLabel(account.authMode)} />
             <SoftBadge tone="neutral" label={envLabel} />
             {activeRouteLabels.length > 0 ? (
               <span
-                className="inline-flex min-w-0 items-center truncate text-[10px] font-medium text-emerald-700"
+                className="inline-flex min-w-0 items-center truncate text-[10px] font-medium text-primary"
                 title={activeRouteDetails || undefined}
               >
                 {activeRouteLabels.join(" · ")}
@@ -1325,10 +1325,10 @@ function AccountListCard({
           <div className="min-w-0 space-y-1">
             {baseUrl ? (
               <div className="account-runtime-line min-h-6 min-w-0">
-                <span className="min-w-0 truncate text-[14px] font-medium text-neutral-950 [font-variant-numeric:tabular-nums]">{baseUrl}</span>
+                <span className="min-w-0 truncate text-[14px] font-medium text-foreground [font-variant-numeric:tabular-nums]">{baseUrl}</span>
                 <button
                   type="button"
-                  className="motion-interactive-color inline-flex size-6 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-white hover:text-neutral-900"
+                  className="motion-interactive-color inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-white hover:text-foreground"
                   onClick={() => onCopyBaseUrl(baseUrl)}
                   aria-label={language === "zh" ? "复制 Base URL" : language === "ja" ? "Base URL をコピー" : "Copy Base URL"}
                   title={language === "zh" ? "复制完整 Base URL" : language === "ja" ? "完全な Base URL をコピー" : "Copy full Base URL"}
@@ -1337,16 +1337,16 @@ function AccountListCard({
                 </button>
               </div>
             ) : !isAuth ? (
-              <span className="flex min-h-6 items-center truncate text-[12px] text-slate-400">
+              <span className="flex min-h-6 items-center truncate text-[12px] text-muted-foreground">
                 {language === "zh" ? "未配置 Base URL" : language === "ja" ? "Base URL 未設定" : "Base URL not set"}
               </span>
             ) : null}
             {maskedApiKey ? (
               <div className="account-runtime-line min-h-6 min-w-0">
-                <span className="min-w-0 truncate font-mono text-[12px] text-slate-500 [font-variant-numeric:tabular-nums]">{maskedApiKey}</span>
+                <span className="min-w-0 truncate font-mono text-[12px] text-muted-foreground [font-variant-numeric:tabular-nums]">{maskedApiKey}</span>
                 <button
                   type="button"
-                  className="motion-interactive-color inline-flex size-6 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-white hover:text-neutral-900"
+                  className="motion-interactive-color inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-white hover:text-foreground"
                   onClick={() => onCopyApiKey(apiKeyValue)}
                   aria-label={language === "zh" ? "复制 API Key" : language === "ja" ? "API Key をコピー" : "Copy API key"}
                   title={language === "zh" ? "复制完整 API Key" : language === "ja" ? "完全な API Key をコピー" : "Copy full API key"}
@@ -1383,7 +1383,7 @@ function AccountListCard({
           </div>
         ) : (
           <div className="flex min-h-[52px] items-center px-3 py-2">
-            <div className="text-[12px] leading-5 text-slate-500">{getApiUsageHint(language)}</div>
+            <div className="text-[12px] leading-5 text-muted-foreground">{getApiUsageHint(language)}</div>
           </div>
         )}
       </div>
@@ -1477,7 +1477,7 @@ function AccountListCard({
         />
         <button
           type="button"
-          className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[12px] font-medium text-neutral-700 ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-55"
+          className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[12px] font-medium text-foreground ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
           onClick={onOpenModels}
           disabled={busy}
           title={language === "zh" ? "选择账号暴露的模型" : "Choose exposed models"}
@@ -1487,7 +1487,7 @@ function AccountListCard({
         </button>
         <button
           type="button"
-          className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[12px] font-medium text-neutral-700 ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-55"
+          className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[12px] font-medium text-foreground ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
           onClick={() => {
             onPrimeAccount(account);
             onLogin();
@@ -1587,14 +1587,14 @@ function RowActionMenu({
     <div ref={rootRef} className="relative">
       <button
         type="button"
-        className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[12px] font-medium text-neutral-700 ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-55"
+        className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[12px] font-medium text-foreground ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
         onClick={() => setOpen((value) => !value)}
         disabled={disabled}
         aria-expanded={open}
       >
         <Ellipsis className="size-4" />
         <span className="responsive-action-label">{label}</span>
-        <ChevronDown className={cn("motion-chevron responsive-action-label size-3.5 text-slate-400", open && "rotate-180")} />
+        <ChevronDown className={cn("motion-chevron responsive-action-label size-3.5 text-muted-foreground", open && "rotate-180")} />
       </button>
       {menuMounted ? (
         <div
@@ -1616,7 +1616,7 @@ function RowActionMenu({
           ) : (
             <button key={item.key} type="button"
               className={cn("motion-interactive-color flex w-full items-center rounded-lg px-3 py-2 text-left text-[12px] font-medium",
-                item.tone === "danger" ? "text-rose-600 hover:bg-rose-50" : "text-neutral-700 hover:bg-[#f6f7f9]")}
+                item.tone === "danger" ? "text-destructive hover:bg-destructive/10" : "text-foreground hover:bg-[#f6f7f9]")}
               onClick={() => { setOpen(false); item.onSelect?.(); }}>
               {item.label}
             </button>
@@ -1645,10 +1645,10 @@ function RowActionSubmenu({
 
   return (
     <div ref={triggerRef} className="relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
-      <button type="button" className="motion-interactive-color flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[12px] font-medium text-neutral-700 hover:bg-[#f6f7f9]"
+      <button type="button" className="motion-interactive-color flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[12px] font-medium text-foreground hover:bg-[#f6f7f9]"
         aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         <span>{item.label}</span>
-        <ChevronRight className="size-3.5 text-slate-400" />
+        <ChevronRight className="size-3.5 text-muted-foreground" />
       </button>
       {mounted ? (
         <div ref={menuRef} data-state={open ? "open" : "closed"} data-submenu-placement={placement}
@@ -1657,7 +1657,7 @@ function RowActionSubmenu({
           <div className="motion-popover-enter min-w-[180px] overflow-y-auto rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md"
             style={{ maxHeight: availableHeight }}>
             {item.children.map((child) => (
-              <button key={child.key} type="button" className="motion-interactive-color block w-full rounded-lg px-3 py-2 text-left text-[12px] font-medium text-neutral-700 hover:bg-[#f6f7f9]"
+              <button key={child.key} type="button" className="motion-interactive-color block w-full rounded-lg px-3 py-2 text-left text-[12px] font-medium text-foreground hover:bg-[#f6f7f9]"
                 onClick={() => { onClose(); child.onSelect(); }}>
                 {child.label}
               </button>
@@ -1674,7 +1674,7 @@ function SoftBadge({ label, tone, title }: { label: string; tone: "brand" | "neu
     <span
       className={cn(
         "inline-flex h-5 items-center rounded-md px-2 text-[10px] font-medium",
-        tone === "brand" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500",
+        tone === "brand" ? "bg-accent text-muted-foreground" : "bg-accent text-muted-foreground",
       )}
       title={title}
     >
@@ -1703,19 +1703,19 @@ function CardUsageRow({
 
   return (
     <div className="account-usage-row px-0.5 py-1">
-      <span className="truncate text-[11px] font-semibold text-neutral-900">{label}</span>
+      <span className="truncate text-[11px] font-semibold text-foreground">{label}</span>
       <div className="min-w-0">
-        <div className="h-1.5 overflow-hidden rounded-full bg-slate-200/80">
+        <div className="h-1.5 overflow-hidden rounded-lg bg-slate-200/80">
           <div
-            className={cn("h-full origin-left rounded-full transition-[transform,background-color] duration-[220ms] ease-[cubic-bezier(0.23,1,0.32,1)]", getUsageProgressClass(percent))}
+            className={cn("h-full origin-left rounded-lg transition-[transform,background-color] duration-[220ms] ease-[cubic-bezier(0.23,1,0.32,1)]", getUsageProgressClass(percent))}
             style={{ transform: `scaleX(${percent / 100})` }}
           />
         </div>
       </div>
-      <span className="text-right text-[10px] font-semibold text-neutral-700 [font-variant-numeric:tabular-nums]">
+      <span className="text-right text-[10px] font-semibold text-foreground [font-variant-numeric:tabular-nums]">
         {hasPercent ? `${percent}%` : ""}
       </span>
-      <span className="text-right text-[10px] font-medium text-slate-500 [font-variant-numeric:tabular-nums]">
+      <span className="text-right text-[10px] font-medium text-muted-foreground [font-variant-numeric:tabular-nums]">
         {resetHint}
       </span>
     </div>
@@ -1769,7 +1769,7 @@ function RequestHealthRow({
   const visibleSegments = segments.slice(-REQUEST_HEALTH_SAMPLE_SIZE);
   const slots = Array.from({ length: REQUEST_HEALTH_SAMPLE_SIZE }, (_, index) => {
     const segment = visibleSegments[index - (REQUEST_HEALTH_SAMPLE_SIZE - visibleSegments.length)];
-    if (!segment) return { className: "bg-slate-100", title: "" };
+    if (!segment) return { className: "bg-accent", title: "" };
     const value = kind === "success" ? segment.success : segment.cacheHit;
     const stateLabel = kind === "success"
       ? value ? (language === "zh" ? "成功" : "Success") : (language === "zh" ? "失败" : "Failed")
@@ -1787,8 +1787,8 @@ function RequestHealthRow({
   return (
     <div>
       <div className="mb-1 flex items-center justify-between gap-3 text-[10px] leading-none">
-        <span className="font-medium text-slate-500">{label}</span>
-        <span className="font-semibold text-neutral-800 [font-variant-numeric:tabular-nums]">{percent}</span>
+        <span className="font-medium text-muted-foreground">{label}</span>
+        <span className="font-semibold text-foreground [font-variant-numeric:tabular-nums]">{percent}</span>
       </div>
       <div
         className="grid h-2.5 gap-px"
@@ -1884,8 +1884,8 @@ function CardTargetButton({
       <div
         className={cn(
           "motion-interactive-color flex h-9 overflow-hidden rounded-lg border border-transparent",
-          active ? "ui-selected-control" : "bg-[#fafafa] text-neutral-700",
-          !disabled && !active && "hover:bg-[#f3f4f6] hover:text-neutral-950",
+          active ? "ui-selected-control" : "bg-[#fafafa] text-foreground",
+          !disabled && !active && "hover:bg-[#f3f4f6] hover:text-foreground",
           disabled && "cursor-not-allowed opacity-55",
         )}
       >
@@ -1903,8 +1903,8 @@ function CardTargetButton({
         <button
           type="button"
           className={cn(
-            "motion-interactive-color flex h-full w-8 items-center justify-center text-slate-400",
-            !disabled && "hover:bg-black/[0.035] hover:text-neutral-700",
+            "motion-interactive-color flex h-full w-8 items-center justify-center text-muted-foreground",
+            !disabled && "hover:bg-black/[0.035] hover:text-foreground",
           )}
           onClick={() => setOpen((value) => !value)}
           disabled={disabled}
@@ -1944,9 +1944,9 @@ function CardTargetButton({
                 <button
                   type="button"
                   className={cn(
-                    "motion-interactive-color flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[12px] font-medium text-neutral-700 hover:bg-[#f6f7f9] hover:text-neutral-950",
-                    item.key === primaryStrategy && "bg-[#f5f7fa] text-neutral-950",
-                    item.disabled && "cursor-not-allowed text-slate-300 hover:bg-transparent hover:text-slate-300",
+                    "motion-interactive-color flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[12px] font-medium text-foreground hover:bg-[#f6f7f9] hover:text-foreground",
+                    item.key === primaryStrategy && "bg-[#f5f7fa] text-foreground",
+                    item.disabled && "cursor-not-allowed text-muted-foreground/60 hover:bg-transparent hover:text-muted-foreground/60",
                   )}
                   disabled={item.disabled}
                   onClick={() => {
@@ -1957,7 +1957,7 @@ function CardTargetButton({
                   }}
                 >
                   {item.label}
-                  {item.key === "new-window" && loadProjects ? <span className="text-slate-400">›</span> : null}
+                  {item.key === "new-window" && loadProjects ? <span className="text-muted-foreground">›</span> : null}
                 </button>
                 {item.key === "new-window" && projectMenuMounted && loadProjects ? (
                   <div
@@ -1972,14 +1972,14 @@ function CardTargetButton({
                       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                         {projects.map((project) => (
                           <button key={project.path} type="button" title={project.path} className="motion-interactive-color block w-full rounded-lg px-3 py-2 text-left hover:bg-[#f6f7f9]" onClick={() => { setOpen(false); setProjectOpen(false); onSelectProject?.(project.path); }}>
-                            <span className="block truncate text-[12px] font-medium text-neutral-800">{project.name}</span>
-                            <span className="block truncate text-[10px] text-slate-400">{project.path}</span>
+                            <span className="block truncate text-[12px] font-medium text-foreground">{project.name}</span>
+                            <span className="block truncate text-[10px] text-muted-foreground">{project.path}</span>
                           </button>
                         ))}
                       </div>
                       <div className="mt-1 border-t border-black/[0.06] pt-1">
-                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[12px] text-neutral-700 hover:bg-[#f6f7f9]" onClick={() => { setOpen(false); onSelectProject?.(""); }}>{homeLabel}</button>
-                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[12px] text-neutral-700 hover:bg-[#f6f7f9]" onClick={() => { void onPickDirectory?.().then((path) => { if (path) { setOpen(false); onSelectProject?.(path); } }); }}>{pickDirectoryLabel}</button>
+                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[12px] text-foreground hover:bg-[#f6f7f9]" onClick={() => { setOpen(false); onSelectProject?.(""); }}>{homeLabel}</button>
+                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[12px] text-foreground hover:bg-[#f6f7f9]" onClick={() => { void onPickDirectory?.().then((path) => { if (path) { setOpen(false); onSelectProject?.(path); } }); }}>{pickDirectoryLabel}</button>
                       </div>
                     </div>
                   </div>

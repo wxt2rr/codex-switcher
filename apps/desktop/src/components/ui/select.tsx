@@ -32,7 +32,7 @@ function SelectTrigger({
       data-slot="select-trigger"
       className={cn(
         "border-input aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:bg-input/30 dark:hover:bg-input/50",
-        "group flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-transparent bg-[#f7f8fa] px-3 py-2 text-[13px] whitespace-nowrap shadow-none transition-[background-color,color,border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] outline-none dark:bg-[#19212b] dark:text-slate-100",
+        "group flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-transparent bg-muted px-3 py-2 text-[13px] whitespace-nowrap shadow-none transition-[background-color,color,border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] outline-none dark:bg-[#19212b] dark:text-foreground",
         "hover:bg-[#eef1f4] dark:hover:bg-[#202a36] disabled:cursor-not-allowed disabled:opacity-50",
         "[&>span]:line-clamp-1",
         className,
@@ -41,7 +41,7 @@ function SelectTrigger({
     >
       {children}
       <SelectPrimitive.Icon asChild>
-        <ChevronDownIcon className="motion-chevron size-4 text-neutral-400 group-data-[state=open]:rotate-180 dark:text-slate-500" />
+        <ChevronDownIcon className="motion-chevron size-4 text-muted-foreground group-data-[state=open]:rotate-180 dark:text-muted-foreground" />
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
   );
@@ -92,7 +92,7 @@ function SelectLabel({
   return (
     <SelectPrimitive.Label
       data-slot="select-label"
-      className={cn("px-2 py-1.5 text-xs font-medium text-neutral-400 dark:text-slate-500", className)}
+      className={cn("px-2 py-1.5 text-xs font-medium text-muted-foreground dark:text-muted-foreground", className)}
       {...props}
     />
   );
@@ -108,7 +108,7 @@ function SelectItem({
     <SelectPrimitive.Item
       data-slot="select-item"
       className={cn(
-        "focus:bg-neutral-100 focus:text-neutral-950 relative flex w-full cursor-default items-center gap-2 rounded-lg py-2 pr-2 pl-8 text-[13px] text-neutral-700 outline-none select-none dark:text-slate-100 dark:focus:bg-[#202733] dark:focus:text-white",
+        "focus:bg-accent focus:text-foreground relative flex w-full cursor-default items-center gap-2 rounded-lg py-2 pr-2 pl-8 text-[13px] text-foreground outline-none select-none dark:text-foreground dark:focus:bg-[#202733] dark:focus:text-white",
         "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         className,
       )}

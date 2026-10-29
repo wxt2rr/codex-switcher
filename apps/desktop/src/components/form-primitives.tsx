@@ -47,7 +47,7 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
       {...props}
       className={cn(
         "h-9 w-full rounded-lg border border-transparent bg-[#f1f4f8] px-3 dark:bg-[#19212b]",
-        "text-[13px] text-neutral-800 placeholder:text-neutral-400 dark:text-slate-100 dark:placeholder:text-slate-500",
+        "text-[13px] text-neutral-800 placeholder:text-neutral-400 dark:text-slate-100 dark:placeholder:text-muted-foreground",
         "outline-none transition-[background-color,color,border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]",
         "hover:bg-[#e9eef5] dark:hover:bg-[#202a36]",
         "focus:border-primary focus:ring-2 focus:ring-primary/15 focus:ring-offset-0",
@@ -78,8 +78,10 @@ export function Select({
   const selectedItem = normalizedItems.find((item) => item.value === value);
   const [open, setOpen] = useState(false);
   const closeTimerRef = useRef<number | null>(null);
+  const openTimerRef = useRef<number | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const isHoveringRef = useRef(false);
 
   function cancelClose() {
     if (closeTimerRef.current !== null) {
@@ -88,10 +90,34 @@ export function Select({
     }
   }
 
+  function cancelOpen() {
+    if (openTimerRef.current !== null) {
+      window.clearTimeout(openTimerRef.current);
+      openTimerRef.current = null;
+    }
+  }
+
   function handleHoverOpen() {
     if (disabled) return;
     cancelClose();
-    setOpen(true);
+    cancelOpen();
+    isHoveringRef.current = true;
+    // Small delay to prevent accidental opens when moving quickly past
+    openTimerRef.current = window.setTimeout(() => {
+      if (isHoveringRef.current) {
+        setOpen(true);
+      }
+    }, 40);
+  }
+
+  function handleHoverLeave() {
+    isHoveringRef.current = false;
+    cancelOpen();
+    // Immediate close when leaving, no delay
+    cancelClose();
+    closeTimerRef.current = window.setTimeout(() => {
+      setOpen(false);
+    }, 50);
   }
 
   function scheduleClose(point?: { x: number; y: number }) {
@@ -101,36 +127,68 @@ export function Select({
         point,
         triggerRef.current?.getBoundingClientRect() ?? null,
         contentRef.current?.getBoundingClientRect() ?? null,
-        8,
+        6,
       )) return;
-      setOpen(false);
-    }, 120);
+      // Always close if we're not hovering
+      if (!isHoveringRef.current) {
+        setOpen(false);
+      }
+    }, 50);
   }
 
   useEffect(() => {
     if (!open || !openOnHover) return;
+
     function handlePointerMove(event: PointerEvent) {
-      if (isPointInsideHoverMenu(
-        { x: event.clientX, y: event.clientY },
+      const point = { x: event.clientX, y: event.clientY };
+      const isInside = isPointInsideHoverMenu(
+        point,
         triggerRef.current?.getBoundingClientRect() ?? null,
         contentRef.current?.getBoundingClientRect() ?? null,
-        8,
-      )) {
+        6,
+      );
+      if (isInside) {
+        isHoveringRef.current = true;
         cancelClose();
       } else {
-        scheduleClose({ x: event.clientX, y: event.clientY });
+        // Only close if we're not hovering over another Select
+        // Use a small delay to allow for smooth transitions between Selects
+        if (!isHoveringRef.current) {
+          scheduleClose(point);
+        }
       }
     }
+
+    // Use a unique identifier for this Select instance
+    const instanceId = Math.random().toString(36).substr(2, 9);
+    (window as any).__selectInstances = (window as any).__selectInstances || new Map();
+    (window as any).__selectInstances.set(instanceId, { close: () => setOpen(false) });
+
     document.addEventListener("pointermove", handlePointerMove, true);
     return () => {
       document.removeEventListener("pointermove", handlePointerMove, true);
+      (window as any).__selectInstances?.delete(instanceId);
       cancelClose();
+      cancelOpen();
     };
   }, [open, openOnHover]);
 
+  // Clean up on unmount
+  useEffect(() => {
+    return () => {
+      cancelClose();
+      cancelOpen();
+    };
+  }, []);
+
   return (
     <UiSelect value={value} onValueChange={onValueChange} disabled={disabled} open={open} onOpenChange={setOpen}>
-      <SelectTrigger ref={triggerRef} className={className} onMouseEnter={openOnHover ? handleHoverOpen : undefined}>
+      <SelectTrigger
+        ref={triggerRef}
+        className={className}
+        onMouseEnter={openOnHover ? handleHoverOpen : undefined}
+        onMouseLeave={openOnHover ? handleHoverLeave : undefined}
+      >
         {selectedItem?.iconUrl ? (
           <div className="flex min-w-0 items-center gap-2"><img src={selectedItem.iconUrl} alt="" className="size-[18px] shrink-0 object-contain" /><span className="truncate">{selectedItem.label}</span></div>
         ) : <SelectValue placeholder={placeholder} />}
@@ -159,8 +217,8 @@ export function Select({
                 className={cn(
                   "ml-auto flex size-6 shrink-0 items-center justify-center rounded-md",
                   item.actionDisabled
-                    ? "cursor-default text-amber-500"
-                    : "text-slate-400 hover:bg-slate-100 hover:text-amber-500",
+                    ? "cursor-default text-warm-500"
+                    : "text-muted-foreground hover:bg-accent hover:text-warm-500",
                 )}
               >
                 {item.actionIcon}
@@ -181,7 +239,7 @@ export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
       {...props}
       className={cn(
         "min-h-[120px] w-full rounded-lg border border-transparent bg-[#f1f4f8] px-3 py-2.5 dark:bg-[#19212b]",
-        "text-[13px] text-neutral-800 placeholder:text-neutral-400 dark:text-slate-100 dark:placeholder:text-slate-500",
+        "text-[13px] text-neutral-800 placeholder:text-neutral-400 dark:text-slate-100 dark:placeholder:text-muted-foreground",
         "outline-none transition-[background-color,color,border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]",
         "hover:bg-[#e9eef5] dark:hover:bg-[#202a36]",
         "focus:border-primary focus:ring-2 focus:ring-primary/15 focus:ring-offset-0",

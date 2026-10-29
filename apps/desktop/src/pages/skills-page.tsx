@@ -310,7 +310,7 @@ export function SkillsPage({
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <h2 className="text-[28px] font-semibold tracking-[-0.04em] text-neutral-950 dark:text-neutral-50">{title}</h2>
-              <p className="mt-1 truncate text-[13px] leading-6 text-slate-500 dark:text-slate-400">{subtitle}</p>
+              <p className="mt-1 truncate text-[13px] leading-6 text-muted-foreground dark:text-muted-foreground">{subtitle}</p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <Button variant="secondary" size="sm" onClick={() => setSyncOpen(true)}>
@@ -334,7 +334,7 @@ export function SkillsPage({
                     "h-8 rounded-lg border border-transparent px-3.5 text-[12px] font-semibold transition-[background-color,color,border-color,transform] duration-[140ms] ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.97] [-webkit-app-region:no-drag]",
                     activeScopeId === scope.id
                       ? "ui-selected-control"
-                      : "text-slate-500 hover:bg-[#f3f4f6] hover:text-neutral-900 dark:text-slate-400 dark:hover:bg-[#1b2129] dark:hover:text-white",
+                      : "text-muted-foreground hover:bg-[#f3f4f6] hover:text-neutral-900 dark:text-muted-foreground dark:hover:bg-[#1b2129] dark:hover:text-white",
                   )}>
                   {scope.id === "marketplace" ? (zh ? "市场" : ja ? "マーケット" : "Marketplace") : scope.name}
                 </button>
@@ -348,7 +348,7 @@ export function SkillsPage({
           <div className="rounded-[14px] border border-black/[0.05] bg-white px-3 py-2.5 dark:border-white/[0.07] dark:bg-[#141a22]">
             <div className="responsive-toolbar flex items-center gap-2.5">
             <div className="relative min-w-[220px] max-w-[520px] flex-1">
-              <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input value={query} onChange={(event) => setQuery(event.target.value)}
                 placeholder={activeScopeId === "marketplace" ? (zh ? "搜索市场" : "Search marketplace") : (zh ? "搜索已安装 Skill" : "Search installed skills")}
                 className="h-8 rounded-lg border-transparent bg-[#fbfbfc] pl-10 text-[12px] shadow-none dark:bg-[#1b2129]" />
@@ -419,7 +419,7 @@ export function SkillsPage({
           <Field label={zh ? "Skill 名称" : "Skill name"} hint={zh ? "仓库只有一个 Skill 时可留空" : "Optional when the repository contains one skill"}>
             <Input value={skillName} onChange={(event) => setSkillName(event.target.value)} placeholder="skill-name" />
           </Field>
-          <div className="rounded-lg bg-slate-50 px-3 py-3 text-[12px] leading-5 text-slate-500 dark:bg-[#1b2129] dark:text-slate-400">
+          <div className="rounded-lg bg-muted px-3 py-3 text-[12px] leading-5 text-muted-foreground dark:bg-[#1b2129] dark:text-muted-foreground">
             {zh ? "安装过程只复制 Skill 文件，不会执行仓库脚本或安装钩子。" : "Installation copies skill files only. Repository scripts and install hooks are never executed."}
           </div>
           <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setInstallOpen(false)}>{zh ? "取消" : "Cancel"}</Button>
@@ -441,7 +441,7 @@ export function SkillsPage({
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-[13px] font-semibold text-neutral-900 dark:text-neutral-100">{zh ? "同步目录" : ja ? "同期ディレクトリ" : "Sync directories"}</div>
-              <div className="mt-0.5 text-[11px] text-slate-400">{zh ? "内置与自定义服务商统一管理" : "Manage built-in and custom providers"}</div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground">{zh ? "内置与自定义服务商统一管理" : "Manage built-in and custom providers"}</div>
             </div>
             <Button type="button" variant="secondary" size="sm" onClick={() => setAddProviderOpen((value) => !value)}>
               <Plus className="size-4" />{zh ? "添加服务商" : ja ? "プロバイダーを追加" : "Add provider"}
@@ -510,11 +510,11 @@ function MarketplaceRow({ skill, language, onDetail, onInstall, installing, disa
       <SkillIcon label={skill.name} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-[14px] font-semibold text-neutral-900 dark:text-neutral-100">{skill.name}</div>
-        <p className="mt-1 line-clamp-2 min-h-9 text-[12px] leading-[18px] text-slate-500 dark:text-slate-400">{skill.description || skill.source}</p>
-        <p className="mt-1 truncate font-mono text-[10px] text-slate-400">{skill.source}{skill.installs ? ` · ${formatCount(skill.installs)} installs` : ""}</p>
+        <p className="mt-1 line-clamp-2 min-h-9 text-[12px] leading-[18px] text-muted-foreground dark:text-muted-foreground">{skill.description || skill.source}</p>
+        <p className="mt-1 truncate font-mono text-[10px] text-muted-foreground">{skill.source}{skill.installs ? ` · ${formatCount(skill.installs)} installs` : ""}</p>
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        <Button type="button" variant="ghost" size="icon" className="size-8 text-slate-500" onClick={onDetail}
+        <Button type="button" variant="ghost" size="icon" className="size-8 text-muted-foreground" onClick={onDetail}
           title={zh ? "查看详情" : "View details"} aria-label={zh ? `查看 ${skill.name} 详情` : `View ${skill.name} details`}><Info className="size-4" /></Button>
         <Button type="button" variant="secondary" size="sm" onClick={onInstall} disabled={disabled}
           title={zh ? "安装并同步到已启用的服务商" : "Install and sync to enabled providers"}
@@ -540,16 +540,16 @@ function InstalledRow({ skill, language, updateAvailable, canManage, onDetail, o
           <div className="truncate text-[14px] font-semibold text-neutral-900 dark:text-neutral-100">{skill.name}</div>
           {skill.linked ? <span className="shrink-0 text-[10px] text-sky-600 dark:text-sky-300">{zh ? "软链接" : "linked"}</span> : null}
         </div>
-        <p className="mt-1 line-clamp-2 min-h-9 text-[12px] leading-[18px] text-slate-500 dark:text-slate-400">{skill.description || (zh ? "暂无描述" : "No description")}</p>
-        <p className="mt-1 truncate font-mono text-[10px] text-slate-400">{skill.linkedFrom ?? skill.path}</p>
+        <p className="mt-1 line-clamp-2 min-h-9 text-[12px] leading-[18px] text-muted-foreground dark:text-muted-foreground">{skill.description || (zh ? "暂无描述" : "No description")}</p>
+        <p className="mt-1 truncate font-mono text-[10px] text-muted-foreground">{skill.linkedFrom ?? skill.path}</p>
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        <Button type="button" variant="ghost" size="icon" className="size-8 text-slate-500" onClick={onDetail}
+        <Button type="button" variant="ghost" size="icon" className="size-8 text-muted-foreground" onClick={onDetail}
           title={zh ? "查看详情" : "View details"} aria-label={zh ? `查看 ${skill.name} 详情` : `View ${skill.name} details`}><Info className="size-4" /></Button>
         {updateAvailable && canManage ? <Button type="button" variant="secondary" size="icon" className="size-8 text-sky-600" onClick={onUpdate} disabled={busy} title={zh ? "更新" : "Update"}
           aria-label={zh ? "更新" : "Update"}><ArrowUpCircle className="size-4" /></Button> : null}
-        {warning ? <TriangleAlert className="size-4 text-amber-500" /> : <Check className="size-4 text-slate-300" />}
-        {canManage ? <Button type="button" variant="ghost" size="icon" className="size-8 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40" onClick={onRemove} disabled={busy} title={zh ? "卸载" : "Uninstall"}
+        {warning ? <TriangleAlert className="size-4 text-warm-500" /> : <Check className="size-4 text-muted-foreground/60" />}
+        {canManage ? <Button type="button" variant="ghost" size="icon" className="size-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive dark:hover:bg-rose-950/40" onClick={onRemove} disabled={busy} title={zh ? "卸载" : "Uninstall"}
           aria-label={zh ? "卸载" : "Uninstall"}><Trash2 className="size-4" /></Button> : null}
       </div>
     </ListCard>
@@ -564,14 +564,14 @@ function CodexEnvironmentBinding({ scope, language }: { scope: SkillScope; langu
       <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="truncate text-[13px] font-semibold text-neutral-900 dark:text-neutral-100">{scope.name}</div>
-            <div className="mt-1 truncate font-mono text-[10px] text-slate-400">{scope.path}</div>
-            <div className="mt-1.5 text-[10px] font-medium text-slate-500 dark:text-slate-400">
+            <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">{scope.path}</div>
+            <div className="mt-1.5 text-[10px] font-medium text-muted-foreground dark:text-muted-foreground">
               {zh ? `主存储 · ${scope.skills.length} 个 Skill` : ja ? `メインストレージ · ${scope.skills.length} Skill` : `Primary store · ${scope.skills.length} skills`}
             </div>
           </div>
-        <label className="motion-toggle relative inline-flex h-[22px] w-[38px] shrink-0 cursor-default items-center rounded-full bg-primary" title={zh ? "Codex 环境默认开启" : "Codex environments are always enabled"}>
+        <label className="motion-toggle relative inline-flex h-[22px] w-[38px] shrink-0 cursor-default items-center rounded-lg bg-primary" title={zh ? "Codex 环境默认开启" : "Codex environments are always enabled"}>
           <input type="checkbox" checked disabled readOnly aria-label={`${scope.name} ${zh ? "默认开启" : "always enabled"}`} className="peer sr-only" />
-          <span className="motion-toggle-thumb absolute left-0 top-[2px] size-[18px] translate-x-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)]" />
+          <span className="motion-toggle-thumb absolute left-0 top-[2px] size-[18px] translate-x-[18px] rounded-lg bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)]" />
         </label>
       </div>
     </section>
@@ -589,14 +589,14 @@ function ProviderBindingEditor({ binding, draft, codexScopes, language, onChange
     <section className="rounded-lg border border-black/[0.06] p-4 dark:border-white/[0.08]">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0"><div className="text-[13px] font-semibold text-neutral-900 dark:text-neutral-100">{binding.name}</div>
-          <div className="mt-1 truncate font-mono text-[10px] text-slate-400">{value.targetPath}</div></div>
+          <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">{value.targetPath}</div></div>
         <div className="flex shrink-0 items-center gap-2">
-          {onDelete ? <Button type="button" variant="ghost" size="icon" className="size-8 text-slate-400 hover:bg-rose-50 hover:text-rose-600" onClick={onDelete}
+          {onDelete ? <Button type="button" variant="ghost" size="icon" className="size-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" onClick={onDelete}
             title={zh ? "删除自定义服务商" : "Delete custom provider"} aria-label={zh ? `删除 ${binding.name}` : `Delete ${binding.name}`}><Trash2 className="size-4" /></Button> : null}
-          <label className={`motion-toggle relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer items-center rounded-full ${value.enabled ? "bg-primary" : "bg-[#d1d1d6] dark:bg-slate-700"}`}>
+          <label className={`motion-toggle relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer items-center rounded-lg ${value.enabled ? "bg-primary" : "bg-[#d1d1d6] dark:bg-slate-700"}`}>
             <input type="checkbox" checked={value.enabled} onChange={(event) => onChange({ enabled: event.target.checked,
               sourceEnv: event.target.checked ? value.sourceEnv ?? codexScopes[0]?.envName : value.sourceEnv })} className="peer sr-only" />
-            <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${value.enabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
+            <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-lg bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${value.enabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
           </label>
         </div>
       </div>
@@ -605,8 +605,8 @@ function ProviderBindingEditor({ binding, draft, codexScopes, language, onChange
           items={codexScopes.map((scope) => ({ value: scope.envName!, label: scope.name }))} openOnHover={false} />
       </Field></div> : null}
       {binding.status === "conflict" || binding.status === "error" || binding.status === "missing-source" ? (
-        <p className="mt-2 text-[11px] text-amber-600">{binding.message ?? binding.status}</p>
-      ) : value.enabled ? <p className="mt-2 text-[11px] text-slate-400">{zh ? `${binding.managedLinks} 个受管链接` : `${binding.managedLinks} managed links`}</p> : null}
+        <p className="mt-2 text-[11px] text-warm-600">{binding.message ?? binding.status}</p>
+      ) : value.enabled ? <p className="mt-2 text-[11px] text-muted-foreground">{zh ? `${binding.managedLinks} 个受管链接` : `${binding.managedLinks} managed links`}</p> : null}
     </section>
   );
 }
@@ -644,7 +644,7 @@ function SkillDetailPanel({ selection, language, onClose, onInstall }: {
             <SkillIcon label={skill.name} linked={installed?.linked} />
             <div className="min-w-0">
               <h3 className="text-[16px] font-semibold text-neutral-950 dark:text-neutral-50">{skill.name}</h3>
-              <p className="mt-1.5 whitespace-pre-wrap text-[12px] leading-5 text-slate-500 dark:text-slate-400">
+              <p className="mt-1.5 whitespace-pre-wrap text-[12px] leading-5 text-muted-foreground dark:text-muted-foreground">
                 {skill.description || (zh ? "暂无描述" : ja ? "説明はありません" : "No description available")}
               </p>
             </div>
@@ -653,7 +653,7 @@ function SkillDetailPanel({ selection, language, onClose, onInstall }: {
 
         <dl className="overflow-hidden rounded-lg border border-black/[0.06] dark:border-white/[0.08]">
           {detailRows.map((row) => <div key={row.label} className="grid grid-cols-[84px_minmax(0,1fr)] gap-3 border-b border-black/[0.05] px-4 py-3 last:border-b-0 dark:border-white/[0.06]">
-            <dt className="text-[11px] font-medium text-slate-400">{row.label}</dt>
+            <dt className="text-[11px] font-medium text-muted-foreground">{row.label}</dt>
             <dd className="min-w-0 break-all font-mono text-[11px] leading-5 text-neutral-700 dark:text-neutral-200">{row.value}</dd>
           </div>)}
         </dl>
@@ -678,16 +678,16 @@ function localizeSkillState(skill: InstalledSkill, language: UiLanguage): string
 }
 
 function SkillIcon({ linked = false }: { label: string; linked?: boolean }) {
-  return <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 dark:bg-[#202733] dark:text-slate-300">
+  return <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-accent text-muted-foreground dark:bg-[#202733] dark:text-muted-foreground/60">
     {linked ? <Link2 className="size-[17px]" /> : <PackageOpen className="size-[17px]" />}
   </div>;
 }
 
 function EmptyState({ icon, title, description, action }: { icon: ReactNode; title: string; description: string; action?: ReactNode }) {
   return <div className="flex min-h-[240px] flex-col items-center justify-center text-center">
-    <div className="flex size-10 items-center justify-center rounded-lg bg-slate-100 text-slate-400 dark:bg-[#1b2129]">{icon}</div>
+    <div className="flex size-10 items-center justify-center rounded-lg bg-accent text-muted-foreground dark:bg-[#1b2129]">{icon}</div>
     <h3 className="mt-3 text-[14px] font-semibold text-neutral-800 dark:text-neutral-100">{title}</h3>
-    <p className="mt-1 max-w-[460px] text-[12px] leading-5 text-slate-400">{description}</p>
+    <p className="mt-1 max-w-[460px] text-[12px] leading-5 text-muted-foreground">{description}</p>
     {action ? <div className="mt-4">{action}</div> : null}
   </div>;
 }

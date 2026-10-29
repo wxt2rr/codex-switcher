@@ -42,9 +42,9 @@ export function PageHeader({
       )}
     >
       <div>
-        <h2 className="text-[24px] font-semibold tracking-[-0.03em] text-neutral-950">{title}</h2>
+        <h2 className="text-[24px] font-semibold tracking-[-0.03em] text-foreground">{title}</h2>
         {description ? (
-          <p className="mt-1 max-w-3xl text-[13px] leading-6 text-neutral-500">
+          <p className="mt-1 max-w-3xl text-[13px] leading-6 text-muted-foreground">
             {description}
           </p>
         ) : null}
@@ -111,8 +111,8 @@ export function TableCard({
         )}
       >
         <div>
-          <h3 className="text-[15px] font-semibold text-neutral-950">{title}</h3>
-          {subtitle ? <p className="mt-0.5 text-[12px] text-neutral-500">{subtitle}</p> : null}
+          <h3 className="text-[15px] font-semibold text-foreground">{title}</h3>
+          {subtitle ? <p className="mt-0.5 text-[12px] text-muted-foreground">{subtitle}</p> : null}
         </div>
         {aside && <div className="shrink-0">{aside}</div>}
       </div>
@@ -140,7 +140,7 @@ export function DataTable({
             {columns.map((column) => (
               <th
                 key={column}
-                className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.16em] text-neutral-400"
+                className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground"
               >
                 {column}
               </th>
@@ -167,8 +167,8 @@ export function DataRow({
       className={cn(
         "transition-colors duration-100",
         active
-          ? "bg-emerald-50/60"
-          : "odd:bg-white even:bg-[#fcfcfd] hover:bg-neutral-50/80",
+          ? "bg-primary/10"
+          : "odd:bg-white even:bg-[#fcfcfd] hover:bg-muted/80",
       )}
     >
       {children}
@@ -186,7 +186,7 @@ export function DataCell({
   className?: string;
 }) {
   return (
-    <td className={cn("px-5 py-3 align-middle text-[13px] text-neutral-700", className)}>
+    <td className={cn("px-5 py-3 align-middle text-[13px] text-foreground", className)}>
       {children}
     </td>
   );
@@ -206,11 +206,11 @@ export function EmptyTableState({
       <td colSpan={colSpan} className="px-6 py-10">
         <div
           className={cn(
-            "rounded-lg bg-neutral-50/60",
+            "rounded-lg bg-muted/60",
             "px-6 py-8 text-center",
           )}
         >
-          <div className="text-sm font-semibold text-neutral-600">{title}</div>
+          <div className="text-sm font-semibold text-muted-foreground">{title}</div>
         </div>
       </td>
     </tr>
@@ -229,13 +229,13 @@ export function ToolbarStat({
   return (
     <div
       className={cn(
-        "rounded-lg bg-neutral-50/70 px-3.5 py-2",
+        "rounded-lg bg-muted/70 px-3.5 py-2",
       )}
     >
-      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-neutral-400">
+      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
         {label}
       </div>
-      <div className="mt-1 text-sm font-semibold text-neutral-700">{value}</div>
+      <div className="mt-1 text-sm font-semibold text-foreground">{value}</div>
     </div>
   );
 }
@@ -275,10 +275,10 @@ export function SidePanel({
         >
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-neutral-950">{title}</h3>
-              {description ? <p className="mt-1 text-[13px] leading-6 text-neutral-500">{description}</p> : null}
+              <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-foreground">{title}</h3>
+              {description ? <p className="mt-1 text-[13px] leading-6 text-muted-foreground">{description}</p> : null}
             </div>
-            <button type="button" onClick={onClose} aria-label={closeLabel} title={closeLabel} className="motion-interactive-color inline-flex size-8 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-black/[0.045] hover:text-neutral-800">
+            <button type="button" onClick={onClose} aria-label={closeLabel} title={closeLabel} className="motion-interactive-color inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-black/[0.045] hover:text-foreground">
               <X className="size-4" />
             </button>
           </div>
@@ -323,8 +323,8 @@ export function ConfirmDialog({
     <DialogPortal>
       <div data-state={open ? "open" : "closed"} className={cn(dialogOverlayClass, "z-50")}>
         <div data-state={open ? "open" : "closed"} className={cn(dialogSurfaceClass, "max-w-[460px] rounded-[16px]")}>
-          <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-neutral-950">{title}</h3>
-          {description ? <p className="mt-2 text-[13px] leading-6 text-neutral-500">{description}</p> : null}
+          <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-foreground">{title}</h3>
+          {description ? <p className="mt-2 text-[13px] leading-6 text-muted-foreground">{description}</p> : null}
           {impact && (
             <div className="mt-4 rounded-[10px] border border-black/[0.05] bg-[#fafbfc] p-4">
               {impact}
@@ -377,10 +377,10 @@ export function ProgressDialog({
   const isRunning = phase === "running";
   const Icon = isRunning ? LoaderCircle : phase === "success" ? CircleCheck : CircleAlert;
   const iconClass = isRunning
-    ? "text-slate-400"
+    ? "text-muted-foreground"
     : phase === "success"
-      ? "text-emerald-600"
-      : "text-rose-600";
+      ? "text-primary"
+      : "text-destructive";
 
   return (
     <DialogPortal>
@@ -394,11 +394,11 @@ export function ProgressDialog({
         <div data-state={open ? "open" : "closed"} className={cn(dialogSurfaceClass, "max-w-[480px] rounded-[16px]")}>
           <div className="flex items-start gap-3">
             {(!isRunning || showRunningIcon) ? <Icon className={cn("mt-0.5 size-5 shrink-0", iconClass, isRunning && "animate-spin")} aria-hidden="true" /> : null}
-            <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-neutral-950">{title}</h3>
+            <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-foreground">{title}</h3>
           </div>
           <div className="mt-4 rounded-[10px] border border-black/[0.05] bg-[#fafbfc] p-4">{children}</div>
           {isRunning && showBusyLabel ? (
-            <div className="mt-5 text-right text-[12px] text-slate-400">{busyLabel}</div>
+            <div className="mt-5 text-right text-[12px] text-muted-foreground">{busyLabel}</div>
           ) : !isRunning ? (
             <div className="mt-5 flex justify-end">
               <Button onClick={onConfirm}>{confirmLabel}</Button>
@@ -443,16 +443,16 @@ export function SummaryPanel({
     summary?.tone === "ok"
       ? "border-primary/20 bg-primary/10 text-primary"
       : summary?.tone === "warn"
-        ? "border-neutral-200 bg-neutral-50 text-neutral-700"
-        : "border-neutral-100 bg-neutral-50/60 text-neutral-700";
+        ? "border-border bg-muted text-foreground"
+        : "border-neutral-100 bg-muted/60 text-foreground";
 
   return (
     <section
       className="rounded-[18px] bg-white shadow-[0_12px_36px_rgba(15,23,42,0.045)]"
     >
       <div className="px-5 py-3.5">
-        <h3 className="text-[16px] font-semibold text-neutral-950">{title}</h3>
-        <p className="mt-1 text-[12px] text-neutral-500">{subtitle}</p>
+        <h3 className="text-[16px] font-semibold text-foreground">{title}</h3>
+        <p className="mt-1 text-[12px] text-muted-foreground">{subtitle}</p>
       </div>
       <div className="space-y-4 px-5 py-5">
         {summary ? (
@@ -473,9 +473,9 @@ export function SummaryPanel({
                     {section.entries.map((entry) => (
                       <div
                         key={`${section.title}-${entry.label}-${entry.value}`}
-                        className="flex items-start justify-between gap-4 rounded-lg bg-white/80 px-3 py-2 text-[13px] text-neutral-700"
+                        className="flex items-start justify-between gap-4 rounded-lg bg-white/80 px-3 py-2 text-[13px] text-foreground"
                       >
-                        <span className="text-neutral-400">{entry.label}</span>
+                        <span className="text-muted-foreground">{entry.label}</span>
                         <span className="text-right font-medium">{entry.value}</span>
                       </div>
                     ))}
@@ -485,19 +485,19 @@ export function SummaryPanel({
             </div>
           </div>
         ) : (
-          <div className="rounded-lg border border-dashed border-neutral-200 bg-neutral-50/60 px-4 py-8 text-sm text-neutral-400">
+          <div className="rounded-lg border border-dashed border-border bg-muted/60 px-4 py-8 text-sm text-muted-foreground">
             {emptyLabel}
           </div>
         )}
 
         <div>
-          <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-400">
+          <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
             {rawOutputLabel}
           </div>
           <pre
             className={cn(
               "min-h-[240px] overflow-auto rounded-lg",
-              "bg-[#fafafa] p-4 text-xs leading-6 text-neutral-500",
+              "bg-[#fafafa] p-4 text-xs leading-6 text-muted-foreground",
               "font-mono",
             )}
           >

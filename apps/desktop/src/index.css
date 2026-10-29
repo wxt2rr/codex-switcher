@@ -1,13 +1,12 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/inter";
 @import "../../../packages/design-tokens/theme.css";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --font-sans: "Inter Variable", system-ui, sans-serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-heading: var(--font-sans);
 
   /* Semantic color aliases */
@@ -63,6 +62,13 @@
   --color-sky-200: oklch(0.901 0.058 230.902);
   --color-sky-500: oklch(0.685 0.169 237.323);
   --color-sky-600: oklch(0.588 0.158 241.966);
+
+  /* Warm accent for warnings */
+  --color-warm-50: oklch(0.97 0.02 80);
+  --color-warm-100: oklch(0.95 0.03 80);
+  --color-warm-200: oklch(0.92 0.05 80);
+  --color-warm-500: oklch(0.769 0.188 70.08);
+  --color-warm-600: oklch(0.666 0.179 58.318);
 
   /* Shadow scale */
   --shadow-2xs: 0 1px 2px 0 rgb(0 0 0 / 0.03);
@@ -221,7 +227,10 @@ body {
 }
 
 .motion-popover-enter[data-state="open"] {
+  opacity: 1;
+  transform: translateY(0) scale(1);
   transition-duration: var(--motion-popover-enter);
+  pointer-events: auto;
 
   @starting-style {
     opacity: 0;
@@ -241,26 +250,32 @@ body {
 }
 
 .motion-select-content {
-  opacity: 1;
-  transform: translateY(0) scale(1);
+  opacity: 0;
+  transform: translateY(var(--motion-select-offset, -4px)) scale(0.96);
   transition:
     opacity var(--motion-popover-exit) var(--ease-out),
     transform var(--motion-popover-exit) var(--ease-out);
   will-change: transform, opacity;
+  pointer-events: none;
 }
 
 .motion-select-content[data-state="open"] {
+  opacity: 1;
+  transform: translateY(0) scale(1);
   transition-duration: var(--motion-popover-enter);
+  pointer-events: auto;
 
   @starting-style {
     opacity: 0;
-    transform: translateY(var(--motion-select-offset, -2px)) scale(0.98);
+    transform: translateY(var(--motion-select-offset, -4px)) scale(0.96);
   }
 }
 
 .motion-select-content[data-state="closed"] {
   opacity: 0;
-  transform: translateY(var(--motion-select-offset, -1px)) scale(0.985);
+  transform: translateY(var(--motion-select-offset, -2px)) scale(0.98);
+  transition-duration: var(--motion-popover-exit);
+  pointer-events: none;
 }
 
 .motion-select-content[data-side="top"] {

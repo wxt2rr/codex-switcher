@@ -87,7 +87,7 @@ function AccountSourceSummary({
   const remaining = Math.max(0, accountLabels.length - preview.length);
   return (
     <div className="min-w-0">
-      <div className="flex items-center justify-between gap-3 text-[11px] text-slate-400">
+      <div className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
         <span>{label}</span>
         <span>{count} {zh ? "个账号" : count === 1 ? "account" : "accounts"}</span>
       </div>
@@ -96,7 +96,7 @@ function AccountSourceSummary({
           {preview.map((account) => <SoftBadge key={account} label={account} className="h-5 max-w-full truncate rounded-md px-2 text-[10px]" />)}
           {remaining ? <SoftBadge label={`+${remaining}`} className="h-5 rounded-md px-2 text-[10px]" /> : null}
         </div>
-      ) : <div className="mt-1.5 text-[11px] text-slate-400">{emptyLabel}</div>}
+      ) : <div className="mt-1.5 text-[11px] text-muted-foreground">{emptyLabel}</div>}
     </div>
   );
 }
@@ -325,7 +325,7 @@ export function ModelsPage({
       />
 
       {loading ? <ListLoadingState rows={3} /> : snapshot.models.length === 0 ? (
-          <ListCard className="flex min-h-[150px] items-center justify-center text-[13px] font-medium text-slate-400">
+          <ListCard className="flex min-h-[150px] items-center justify-center text-[13px] font-medium text-muted-foreground">
             {zh ? "暂无自定义模型" : "No custom models"}
           </ListCard>
         ) : (
@@ -356,8 +356,8 @@ export function ModelsPage({
                     size={32}
                   />
                   <div className="min-w-0">
-                    <h3 className="truncate text-[14px] font-semibold text-neutral-950 dark:text-white">{model.entry.display_name}</h3>
-                    <p className="mt-1 truncate font-mono text-[11px] text-slate-400">{model.entry.slug}</p>
+                    <h3 className="truncate text-[14px] font-semibold text-foreground dark:text-white">{model.entry.display_name}</h3>
+                    <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">{model.entry.slug}</p>
                   </div>
                 </div>
               </div>
@@ -385,7 +385,7 @@ export function ModelsPage({
                     } : undefined}
                   />
                   {model.entry.model_source === "bundled" ? (
-                    <span className="text-[11px] text-slate-400">{zh ? "随 Codex App 自动同步" : "Synced from Codex App"}</span>
+                    <span className="text-[11px] text-muted-foreground">{zh ? "随 Codex App 自动同步" : "Synced from Codex App"}</span>
                   ) : (
                     <>
                       <Button size="sm" variant="ghost" onClick={() => openEditor(model)}><Pencil className="size-3.5" />{zh ? "编辑" : "Edit"}</Button>
@@ -396,7 +396,7 @@ export function ModelsPage({
               </div>
             </ListCard>
           );
-          }) : <ListCard className="col-span-full flex min-h-[150px] items-center justify-center text-[13px] font-medium text-slate-400">{zh ? "没有匹配的模型" : "No matching models"}</ListCard>}
+          }) : <ListCard className="col-span-full flex min-h-[150px] items-center justify-center text-[13px] font-medium text-muted-foreground">{zh ? "没有匹配的模型" : "No matching models"}</ListCard>}
           </div>
         </ListStack>
       )}
@@ -410,9 +410,9 @@ export function ModelsPage({
         scrollable={false}
       >
         <div className="flex min-h-0 flex-1 flex-col gap-4">
-          <div className="flex shrink-0 items-center gap-1 rounded-lg bg-neutral-100 p-1">
-            <button type="button" onClick={() => changeMode("form")} aria-pressed={mode === "form"} className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border text-[12px] ${mode === "form" ? "ui-selected-control" : "border-transparent text-slate-500"}`}><FilePenLine className="size-3.5" />{zh ? "表单" : "Form"}</button>
-            <button type="button" onClick={() => changeMode("json")} aria-pressed={mode === "json"} className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border text-[12px] ${mode === "json" ? "ui-selected-control" : "border-transparent text-slate-500"}`}><Braces className="size-3.5" />JSON</button>
+          <div className="flex shrink-0 items-center gap-1 rounded-lg bg-accent p-1">
+            <button type="button" onClick={() => changeMode("form")} aria-pressed={mode === "form"} className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border text-[12px] ${mode === "form" ? "ui-selected-control" : "border-transparent text-muted-foreground"}`}><FilePenLine className="size-3.5" />{zh ? "表单" : "Form"}</button>
+            <button type="button" onClick={() => changeMode("json")} aria-pressed={mode === "json"} className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border text-[12px] ${mode === "json" ? "ui-selected-control" : "border-transparent text-muted-foreground"}`}><Braces className="size-3.5" />JSON</button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto pr-1">
             {mode === "form" ? (

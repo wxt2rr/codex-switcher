@@ -1284,7 +1284,7 @@ export function App() {
                 style={{ transform: `scaleX(${initialLoadingProgress / 100})` }}
               />
             </div>
-            <p className="mt-3 text-center text-[12px] text-slate-500">
+            <p className="mt-3 text-center text-[12px] text-muted-foreground">
               {language === "zh"
                 ? initialLoadingStage === "loading-settings" ? "正在加载界面设置" : initialLoadingStage === "restoring-routes" ? "正在恢复本地配置与代理路由" : "启动就绪"
                 : language === "ja"
@@ -1319,7 +1319,7 @@ export function App() {
       >
         <section className="flex h-full min-h-0 items-center justify-center px-6">
           <div className="flex flex-col items-center gap-4">
-            <div className="text-lg font-semibold text-neutral-800">{loadingErrorTitle}</div>
+            <div className="text-lg font-semibold text-foreground">{loadingErrorTitle}</div>
             <Button variant="outline" onClick={() => void refreshOverview({ loadMetrics: true })} disabled={busy}>
               {retryLabel}
             </Button>
@@ -1569,16 +1569,16 @@ export function App() {
             ? "モデル設定は保存されました。Codex App は起動時にモデル一覧をキャッシュするため、最新設定を反映するには再起動が必要です。"
             : "The model settings were saved. Codex App caches its model list at startup, so the current App must restart to load the latest configuration."}
         impact={modelCatalogRefreshRequest ? (
-          <div className="space-y-2 text-[12px] text-slate-600">
+          <div className="space-y-2 text-[12px] text-muted-foreground">
             <div className="flex justify-between gap-4">
               <span>{language === "zh" ? "环境" : language === "ja" ? "環境" : "Environment"}</span>
-              <span className="font-medium text-neutral-800">{modelCatalogRefreshRequest.envName ?? "-"}</span>
+              <span className="font-medium text-foreground">{modelCatalogRefreshRequest.envName ?? "-"}</span>
             </div>
             <div className="flex justify-between gap-4">
               <span>{language === "zh" ? "当前窗口" : language === "ja" ? "実行中のウィンドウ" : "Running windows"}</span>
-              <span className="font-medium text-neutral-800">{modelCatalogRefreshRequest.runningWindows}</span>
+              <span className="font-medium text-foreground">{modelCatalogRefreshRequest.runningWindows}</span>
             </div>
-            <div className="pt-1 text-slate-500">
+            <div className="pt-1 text-muted-foreground">
               {language === "zh" ? "重启会短暂中断当前 Codex App 窗口。" : language === "ja" ? "再起動中は Codex App のウィンドウが一時的に中断されます。" : "Restarting briefly interrupts the current Codex App windows."}
             </div>
           </div>

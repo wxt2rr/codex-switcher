@@ -53,7 +53,7 @@ export function ModelTestButton({ bridge, request, language }: {
         title={request ? (zh ? "使用当前服务商发送：你是什么模型" : "Ask the current provider: What model are you?") : (zh ? "需要先绑定账号" : "Bind an account before testing")}
         className={cn(
           "inline-flex h-8 min-w-[68px] items-center justify-center gap-1.5 rounded-lg border border-black/[0.08] bg-white px-2.5 text-[11px] font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-50",
-          result?.ok && "border-emerald-200 bg-emerald-50 text-emerald-700",
+          result?.ok && "border-primary/30 bg-primary/10 text-primary",
         )}
       >
         {testing ? <LoaderCircle className="size-3.5 animate-spin" /> : result?.ok ? <CheckCircle2 className="size-3.5" /> : <PlayCircle className="size-3.5" />}

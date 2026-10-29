@@ -42,8 +42,8 @@ export function DashboardCardHeader({
   return (
     <div className="mb-5 flex items-start justify-between gap-3">
       <div>
-        <div className="text-[15px] font-semibold tracking-tight text-neutral-800">{title}</div>
-        <div className="mt-1 text-[13px] leading-5 text-neutral-400">{subtitle}</div>
+        <div className="text-[15px] font-semibold tracking-tight text-foreground">{title}</div>
+        <div className="mt-1 text-[13px] leading-5 text-muted-foreground">{subtitle}</div>
       </div>
       {actionLabel ? (
         <Button size="sm" variant="outline" onClick={onAction} className="shrink-0">
@@ -65,27 +65,27 @@ export function MetricBlock({
 }) {
   return (
     <div>
-      <div className="text-[13px] font-medium text-neutral-400">{label}</div>
-      <div key={value} className="motion-value-update mt-2 text-[2rem] font-semibold leading-none tracking-tight text-neutral-800">{value}</div>
-      {hint ? <div className="mt-2 text-[13px] text-neutral-400">{hint}</div> : null}
+      <div className="text-[13px] font-medium text-muted-foreground">{label}</div>
+      <div key={value} className="motion-value-update mt-2 text-[2rem] font-semibold leading-none tracking-tight text-foreground">{value}</div>
+      {hint ? <div className="mt-2 text-[13px] text-muted-foreground">{hint}</div> : null}
     </div>
   );
 }
 
 export function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-neutral-100 bg-neutral-50/80 px-4 py-3">
-      <div className="text-[13px] font-medium text-neutral-400">{label}</div>
-      <div key={value} className="motion-value-update mt-1 text-sm font-medium text-neutral-700">{value}</div>
+    <div className="rounded-lg border border-neutral-100 bg-muted/80 px-4 py-3">
+      <div className="text-[13px] font-medium text-muted-foreground">{label}</div>
+      <div key={value} className="motion-value-update mt-1 text-sm font-medium text-foreground">{value}</div>
     </div>
   );
 }
 
 export function BigNumber({ value, label }: { value: string; label: string }) {
   return (
-    <div className="rounded-lg border border-neutral-100 bg-neutral-50/80 px-4 py-5">
-      <div key={value} className="motion-value-update text-4xl font-semibold tracking-tight text-neutral-800">{value}</div>
-      <div className="mt-2 text-sm font-medium text-neutral-400">{label}</div>
+    <div className="rounded-lg border border-neutral-100 bg-muted/80 px-4 py-5">
+      <div key={value} className="motion-value-update text-4xl font-semibold tracking-tight text-foreground">{value}</div>
+      <div className="mt-2 text-sm font-medium text-muted-foreground">{label}</div>
     </div>
   );
 }
@@ -93,9 +93,9 @@ export function BigNumber({ value, label }: { value: string; label: string }) {
 export function StatCard({ label, value, helper, valueClassName }: { label: string; value: string; helper: ReactNode; valueClassName?: string }) {
   return (
     <div className="min-w-0 px-5 py-3">
-      <div className="text-[12px] font-medium text-slate-500">{label}</div>
-      <div key={value} className={cn("motion-value-update mt-1 text-[20px] font-semibold tracking-[-0.03em] text-neutral-950", valueClassName)}>{value}</div>
-      <div className="mt-1 text-[11px] text-slate-500">{helper}</div>
+      <div className="text-[12px] font-medium text-muted-foreground">{label}</div>
+      <div key={value} className={cn("motion-value-update mt-1 text-[20px] font-semibold tracking-[-0.03em] text-foreground", valueClassName)}>{value}</div>
+      <div className="mt-1 text-[11px] text-muted-foreground">{helper}</div>
     </div>
   );
 }
@@ -113,13 +113,13 @@ export function StatusPill({
     tone === "ok"
       ? "border border-primary/20 bg-primary/10 text-primary"
       : tone === "warn"
-        ? "border border-neutral-200 bg-neutral-50 text-neutral-700"
-        : "border border-neutral-200/60 bg-neutral-100 text-neutral-500";
+        ? "border border-border bg-muted text-foreground"
+        : "border border-border/60 bg-accent text-muted-foreground";
 
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-3 py-0.5",
+        "inline-flex items-center gap-1.5 rounded-lg px-3 py-0.5",
         "text-xs font-semibold",
         className,
       )}

@@ -59,7 +59,7 @@ function StatusTargetCard({
       <div className="flex min-w-0 items-center">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-3">
-            <h3 className="truncate text-[15px] font-semibold tracking-[-0.02em] text-neutral-950">{label}</h3>
+            <h3 className="truncate text-[15px] font-semibold tracking-[-0.02em] text-foreground">{label}</h3>
             <RunStatusBadge
               label={localizeLoginState(status.loginState, language)}
               tone={isLoggedIn ? "success" : "warn"}
@@ -72,18 +72,18 @@ function StatusTargetCard({
         </div>
       </div>
 
-      <div className="responsive-priority-tertiary min-w-0 border-l border-neutral-200/70 pl-5">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">{language === "zh" ? "当前对象" : "Current"}</div>
-        <div className="mt-2 truncate text-[14px] font-semibold text-neutral-950">{status.current}</div>
-        <div className="mt-1 truncate text-[12px] text-slate-500">
+      <div className="responsive-priority-tertiary min-w-0 border-l border-border/70 pl-5">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{language === "zh" ? "当前对象" : "Current"}</div>
+        <div className="mt-2 truncate text-[14px] font-semibold text-foreground">{status.current}</div>
+        <div className="mt-1 truncate text-[12px] text-muted-foreground">
           {status.email ?? (loading ? loadingLabel : "-")}
         </div>
       </div>
 
-      <div className="responsive-priority-secondary min-w-0 border-l border-neutral-200/70 pl-5">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">{language === "zh" ? "认证" : "Auth"}</div>
-        <div className="mt-2 truncate text-[14px] font-medium text-neutral-950">{status.auth}</div>
-        <div className="mt-1 truncate text-[12px] text-slate-500">
+      <div className="responsive-priority-secondary min-w-0 border-l border-border/70 pl-5">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{language === "zh" ? "认证" : "Auth"}</div>
+        <div className="mt-2 truncate text-[14px] font-medium text-foreground">{status.auth}</div>
+        <div className="mt-1 truncate text-[12px] text-muted-foreground">
           {authExpiryLabel}: {status.authExpiry}
         </div>
       </div>
@@ -91,7 +91,7 @@ function StatusTargetCard({
       <div className="responsive-actions">
         <button
           type="button"
-          className="flex size-8 items-center justify-center rounded-lg border border-neutral-200 bg-white text-slate-700"
+          className="flex size-8 items-center justify-center rounded-lg border border-border bg-white text-foreground"
           aria-label={language === "zh" ? "认证状态" : "Auth state"}
           title={language === "zh" ? "认证状态" : "Auth state"}
         >
@@ -149,7 +149,7 @@ export function OverviewPage({
             variant="outline"
             onClick={onRefresh}
             disabled={busy}
-            className="h-9 rounded-lg border-neutral-200 bg-white px-4 text-[12px] shadow-none"
+            className="h-9 rounded-lg border-border bg-white px-4 text-[12px] shadow-none"
           >
             <RefreshCw className="size-4" />
             {busy ? pageCopy.common.refreshing : refreshLabel}

@@ -17,6 +17,7 @@ import {
 } from "../components/account-list-primitives";
 import { Field, Input, Select } from "../components/form-primitives";
 import { ConfirmDialog } from "../components/admin-primitives";
+import { ThemeColorSettings } from "../components/theme-color-settings";
 import { getDesktopCopy } from "../desktop-copy";
 import { localizeLogKind } from "../desktop-utils";
 import type { UiLanguage } from "../i18n";
@@ -538,6 +539,13 @@ export function OperationsPage({
             </pre>
           </div>
         </OperationCard>
+        <OperationCard
+          title={language === "zh" ? "主题色" : language === "ja" ? "テーマカラー" : "Theme Color"}
+          subtitle={language === "zh" ? "自定义界面主题色，保存后实时生效" : language === "ja" ? "テーマカラーをカスタマイズ、保存後すぐに反映" : "Customize the theme color, applied immediately after saving"}
+        >
+          <ThemeColorSettings language={language} />
+        </OperationCard>
+
       </ListStack>
       <ConfirmDialog
         open={showBadgePermissionDialog}
