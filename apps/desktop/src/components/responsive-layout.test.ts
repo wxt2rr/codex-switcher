@@ -71,8 +71,8 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.doesNotMatch(accounts, /当前激活目标/);
   assert.doesNotMatch(environments, /环境总数/);
   assert.doesNotMatch(environments, /当前激活环境/);
-  assert.match(environments, /mt-2 flex flex-wrap items-center gap-2 text-\[11px\]/);
-  assert.match(environments, /className="h-5 px-2 text-\[10px\]"/);
+  assert.match(environments, /mt-2 flex flex-wrap items-center gap-2 text-\[12px\]/);
+  assert.match(environments, /className="h-5 px-2 text-\[11px\]"/);
   assert.doesNotMatch(accounts, /function StatCard\(/);
   assert.match(accounts, /className="page-scroll-gutter h-full min-h-0"/);
   assert.match(accounts, /<ListStack className="mt-0 min-h-full">/);
@@ -173,13 +173,17 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.doesNotMatch(select, /focus-visible:ring/);
   assert.match(select, /collisionPadding=\{12\}/);
   assert.match(select, /--radix-select-content-available-height/);
-  assert.match(css, /\[data-slot="select-trigger"\]:focus-visible\s*\{[^}]*box-shadow:\s*none/s);
+  assert.match(css, /\[data-slot="select-trigger"\]:focus,\s*\[data-slot="select-trigger"\]:focus-visible\s*\{[^}]*border-color:\s*transparent;[^}]*box-shadow:\s*none/s);
   assert.match(accounts, /data-auth-refresh-input/);
   assert.match(accounts, /data-account-search-input/);
   assert.match(accounts, /focus:border-transparent focus:ring-0/);
   assert.match(css, /\[data-account-search-input\]:focus-visible\s*\{[^}]*box-shadow:\s*none/s);
   assert.match(accounts, /w-\[64px\]/);
   assert.match(css, /\[data-auth-refresh-input\]:focus-visible\s*\{[^}]*box-shadow:\s*none/s);
+  assert.match(formPrimitives, /focus:border-transparent focus:ring-0 focus:ring-offset-0/);
+  assert.doesNotMatch(formPrimitives, /focus:border-primary|focus:ring-2 focus:ring-primary/);
+  assert.match(operations, /autoUpdateStatus\.currentVersion/);
+  assert.match(operations, /当前版本/);
   assert.match(accounts, /aria-expanded=\{open\}/);
   assert.match(accounts, /key: "copy"/);
   assert.match(accounts, /key: "copy-to"/);
@@ -187,7 +191,7 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.match(accounts, /<RowActionSubmenu/);
   assert.match(accounts, /<ChevronRight/);
   assert.match(accounts, /onClick=\{\(\) => onSelect\(primaryStrategy\)\}/);
-  assert.match(accounts, /onMouseLeave=\{\(\) => setProjectOpen\(false\)\}/);
+  assert.match(accounts, /onPointerLeave=\{projectMenu\.closeOnHover\}/);
   assert.match(accounts, /key: "multi-window"/);
   assert.match(accounts, /disabled: !account\.isCurrentApp/);
   assert.match(accounts, /只有活跃账号支持多开/);
@@ -238,7 +242,7 @@ test("all management record cards opt into the single-row responsive contract", 
   assert.match(environments, /ListStack/);
   assert.match(environments, /<ListStack>/);
   assert.match(environments, /title=\{env\.path\}/);
-  assert.match(environments, /font-mono text-\[11px\] text-muted-foreground/);
+  assert.match(environments, /font-mono text-\[12px\] text-muted-foreground/);
   assert.doesNotMatch(environments, /!rounded-none/);
   assert.doesNotMatch(environments, /!shadow-none/);
   assert.doesNotMatch(environments, /index % 2 \? "bg-\[#fafbfc\]" : "bg-white"/);
@@ -346,10 +350,16 @@ test("shared selects open on hover without button press scaling", () => {
   assert.match(accounts, /<Select/);
   assert.match(select, /data-slot="select-trigger"/);
   assert.match(formPrimitives, /openOnHover = true/);
-  assert.match(formPrimitives, /onMouseEnter=\{openOnHover \? handleHoverOpen : undefined\}/);
-  assert.match(formPrimitives, /if \(!open \|\| !openOnHover\) return/);
+  assert.match(formPrimitives, /onPointerEnter=\{openOnHover \? handleHoverOpen : undefined\}/);
+  assert.match(formPrimitives, /onPointerLeave=\{openOnHover \? handleHoverLeave : undefined\}/);
+  assert.match(formPrimitives, /onPointerEnter=\{openOnHover \? handleHoverContentEnter : undefined\}/);
+  assert.match(formPrimitives, /onPointerLeave=\{openOnHover \? handleHoverContentLeave : undefined\}/);
+  assert.match(formPrimitives, /document\.addEventListener\("pointermove"/);
   assert.match(formPrimitives, /isPointInsideHoverMenu/);
-  assert.doesNotMatch(formPrimitives, /onMouseLeave=\{scheduleClose\}/);
+  assert.match(formPrimitives, /lastPointerRef/);
+  assert.match(css, /\.motion-popover-enter\[data-state="closed"\]\s*\{[^}]*pointer-events:\s*none/s);
+  assert.match(accounts, /useHoverMenuState/);
+  assert.match(accounts, /!open && "pointer-events-none"/);
   assert.match(formPrimitives, /<div className="flex min-w-0 items-center gap-2"><img src=\{selectedItem\.iconUrl\}/);
   assert.doesNotMatch(formPrimitives, /<span className="flex min-w-0 items-center gap-2"><img src=\{selectedItem\.iconUrl\}/);
 });
@@ -505,7 +515,7 @@ test("environment route status uses a compact semantic indicator", () => {
   assert.match(environments, /border-primary\/30 bg-primary\/10 text-primary/);
   assert.match(environments, /账号池 · \$\{poolStatus\.readyMembers\}\/\$\{poolStatus\.members\.length\}/);
   assert.match(environments, /aria-pressed=\{isGatewayEnabled\}/);
-  assert.match(accounts, /truncate text-\[10px\] font-medium text-primary/);
+  assert.match(accounts, /truncate text-\[11px\] font-medium text-primary/);
 });
 
 test("usage Base URLs open a filterable paginated request details view", () => {

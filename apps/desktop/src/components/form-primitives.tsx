@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/select";
 import type { SelectFieldItem } from "./select-field";
 import { toSelectItems } from "./select-field";
-import { isPointInsideHoverMenu } from "./hover-menu-intent";
+import { isPointInsideHoverMenu, type HoverPoint } from "./hover-menu-intent";
 import {
   SELECT_HOVER_CLOSE_DELAY,
   SELECT_HOVER_OPEN_DELAY,
@@ -55,7 +55,7 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
         "text-[13px] text-neutral-800 placeholder:text-neutral-400 dark:text-slate-100 dark:placeholder:text-muted-foreground",
         "outline-none transition-[background-color,color,border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]",
         "hover:bg-[#e9eef5] dark:hover:bg-[#202a36]",
-        "focus:border-primary focus:ring-2 focus:ring-primary/15 focus:ring-offset-0",
+        "focus:border-transparent focus:ring-0 focus:ring-offset-0",
         props.className,
       )}
     />
@@ -87,7 +87,9 @@ export function Select({
   const openTimerRef = useRef<number | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const openRef = useRef(false);
   const isHoveringRef = useRef(false);
+  const lastPointerRef = useRef<HoverPoint | null>(null);
 
   function cancelClose() {
     if (closeTimerRef.current !== null) {
@@ -103,46 +105,67 @@ export function Select({
     }
   }
 
-  function handleHoverOpen() {
+  function setOpenState(nextOpen: boolean) {
+    openRef.current = nextOpen;
+    setOpen(nextOpen);
+  }
+
+  function handleHoverOpen(event: { clientX: number; clientY: number }) {
     if (disabled) return;
+    lastPointerRef.current = { x: event.clientX, y: event.clientY };
     selectHoverCoordinator.activate(selectId);
     cancelClose();
-    cancelOpen();
     isHoveringRef.current = true;
-    // Small delay to prevent accidental opens when moving quickly past
+    if (openRef.current) {
+      cancelOpen();
+      return;
+    }
+    cancelOpen();
     openTimerRef.current = window.setTimeout(() => {
-      if (isHoveringRef.current) {
-        setOpen(true);
+      openTimerRef.current = null;
+      if (isHoveringRef.current && !openRef.current) {
+        setOpenState(true);
       }
     }, SELECT_HOVER_OPEN_DELAY);
   }
 
-  function handleHoverLeave() {
+  function handleHoverLeave(event: { clientX: number; clientY: number }) {
+    lastPointerRef.current = { x: event.clientX, y: event.clientY };
     isHoveringRef.current = false;
     cancelOpen();
-    // Immediate close when leaving, no delay
-    cancelClose();
-    closeTimerRef.current = window.setTimeout(() => {
-      if (!isHoveringRef.current) {
-        selectHoverCoordinator.release(selectId);
-        setOpen(false);
-      }
-    }, SELECT_HOVER_CLOSE_DELAY);
+    scheduleClose(lastPointerRef.current);
   }
 
-  function scheduleClose(point?: { x: number; y: number }) {
+  function handleHoverContentEnter(event: { clientX: number; clientY: number }) {
+    lastPointerRef.current = { x: event.clientX, y: event.clientY };
+    isHoveringRef.current = true;
     cancelClose();
+  }
+
+  function handleHoverContentLeave(event: { clientX: number; clientY: number }) {
+    lastPointerRef.current = { x: event.clientX, y: event.clientY };
+    isHoveringRef.current = false;
+    scheduleClose(lastPointerRef.current);
+  }
+
+  function scheduleClose(point?: HoverPoint) {
+    cancelClose();
+    if (point) lastPointerRef.current = point;
     closeTimerRef.current = window.setTimeout(() => {
-      if (point && isPointInsideHoverMenu(
-        point,
+      closeTimerRef.current = null;
+      const latestPoint = lastPointerRef.current;
+      if (latestPoint && isPointInsideHoverMenu(
+        latestPoint,
         triggerRef.current?.getBoundingClientRect() ?? null,
         contentRef.current?.getBoundingClientRect() ?? null,
-        6,
-      )) return;
-      // Always close if we're not hovering
+        10,
+      )) {
+        isHoveringRef.current = true;
+        return;
+      }
       if (!isHoveringRef.current) {
         selectHoverCoordinator.release(selectId);
-        setOpen(false);
+        setOpenState(false);
       }
     }, SELECT_HOVER_CLOSE_DELAY);
   }
@@ -156,7 +179,7 @@ export function Select({
         isHoveringRef.current = false;
         cancelClose();
         cancelOpen();
-        setOpen(false);
+        setOpenState(false);
       },
     });
   }, [openOnHover, selectId]);
@@ -166,11 +189,12 @@ export function Select({
 
     function handlePointerMove(event: PointerEvent) {
       const point = { x: event.clientX, y: event.clientY };
+      lastPointerRef.current = point;
       const isInside = isPointInsideHoverMenu(
         point,
         triggerRef.current?.getBoundingClientRect() ?? null,
         contentRef.current?.getBoundingClientRect() ?? null,
-        6,
+        10,
       );
       if (isInside) {
         isHoveringRef.current = true;
@@ -185,9 +209,8 @@ export function Select({
     return () => {
       document.removeEventListener("pointermove", handlePointerMove, true);
       cancelClose();
-      cancelOpen();
     };
-  }, [open, openOnHover]);
+  }, [open, openOnHover, selectId]);
 
   // Clean up on unmount
   useEffect(() => {
@@ -207,8 +230,9 @@ export function Select({
       cancelClose();
       cancelOpen();
       selectHoverCoordinator.release(selectId);
+      openRef.current = false;
     }
-    setOpen(nextOpen);
+    setOpenState(nextOpen);
   }
 
   return (
@@ -216,14 +240,18 @@ export function Select({
       <SelectTrigger
         ref={triggerRef}
         className={className}
-        onMouseEnter={openOnHover ? handleHoverOpen : undefined}
-        onMouseLeave={openOnHover ? handleHoverLeave : undefined}
+        onPointerEnter={openOnHover ? handleHoverOpen : undefined}
+        onPointerLeave={openOnHover ? handleHoverLeave : undefined}
       >
         {selectedItem?.iconUrl ? (
           <div className="flex min-w-0 items-center gap-2"><img src={selectedItem.iconUrl} alt="" className="size-[18px] shrink-0 object-contain" /><span className="truncate">{selectedItem.label}</span></div>
         ) : <SelectValue placeholder={placeholder} />}
       </SelectTrigger>
-      <SelectContent ref={contentRef}>
+      <SelectContent
+        ref={contentRef}
+        onPointerEnter={openOnHover ? handleHoverContentEnter : undefined}
+        onPointerLeave={openOnHover ? handleHoverContentLeave : undefined}
+      >
         {normalizedItems.map((item) => (
           <SelectItem
             key={item.value}
@@ -272,7 +300,7 @@ export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
         "text-[13px] text-neutral-800 placeholder:text-neutral-400 dark:text-slate-100 dark:placeholder:text-muted-foreground",
         "outline-none transition-[background-color,color,border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]",
         "hover:bg-[#e9eef5] dark:hover:bg-[#202a36]",
-        "focus:border-primary focus:ring-2 focus:ring-primary/15 focus:ring-offset-0",
+        "focus:border-transparent focus:ring-0 focus:ring-offset-0",
         "resize-y",
         props.className,
       )}

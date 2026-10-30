@@ -210,26 +210,29 @@ export function OperationsPage({
           subtitle={language === "zh" ? "从 GitHub 检查并下载新版本；安装方式按当前平台能力处理。" : "Check and download releases from GitHub; installation follows the current platform capabilities."}
         >
           <div className="flex flex-wrap items-center gap-3 rounded-lg bg-[#f7f8fa] px-4 py-3">
-            <span className="text-[13px] text-slate-600">
-              {!autoUpdateStatus.enabled
-                ? (language === "zh" ? "未配置更新源" : "Feed not configured")
-                : autoUpdateStatus.state === "idle"
-                  ? (language === "zh" ? "已是最新版本" : "Up to date")
-                  : autoUpdateStatus.state === "checking"
-                    ? (language === "zh" ? "正在检查" : "Checking")
-                    : autoUpdateStatus.state === "downloading"
-                      ? `${language === "zh" ? "正在下载" : "Downloading"}${autoUpdateStatus.progress !== undefined ? ` ${Math.round(autoUpdateStatus.progress)}%` : ""}`
-                      : autoUpdateStatus.state === "downloaded"
-                        ? (language === "zh" ? "更新包已下载" : "Update downloaded")
-                        : autoUpdateStatus.state === "installing"
-                          ? (language === "zh" ? "正在安装，应用即将重启" : "Installing; the app will restart")
-                          : autoUpdateStatus.state === "manual-install"
-                            ? (language === "zh" ? "请完成手动安装" : "Complete the manual installation")
-                            : autoUpdateStatus.state === "unsupported"
-                              ? (language === "zh" ? "当前平台需手动安装" : "Manual installation required")
-                              : autoUpdateStatus.state}
-              {autoUpdateStatus.version ? ` · ${autoUpdateStatus.version}` : ""}
-            </span>
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-slate-600">
+              <span>
+                {!autoUpdateStatus.enabled
+                  ? (language === "zh" ? "未配置更新源" : "Feed not configured")
+                  : autoUpdateStatus.state === "idle"
+                    ? (language === "zh" ? "已是最新版本" : "Up to date")
+                    : autoUpdateStatus.state === "checking"
+                      ? (language === "zh" ? "正在检查" : "Checking")
+                      : autoUpdateStatus.state === "downloading"
+                        ? `${language === "zh" ? "正在下载" : "Downloading"}${autoUpdateStatus.progress !== undefined ? ` ${Math.round(autoUpdateStatus.progress)}%` : ""}`
+                        : autoUpdateStatus.state === "downloaded"
+                          ? (language === "zh" ? "更新包已下载" : "Update downloaded")
+                          : autoUpdateStatus.state === "installing"
+                            ? (language === "zh" ? "正在安装，应用即将重启" : "Installing; the app will restart")
+                            : autoUpdateStatus.state === "manual-install"
+                              ? (language === "zh" ? "请完成手动安装" : "Complete the manual installation")
+                              : autoUpdateStatus.state === "unsupported"
+                                ? (language === "zh" ? "当前平台需手动安装" : "Manual installation required")
+                                : autoUpdateStatus.state}
+              </span>
+              {autoUpdateStatus.currentVersion ? <span className="shrink-0 text-[12px] text-slate-400">· {language === "zh" ? "当前版本" : "Current"} v{autoUpdateStatus.currentVersion}</span> : null}
+              {autoUpdateStatus.version ? <span className="shrink-0 text-[12px] text-slate-400">· {language === "zh" ? "目标版本" : "Target"} v{autoUpdateStatus.version}</span> : null}
+            </div>
             {autoUpdateStatus.message ? <span className="text-[12px] text-slate-400">{autoUpdateStatus.message}</span> : null}
             <div className="ml-auto flex gap-2">
               <button type="button" className="rounded-md bg-white px-3 py-1.5 text-[12px] font-medium text-slate-700 ring-1 ring-black/[0.06] disabled:opacity-50" disabled={!autoUpdateStatus.enabled || ["checking", "downloading", "installing"].includes(autoUpdateStatus.state)} onClick={onCheckForAutoUpdate}>{language === "zh" ? "检查并下载" : "Check & download"}</button>

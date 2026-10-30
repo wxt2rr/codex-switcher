@@ -393,6 +393,7 @@ export interface ProviderPluginMarketEntry {
 export interface DesktopAutoUpdateStatus {
   enabled: boolean;
   state: "disabled" | "idle" | "checking" | "available" | "downloading" | "downloaded" | "installing" | "manual-install" | "unsupported" | "error";
+  currentVersion?: string;
   version?: string;
   message?: string;
   checkedAt?: number;

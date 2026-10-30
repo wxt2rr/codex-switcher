@@ -490,9 +490,9 @@ app.whenReady().then(async () => {
     manifest: readConfiguredUpdateManifest(),
     trustedPublicKeyPem: process.env.CODEX_SWITCHER_UPDATE_TRUSTED_PUBLIC_KEY,
     requireSignedManifest: process.env.CODEX_SWITCHER_UPDATE_REQUIRE_SIGNATURE === "1",
+    currentVersion: app.getVersion(),
     ...(updateFeedUrl || githubUpdate ? {
       rollbackJournal: createUpdateRollbackJournal(resolveUpdateJournalPath(app.getPath("userData"))),
-      currentVersion: app.getVersion(),
       backupPath: updateBackupPath,
       prepareRollbackBackup: (backupPath: string) => copyInstallForRollback(resolveUpdateRollbackTarget(), backupPath),
       restoreRollbackBackup: (backupPath: string) => restoreInstallFromRollback(resolveUpdateRollbackTarget(), backupPath),

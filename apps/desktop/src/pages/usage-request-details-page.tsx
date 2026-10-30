@@ -247,7 +247,7 @@ function RequestStatus({ item, zh }: { item: UsageRequestRecord; zh: boolean }) 
         </div>
       )}
     >
-      <button type="button" className={cn(badgeClass, "cursor-help outline-none focus-visible:ring-2 focus-visible:ring-blue-400")}
+      <button type="button" className={cn(badgeClass, "cursor-help outline-none focus-visible:ring-0 focus-visible:outline-none")}
         aria-label={zh ? `查看 HTTP ${item.httpStatus} 错误详情` : `View HTTP ${item.httpStatus} error details`}>
         {item.httpStatus}
       </button>
@@ -259,7 +259,7 @@ function RoutingAttempts({ item, zh }: { item: UsageRequestRecord; zh: boolean }
   if (!item.poolId) return <span>-</span>;
   const attempts = item.attempts ?? [];
   const trigger = (
-    <button type="button" className="cursor-help text-left outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
+    <button type="button" className="cursor-help text-left outline-none focus-visible:ring-0 focus-visible:outline-none">
       <div className="font-medium text-neutral-700">{item.attemptCount ?? Math.max(1, attempts.length)} {zh ? "次" : "attempts"}</div>
       {item.failoverReason ? <div className="mt-1 max-w-[150px] truncate text-[11px] text-warm-600">{formatFailureReason(item.failoverReason, zh)}</div> : null}
     </button>

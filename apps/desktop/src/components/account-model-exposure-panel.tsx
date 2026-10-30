@@ -218,54 +218,56 @@ export function AccountModelExposurePanel({
             </div>
           </div>
         ) : null}
-        <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-black/[0.05] bg-white p-1.5">
+        <div className="grid shrink-0 gap-2 rounded-lg border border-black/[0.05] bg-white p-1.5">
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={zh ? "搜索模型、服务商或标识" : "Search model, provider, or id"} className="pl-9" />
           </div>
-          <Select
-            value={providerFilter}
-            onValueChange={setProviderFilter}
-            items={[
-              { value: "all", label: zh ? "全部服务商" : "All providers" },
-              ...providerOptions.map((providerId) => ({
-                value: providerId,
-                label: providerLabel(
-                  providerId,
-                  providerCatalog,
-                  zh,
-                  String(allCandidates.find((model) => providerIdForAccountModel(model, discoveryByProviderKey) === providerId)?.entry.provider_display_name ?? ""),
-                ),
-              })),
-            ]}
-            openOnHover={false}
-            className="h-9 min-w-[140px] max-w-[180px] flex-1 bg-white text-[12px]"
-          />
-          <Select
-            value={modelFilter}
-            onValueChange={setModelFilter}
-            items={[
-              { value: "all", label: zh ? "全部模型" : "All models" },
-              { value: "selected", label: zh ? "已选择" : "Selected" },
-            ]}
-            openOnHover={false}
-            className="h-9 min-w-[100px] max-w-[130px] flex-1 bg-white text-[12px]"
-          />
-          <Tooltip content={zh ? "重新拉取模型列表" : "Refresh model list"}>
-            <Button type="button" variant="outline" size="icon" onClick={() => void loadModels(true)} disabled={refreshing || loading || !accountKey} aria-label={zh ? "刷新模型列表" : "Refresh model list"}>
-              <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
-            </Button>
-          </Tooltip>
-          <Tooltip content={zh ? "找不到支持的模型？点击这里，去模型设置页新增自定义模型吧。" : "Can't find a supported model? Open Models to add a custom model."}>
-            <button
-              type="button"
-              onClick={onOpenModelSettings}
-              aria-label={zh ? "打开模型设置" : "Open model settings"}
-              className="inline-flex size-9 items-center justify-center rounded-lg border border-black/[0.08] bg-white text-muted-foreground transition-colors hover:bg-muted hover:text-neutral-900"
-            >
-              <CircleHelp className="size-4" />
-            </button>
-          </Tooltip>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <Select
+              value={providerFilter}
+              onValueChange={setProviderFilter}
+              items={[
+                { value: "all", label: zh ? "全部服务商" : "All providers" },
+                ...providerOptions.map((providerId) => ({
+                  value: providerId,
+                  label: providerLabel(
+                    providerId,
+                    providerCatalog,
+                    zh,
+                    String(allCandidates.find((model) => providerIdForAccountModel(model, discoveryByProviderKey) === providerId)?.entry.provider_display_name ?? ""),
+                  ),
+                })),
+              ]}
+              openOnHover={false}
+              className="h-9 min-w-[140px] flex-1 bg-white text-[12px] sm:max-w-[180px]"
+            />
+            <Select
+              value={modelFilter}
+              onValueChange={setModelFilter}
+              items={[
+                { value: "all", label: zh ? "全部模型" : "All models" },
+                { value: "selected", label: zh ? "已选择" : "Selected" },
+              ]}
+              openOnHover={false}
+              className="h-9 min-w-[100px] flex-1 bg-white text-[12px] sm:max-w-[130px]"
+            />
+            <Tooltip content={zh ? "重新拉取模型列表" : "Refresh model list"}>
+              <Button type="button" variant="outline" size="icon" onClick={() => void loadModels(true)} disabled={refreshing || loading || !accountKey} aria-label={zh ? "刷新模型列表" : "Refresh model list"}>
+                <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
+              </Button>
+            </Tooltip>
+            <Tooltip content={zh ? "找不到支持的模型？点击这里，去模型设置页新增自定义模型吧。" : "Can't find a supported model? Open Models to add a custom model."}>
+              <button
+                type="button"
+                onClick={onOpenModelSettings}
+                aria-label={zh ? "打开模型设置" : "Open model settings"}
+                className="inline-flex size-9 items-center justify-center rounded-lg border border-black/[0.08] bg-white text-muted-foreground transition-colors hover:bg-muted hover:text-neutral-900"
+              >
+                <CircleHelp className="size-4" />
+              </button>
+            </Tooltip>
+          </div>
         </div>
         <div className="flex shrink-0 items-center rounded-lg border border-black/[0.05] bg-[#fafbfc] px-3 py-2">
           <label

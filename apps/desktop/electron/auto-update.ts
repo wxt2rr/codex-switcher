@@ -12,6 +12,7 @@ export type DesktopAutoUpdateState = "disabled" | "idle" | "checking" | "availab
 export interface DesktopAutoUpdateStatus {
   enabled: boolean;
   state: DesktopAutoUpdateState;
+  currentVersion?: string;
   version?: string;
   message?: string;
   checkedAt?: number;
@@ -87,8 +88,8 @@ export function createDesktopAutoUpdateController(
   const requireSignedManifest = options.requireSignedManifest ?? Boolean(feedUrl);
   let downloaded: DownloadedUpdate | undefined;
   let status: DesktopAutoUpdateStatus = feedUrl || github
-    ? { enabled: true, state: "idle", platform: github?.platform }
-    : { enabled: false, state: "disabled", message: "Update feed is not configured" };
+    ? { enabled: true, state: "idle", currentVersion: options.currentVersion, platform: github?.platform }
+    : { enabled: false, state: "disabled", currentVersion: options.currentVersion, message: "Update feed is not configured" };
 
   if (feedUrl) {
     updater.setFeedURL({ provider: "generic", url: feedUrl });

@@ -675,13 +675,67 @@ test("environment gateway persists, selects an account route, and survives route
   await new Promise<void>((resolve) => upstream.close(() => resolve()));
 });
 
+test("environment gateway rejects a ChatGPT route without credentials instead of forwarding ingress auth", async () => {
+  let upstreamCalls = 0;
+  const upstream = createServer(async (_request, response) => {
+    upstreamCalls += 1;
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ id: "should-not-be-called" }));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const address = upstream.address(); assert(address && typeof address !== "string");
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-missing-chatgpt-credential-"));
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+  const route = {
+    routeId: "route-missing-chatgpt-credential", envName: "work", accountName: "default",
+    providerId: "chatgpt", upstreamBaseUrl: `http://127.0.0.1:${address.port}/v1`, originalBaseUrl: "default",
+    protocol: "responses" as const, exposedModelId: "gpt-5.6-luna", upstreamModel: "gpt-5.6-luna",
+    reasoningProfile: "auto" as const, enabled: true, createdAt: Date.now(), updatedAt: Date.now(),
+  };
+  const gateway = {
+    gatewayId: "gateway-missing-chatgpt-credential", envName: "work", routeIds: [route.routeId],
+    routeGroups: { luna: { id: "luna", exposedModelId: "gpt-5.6-luna", routeIds: [route.routeId], strategy: "order" as const, sessionPolicy: "auto" as const, fallbackEnabled: true } },
+    defaultRouteId: route.routeId, enabled: true, createdAt: Date.now(), updatedAt: Date.now(),
+  };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  try {
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify(route),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway),
+    })).status, 204);
+    const response = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
+      method: "POST",
+      headers: { authorization: "Bearer ckt-ingress-key", "content-type": "application/json" },
+      body: JSON.stringify({ model: "gpt-5.6-luna", input: "hello" }),
+    });
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), {
+      error: "Route credentials are unavailable for the selected account",
+      code: "ROUTE_CREDENTIALS_UNAVAILABLE",
+    });
+    assert.equal(upstreamCalls, 0);
+  } finally {
+    await service.close();
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
+});
+
 test("local Agent surface exposes authenticated models and v1 protocol aliases without changing the Codex gateway", async () => {
   let receivedPath = "";
   let receivedAuthorization = "";
+  let receivedStore: unknown;
   const upstream = createServer(async (request, response) => {
     receivedPath = request.url ?? "";
     receivedAuthorization = String(request.headers.authorization ?? "");
-    for await (const _chunk of request) { /* drain */ }
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    try {
+      receivedStore = chunks.length ? (JSON.parse(Buffer.concat(chunks).toString("utf8")) as { store?: unknown }).store : undefined;
+    } catch {
+      receivedStore = undefined;
+    }
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({ id: "local-agent-response", model: "upstream-model", output: [] }));
   });
@@ -713,20 +767,66 @@ test("local Agent surface exposes authenticated models and v1 protocol aliases w
       const response = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/v1/responses`, {
         method: "POST",
         headers: { authorization: "Bearer agent-token", "content-type": "application/json" },
-        body: JSON.stringify({ model: "gpt-local", input: "hello" }),
+        body: JSON.stringify({ model: "gpt-local", input: "hello", store: true }),
       });
       assert.equal(response.status, 200);
       assert.equal((await response.json()).id, "local-agent-response");
       assert.equal(receivedPath, "/v1/responses");
       assert.equal(receivedAuthorization, "");
+      assert.equal(receivedStore, false);
 
       const internal = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
         method: "POST",
         headers: { authorization: "Bearer internal-token", "content-type": "application/json" },
-        body: JSON.stringify({ model: "gpt-local", input: "hello" }),
+        body: JSON.stringify({ model: "gpt-local", input: "hello", store: true }),
       });
       assert.equal(internal.status, 200);
       await internal.arrayBuffer();
+      assert.equal(receivedStore, true);
+
+      const pool = {
+        poolId: "pool-local-agent",
+        envName: "work",
+        protocol: "responses" as const,
+        enabled: true,
+        strategy: "sticky_weighted_round_robin" as const,
+        sessionTtlMinutes: 60,
+        maxFailoverAttempts: 0,
+        maxSameAccountFailures: 1,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        members: [{
+          accountName: route.accountName,
+          routeId: route.routeId,
+          protocol: "responses" as const,
+          upstreamBaseUrl: route.upstreamBaseUrl,
+          originalBaseUrl: route.originalBaseUrl,
+          upstreamModel: route.upstreamModel,
+          enabled: true,
+          weight: 1,
+          priority: 0,
+        }],
+      };
+      assert.equal((await fetch(`${service.origin}/admin/pools`, {
+        method: "PUT", headers: adminHeaders, body: JSON.stringify(pool),
+      })).status, 204);
+      assert.equal((await fetch(`${service.origin}/admin/pools/${pool.poolId}/members/${route.accountName}/secret`, {
+        method: "PUT", headers: adminHeaders, body: JSON.stringify({ authMode: "none" }),
+      })).status, 204);
+      assert.equal((await fetch(`${service.origin}/admin/pools/${pool.poolId}/token`, {
+        method: "PUT", headers: adminHeaders, body: JSON.stringify({ localRouteToken: "pool-token" }),
+      })).status, 204);
+      assert.equal((await fetch(`${service.origin}/admin/gateways`, {
+        method: "PUT", headers: adminHeaders, body: JSON.stringify({ ...gateway, poolId: pool.poolId }),
+      })).status, 204);
+      const pooled = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/v1/responses`, {
+        method: "POST",
+        headers: { authorization: "Bearer agent-token", "content-type": "application/json" },
+        body: JSON.stringify({ model: "gpt-local", input: "hello from pool", store: true }),
+      });
+      assert.equal(pooled.status, 200);
+      await pooled.arrayBuffer();
+      assert.equal(receivedStore, false);
 
       assert.equal((await fetch(`${service.origin}/admin/gateways/${gateway.gatewayId}/access`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ enabled: false }) })).status, 204);
       assert.equal((await fetch(`${service.origin}/gateways/${gateway.gatewayId}/v1/models`, { headers: { authorization: "Bearer agent-token" } })).status, 404);
@@ -734,6 +834,58 @@ test("local Agent surface exposes authenticated models and v1 protocol aliases w
       await service.close();
     }
   } finally {
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
+});
+
+test("local Agent Chat Completions surface disables store for OpenAI-compatible upstreams", async () => {
+  let receivedStore: unknown;
+  const upstream = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    receivedStore = chunks.length ? (JSON.parse(Buffer.concat(chunks).toString("utf8")) as { store?: unknown }).store : undefined;
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ id: "local-agent-chat-response", choices: [{ message: { role: "assistant", content: "ok" } }] }));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const address = upstream.address(); assert(address && typeof address !== "string");
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-local-agent-chat-"));
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+  const route = {
+    routeId: "route-local-agent-chat", envName: "work", accountName: "chat-login",
+    upstreamBaseUrl: `http://127.0.0.1:${address.port}/v1`, originalBaseUrl: "default",
+    protocol: "chat_completions" as const, exposedModelId: "gpt-chat", upstreamModel: "upstream-chat",
+    reasoningProfile: "auto" as const, enabled: true, createdAt: Date.now(), updatedAt: Date.now(),
+  };
+  const gateway = {
+    gatewayId: "gateway-local-agent-chat", envName: "work", routeIds: [route.routeId],
+    routeGroups: { chat: { id: "chat", exposedModelId: "gpt-chat", routeIds: [route.routeId], strategy: "order" as const, sessionPolicy: "auto" as const, fallbackEnabled: true } },
+    defaultRouteId: route.routeId, localAgentAccessEnabled: true, enabled: true, createdAt: Date.now(), updatedAt: Date.now(),
+  };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  try {
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify(route),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}/secret`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify({ authMode: "none", localRouteToken: "internal-token" }),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways/${gateway.gatewayId}/access`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify({ enabled: true, token: "agent-token" }),
+    })).status, 204);
+    const response = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/v1/chat/completions`, {
+      method: "POST",
+      headers: { authorization: "Bearer agent-token", "content-type": "application/json" },
+      body: JSON.stringify({ model: "gpt-chat", messages: [{ role: "user", content: "hello" }], store: true }),
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).id, "local-agent-chat-response");
+    assert.equal(receivedStore, false);
+  } finally {
+    await service.close();
     await new Promise<void>((resolve) => upstream.close(() => resolve()));
   }
 });

@@ -275,7 +275,7 @@ export function PluginsPage({
             <Input value={gitRef} onChange={(event) => setGitRef(event.target.value)} placeholder="v1.0.0 or 0123456" />
           </Field> : null}
           <Field label="plugin.json" hint={zh ? "Manifest 必须声明 provider 或 middleware 权限；不要把密钥放进插件目录。" : "The manifest must declare provider or middleware permission; never put secrets in the plugin directory."}>
-            <textarea value={manifestJson} onChange={(event) => setManifestJson(event.target.value)} className="min-h-[220px] w-full rounded-lg border border-transparent bg-[#f1f4f8] p-3 font-mono text-[12px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 dark:bg-[#19212b]" placeholder={'{\n  "id": "my-plugin",\n  "name": "My plugin",\n  "version": "1.0.0",\n  "apiVersion": 2,\n  "entry": "plugin.mjs",\n  "permissions": ["provider"]\n}'} />
+            <textarea value={manifestJson} onChange={(event) => setManifestJson(event.target.value)} className="min-h-[220px] w-full rounded-lg border border-transparent bg-[#f1f4f8] p-3 font-mono text-[12px] outline-none focus:border-transparent focus:ring-0 dark:bg-[#19212b]" placeholder={'{\n  "id": "my-plugin",\n  "name": "My plugin",\n  "version": "1.0.0",\n  "apiVersion": 2,\n  "entry": "plugin.mjs",\n  "permissions": ["provider"]\n}'} />
           </Field>
           <Button onClick={() => void installLocalPlugin()} disabled={Boolean(busyId)}><Download className="mr-1.5 size-4" />{zh ? "校验并安装" : "Verify and install"}</Button>
         </div>

@@ -230,12 +230,17 @@ function rewriteGatewayModel(body: Buffer | undefined, upstreamModel: string | u
   }
 }
 
-function normalizeAuthResponsesRequest(
+function normalizeResponsesRequest(
   body: Buffer | undefined,
   route: RouteTarget,
-  secret: RouteRuntimeSecret | undefined,
+  secret: { authMode?: "auth" | "apikey" | "none" } | undefined,
+  forceStoreFalse = false,
 ): Buffer | undefined {
-  if (!body?.length || route.protocol !== "responses" || secret?.authMode !== "auth") return body;
+  // Managed AUTH Responses routes always disable server-side response
+  // storage. Local Agent requests apply the same privacy/compatibility rule
+  // to every OpenAI-compatible protocol, including Chat Completions: some
+  // upstreams reject `store: true` even when the request is not Responses.
+  if (!body?.length || (!forceStoreFalse && (route.protocol !== "responses" || secret?.authMode !== "auth"))) return body;
   try {
     const parsed = JSON.parse(body.toString("utf8")) as unknown;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return body;
@@ -245,6 +250,23 @@ function normalizeAuthResponsesRequest(
   } catch {
     return body;
   }
+}
+
+function hasUsableRouteCredential(
+  route: Pick<RouteTarget, "providerId"> | undefined,
+  secret: {
+    authMode?: "auth" | "apikey" | "none";
+    upstreamApiKey?: string;
+    upstreamBearerToken?: string;
+  } | undefined,
+): boolean {
+  // Legacy native routes without a configured provider secret may intentionally
+  // pass through the caller's authorization. Managed ChatGPT routes are never
+  // allowed to do that: their subscription token must come from the account.
+  if (!secret) return route?.providerId !== "chatgpt";
+  if (secret.authMode === "none") return true;
+  if (secret.authMode === undefined && !secret.upstreamApiKey && !secret.upstreamBearerToken) return true;
+  return Boolean((secret.upstreamApiKey ?? secret.upstreamBearerToken)?.trim());
 }
 
 function inferGatewayCapabilities(body: Record<string, unknown> | undefined) {
@@ -1028,6 +1050,7 @@ async function proxyAccountPoolRequest(
   resolveProviderAdapter?: (providerId: string | undefined) => RuntimeProviderAdapter | undefined,
   capabilityRegistry?: CapabilityRegistry,
   persistCapabilityObservations?: () => void,
+  forceResponsesStoreFalse = false,
 ): Promise<void> {
   const startedAt = Date.now();
   const body = bodyOverride ?? (request.method === "GET" || request.method === "HEAD" ? Buffer.alloc(0) : await readRequestBodyBuffer(request));
@@ -1084,7 +1107,7 @@ async function proxyAccountPoolRequest(
       enabled: true, createdAt: pool.createdAt, updatedAt: pool.updatedAt,
     };
     const secret = secrets.get(member.accountName);
-    if (!route || !secret) {
+    if (!route || !secret || !hasUsableRouteCredential(route, secret)) {
       memberAttempts.set(member.accountName, maxSameAccountFailures);
       retryAccountName = undefined;
       await store.upsertPoolHealth(nextMemberHealth(health.find((item) => item.accountName === member.accountName)!, { ok: false, status: 401, reason: "unauthorized" }, Date.now()));
@@ -1104,6 +1127,7 @@ async function proxyAccountPoolRequest(
       ? { ...route, upstreamModel: effectiveUpstreamModel, protocol: effectiveProtocol }
       : route;
     let candidateBody = rewriteGatewayModel(body, effectiveUpstreamModel) ?? body;
+    candidateBody = normalizeResponsesRequest(candidateBody, effectiveRoute, secret, forceResponsesStoreFalse) ?? candidateBody;
     let candidateParsedBody = candidateBody.length ? parseRequestBody(candidateBody) : parsedBody;
     let candidateHistoryScope: string | undefined;
     if (pool.protocol === "responses" && effectiveRoute.protocol !== "responses" && candidateParsedBody && history) {
@@ -1390,6 +1414,7 @@ async function proxyRequest(
   persistCapabilityObservations?: () => void,
   history?: ConversationHistoryStore,
   historyScopeId?: string,
+  forceResponsesStoreFalse = false,
 ): Promise<void> {
   const startedAt = Date.now();
   const candidates = [route, ...fallbackRoutes.filter((candidate) => candidate.routeId !== route.routeId)];
@@ -1398,6 +1423,7 @@ async function proxyRequest(
   let lastRetryableResponse: { status: number; headers: Headers; body: Buffer; retryAfterMs: number | null } | undefined;
   let lastRetryableRoute: RouteTarget | undefined;
   let lastError: unknown;
+  let allCandidatesCredentialUnavailable = candidates.length > 0;
   const attempts: UsageRequestAttempt[] = [];
   const requiresAuthResponsesBody = candidates.some((candidate) => {
     if (candidate.protocol !== "responses") return false;
@@ -1408,7 +1434,7 @@ async function proxyRequest(
   // body. Buffer requests whenever a capability registry/profile or protocol
   // conversion is active; otherwise preserve the legacy streaming path.
   const shouldBufferRequestBody = request.method !== "GET" && request.method !== "HEAD"
-    && (requiresAuthResponsesBody || Boolean(capabilityRegistry) || Boolean(incomingProtocol)
+    && (forceResponsesStoreFalse || requiresAuthResponsesBody || Boolean(capabilityRegistry) || Boolean(incomingProtocol)
       || candidates.some((candidate) => Boolean(candidate.capabilityProfile || candidate.capabilities)));
   const bodyWasBuffered = bodyOverride !== undefined || shouldBufferRequestBody;
   const requestBody = bodyOverride ?? (shouldBufferRequestBody
@@ -1421,8 +1447,25 @@ async function proxyRequest(
   for (const [index, candidate] of candidates.entries()) {
     selectedRoute = candidate;
     const candidateSecret = resolveSecret?.(candidate) ?? (candidate.routeId === route.routeId ? secret : undefined);
+    if (!hasUsableRouteCredential(candidate, candidateSecret)) {
+      const attemptStartedAt = Date.now();
+      const errorMessage = "Route credentials are unavailable for the selected account";
+      attempts.push({
+        accountName: candidate.accountName,
+        startedAt: attemptStartedAt,
+        completedAt: Date.now(),
+        httpStatus: 503,
+        reason: "unauthorized",
+        errorMessage,
+        retryAfterMs: null,
+        outcome: index < candidates.length - 1 ? "retry" : "failed",
+      });
+      if (index < candidates.length - 1) continue;
+      break;
+    }
+    allCandidatesCredentialUnavailable = false;
     let candidateBody = rewriteGatewayModel(requestBody, candidate.upstreamModel);
-    candidateBody = normalizeAuthResponsesRequest(candidateBody, candidate, candidateSecret);
+    candidateBody = normalizeResponsesRequest(candidateBody, candidate, candidateSecret, forceResponsesStoreFalse);
     let candidateHistoryScope: string | undefined;
     if (candidateBody) {
       let candidateParsedBody = parseRequestBody(candidateBody);
@@ -1646,6 +1689,27 @@ async function proxyRequest(
     if (finalAttempt && finalAttempt.httpStatus === lastRetryableResponse.status) finalAttempt.outcome = "returned";
   }
   if (!upstreamResponse) {
+    if (allCandidatesCredentialUnavailable) {
+      const errorMessage = "Route credentials are unavailable for the selected account";
+      sendJson(response, 503, { error: errorMessage, code: "ROUTE_CREDENTIALS_UNAVAILABLE" });
+      const completedAt = Date.now();
+      await store.recordUsage({
+        requestId: randomUUID(), routeId: selectedRoute.routeId, startedAt, completedAt,
+        envName: selectedRoute.envName, accountName: selectedRoute.accountName, upstreamBaseUrl: selectedRoute.upstreamBaseUrl,
+        endpoint: `/${routeSuffix.replace(/^\/+/, "")}`, model: null, inputTokens: null, outputTokens: null,
+        cacheCreationTokens: null, cacheReadTokens: null, totalTokens: null, httpStatus: 503,
+        latencyMs: completedAt - startedAt, actualCost: null, standardCost: null, errorMessage,
+        logicalModel: usageContext?.logicalModel ?? incomingModel ?? null,
+        servedModel: selectedRoute.upstreamModel ?? null, providerId: selectedRoute.providerId ?? null,
+        credentialId: selectedRoute.routeId, agentId: usageContext?.agentId ?? (request.headers["x-codex-agent"]?.toString().trim() || null),
+        ingressProtocol: usageContext?.ingressProtocol ?? incomingProtocol ?? selectedRoute.protocol,
+        upstreamProtocol: selectedRoute.protocol, routeGroupId: usageContext?.routeGroupId ?? selectedRoute.routeGroupId ?? null,
+        routeRuleId: usageContext?.routeRuleId ?? null, timeToFirstTokenMs: null, retryAfterMs: null,
+        finalCandidate: selectedRoute.routeId, failureType: "unauthorized", attempts,
+        attemptCount: attempts.length, attemptedAccounts: [...new Set(attempts.map((attempt) => attempt.accountName))],
+      });
+      return;
+    }
     const errorMessage = safeUpstreamFailureMessage(lastError, resolveUpstreamProxy(
       `${selectedRoute.upstreamBaseUrl.replace(/\/+$/, "")}/${routeSuffix.replace(/^\/+/, "")}`,
       selectedRoute.proxyUrl,
@@ -2582,6 +2646,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
             (providerId) => providerId && pluginManager?.registry.has(providerId) ? pluginManager.registry.get(providerId) : undefined,
             capabilityRegistry,
             persistCapabilityObservations,
+            localAgentSurface,
           );
         }
         const legacyFallbackRoutes = gateway.routeGroups
@@ -2642,6 +2707,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           persistCapabilityObservations,
           history,
           gateway.gatewayId,
+          localAgentSurface,
         );
       }
       const poolMatch = url.pathname.match(/^\/pools\/([^/]+)\/?(.*)$/);

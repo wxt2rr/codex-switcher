@@ -267,6 +267,7 @@ body {
 .motion-popover-enter[data-state="closed"] {
   opacity: 0;
   transform: translateY(-1px) scale(0.985);
+  pointer-events: none;
 }
 
 .motion-popover-enter[data-menu-placement="up"],
@@ -592,14 +593,15 @@ body {
   background: oklch(0.56 0.14 164 / 0.15);
 }
 
-/* ===== Focus ring (global override for consistent focus) ===== */
+/* ===== Focus treatment (avoid colored focus borders across controls) ===== */
 :focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px oklch(0.99 0 0), 0 0 0 4px var(--ring);
-  border-radius: 0.375rem;
+  box-shadow: none;
 }
 
+[data-slot="select-trigger"]:focus,
 [data-slot="select-trigger"]:focus-visible {
+  border-color: transparent;
   box-shadow: none;
 }
 

@@ -29,6 +29,7 @@ import {
 } from "@/account-usage";
 import { Button } from "@/components/ui/button";
 import { useAdaptiveMenuLayout } from "@/components/adaptive-menu-placement";
+import { useHoverMenuState } from "@/components/hover-menu-state";
 import { useDelayedUnmount } from "@/components/use-delayed-unmount";
 import { cn } from "@/lib/utils";
 import { maskApiKeyForDisplay } from "../api-key-display";
@@ -1639,22 +1640,21 @@ function RowActionSubmenu({
   };
   onClose: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const mounted = useDelayedUnmount(open, 140);
+  const { open, mounted, setOpen, openOnHover, closeOnHover } = useHoverMenuState();
   const triggerRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const { placement, availableHeight } = useAdaptiveMenuLayout(mounted, triggerRef, menuRef);
 
   return (
-    <div ref={triggerRef} className="relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+    <div ref={triggerRef} className="relative" onPointerEnter={openOnHover} onPointerLeave={closeOnHover}>
       <button type="button" className="motion-interactive-color flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] font-medium text-foreground hover:bg-[#f6f7f9]"
-        aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span>{item.label}</span>
         <ChevronRight className="size-3.5 text-muted-foreground" />
       </button>
       {mounted ? (
         <div ref={menuRef} data-state={open ? "open" : "closed"} data-submenu-placement={placement}
-          className={cn("absolute right-full z-30 pr-2", placement === "up" ? "bottom-[-4px]" : "top-[-4px]")}
+          className={cn("absolute right-full z-30 pr-2", !open && "pointer-events-none", placement === "up" ? "bottom-[-4px]" : "top-[-4px]")}
           style={{ maxHeight: availableHeight }}>
           <div className="motion-popover-enter min-w-[180px] overflow-y-auto rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md"
             style={{ maxHeight: availableHeight }}>
@@ -1732,7 +1732,7 @@ function CardUsageRow({
             <span
               tabIndex={0}
               aria-label={exactResetTimeLabel}
-              className="truncate cursor-help rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+              className="truncate cursor-help rounded-sm outline-none focus-visible:ring-0 focus-visible:outline-none"
             >
               {resetHint}
             </span>
@@ -1856,10 +1856,9 @@ function CardTargetButton({
   homeLabel?: string;
   pickDirectoryLabel?: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const [projectOpen, setProjectOpen] = useState(false);
-  const menuMounted = useDelayedUnmount(open, 140);
-  const projectMenuMounted = useDelayedUnmount(projectOpen, 140);
+  const { open, mounted: menuMounted, setOpen, openOnHover, closeOnHover } = useHoverMenuState({ disabled });
+  const projectMenu = useHoverMenuState({ disabled: !loadProjects });
+  const { open: projectOpen, mounted: projectMenuMounted } = projectMenu;
   const [projects, setProjects] = useState<CodexProject[]>([]);
   const [projectsLoaded, setProjectsLoaded] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -1892,14 +1891,10 @@ function CardTargetButton({
     <div
       ref={rootRef}
       className="relative"
-      onMouseEnter={() => {
-        if (!disabled) {
-          setOpen(true);
-        }
-      }}
-      onMouseLeave={() => {
-        setOpen(false);
-        setProjectOpen(false);
+      onPointerEnter={openOnHover}
+      onPointerLeave={() => {
+        closeOnHover();
+        projectMenu.closeOnHover();
       }}
     >
       <div
@@ -1927,7 +1922,7 @@ function CardTargetButton({
             "motion-interactive-color flex h-full w-8 items-center justify-center text-muted-foreground",
             !disabled && "hover:bg-black/[0.035] hover:text-foreground",
           )}
-          onClick={() => setOpen((value) => !value)}
+          onClick={() => setOpen(!open)}
           disabled={disabled}
           aria-label={`${label} menu`}
           title={`${label} menu`}
@@ -1939,7 +1934,7 @@ function CardTargetButton({
         <div
           ref={menuRef}
           data-menu-placement={placement}
-          className={cn("absolute right-0 z-20 overflow-visible", placement === "up" ? "bottom-full pb-2" : "top-full pt-2")}
+          className={cn("absolute right-0 z-20 overflow-visible", !open && "pointer-events-none", placement === "up" ? "bottom-full pb-2" : "top-full pt-2")}
           style={{ maxHeight: availableHeight }}
         >
           <div data-state={open ? "open" : "closed"} className="motion-popover-enter min-w-[172px] rounded-lg border border-black/[0.08] bg-white p-1 shadow-md">
@@ -1949,18 +1944,18 @@ function CardTargetButton({
                 ref={item.key === "new-window" ? projectTriggerRef : undefined}
                 className="relative"
                 title={item.disabled ? item.disabledHint : undefined}
-                onMouseEnter={() => {
+                onPointerEnter={() => {
                   if (item.key !== "new-window" || !loadProjects) {
-                    setProjectOpen(false);
+                    projectMenu.setOpen(false);
                     return;
                   }
-                  setProjectOpen(true);
+                  projectMenu.openOnHover();
                   if (!projectsLoaded) {
                     setProjectsLoaded(true);
                     void loadProjects().then(setProjects).catch(() => setProjects([]));
                   }
                 }}
-                onMouseLeave={() => setProjectOpen(false)}
+                onPointerLeave={projectMenu.closeOnHover}
               >
                 <button
                   type="button"
@@ -1973,7 +1968,7 @@ function CardTargetButton({
                   onClick={() => {
                     if (item.key === "new-window" && loadProjects) return;
                     setOpen(false);
-                    setProjectOpen(false);
+                    projectMenu.setOpen(false);
                     onSelect(item.key);
                   }}
                 >
@@ -1986,21 +1981,22 @@ function CardTargetButton({
                     data-submenu-placement={projectPlacement}
                     className={cn(
                       "absolute right-full z-30 pr-2",
+                      !projectOpen && "pointer-events-none",
                       projectPlacement === "up" ? "bottom-[-4px]" : "top-[-4px]",
                     )}
                   >
                     <div data-state={projectOpen ? "open" : "closed"} className="motion-popover-enter flex w-[280px] flex-col overflow-hidden rounded-lg border border-black/[0.08] bg-white p-1 shadow-md" style={{ maxHeight: projectAvailableHeight }}>
                       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                         {projects.map((project) => (
-                          <button key={project.path} type="button" title={project.path} className="motion-interactive-color block w-full rounded-lg px-3 py-2 text-left hover:bg-[#f6f7f9]" onClick={() => { setOpen(false); setProjectOpen(false); onSelectProject?.(project.path); }}>
+                          <button key={project.path} type="button" title={project.path} className="motion-interactive-color block w-full rounded-lg px-3 py-2 text-left hover:bg-[#f6f7f9]" onClick={() => { setOpen(false); projectMenu.setOpen(false); onSelectProject?.(project.path); }}>
                             <span className="block truncate text-[13px] font-medium text-foreground">{project.name}</span>
                             <span className="block truncate text-[11px] text-muted-foreground">{project.path}</span>
                           </button>
                         ))}
                       </div>
                       <div className="mt-1 border-t border-black/[0.06] pt-1">
-                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[13px] text-foreground hover:bg-[#f6f7f9]" onClick={() => { setOpen(false); onSelectProject?.(""); }}>{homeLabel}</button>
-                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[13px] text-foreground hover:bg-[#f6f7f9]" onClick={() => { void onPickDirectory?.().then((path) => { if (path) { setOpen(false); onSelectProject?.(path); } }); }}>{pickDirectoryLabel}</button>
+                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[13px] text-foreground hover:bg-[#f6f7f9]" onClick={() => { setOpen(false); projectMenu.setOpen(false); onSelectProject?.(""); }}>{homeLabel}</button>
+                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[13px] text-foreground hover:bg-[#f6f7f9]" onClick={() => { void onPickDirectory?.().then((path) => { if (path) { setOpen(false); projectMenu.setOpen(false); onSelectProject?.(path); } }); }}>{pickDirectoryLabel}</button>
                       </div>
                     </div>
                   </div>

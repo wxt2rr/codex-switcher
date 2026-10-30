@@ -36,6 +36,7 @@ function environment(): EnvState {
       codex: {
         name: "codex",
         authMode: "auth",
+        authData: { tokens: { access_token: "codex-access-token" } },
         runtime: {
           preferredAuthMethod: "chatgpt",
           openaiBaseUrlMode: "custom",
@@ -304,6 +305,35 @@ test("bundled Codex models compile into route groups for AUTH accounts", () => {
   assert.ok(model);
   assert.equal(model.providerId, "chatgpt");
   assert.equal(model.capabilities.vision, true);
+});
+
+test("bundled Codex models skip AUTH accounts without a subscription token", () => {
+  const env = environment();
+  env.accounts.codex.authData = undefined;
+  env.accounts.plus = {
+    ...env.accounts.codex,
+    name: "plus",
+    authData: { tokens: { access_token: "plus-access-token" } },
+  };
+  const result = applyModelCatalogBindings(
+    env,
+    buildLegacyGatewayEnvironmentState(env),
+    snapshot(),
+    [{
+      slug: "gpt-5.6-luna",
+      display_name: "GPT-5.6 Luna",
+      supported_in_api: true,
+      supported_reasoning_levels: [{ effort: "medium", description: "Balanced" }],
+      shell_type: "shell_command",
+      input_modalities: ["text"],
+      supports_parallel_tool_calls: true,
+      tool_mode: null,
+    }],
+  );
+
+  const group = Object.values(result.routeGroups).find((candidate) => candidate.exposedModelId === "gpt-5.6-luna");
+  assert.ok(group);
+  assert.deepEqual(group.members.map((member) => member.credentialSelector.credentialIds), [["credential:wangxt:plus"]]);
 });
 
 test("recompiling removes stale generated bindings without removing legacy routes", () => {

@@ -65,8 +65,9 @@ test("explicitly unsigned development feeds report downloaded updates and instal
 
 test("auto update remains disabled without a feed and never calls the updater", async () => {
   const fake = fakeUpdater();
-  const controller = createDesktopAutoUpdateController(fake.updater);
+  const controller = createDesktopAutoUpdateController(fake.updater, { currentVersion: "1.2.3" });
   assert.equal(controller.getStatus().state, "disabled");
+  assert.equal(controller.getStatus().currentVersion, "1.2.3");
   assert.equal((await controller.check()).state, "disabled");
   assert.equal(fake.checks, 0);
 });

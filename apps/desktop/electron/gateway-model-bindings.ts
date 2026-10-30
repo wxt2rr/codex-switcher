@@ -110,6 +110,10 @@ function addBundledModelBindings(
 
     for (const [accountName, account] of Object.entries(environment.accounts)) {
       if (account.authMode !== "auth") continue;
+      // The reserved default/default account is synthesized when its files are
+      // absent. Do not expose Codex built-in models through that placeholder;
+      // only accounts with an actual subscription access token can serve them.
+      if (!hasAuthCredential(account.authData)) continue;
       const credentialId = credentialsByAccount.get(accountName);
       const credential = credentialId ? gateway.credentials[credentialId] : undefined;
       if (!credentialId || !credential || credential.status === "disabled") continue;
@@ -152,6 +156,19 @@ function addBundledModelBindings(
       group.members.sort((left, right) => left.priority - right.priority || left.modelId.localeCompare(right.modelId));
       gateway.routeGroups[routeGroupId] = group;
     }
+  }
+}
+
+function hasAuthCredential(authData: Record<string, unknown> | undefined): boolean {
+  const direct = authData?.access_token;
+  if (typeof direct === "string" && direct.trim()) return true;
+  const rawTokens = authData?.tokens;
+  if (!rawTokens) return false;
+  try {
+    const tokens = typeof rawTokens === "string" ? JSON.parse(rawTokens) as Record<string, unknown> : rawTokens as Record<string, unknown>;
+    return typeof tokens.access_token === "string" && tokens.access_token.trim().length > 0;
+  } catch {
+    return false;
   }
 }
 
