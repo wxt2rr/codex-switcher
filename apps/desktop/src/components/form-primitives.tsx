@@ -30,7 +30,7 @@ export function Field({
 }) {
   return (
     <div className="grid gap-1.5">
-      <label className="text-[12px] font-medium text-neutral-700">{label}</label>
+      <label className="text-[13px] font-medium text-neutral-700">{label}</label>
       {children}
       {(hint || error) && (
         <span

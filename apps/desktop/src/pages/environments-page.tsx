@@ -280,7 +280,7 @@ function EnvironmentActionMenu({
               key={item.key}
               type="button"
               className={cn(
-                "motion-interactive-color flex w-full items-center rounded-lg px-3 py-2 text-left text-[12px] font-medium",
+                "motion-interactive-color flex w-full items-center rounded-lg px-3 py-2 text-left text-[13px] font-medium",
                 item.tone === "danger" ? "text-destructive hover:bg-destructive/10" : "text-neutral-700 hover:bg-[#f6f7f9]",
               )}
               onClick={() => {
@@ -349,15 +349,15 @@ function EnvCard({
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h3 className="truncate text-[15px] font-semibold tracking-[-0.02em] text-neutral-950">{env.name}</h3>
-            {currentTargetBadges.map((target) => <SoftBadge key={target} tone="brand" label={target} className="h-5 px-2 text-[10px]" />)}
+            <h3 className="truncate text-[17px] font-semibold tracking-[-0.02em] text-neutral-950">{env.name}</h3>
+            {currentTargetBadges.map((target) => <SoftBadge key={target} tone="brand" label={target} className="h-5 px-2 text-[11px]" />)}
             <SoftBadge
               tone={isGatewayEnabled ? "brand" : "neutral"}
               label={language === "zh" ? (isGatewayEnabled ? "网关模式" : "手动模式") : language === "ja" ? (isGatewayEnabled ? "ゲートウェイモード" : "手動モード") : (isGatewayEnabled ? "Gateway mode" : "Manual mode")}
-              className="h-5 px-2 text-[10px]"
+              className="h-5 px-2 text-[11px]"
             />
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
             <span className={cn(
               "inline-flex h-6 items-center gap-1.5 rounded-md px-2 font-medium",
               runtime.tone === "success" && "bg-primary/10 text-primary",
@@ -369,7 +369,7 @@ function EnvCard({
             </span>
             <span className="text-muted-foreground">{language === "zh" ? `${accountCount} 个账号` : language === "ja" ? `${accountCount} アカウント` : `${accountCount} accounts`}</span>
           </div>
-          {runtime.detail ? <div className="mt-1 font-mono text-[11px] text-muted-foreground">{runtime.detail}</div> : null}
+          {runtime.detail ? <div className="mt-1 font-mono text-[12px] text-muted-foreground">{runtime.detail}</div> : null}
         </div>
 
         <div className="environment-card-actions flex flex-wrap items-center gap-2 xl:justify-end">
@@ -424,12 +424,12 @@ function EnvCard({
 
       <div className="grid gap-3 border-t border-black/[0.06] pt-3 dark:border-white/[0.07] sm:grid-cols-2">
         <div className="min-w-0">
-          <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">{language === "zh" ? "环境路径" : language === "ja" ? "環境パス" : "Environment path"}</div>
-          <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground" title={env.path}>{env.path}</div>
+          <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">{language === "zh" ? "环境路径" : language === "ja" ? "環境パス" : "Environment path"}</div>
+          <div className="mt-1 truncate font-mono text-[12px] text-muted-foreground" title={env.path}>{env.path}</div>
         </div>
         <div className="min-w-0">
-          <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">{language === "zh" ? "本地网关" : language === "ja" ? "ローカルゲートウェイ" : "Local gateway"}</div>
-          <div className={cn("mt-1 truncate font-mono text-[11px]", routeStatus?.localGatewayBaseUrl ? "text-muted-foreground" : "text-muted-foreground")} title={routeStatus?.localGatewayBaseUrl ?? undefined}>
+          <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">{language === "zh" ? "本地网关" : language === "ja" ? "ローカルゲートウェイ" : "Local gateway"}</div>
+          <div className={cn("mt-1 truncate font-mono text-[12px]", routeStatus?.localGatewayBaseUrl ? "text-muted-foreground" : "text-muted-foreground")} title={routeStatus?.localGatewayBaseUrl ?? undefined}>
             {routeStatus?.localGatewayBaseUrl ?? (isGatewayEnabled ? (language === "zh" ? "等待服务启动" : language === "ja" ? "サービスの起動を待機中" : "Waiting for service") : (language === "zh" ? "未启用" : language === "ja" ? "未有効" : "Not enabled"))}
           </div>
         </div>
@@ -438,11 +438,11 @@ function EnvCard({
         <div className="rounded-xl border border-primary/15 bg-primary/[0.035] px-3.5 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <div className="text-[11px] font-semibold text-neutral-800">{language === "zh" ? "本机 Agent 接入" : language === "ja" ? "ローカル Agent 接続" : "Local Agent access"}</div>
-              <div className="mt-0.5 text-[10px] text-muted-foreground">{language === "zh" ? `127.0.0.1:${routeStatus.port ?? "—"}，仅本机可访问，不对局域网或公网开放` : language === "ja" ? `127.0.0.1:${routeStatus.port ?? "—"} のみで待受けます` : `127.0.0.1:${routeStatus.port ?? "—"} · loopback only`}</div>
+              <div className="text-[12px] font-semibold text-neutral-800">{language === "zh" ? "本机 Agent 接入" : language === "ja" ? "ローカル Agent 接続" : "Local Agent access"}</div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground">{language === "zh" ? `127.0.0.1:${routeStatus.port ?? "—"}，仅本机可访问，不对局域网或公网开放` : language === "ja" ? `127.0.0.1:${routeStatus.port ?? "—"} のみで待受けます` : `127.0.0.1:${routeStatus.port ?? "—"} · loopback only`}</div>
             </div>
-            <div className="flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
-              {(["Responses", "Chat Completions", "Anthropic", "Gemini"] as const).map((protocol) => <SoftBadge key={protocol} tone="neutral" label={protocol} className="h-5 px-1.5 text-[9px]" />)}
+            <div className="flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
+              {(["Responses", "Chat Completions", "Anthropic", "Gemini"] as const).map((protocol) => <SoftBadge key={protocol} tone="neutral" label={protocol} className="h-5 px-1.5 text-[10px]" />)}
             </div>
           </div>
           <div className="mt-3 grid gap-2 sm:grid-cols-3">
@@ -452,9 +452,9 @@ function EnvCard({
               [language === "zh" ? "API Key" : "API Key", routeStatus.localAgentAccessToken],
             ] as const).map(([label, value]) => value ? (
               <div key={label} className="min-w-0 rounded-lg border border-black/[0.05] bg-white/70 px-2.5 py-2 dark:border-white/[0.07] dark:bg-white/[0.03]">
-                <div className="text-[10px] font-medium text-muted-foreground">{label}</div>
+                <div className="text-[11px] font-medium text-muted-foreground">{label}</div>
                 <div className="mt-1 flex min-w-0 items-center gap-1">
-                  <div className="min-w-0 flex-1 truncate font-mono text-[10px] text-neutral-700" title={value}>{label === "API Key" ? `${value.slice(0, 4)}••••${value.slice(-4)}` : value}</div>
+                  <div className="min-w-0 flex-1 truncate font-mono text-[11px] text-neutral-700" title={value}>{label === "API Key" ? `${value.slice(0, 4)}••••${value.slice(-4)}` : value}</div>
                   <button type="button" className="shrink-0 rounded p-1 text-muted-foreground hover:bg-black/[0.05] hover:text-neutral-800" onClick={() => onCopyLocalAgentValue(value, label)} aria-label={`${label} copy`}>
                     <Copy className="size-3.5" />
                   </button>
@@ -678,13 +678,13 @@ export function EnvironmentsPage({
   return (
     <ListPageFrame className="overflow-hidden" contentClassName="h-full gap-3">
       <div className="shrink-0 flex flex-col gap-4">
-        <div><h2 className="text-[28px] font-semibold tracking-[-0.04em] text-neutral-950">{pageTitle(language)}</h2><p className="mt-1 text-[13px] leading-6 text-muted-foreground">{pageSubtitle(language)}</p></div>
+        <div><h2 className="text-[24px] font-semibold tracking-[-0.04em] text-neutral-950">{pageTitle(language)}</h2><p className="mt-1 text-[13px] leading-6 text-muted-foreground">{pageSubtitle(language)}</p></div>
         <div className="rounded-[14px] border border-black/[0.05] bg-white px-3 py-2.5">
           <div className="responsive-toolbar flex items-center gap-2.5">
-            <div className="relative min-w-[220px] flex-1"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={pageCopy.environments.searchPlaceholder} className="h-8 rounded-lg border-transparent bg-[#fbfbfc] pl-10 text-[12px] shadow-none" /></div>
+            <div className="relative min-w-[220px] flex-1"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={pageCopy.environments.searchPlaceholder} className="h-8 rounded-lg border-transparent bg-[#fbfbfc] pl-10 text-[13px] shadow-none" /></div>
             <Button
               variant="outline"
-              className="h-8 rounded-lg px-3.5 text-[12px] shadow-none"
+              className="h-8 rounded-lg px-3.5 text-[13px] shadow-none"
               onClick={() => openConversationRepair()}
               disabled={busy}
             >
@@ -692,7 +692,7 @@ export function EnvironmentsPage({
               {language === "zh" ? "修复指定会话" : language === "ja" ? "指定会話を修復" : "Repair conversation"}
             </Button>
             <Button
-              className="ml-auto h-8 rounded-lg bg-neutral-950 px-3.5 text-[12px] shadow-none"
+              className="ml-auto h-8 rounded-lg bg-neutral-950 px-3.5 text-[13px] shadow-none"
               onClick={() => setDrawerOpen(true)}
               disabled={busy}
             >
@@ -826,7 +826,7 @@ export function EnvironmentsPage({
           </Button>
 
           {conversationRepairDialog?.phase === "analyzing" ? (
-            <div className="flex items-center gap-2 rounded-lg bg-[#f7f8fa] px-3 py-3 text-[12px] text-muted-foreground">
+            <div className="flex items-center gap-2 rounded-lg bg-[#f7f8fa] px-3 py-3 text-[13px] text-muted-foreground">
               <LoaderCircle className="size-4 animate-spin" />
               {language === "zh" ? "正在扫描所有 Codex 环境…" : language === "ja" ? "すべての Codex 環境をスキャン中…" : "Scanning all Codex environments…"}
             </div>
@@ -836,8 +836,8 @@ export function EnvironmentsPage({
             <div className="space-y-3 rounded-lg border border-black/[0.06] bg-[#fbfbfc] p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">{language === "zh" ? "分析结果" : language === "ja" ? "分析結果" : "Inspection result"}</div>
-                  <div className="mt-1 break-all font-mono text-[12px] text-neutral-800">{repairInspection.conversationId}</div>
+                  <div className="text-[12px] font-medium uppercase tracking-[0.08em] text-muted-foreground">{language === "zh" ? "分析结果" : language === "ja" ? "分析結果" : "Inspection result"}</div>
+                  <div className="mt-1 break-all font-mono text-[13px] text-neutral-800">{repairInspection.conversationId}</div>
                 </div>
                 <SoftBadge
                   tone={repairInspection.status === "ambiguous" ? "warn" : "neutral"}
@@ -864,11 +864,11 @@ export function EnvironmentsPage({
                 <div className="space-y-3">
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-sm font-semibold text-neutral-900">{selectedRepairCandidate.envName}</span>
-                    <span className={cn("rounded-md px-2 py-1 text-[10px] font-semibold", conversationRepairStatusClass(selectedRepairCandidate.status))}>
+                    <span className={cn("rounded-md px-2 py-1 text-[11px] font-semibold", conversationRepairStatusClass(selectedRepairCandidate.status))}>
                       {conversationRepairStatusLabel(selectedRepairCandidate.status, language)}
                     </span>
                   </div>
-                  <div className="grid gap-2 text-[12px] sm:grid-cols-2">
+                  <div className="grid gap-2 text-[13px] sm:grid-cols-2">
                     {[
                       [language === "zh" ? "历史 provider" : "Recorded provider", selectedRepairCandidate.recordedProvider ?? "—"],
                       [language === "zh" ? "当前 provider" : "Current provider", selectedRepairCandidate.currentProvider ?? "—"],
@@ -876,14 +876,14 @@ export function EnvironmentsPage({
                       [language === "zh" ? "当前模型" : "Current model", selectedRepairCandidate.currentModel ?? "—"],
                     ].map(([label, value]) => (
                       <div key={String(label)} className="min-w-0 rounded-lg bg-white px-3 py-2">
-                        <div className="text-[10px] text-muted-foreground">{label}</div>
-                        <div className="mt-1 truncate font-mono text-[11px] text-slate-700" title={String(value)}>{value}</div>
+                        <div className="text-[11px] text-muted-foreground">{label}</div>
+                        <div className="mt-1 truncate font-mono text-[12px] text-slate-700" title={String(value)}>{value}</div>
                       </div>
                     ))}
                   </div>
-                  <div className="text-[12px] leading-5 text-muted-foreground">{selectedRepairCandidate.statusMessage}</div>
+                  <div className="text-[13px] leading-5 text-muted-foreground">{selectedRepairCandidate.statusMessage}</div>
                   {selectedRepairCandidate.gatewayEnabled ? (
-                    <div className="rounded-lg bg-sky-50 px-3 py-2 text-[11px] leading-5 text-sky-700">
+                    <div className="rounded-lg bg-sky-50 px-3 py-2 text-[12px] leading-5 text-sky-700">
                       {language === "zh" ? "该环境当前启用了网关模式。" : language === "ja" ? "この環境ではゲートウェイモードが有効です。" : "Gateway mode is enabled for this environment."}
                     </div>
                   ) : null}
@@ -899,7 +899,7 @@ export function EnvironmentsPage({
                   </Button>
                 </div>
               ) : (
-                <div className="flex items-start gap-2 text-[12px] leading-5 text-destructive">
+                <div className="flex items-start gap-2 text-[13px] leading-5 text-destructive">
                   <CircleAlert className="mt-0.5 size-4 shrink-0" />
                   <span>{repairInspection.message}</span>
                 </div>
@@ -908,7 +908,7 @@ export function EnvironmentsPage({
           ) : null}
 
           {conversationRepairDialog?.phase === "success" && conversationRepairDialog.result ? (
-            <div className="space-y-2 rounded-lg border border-primary/30 bg-primary/10 p-4 text-[12px] leading-5 text-primary">
+            <div className="space-y-2 rounded-lg border border-primary/30 bg-primary/10 p-4 text-[13px] leading-5 text-primary">
               <div className="flex items-center gap-2 font-semibold"><CheckCircle2 className="size-4" />{language === "zh" ? "指定会话修复完成" : language === "ja" ? "指定会話を修復しました" : "Conversation repaired"}</div>
               <div>{conversationRepairDialog.result.message}</div>
               <div>{language === "zh" ? "已更新文件" : "Updated files"}：{conversationRepairDialog.result.filesUpdated.length}</div>
@@ -917,7 +917,7 @@ export function EnvironmentsPage({
           ) : null}
 
           {conversationRepairDialog?.phase === "error" ? (
-            <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-[12px] leading-5 text-destructive">
+            <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-[13px] leading-5 text-destructive">
               <CircleAlert className="mt-0.5 size-4 shrink-0" />
               <span className="break-words">{conversationRepairDialog.error}</span>
             </div>
@@ -969,7 +969,7 @@ export function EnvironmentsPage({
                     title={language === "zh" ? "分配权重：数值越高，新会话分配到该账号的概率越高" : "Distribution weight: higher values receive more new sessions"}
                   />
                   <span
-                    className="text-[10px] text-muted-foreground"
+                    className="text-[11px] text-muted-foreground"
                     title={language === "zh" ? "轮询顺序：权重相同时按此顺序选择账号" : "Rotation order used when weights are equal"}
                   >#{index + 1}</span>
                 </label>;
@@ -1099,7 +1099,7 @@ export function EnvironmentsPage({
                 { value: "config.toml", label: "config.toml" },
                 { value: "auth.json", label: "auth.json" },
               ]}
-              className="h-8 w-[140px] rounded-lg bg-[#f7f8fa] text-[12px]"
+              className="h-8 w-[140px] rounded-lg bg-[#f7f8fa] text-[13px]"
             />
           </div>
 
@@ -1133,9 +1133,9 @@ export function EnvironmentsPage({
                       className="mt-1"
                     />
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 text-[12px] font-semibold text-neutral-900">
+                      <div className="flex items-center gap-2 text-[13px] font-semibold text-neutral-900">
                         <span>{formatHistoryTimestamp(group.createdAt)}</span>
-                        <span className="rounded-md bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        <span className="rounded-md bg-white px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
                           {localizeHistorySource(group.source, language)}
                         </span>
                       </div>
@@ -1144,13 +1144,13 @@ export function EnvironmentsPage({
                           const file = group.files[fileType];
                           return (
                             <div key={fileType} className="rounded-lg bg-white px-3 py-3">
-                              <div className="flex items-center gap-2 text-[12px] font-semibold text-neutral-900">
+                              <div className="flex items-center gap-2 text-[13px] font-semibold text-neutral-900">
                                 <span>{fileType}</span>
                                 <span
                                   className={
                                     file.changed
-                                      ? "rounded-md bg-[#eef4ff] px-2 py-0.5 text-[10px] font-medium text-sky-700"
-                                      : "rounded-md bg-[#f3f4f6] px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+                                      ? "rounded-md bg-[#eef4ff] px-2 py-0.5 text-[11px] font-medium text-sky-700"
+                                      : "rounded-md bg-[#f3f4f6] px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
                                   }
                                 >
                                   {file.changed
@@ -1162,7 +1162,7 @@ export function EnvironmentsPage({
                                       : "Unchanged"}
                                 </span>
                               </div>
-                              <div className="mt-2 max-h-[140px] overflow-auto rounded-lg bg-[#fbfbfc] px-3 py-2 font-mono text-[11px] leading-5 text-muted-foreground whitespace-pre-wrap break-all">
+                              <div className="mt-2 max-h-[140px] overflow-auto rounded-lg bg-[#fbfbfc] px-3 py-2 font-mono text-[12px] leading-5 text-muted-foreground whitespace-pre-wrap break-all">
                                 {file.changed
                                   ? file.content || (language === "zh" ? "空文件" : "Empty file")
                                   : language === "zh"
@@ -1277,7 +1277,7 @@ export function EnvironmentsPage({
                       ? syncHistorySteps[syncHistoryDialog.step]?.ja
                       : syncHistorySteps[syncHistoryDialog.step]?.en}
                 </span>
-                <span className="ml-auto shrink-0 text-[12px] font-normal text-muted-foreground">
+                <span className="ml-auto shrink-0 text-[13px] font-normal text-muted-foreground">
                   {syncHistoryDialog.step + 1}/{syncHistorySteps.length}
                 </span>
               </div>
@@ -1287,7 +1287,7 @@ export function EnvironmentsPage({
                   style={{ width: `${Math.round(((syncHistoryDialog.step + 1) / syncHistorySteps.length) * 100)}%` }}
                 />
               </div>
-              <div className="text-[12px] leading-5 text-muted-foreground">
+              <div className="text-[13px] leading-5 text-muted-foreground">
                 {language === "zh"
                   ? `环境：${syncHistoryDialog.envName}。请稍候，完成前不要关闭应用。`
                   : language === "ja"
@@ -1314,12 +1314,12 @@ export function EnvironmentsPage({
                   [language === "zh" ? "更新索引" : language === "ja" ? "更新したスレッド" : "Threads", syncHistoryDialog.result.threadsUpdated],
                 ].map(([label, value]) => (
                   <div key={String(label)} className="rounded-lg bg-white px-3 py-2.5 text-center">
-                    <div className="text-[11px] text-muted-foreground">{label}</div>
+                    <div className="text-[12px] text-muted-foreground">{label}</div>
                     <div className="mt-1 text-base font-semibold text-neutral-800">{value}</div>
                   </div>
                 ))}
               </div>
-              <div className="space-y-1 text-[12px] leading-5 text-muted-foreground">
+              <div className="space-y-1 text-[13px] leading-5 text-muted-foreground">
                 <div>Provider：<code className="break-all text-slate-700">{syncHistoryDialog.result.providerId}</code></div>
                 {syncHistoryDialog.result.backupPath ? (
                   <div>{language === "zh" ? "备份位置" : language === "ja" ? "バックアップ先" : "Backup"}：<code className="break-all text-slate-700">{syncHistoryDialog.result.backupPath}</code></div>

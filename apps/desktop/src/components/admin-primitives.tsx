@@ -111,8 +111,8 @@ export function TableCard({
         )}
       >
         <div>
-          <h3 className="text-[15px] font-semibold text-foreground">{title}</h3>
-          {subtitle ? <p className="mt-0.5 text-[12px] text-muted-foreground">{subtitle}</p> : null}
+          <h3 className="text-[17px] font-semibold text-foreground">{title}</h3>
+          {subtitle ? <p className="mt-0.5 text-[13px] text-muted-foreground">{subtitle}</p> : null}
         </div>
         {aside && <div className="shrink-0">{aside}</div>}
       </div>
@@ -140,7 +140,7 @@ export function DataTable({
             {columns.map((column) => (
               <th
                 key={column}
-                className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground"
+                className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground"
               >
                 {column}
               </th>
@@ -232,7 +232,7 @@ export function ToolbarStat({
         "rounded-lg bg-muted/70 px-3.5 py-2",
       )}
     >
-      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+      <div className="text-[12px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
         {label}
       </div>
       <div className="mt-1 text-sm font-semibold text-foreground">{value}</div>
@@ -398,7 +398,7 @@ export function ProgressDialog({
           </div>
           <div className="mt-4 rounded-[10px] border border-black/[0.05] bg-[#fafbfc] p-4">{children}</div>
           {isRunning && showBusyLabel ? (
-            <div className="mt-5 text-right text-[12px] text-muted-foreground">{busyLabel}</div>
+            <div className="mt-5 text-right text-[13px] text-muted-foreground">{busyLabel}</div>
           ) : !isRunning ? (
             <div className="mt-5 flex justify-end">
               <Button onClick={onConfirm}>{confirmLabel}</Button>
@@ -452,7 +452,7 @@ export function SummaryPanel({
     >
       <div className="px-5 py-3.5">
         <h3 className="text-[16px] font-semibold text-foreground">{title}</h3>
-        <p className="mt-1 text-[12px] text-muted-foreground">{subtitle}</p>
+        <p className="mt-1 text-[13px] text-muted-foreground">{subtitle}</p>
       </div>
       <div className="space-y-4 px-5 py-5">
         {summary ? (
@@ -466,7 +466,7 @@ export function SummaryPanel({
             <div className="mt-4 space-y-3">
               {summary.sections.map((section) => (
                 <div key={section.title}>
-                  <div className="text-[11px] font-bold uppercase tracking-[0.18em] opacity-70">
+                  <div className="text-[12px] font-bold uppercase tracking-[0.18em] opacity-70">
                     {section.title}
                   </div>
                   <div className="mt-2 space-y-1.5">
@@ -491,7 +491,7 @@ export function SummaryPanel({
         )}
 
         <div>
-          <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+          <div className="mb-2 text-[12px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
             {rawOutputLabel}
           </div>
           <pre

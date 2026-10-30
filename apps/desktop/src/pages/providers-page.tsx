@@ -87,7 +87,7 @@ export function ProvidersPage({
         onSearchChange={setQuery}
         layout="stacked"
         actions={(
-          <span className="hidden text-[11px] text-muted-foreground xl:inline">{visibleItems.length} / {items.length}</span>
+          <span className="hidden text-[12px] text-muted-foreground xl:inline">{visibleItems.length} / {items.length}</span>
         )}
       />
 
@@ -100,7 +100,7 @@ export function ProvidersPage({
             if (!entries?.length) return null;
             return (
               <section key={category} className="space-y-3">
-                <div className="text-[12px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                <div className="text-[13px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                   {label(category as ProviderCatalogItem["category"], language)}
                 </div>
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -112,19 +112,19 @@ export function ProvidersPage({
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
                             <h2 className="truncate text-[14px] font-semibold text-foreground dark:text-white">{item.displayName}</h2>
-                            <span className="inline-flex h-5 items-center rounded-md bg-accent/80 px-2 text-[10px] font-medium text-muted-foreground dark:bg-[#202733]/80 dark:text-muted-foreground">
+                            <span className="inline-flex h-5 items-center rounded-md bg-accent/80 px-2 text-[11px] font-medium text-muted-foreground dark:bg-[#202733]/80 dark:text-muted-foreground">
                               {item.authMethods.includes("subscription") ? (zh ? "订阅" : "Subscription") : item.category === "local" ? (zh ? "本地" : "Local") : (zh ? "API" : "API")}
                             </span>
                           </div>
-                          <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">{item.id}</p>
-                          <div className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] leading-4 text-muted-foreground">
+                          <p className="mt-1 truncate font-mono text-[12px] text-muted-foreground">{item.id}</p>
+                          <div className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[12px] leading-4 text-muted-foreground">
                             <span className="font-medium text-muted-foreground dark:text-muted-foreground">Responses</span>
                             {item.protocols.map((protocol) => <span key={protocol}>{zh ? "上游" : "Upstream"}: {protocolLabel(protocol)}</span>)}
                             {item.capabilities.modelDiscovery ? <span>{zh ? "自动发现模型" : "Model discovery"}</span> : null}
                             {conversionLabel(item, zh) ? <span className={item.capabilities.protocolConversion ? "font-medium text-emerald-600/80 dark:text-emerald-400/80" : undefined}>{conversionLabel(item, zh)}</span> : null}
                           </div>
                           <div className="mt-4 flex items-center justify-between gap-2">
-                            <span className="text-[11px] text-muted-foreground">{accountCount} {zh ? "个账号" : "accounts"}</span>
+                            <span className="text-[12px] text-muted-foreground">{accountCount} {zh ? "个账号" : "accounts"}</span>
                             <div className="flex items-center gap-2">
                               <Button size="sm" variant="ghost" onClick={() => setActiveProvider(item)}>{zh ? "详情" : "Details"}</Button>
                               <Button size="sm" variant="outline" onClick={() => onAddAccount(item.id)}>{zh ? "添加账号" : "Add account"}</Button>
@@ -154,8 +154,8 @@ export function ProvidersPage({
               <ProviderIcon providerId={activeProvider.iconKey} iconUrl={activeProvider.iconUrl} displayName={activeProvider.displayName} size={36} />
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-foreground">{activeProvider.displayName}</div>
-                <div className="font-mono text-[11px] text-muted-foreground">{activeProvider.id}</div>
-                {activeProvider.defaultBaseUrl ? <div className="mt-1 truncate text-[11px] text-muted-foreground">{activeProvider.defaultBaseUrl}</div> : null}
+                <div className="font-mono text-[12px] text-muted-foreground">{activeProvider.id}</div>
+                {activeProvider.defaultBaseUrl ? <div className="mt-1 truncate text-[12px] text-muted-foreground">{activeProvider.defaultBaseUrl}</div> : null}
               </div>
             </div>
             <div className="flex flex-wrap gap-1.5">
@@ -165,7 +165,7 @@ export function ProvidersPage({
               <SoftBadge label={zh ? "Codex: Responses" : "Codex: Responses"} tone="brand" />
               {conversionLabel(activeProvider, zh) ? <SoftBadge label={conversionLabel(activeProvider, zh)!} tone={activeProvider.capabilities.protocolConversion ? "success" : "neutral"} /> : null}
             </div>
-            <div className="grid gap-2 rounded-lg bg-muted p-3 text-[12px] text-muted-foreground">
+            <div className="grid gap-2 rounded-lg bg-muted p-3 text-[13px] text-muted-foreground">
               <div className="flex justify-between gap-4"><span>{zh ? "Codex 接入协议" : "Codex ingress"}</span><span>Responses</span></div>
               <div className="flex justify-between gap-4"><span>{zh ? "服务商上游协议" : "Provider upstream"}</span><span className="text-right">{activeProvider.protocols.map((protocol) => protocolLabel(protocol)).join(" / ")}</span></div>
               <div className="flex justify-between gap-4"><span>{zh ? "网关转换" : "Gateway conversion"}</span><span>{activeProvider.capabilities.protocolConversion ? (zh ? "Responses → 上游协议" : "Responses → upstream") : (zh ? "无需转换" : "Not needed")}</span></div>
@@ -175,12 +175,12 @@ export function ProvidersPage({
               <div className="flex justify-between gap-4"><span>{zh ? "协议转换" : "Protocol conversion"}</span><span>{activeProvider.capabilities.protocolConversion ? (zh ? "支持" : "Supported") : "—"}</span></div>
             </div>
             <div className="border-t border-black/[0.06] pt-4">
-              <div className="mb-2 text-[12px] font-semibold text-muted-foreground">{zh ? "已连接的环境账号" : "Connected environment accounts"}</div>
+              <div className="mb-2 text-[13px] font-semibold text-muted-foreground">{zh ? "已连接的环境账号" : "Connected environment accounts"}</div>
               {providerAccounts.length ? (
                 <div className="grid gap-2">
-                  {providerAccounts.map((account) => <div key={`${account.envName}/${account.name}`} className="rounded-lg bg-muted px-3 py-2 text-[12px]">{account.envName} / {account.name}</div>)}
+                  {providerAccounts.map((account) => <div key={`${account.envName}/${account.name}`} className="rounded-lg bg-muted px-3 py-2 text-[13px]">{account.envName} / {account.name}</div>)}
                 </div>
-              ) : <div className="text-[12px] text-muted-foreground">{zh ? "还没有账号连接" : "No account connection yet"}</div>}
+              ) : <div className="text-[13px] text-muted-foreground">{zh ? "还没有账号连接" : "No account connection yet"}</div>}
             </div>
             <Button onClick={() => onAddAccount(activeProvider.id)}>{zh ? "在账号页添加账号" : "Add account in Accounts"}</Button>
           </div>

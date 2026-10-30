@@ -569,7 +569,7 @@ export function AccountsPage({
         <div className="shrink-0 flex flex-col gap-4">
           <div className="flex items-start justify-between gap-6">
             <div className="space-y-1">
-              <h2 className="text-[28px] font-semibold tracking-[-0.04em] text-foreground">
+              <h2 className="text-[24px] font-semibold tracking-[-0.04em] text-foreground">
                 {language === "zh" ? "账号管理" : language === "ja" ? "アカウント管理" : "Account Management"}
               </h2>
               <p className="text-[13px] leading-6 text-muted-foreground">
@@ -587,7 +587,7 @@ export function AccountsPage({
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder={language === "zh" ? "搜索账号、环境或 Base URL" : pageCopy.accounts.searchPlaceholder}
-                  className="h-8 rounded-lg border-transparent bg-[#fbfbfc] pl-10 text-[12px] shadow-none focus:border-transparent focus:ring-0"
+                  className="h-8 rounded-lg border-transparent bg-[#fbfbfc] pl-10 text-[13px] shadow-none focus:border-transparent focus:ring-0"
                 />
               </div>
               <Select
@@ -611,7 +611,7 @@ export function AccountsPage({
                     onAction: () => markDefaultEnvironment(env.name),
                   })),
                 ]}
-                className="h-8 w-[140px] rounded-lg border-transparent bg-[#fbfbfc] px-3 text-[12px] shadow-none"
+                className="h-8 w-[140px] rounded-lg border-transparent bg-[#fbfbfc] px-3 text-[13px] shadow-none"
               />
               <Select
                 value={modeFilter}
@@ -621,7 +621,7 @@ export function AccountsPage({
                   { value: "apikey", label: localizeAuthMode("apikey", language) },
                   { value: "auth", label: localizeAuthMode("auth", language) },
                 ]}
-                className="h-8 w-[128px] rounded-lg border-transparent bg-[#fbfbfc] px-3 text-[12px] shadow-none"
+                className="h-8 w-[128px] rounded-lg border-transparent bg-[#fbfbfc] px-3 text-[13px] shadow-none"
               />
               <Select
                 value={sortMode}
@@ -630,7 +630,7 @@ export function AccountsPage({
                   { value: "recent", label: language === "zh" ? "最近使用" : "Recently used" },
                   { value: "name", label: language === "zh" ? "名称排序" : "By name" },
                 ]}
-                className="h-8 w-[128px] rounded-lg border-transparent bg-[#fbfbfc] px-3 text-[12px] shadow-none"
+                className="h-8 w-[128px] rounded-lg border-transparent bg-[#fbfbfc] px-3 text-[13px] shadow-none"
               />
               <div className="flex h-8 items-center overflow-hidden rounded-lg bg-[#f3f4f6]">
                 <button
@@ -658,7 +658,7 @@ export function AccountsPage({
                       }}
                       aria-label={language === "zh" ? "自定义刷新秒数" : "Custom refresh seconds"}
                       title={language === "zh" ? "自定义刷新秒数" : "Custom refresh seconds"}
-                      className="h-8 w-[44px] rounded-none bg-transparent px-1.5 text-[12px] shadow-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+                      className="h-8 w-[44px] rounded-none bg-transparent px-1.5 text-[13px] shadow-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
                       autoFocus
                     />
                     <button
@@ -694,12 +694,12 @@ export function AccountsPage({
                           : `${authRefreshIntervalSeconds}s`,
                       },
                     ]}
-                    className="h-8 w-[64px] rounded-none border-l border-black/[0.05] bg-transparent px-2 text-[12px] shadow-none"
+                    className="h-8 w-[64px] rounded-none border-l border-black/[0.05] bg-transparent px-2 text-[13px] shadow-none"
                   />
                 )}
               </div>
               <Button
-                className="ml-auto h-8 rounded-lg bg-neutral-950 px-3.5 text-[12px] font-semibold text-white shadow-none hover:bg-neutral-800"
+                className="ml-auto h-8 rounded-lg bg-neutral-950 px-3.5 text-[13px] font-semibold text-white shadow-none hover:bg-neutral-800"
                 onClick={() => {
                   onPrimeAccount(undefined);
                   setLoginDrawerOpen(true);
@@ -1306,14 +1306,14 @@ function AccountListCard({
     >
       <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
-            <h3 className="truncate text-[15px] font-semibold tracking-[-0.02em] text-foreground">{account.name}</h3>
+            <h3 className="truncate text-[17px] font-semibold tracking-[-0.02em] text-foreground">{account.name}</h3>
           </div>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             <SoftBadge tone={isAuth ? "brand" : "neutral"} label={formatAccountAuthLabel(account.authMode)} />
             <SoftBadge tone="neutral" label={envLabel} />
             {activeRouteLabels.length > 0 ? (
               <span
-                className="inline-flex min-w-0 items-center truncate text-[10px] font-medium text-primary"
+                className="inline-flex min-w-0 items-center truncate text-[11px] font-medium text-primary"
                 title={activeRouteDetails || undefined}
               >
                 {activeRouteLabels.join(" · ")}
@@ -1339,13 +1339,13 @@ function AccountListCard({
                 </button>
               </div>
             ) : !isAuth ? (
-              <span className="flex min-h-6 items-center truncate text-[12px] text-muted-foreground">
+              <span className="flex min-h-6 items-center truncate text-[13px] text-muted-foreground">
                 {language === "zh" ? "未配置 Base URL" : language === "ja" ? "Base URL 未設定" : "Base URL not set"}
               </span>
             ) : null}
             {maskedApiKey ? (
               <div className="account-runtime-line min-h-6 min-w-0">
-                <span className="min-w-0 truncate font-mono text-[12px] text-muted-foreground [font-variant-numeric:tabular-nums]">{maskedApiKey}</span>
+                <span className="min-w-0 truncate font-mono text-[13px] text-muted-foreground [font-variant-numeric:tabular-nums]">{maskedApiKey}</span>
                 <button
                   type="button"
                   className="motion-interactive-color inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-white hover:text-foreground"
@@ -1385,7 +1385,7 @@ function AccountListCard({
           </div>
         ) : (
           <div className="flex min-h-[52px] items-center px-3 py-2">
-            <div className="text-[12px] leading-5 text-muted-foreground">{getApiUsageHint(language)}</div>
+            <div className="text-[13px] leading-5 text-muted-foreground">{getApiUsageHint(language)}</div>
           </div>
         )}
       </div>
@@ -1479,7 +1479,7 @@ function AccountListCard({
         />
         <button
           type="button"
-          className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[12px] font-medium text-foreground ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
+          className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[13px] font-medium text-foreground ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
           onClick={onOpenModels}
           disabled={busy}
           title={language === "zh" ? "选择账号暴露的模型" : "Choose exposed models"}
@@ -1489,7 +1489,7 @@ function AccountListCard({
         </button>
         <button
           type="button"
-          className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[12px] font-medium text-foreground ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
+          className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[13px] font-medium text-foreground ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
           onClick={() => {
             onPrimeAccount(account);
             onLogin();
@@ -1589,7 +1589,7 @@ function RowActionMenu({
     <div ref={rootRef} className="relative">
       <button
         type="button"
-        className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[12px] font-medium text-foreground ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
+        className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[13px] font-medium text-foreground ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
         onClick={() => setOpen((value) => !value)}
         disabled={disabled}
         aria-expanded={open}
@@ -1617,7 +1617,7 @@ function RowActionMenu({
             />
           ) : (
             <button key={item.key} type="button"
-              className={cn("motion-interactive-color flex w-full items-center rounded-lg px-3 py-2 text-left text-[12px] font-medium",
+              className={cn("motion-interactive-color flex w-full items-center rounded-lg px-3 py-2 text-left text-[13px] font-medium",
                 item.tone === "danger" ? "text-destructive hover:bg-destructive/10" : "text-foreground hover:bg-[#f6f7f9]")}
               onClick={() => { setOpen(false); item.onSelect?.(); }}>
               {item.label}
@@ -1647,7 +1647,7 @@ function RowActionSubmenu({
 
   return (
     <div ref={triggerRef} className="relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
-      <button type="button" className="motion-interactive-color flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[12px] font-medium text-foreground hover:bg-[#f6f7f9]"
+      <button type="button" className="motion-interactive-color flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] font-medium text-foreground hover:bg-[#f6f7f9]"
         aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         <span>{item.label}</span>
         <ChevronRight className="size-3.5 text-muted-foreground" />
@@ -1659,7 +1659,7 @@ function RowActionSubmenu({
           <div className="motion-popover-enter min-w-[180px] overflow-y-auto rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md"
             style={{ maxHeight: availableHeight }}>
             {item.children.map((child) => (
-              <button key={child.key} type="button" className="motion-interactive-color block w-full rounded-lg px-3 py-2 text-left text-[12px] font-medium text-foreground hover:bg-[#f6f7f9]"
+              <button key={child.key} type="button" className="motion-interactive-color block w-full rounded-lg px-3 py-2 text-left text-[13px] font-medium text-foreground hover:bg-[#f6f7f9]"
                 onClick={() => { onClose(); child.onSelect(); }}>
                 {child.label}
               </button>
@@ -1675,7 +1675,7 @@ function SoftBadge({ label, tone, title }: { label: string; tone: "brand" | "neu
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center rounded-md px-2 text-[10px] font-medium",
+        "inline-flex h-5 items-center rounded-md px-2 text-[11px] font-medium",
         tone === "brand" ? "bg-accent text-muted-foreground" : "bg-accent text-muted-foreground",
       )}
       title={title}
@@ -1707,7 +1707,7 @@ function CardUsageRow({
 
   return (
     <div className="account-usage-row px-0.5 py-1">
-      <span className="truncate text-[11px] font-semibold text-foreground">{label}</span>
+      <span className="truncate text-[12px] font-semibold text-foreground">{label}</span>
       <div className="min-w-0">
         <div className="h-1.5 overflow-hidden rounded-lg bg-slate-200/80">
           <div
@@ -1716,10 +1716,10 @@ function CardUsageRow({
           />
         </div>
       </div>
-      <span className="text-right text-[10px] font-semibold text-foreground [font-variant-numeric:tabular-nums]">
+      <span className="text-right text-[11px] font-semibold text-foreground [font-variant-numeric:tabular-nums]">
         {hasPercent ? `${percent}%` : ""}
       </span>
-      <span className="inline-flex min-w-0 items-center justify-end gap-0.5 text-right text-[10px] font-medium text-muted-foreground [font-variant-numeric:tabular-nums]">
+      <span className="inline-flex min-w-0 items-center justify-end gap-0.5 text-right text-[11px] font-medium text-muted-foreground [font-variant-numeric:tabular-nums]">
         {exactResetTime ? (
           <Tooltip
             content={(
@@ -1807,7 +1807,7 @@ function RequestHealthRow({
 
   return (
     <div>
-      <div className="mb-1 flex items-center justify-between gap-3 text-[10px] leading-none">
+      <div className="mb-1 flex items-center justify-between gap-3 text-[11px] leading-none">
         <span className="font-medium text-muted-foreground">{label}</span>
         <span className="font-semibold text-foreground [font-variant-numeric:tabular-nums]">{percent}</span>
       </div>
@@ -1914,7 +1914,7 @@ function CardTargetButton({
           type="button"
           disabled={disabled}
           onClick={() => onSelect(primaryStrategy)}
-          className="motion-interactive-color responsive-action flex h-full min-w-[64px] cursor-pointer items-center justify-center gap-1.5 px-3 text-[12px] font-medium disabled:cursor-not-allowed"
+          className="motion-interactive-color responsive-action flex h-full min-w-[64px] cursor-pointer items-center justify-center gap-1.5 px-3 text-[13px] font-medium disabled:cursor-not-allowed"
           aria-label={label}
           title={label}
         >
@@ -1965,7 +1965,7 @@ function CardTargetButton({
                 <button
                   type="button"
                   className={cn(
-                    "motion-interactive-color flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[12px] font-medium text-foreground hover:bg-[#f6f7f9] hover:text-foreground",
+                    "motion-interactive-color flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] font-medium text-foreground hover:bg-[#f6f7f9] hover:text-foreground",
                     item.key === primaryStrategy && "bg-[#f5f7fa] text-foreground",
                     item.disabled && "cursor-not-allowed text-muted-foreground/60 hover:bg-transparent hover:text-muted-foreground/60",
                   )}
@@ -1993,14 +1993,14 @@ function CardTargetButton({
                       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                         {projects.map((project) => (
                           <button key={project.path} type="button" title={project.path} className="motion-interactive-color block w-full rounded-lg px-3 py-2 text-left hover:bg-[#f6f7f9]" onClick={() => { setOpen(false); setProjectOpen(false); onSelectProject?.(project.path); }}>
-                            <span className="block truncate text-[12px] font-medium text-foreground">{project.name}</span>
-                            <span className="block truncate text-[10px] text-muted-foreground">{project.path}</span>
+                            <span className="block truncate text-[13px] font-medium text-foreground">{project.name}</span>
+                            <span className="block truncate text-[11px] text-muted-foreground">{project.path}</span>
                           </button>
                         ))}
                       </div>
                       <div className="mt-1 border-t border-black/[0.06] pt-1">
-                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[12px] text-foreground hover:bg-[#f6f7f9]" onClick={() => { setOpen(false); onSelectProject?.(""); }}>{homeLabel}</button>
-                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[12px] text-foreground hover:bg-[#f6f7f9]" onClick={() => { void onPickDirectory?.().then((path) => { if (path) { setOpen(false); onSelectProject?.(path); } }); }}>{pickDirectoryLabel}</button>
+                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[13px] text-foreground hover:bg-[#f6f7f9]" onClick={() => { setOpen(false); onSelectProject?.(""); }}>{homeLabel}</button>
+                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[13px] text-foreground hover:bg-[#f6f7f9]" onClick={() => { void onPickDirectory?.().then((path) => { if (path) { setOpen(false); onSelectProject?.(path); } }); }}>{pickDirectoryLabel}</button>
                       </div>
                     </div>
                   </div>

@@ -53,7 +53,7 @@ export function UsageDonut({ models }: { models: UsageAggregate[] }) {
         </g>
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-[11px] text-muted-foreground">Token</span>
+        <span className="text-[12px] text-muted-foreground">Token</span>
         <span className="text-lg font-semibold text-foreground">{formatCompact(total)}</span>
       </div>
     </div>

@@ -104,10 +104,10 @@ export function ThemeColorSettings({ language }: { language: "zh" | "en" | "ja" 
     <div className="space-y-4 rounded-lg bg-[#f7f8fa] px-4 py-3">
       <div className="flex items-center gap-4">
         <div className="flex-1">
-          <div className="text-[12px] font-medium text-foreground">
+          <div className="text-[13px] font-medium text-foreground">
             {language === "zh" ? "当前主题色" : language === "ja" ? "現在のテーマカラー" : "Current theme color"}
           </div>
-          <div className="mt-1 text-[11px] text-muted-foreground">
+          <div className="mt-1 text-[12px] text-muted-foreground">
             {language === "zh" ? "选择预设颜色或自定义颜色" : language === "ja" ? "プリセットカラーまたはカスタムカラーを選択" : "Choose a preset or customize"}
           </div>
         </div>
@@ -148,7 +148,7 @@ export function ThemeColorSettings({ language }: { language: "zh" | "en" | "ja" 
           </div>
 
           <div className="flex items-center gap-3">
-            <label className="text-[12px] font-medium text-foreground">
+            <label className="text-[13px] font-medium text-foreground">
               {language === "zh" ? "自定义颜色" : language === "ja" ? "カスタムカラー" : "Custom color"}
             </label>
             <input

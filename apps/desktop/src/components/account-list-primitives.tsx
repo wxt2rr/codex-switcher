@@ -72,7 +72,7 @@ export function ListPageHeader({
               onChange={(event) => onSearchChange(event.target.value)}
               placeholder={searchPlaceholder}
               className={cn(
-                "h-8 w-full rounded-lg border-transparent pl-10 text-[12px] shadow-none",
+                "h-8 w-full rounded-lg border-transparent pl-10 text-[13px] shadow-none",
                 layout === "stacked" ? "bg-[#fbfbfc] focus:border-transparent focus:ring-0 dark:bg-[#1b2129]" : "bg-[#f3f4f6] dark:bg-[#1b2129]",
               )}
             />
@@ -97,7 +97,7 @@ export function ListPageHeader({
     return (
       <div className="flex shrink-0 flex-col gap-4">
         <div>
-          <h2 className="text-[28px] font-semibold tracking-[-0.04em] text-neutral-950 dark:text-neutral-50">{title}</h2>
+          <h2 className="text-[24px] font-semibold tracking-[-0.04em] text-neutral-950 dark:text-neutral-50">{title}</h2>
           <p className="mt-1 text-[13px] leading-6 text-muted-foreground dark:text-muted-foreground">{subtitle}</p>
         </div>
         <div className="rounded-[18px] bg-white px-3 py-2.5 shadow-[0_10px_30px_rgba(15,23,42,0.03)] ring-1 ring-black/[0.04] dark:bg-[#141a22] dark:ring-white/[0.07]">
@@ -110,7 +110,7 @@ export function ListPageHeader({
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(220px,1fr)_minmax(0,1.8fr)] xl:items-start">
       <div>
-        <h2 className="text-[28px] font-semibold tracking-[-0.04em] text-neutral-950 dark:text-neutral-50">{title}</h2>
+        <h2 className="text-[24px] font-semibold tracking-[-0.04em] text-neutral-950 dark:text-neutral-50">{title}</h2>
         <p className="mt-1 text-[13px] leading-6 text-muted-foreground dark:text-muted-foreground">{subtitle}</p>
       </div>
       {toolbar}
@@ -193,7 +193,7 @@ export function RunStatusBadge({
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center rounded-md px-2 text-[10px] font-semibold",
+        "inline-flex h-5 items-center rounded-md px-2 text-[11px] font-semibold",
         tone === "success" && "bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary-foreground",
         tone === "warn" && "bg-warm-50 text-warm-600 dark:bg-warm-950/50 dark:text-warm-300",
         tone === "neutral" && "bg-accent text-muted-foreground dark:bg-[#202733] dark:text-muted-foreground/60",
@@ -223,7 +223,7 @@ export function IconActionButton({
     <button
       type="button"
       className={cn(
-        "motion-interactive-color responsive-action flex h-9 min-w-[64px] items-center justify-center gap-1.5 rounded-lg border border-transparent px-3 text-[12px] font-medium",
+        "motion-interactive-color responsive-action flex h-9 min-w-[64px] items-center justify-center gap-1.5 rounded-lg border border-transparent px-3 text-[13px] font-medium",
         tone === "danger"
           ? "bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive dark:bg-destructive/30 dark:text-destructive dark:hover:bg-destructive/40"
           : active

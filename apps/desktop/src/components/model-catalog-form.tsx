@@ -84,7 +84,7 @@ function MultiSelectField({
   return (
     <div className="grid grid-cols-2 gap-2 rounded-lg bg-[#f1f4f8] p-2 dark:bg-[#19212b]">
       {options.map((option) => (
-        <label key={option} className="flex min-h-8 items-center gap-2 rounded-md px-2 text-[12px] text-foreground hover:bg-white/70 dark:text-foreground dark:hover:bg-white/[0.06]">
+        <label key={option} className="flex min-h-8 items-center gap-2 rounded-md px-2 text-[13px] text-foreground hover:bg-white/70 dark:text-foreground dark:hover:bg-white/[0.06]">
           <input
             type="checkbox"
             checked={selectedSet.has(option)}
@@ -99,7 +99,7 @@ function MultiSelectField({
           <span>{option}</span>
         </label>
       ))}
-      {!options.length ? <span className="col-span-2 px-2 text-[11px] text-muted-foreground">{zh ? "暂无可选项" : "No options"}</span> : null}
+      {!options.length ? <span className="col-span-2 px-2 text-[12px] text-muted-foreground">{zh ? "暂无可选项" : "No options"}</span> : null}
     </div>
   );
 }
@@ -126,7 +126,7 @@ function ReasoningLevelsField({
   return (
     <div className="grid gap-2 rounded-lg bg-[#f1f4f8] p-2 dark:bg-[#19212b]">
       {MODEL_CATALOG_ENUMS.reasoningEfforts.map((effort) => (
-        <label key={effort} className="flex min-h-8 items-start gap-2 rounded-md px-2 py-1.5 text-[12px] text-foreground hover:bg-white/70 dark:text-foreground dark:hover:bg-white/[0.06]">
+        <label key={effort} className="flex min-h-8 items-start gap-2 rounded-md px-2 py-1.5 text-[13px] text-foreground hover:bg-white/70 dark:text-foreground dark:hover:bg-white/[0.06]">
           <input
             type="checkbox"
             checked={selected.has(effort)}
@@ -143,10 +143,10 @@ function ReasoningLevelsField({
             }}
             className="mt-0.5 size-3.5 accent-primary"
           />
-          <span className="min-w-0"><span className="font-medium">{effort}</span><span className="ml-2 text-[11px] text-muted-foreground">{selected.get(effort)?.description ?? REASONING_DESCRIPTIONS[effort]}</span></span>
+          <span className="min-w-0"><span className="font-medium">{effort}</span><span className="ml-2 text-[12px] text-muted-foreground">{selected.get(effort)?.description ?? REASONING_DESCRIPTIONS[effort]}</span></span>
         </label>
       ))}
-      {zh ? <p className="px-2 text-[11px] text-muted-foreground">可选推理级别会写回 supported_reasoning_levels 数组。</p> : null}
+      {zh ? <p className="px-2 text-[12px] text-muted-foreground">可选推理级别会写回 supported_reasoning_levels 数组。</p> : null}
     </div>
   );
 }
@@ -185,7 +185,7 @@ export function ModelCatalogForm({
     if (field.kind === "boolean") {
       return (
         <Field key={field.key} label={label} hint={hint}>
-          <label className="flex h-9 items-center gap-2 rounded-lg bg-[#f1f4f8] px-3 text-[12px] text-foreground dark:bg-[#19212b] dark:text-foreground">
+          <label className="flex h-9 items-center gap-2 rounded-lg bg-[#f1f4f8] px-3 text-[13px] text-foreground dark:bg-[#19212b] dark:text-foreground">
             <input type="checkbox" checked={current === true} onChange={(event) => updateField(field.key, event.target.checked)} className="size-3.5 accent-primary" />
             {zh ? "启用" : "Enabled"}
           </label>
@@ -216,7 +216,7 @@ export function ModelCatalogForm({
                 setJsonErrors((errors) => ({ ...errors, [field.key]: true }));
               }
             }}
-            className="min-h-[88px] font-mono text-[11px] leading-5"
+            className="min-h-[88px] font-mono text-[12px] leading-5"
             spellCheck={false}
           />
         </Field>
@@ -256,14 +256,14 @@ export function ModelCatalogForm({
         const fields = group.keys.map((key) => fieldByKey.get(key)).filter((field): field is ModelCatalogFieldDefinition => Boolean(field));
         return (
           <section key={group.title} className="space-y-3">
-            <div className="border-b border-black/[0.06] pb-2 text-[12px] font-semibold text-muted-foreground dark:border-white/[0.08] dark:text-muted-foreground">{zh ? group.title : group.titleEn}</div>
+            <div className="border-b border-black/[0.06] pb-2 text-[13px] font-semibold text-muted-foreground dark:border-white/[0.08] dark:text-muted-foreground">{zh ? group.title : group.titleEn}</div>
             <div className="grid gap-3 md:grid-cols-2">
               {fields.map((field) => <div key={field.key} className={field.kind === "textarea" || field.kind === "json" || field.kind === "multi_select" || field.kind === "reasoning_levels" ? "md:col-span-2" : undefined}>{renderField(field)}</div>)}
             </div>
           </section>
         );
       })}
-      <p className="text-[11px] leading-5 text-muted-foreground">{zh ? "表单会保留 JSON 中未识别的扩展字段；需要编辑未知字段时继续使用 JSON 模式。" : "Unknown extension fields are preserved by the form; use JSON mode to edit fields not yet covered here."}</p>
+      <p className="text-[12px] leading-5 text-muted-foreground">{zh ? "表单会保留 JSON 中未识别的扩展字段；需要编辑未知字段时继续使用 JSON 模式。" : "Unknown extension fields are preserved by the form; use JSON mode to edit fields not yet covered here."}</p>
     </div>
   );
 }

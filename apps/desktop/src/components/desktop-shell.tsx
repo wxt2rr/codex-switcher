@@ -146,7 +146,7 @@ export function DesktopShell({
             )}
           >
             <div className="motion-sidebar-label min-w-0 overflow-hidden">
-              <div className="truncate text-[15px] font-semibold tracking-[-0.02em] text-foreground dark:text-neutral-50">{brand}</div>
+              <div className="truncate text-[17px] font-semibold tracking-[-0.02em] text-foreground dark:text-neutral-50">{brand}</div>
             </div>
 
             {!isMacDesktop ? sidebarToggle : null}
@@ -232,15 +232,15 @@ export function DesktopShell({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-3">
                     <h2 className="text-[13px] font-semibold text-foreground dark:text-white">{updatePrompt.title}</h2>
-                    <span className="shrink-0 rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary dark:bg-emerald-950/60 dark:text-primary">v{updatePrompt.version}</span>
+                    <span className="shrink-0 rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary dark:bg-emerald-950/60 dark:text-primary">v{updatePrompt.version}</span>
                   </div>
-                  <p className="mt-1 text-[11px] leading-5 text-muted-foreground dark:text-muted-foreground">{updatePrompt.description}</p>
+                  <p className="mt-1 text-[12px] leading-5 text-muted-foreground dark:text-muted-foreground">{updatePrompt.description}</p>
                 </div>
               </div>
               <div className="mt-3 flex items-center justify-end gap-2">
                 <button
                   type="button"
-                  className="rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground dark:text-muted-foreground dark:hover:bg-white/[0.07] dark:hover:text-slate-200"
+                  className="rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground dark:text-muted-foreground dark:hover:bg-white/[0.07] dark:hover:text-slate-200"
                   onClick={updatePrompt.onSkip}
                   disabled={updatePrompt.busy}
                 >
@@ -248,7 +248,7 @@ export function DesktopShell({
                 </button>
                 <button
                   type="button"
-                  className="rounded-lg bg-primary px-3 py-1.5 text-[11px] font-semibold text-primary-foreground shadow-sm transition-opacity hover:opacity-90 disabled:cursor-wait disabled:opacity-55"
+                  className="rounded-lg bg-primary px-3 py-1.5 text-[12px] font-semibold text-primary-foreground shadow-sm transition-opacity hover:opacity-90 disabled:cursor-wait disabled:opacity-55"
                   onClick={updatePrompt.onInstall}
                   disabled={updatePrompt.busy}
                 >

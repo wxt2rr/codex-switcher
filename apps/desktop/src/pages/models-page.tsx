@@ -87,16 +87,16 @@ function AccountSourceSummary({
   const remaining = Math.max(0, accountLabels.length - preview.length);
   return (
     <div className="min-w-0">
-      <div className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+      <div className="flex items-center justify-between gap-3 text-[12px] text-muted-foreground">
         <span>{label}</span>
         <span>{count} {zh ? "个账号" : count === 1 ? "account" : "accounts"}</span>
       </div>
       {preview.length ? (
         <div className="mt-1.5 flex min-w-0 flex-wrap gap-1.5">
-          {preview.map((account) => <SoftBadge key={account} label={account} className="h-5 max-w-full truncate rounded-md px-2 text-[10px]" />)}
-          {remaining ? <SoftBadge label={`+${remaining}`} className="h-5 rounded-md px-2 text-[10px]" /> : null}
+          {preview.map((account) => <SoftBadge key={account} label={account} className="h-5 max-w-full truncate rounded-md px-2 text-[11px]" />)}
+          {remaining ? <SoftBadge label={`+${remaining}`} className="h-5 rounded-md px-2 text-[11px]" /> : null}
         </div>
-      ) : <div className="mt-1.5 text-[11px] text-muted-foreground">{emptyLabel}</div>}
+      ) : <div className="mt-1.5 text-[12px] text-muted-foreground">{emptyLabel}</div>}
     </div>
   );
 }
@@ -310,7 +310,7 @@ export function ModelsPage({
                 })),
               ]}
               openOnHover={false}
-              className="h-8 w-[132px] shrink-0 bg-[#f3f4f6] text-[12px] dark:bg-[#1b2129]"
+              className="h-8 w-[132px] shrink-0 bg-[#f3f4f6] text-[13px] dark:bg-[#1b2129]"
             />
             <Button size="sm" variant="outline" onClick={() => void refreshDiscoveries()} disabled={refreshing}>
               <RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />
@@ -357,15 +357,15 @@ export function ModelsPage({
                   />
                   <div className="min-w-0">
                     <h3 className="truncate text-[14px] font-semibold text-foreground dark:text-white">{model.entry.display_name}</h3>
-                    <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">{model.entry.slug}</p>
+                    <p className="mt-1 truncate font-mono text-[12px] text-muted-foreground">{model.entry.slug}</p>
                   </div>
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
-                <SoftBadge label={providerLabel(providerId, providerCatalog, zh, String(model.entry.provider_display_name ?? ""))} className="h-5 max-w-[150px] truncate rounded-md px-2 text-[10px]" />
-                <SoftBadge label={model.entry.model_source === "bundled" ? (zh ? "Codex 内置" : "Codex built-in") : model.entry.model_source === "discovered" ? (zh ? "服务商发现" : "Discovered") : (zh ? "手动配置" : "Manual")} className="h-5 rounded-md px-2 text-[10px]" />
-                {discoveryInfo ? <SoftBadge tone={statusTone} label={discoveryStatusLabel(discoveryInfo.status, zh)} className="h-5 rounded-md px-2 text-[10px]" /> : null}
-                {modelCapabilityObservations.slice(0, 3).map((entry) => <SoftBadge key={`${entry.key}/${entry.capability}`} tone={entry.status === "supported" ? "success" : entry.status === "unsupported" ? "warn" : "neutral"} label={`${capabilityLabel(entry.capability, zh)} · ${capabilityStatusLabel(entry.status, zh)}`} className="h-5 max-w-[150px] truncate rounded-md px-2 text-[10px]" />)}
+                <SoftBadge label={providerLabel(providerId, providerCatalog, zh, String(model.entry.provider_display_name ?? ""))} className="h-5 max-w-[150px] truncate rounded-md px-2 text-[11px]" />
+                <SoftBadge label={model.entry.model_source === "bundled" ? (zh ? "Codex 内置" : "Codex built-in") : model.entry.model_source === "discovered" ? (zh ? "服务商发现" : "Discovered") : (zh ? "手动配置" : "Manual")} className="h-5 rounded-md px-2 text-[11px]" />
+                {discoveryInfo ? <SoftBadge tone={statusTone} label={discoveryStatusLabel(discoveryInfo.status, zh)} className="h-5 rounded-md px-2 text-[11px]" /> : null}
+                {modelCapabilityObservations.slice(0, 3).map((entry) => <SoftBadge key={`${entry.key}/${entry.capability}`} tone={entry.status === "supported" ? "success" : entry.status === "unsupported" ? "warn" : "neutral"} label={`${capabilityLabel(entry.capability, zh)} · ${capabilityStatusLabel(entry.status, zh)}`} className="h-5 max-w-[150px] truncate rounded-md px-2 text-[11px]" />)}
               </div>
               <div className="mt-auto grid grid-cols-2 gap-3 border-t border-black/[0.06] pt-3 dark:border-white/[0.07]">
                 <AccountSourceSummary label={zh ? "发现来源" : "Discovered by"} count={sourceAccountLabels.length} emptyLabel={zh ? "暂无已知来源账号" : "No known source account"} accountLabels={sourceAccountLabels} zh={zh} />
@@ -385,7 +385,7 @@ export function ModelsPage({
                     } : undefined}
                   />
                   {model.entry.model_source === "bundled" ? (
-                    <span className="text-[11px] text-muted-foreground">{zh ? "随 Codex App 自动同步" : "Synced from Codex App"}</span>
+                    <span className="text-[12px] text-muted-foreground">{zh ? "随 Codex App 自动同步" : "Synced from Codex App"}</span>
                   ) : (
                     <>
                       <Button size="sm" variant="ghost" onClick={() => openEditor(model)}><Pencil className="size-3.5" />{zh ? "编辑" : "Edit"}</Button>
@@ -411,14 +411,14 @@ export function ModelsPage({
       >
         <div className="flex min-h-0 flex-1 flex-col gap-4">
           <div className="flex shrink-0 items-center gap-1 rounded-lg bg-accent p-1">
-            <button type="button" onClick={() => changeMode("form")} aria-pressed={mode === "form"} className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border text-[12px] ${mode === "form" ? "ui-selected-control" : "border-transparent text-muted-foreground"}`}><FilePenLine className="size-3.5" />{zh ? "表单" : "Form"}</button>
-            <button type="button" onClick={() => changeMode("json")} aria-pressed={mode === "json"} className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border text-[12px] ${mode === "json" ? "ui-selected-control" : "border-transparent text-muted-foreground"}`}><Braces className="size-3.5" />JSON</button>
+            <button type="button" onClick={() => changeMode("form")} aria-pressed={mode === "form"} className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border text-[13px] ${mode === "form" ? "ui-selected-control" : "border-transparent text-muted-foreground"}`}><FilePenLine className="size-3.5" />{zh ? "表单" : "Form"}</button>
+            <button type="button" onClick={() => changeMode("json")} aria-pressed={mode === "json"} className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border text-[13px] ${mode === "json" ? "ui-selected-control" : "border-transparent text-muted-foreground"}`}><Braces className="size-3.5" />JSON</button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto pr-1">
             {mode === "form" ? (
               <ModelCatalogForm value={draft} language={language} onChange={updateDraft} />
             ) : (
-              <Field label="model-catalogs.json"><Textarea className="min-h-[420px] font-mono text-[12px] leading-5" value={jsonDraft} onChange={(event) => setJsonDraft(event.target.value)} spellCheck={false} /></Field>
+              <Field label="model-catalogs.json"><Textarea className="min-h-[420px] font-mono text-[13px] leading-5" value={jsonDraft} onChange={(event) => setJsonDraft(event.target.value)} spellCheck={false} /></Field>
             )}
           </div>
           <div className="flex shrink-0 justify-end gap-2 border-t border-black/[0.06] pt-4">

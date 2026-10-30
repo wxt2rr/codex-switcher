@@ -309,7 +309,7 @@ export function SkillsPage({
         <div className="relative z-20 shrink-0 flex flex-col gap-3 [-webkit-app-region:no-drag]">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <h2 className="text-[28px] font-semibold tracking-[-0.04em] text-neutral-950 dark:text-neutral-50">{title}</h2>
+              <h2 className="text-[24px] font-semibold tracking-[-0.04em] text-neutral-950 dark:text-neutral-50">{title}</h2>
               <p className="mt-1 truncate text-[13px] leading-6 text-muted-foreground dark:text-muted-foreground">{subtitle}</p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
@@ -331,7 +331,7 @@ export function SkillsPage({
                 <button key={scope.id} type="button" role="tab" aria-selected={activeScopeId === scope.id}
                   data-skill-scope-id={scope.id} onClick={() => selectScope(scope.id)}
                   className={cn(
-                    "h-8 rounded-lg border border-transparent px-3.5 text-[12px] font-semibold transition-[background-color,color,border-color,transform] duration-[140ms] ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.97] [-webkit-app-region:no-drag]",
+                    "h-8 rounded-lg border border-transparent px-3.5 text-[13px] font-semibold transition-[background-color,color,border-color,transform] duration-[140ms] ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.97] [-webkit-app-region:no-drag]",
                     activeScopeId === scope.id
                       ? "ui-selected-control"
                       : "text-muted-foreground hover:bg-[#f3f4f6] hover:text-neutral-900 dark:text-muted-foreground dark:hover:bg-[#1b2129] dark:hover:text-white",
@@ -351,7 +351,7 @@ export function SkillsPage({
               <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input value={query} onChange={(event) => setQuery(event.target.value)}
                 placeholder={activeScopeId === "marketplace" ? (zh ? "搜索市场" : "Search marketplace") : (zh ? "搜索已安装 Skill" : "Search installed skills")}
-                className="h-8 rounded-lg border-transparent bg-[#fbfbfc] pl-10 text-[12px] shadow-none dark:bg-[#1b2129]" />
+                className="h-8 rounded-lg border-transparent bg-[#fbfbfc] pl-10 text-[13px] shadow-none dark:bg-[#1b2129]" />
             </div>
             {activeScope?.kind === "marketplace" ? (
               <div className="ml-auto flex items-center gap-2">
@@ -361,7 +361,7 @@ export function SkillsPage({
                   openOnHover={false}
                   items={(snapshot?.catalogSources ?? []).map((source) => ({ value: source.id, label: source.name }))}
                   placeholder={zh ? "选择来源" : "Select source"}
-                  className="h-8 w-[150px] border-transparent bg-[#f7f8fa] text-[12px] dark:bg-[#1b2129]"
+                  className="h-8 w-[150px] border-transparent bg-[#f7f8fa] text-[13px] dark:bg-[#1b2129]"
                 />
                 <Button variant="secondary" size="icon" className="size-8" onClick={() => void loadSnapshot(true)} disabled={loading} title={zh ? "刷新技能列表" : "Refresh skill list"} aria-label={zh ? "刷新技能列表" : "Refresh skill list"}>
                   <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
@@ -419,7 +419,7 @@ export function SkillsPage({
           <Field label={zh ? "Skill 名称" : "Skill name"} hint={zh ? "仓库只有一个 Skill 时可留空" : "Optional when the repository contains one skill"}>
             <Input value={skillName} onChange={(event) => setSkillName(event.target.value)} placeholder="skill-name" />
           </Field>
-          <div className="rounded-lg bg-muted px-3 py-3 text-[12px] leading-5 text-muted-foreground dark:bg-[#1b2129] dark:text-muted-foreground">
+          <div className="rounded-lg bg-muted px-3 py-3 text-[13px] leading-5 text-muted-foreground dark:bg-[#1b2129] dark:text-muted-foreground">
             {zh ? "安装过程只复制 Skill 文件，不会执行仓库脚本或安装钩子。" : "Installation copies skill files only. Repository scripts and install hooks are never executed."}
           </div>
           <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setInstallOpen(false)}>{zh ? "取消" : "Cancel"}</Button>
@@ -441,7 +441,7 @@ export function SkillsPage({
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-[13px] font-semibold text-neutral-900 dark:text-neutral-100">{zh ? "同步目录" : ja ? "同期ディレクトリ" : "Sync directories"}</div>
-              <div className="mt-0.5 text-[11px] text-muted-foreground">{zh ? "内置与自定义服务商统一管理" : "Manage built-in and custom providers"}</div>
+              <div className="mt-0.5 text-[12px] text-muted-foreground">{zh ? "内置与自定义服务商统一管理" : "Manage built-in and custom providers"}</div>
             </div>
             <Button type="button" variant="secondary" size="sm" onClick={() => setAddProviderOpen((value) => !value)}>
               <Plus className="size-4" />{zh ? "添加服务商" : ja ? "プロバイダーを追加" : "Add provider"}
@@ -510,8 +510,8 @@ function MarketplaceRow({ skill, language, onDetail, onInstall, installing, disa
       <SkillIcon label={skill.name} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-[14px] font-semibold text-neutral-900 dark:text-neutral-100">{skill.name}</div>
-        <p className="mt-1 line-clamp-2 min-h-9 text-[12px] leading-[18px] text-muted-foreground dark:text-muted-foreground">{skill.description || skill.source}</p>
-        <p className="mt-1 truncate font-mono text-[10px] text-muted-foreground">{skill.source}{skill.installs ? ` · ${formatCount(skill.installs)} installs` : ""}</p>
+        <p className="mt-1 line-clamp-2 min-h-9 text-[13px] leading-[18px] text-muted-foreground dark:text-muted-foreground">{skill.description || skill.source}</p>
+        <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">{skill.source}{skill.installs ? ` · ${formatCount(skill.installs)} installs` : ""}</p>
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <Button type="button" variant="ghost" size="icon" className="size-8 text-muted-foreground" onClick={onDetail}
@@ -538,10 +538,10 @@ function InstalledRow({ skill, language, updateAvailable, canManage, onDetail, o
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
           <div className="truncate text-[14px] font-semibold text-neutral-900 dark:text-neutral-100">{skill.name}</div>
-          {skill.linked ? <span className="shrink-0 text-[10px] text-sky-600 dark:text-sky-300">{zh ? "软链接" : "linked"}</span> : null}
+          {skill.linked ? <span className="shrink-0 text-[11px] text-sky-600 dark:text-sky-300">{zh ? "软链接" : "linked"}</span> : null}
         </div>
-        <p className="mt-1 line-clamp-2 min-h-9 text-[12px] leading-[18px] text-muted-foreground dark:text-muted-foreground">{skill.description || (zh ? "暂无描述" : "No description")}</p>
-        <p className="mt-1 truncate font-mono text-[10px] text-muted-foreground">{skill.linkedFrom ?? skill.path}</p>
+        <p className="mt-1 line-clamp-2 min-h-9 text-[13px] leading-[18px] text-muted-foreground dark:text-muted-foreground">{skill.description || (zh ? "暂无描述" : "No description")}</p>
+        <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">{skill.linkedFrom ?? skill.path}</p>
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <Button type="button" variant="ghost" size="icon" className="size-8 text-muted-foreground" onClick={onDetail}
@@ -564,8 +564,8 @@ function CodexEnvironmentBinding({ scope, language }: { scope: SkillScope; langu
       <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="truncate text-[13px] font-semibold text-neutral-900 dark:text-neutral-100">{scope.name}</div>
-            <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">{scope.path}</div>
-            <div className="mt-1.5 text-[10px] font-medium text-muted-foreground dark:text-muted-foreground">
+            <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground">{scope.path}</div>
+            <div className="mt-1.5 text-[11px] font-medium text-muted-foreground dark:text-muted-foreground">
               {zh ? `主存储 · ${scope.skills.length} 个 Skill` : ja ? `メインストレージ · ${scope.skills.length} Skill` : `Primary store · ${scope.skills.length} skills`}
             </div>
           </div>
@@ -589,7 +589,7 @@ function ProviderBindingEditor({ binding, draft, codexScopes, language, onChange
     <section className="rounded-lg border border-black/[0.06] p-4 dark:border-white/[0.08]">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0"><div className="text-[13px] font-semibold text-neutral-900 dark:text-neutral-100">{binding.name}</div>
-          <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">{value.targetPath}</div></div>
+          <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground">{value.targetPath}</div></div>
         <div className="flex shrink-0 items-center gap-2">
           {onDelete ? <Button type="button" variant="ghost" size="icon" className="size-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" onClick={onDelete}
             title={zh ? "删除自定义服务商" : "Delete custom provider"} aria-label={zh ? `删除 ${binding.name}` : `Delete ${binding.name}`}><Trash2 className="size-4" /></Button> : null}
@@ -605,8 +605,8 @@ function ProviderBindingEditor({ binding, draft, codexScopes, language, onChange
           items={codexScopes.map((scope) => ({ value: scope.envName!, label: scope.name }))} openOnHover={false} />
       </Field></div> : null}
       {binding.status === "conflict" || binding.status === "error" || binding.status === "missing-source" ? (
-        <p className="mt-2 text-[11px] text-warm-600">{binding.message ?? binding.status}</p>
-      ) : value.enabled ? <p className="mt-2 text-[11px] text-muted-foreground">{zh ? `${binding.managedLinks} 个受管链接` : `${binding.managedLinks} managed links`}</p> : null}
+        <p className="mt-2 text-[12px] text-warm-600">{binding.message ?? binding.status}</p>
+      ) : value.enabled ? <p className="mt-2 text-[12px] text-muted-foreground">{zh ? `${binding.managedLinks} 个受管链接` : `${binding.managedLinks} managed links`}</p> : null}
     </section>
   );
 }
@@ -644,7 +644,7 @@ function SkillDetailPanel({ selection, language, onClose, onInstall }: {
             <SkillIcon label={skill.name} linked={installed?.linked} />
             <div className="min-w-0">
               <h3 className="text-[16px] font-semibold text-neutral-950 dark:text-neutral-50">{skill.name}</h3>
-              <p className="mt-1.5 whitespace-pre-wrap text-[12px] leading-5 text-muted-foreground dark:text-muted-foreground">
+              <p className="mt-1.5 whitespace-pre-wrap text-[13px] leading-5 text-muted-foreground dark:text-muted-foreground">
                 {skill.description || (zh ? "暂无描述" : ja ? "説明はありません" : "No description available")}
               </p>
             </div>
@@ -653,8 +653,8 @@ function SkillDetailPanel({ selection, language, onClose, onInstall }: {
 
         <dl className="overflow-hidden rounded-lg border border-black/[0.06] dark:border-white/[0.08]">
           {detailRows.map((row) => <div key={row.label} className="grid grid-cols-[84px_minmax(0,1fr)] gap-3 border-b border-black/[0.05] px-4 py-3 last:border-b-0 dark:border-white/[0.06]">
-            <dt className="text-[11px] font-medium text-muted-foreground">{row.label}</dt>
-            <dd className="min-w-0 break-all font-mono text-[11px] leading-5 text-neutral-700 dark:text-neutral-200">{row.value}</dd>
+            <dt className="text-[12px] font-medium text-muted-foreground">{row.label}</dt>
+            <dd className="min-w-0 break-all font-mono text-[12px] leading-5 text-neutral-700 dark:text-neutral-200">{row.value}</dd>
           </div>)}
         </dl>
 
@@ -687,7 +687,7 @@ function EmptyState({ icon, title, description, action }: { icon: ReactNode; tit
   return <div className="flex min-h-[240px] flex-col items-center justify-center text-center">
     <div className="flex size-10 items-center justify-center rounded-lg bg-accent text-muted-foreground dark:bg-[#1b2129]">{icon}</div>
     <h3 className="mt-3 text-[14px] font-semibold text-neutral-800 dark:text-neutral-100">{title}</h3>
-    <p className="mt-1 max-w-[460px] text-[12px] leading-5 text-muted-foreground">{description}</p>
+    <p className="mt-1 max-w-[460px] text-[13px] leading-5 text-muted-foreground">{description}</p>
     {action ? <div className="mt-4">{action}</div> : null}
   </div>;
 }

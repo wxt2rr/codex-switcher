@@ -42,7 +42,7 @@ export function DashboardCardHeader({
   return (
     <div className="mb-5 flex items-start justify-between gap-3">
       <div>
-        <div className="text-[15px] font-semibold tracking-tight text-foreground">{title}</div>
+        <div className="text-[17px] font-semibold tracking-tight text-foreground">{title}</div>
         <div className="mt-1 text-[13px] leading-5 text-muted-foreground">{subtitle}</div>
       </div>
       {actionLabel ? (
@@ -93,9 +93,9 @@ export function BigNumber({ value, label }: { value: string; label: string }) {
 export function StatCard({ label, value, helper, valueClassName }: { label: string; value: string; helper: ReactNode; valueClassName?: string }) {
   return (
     <div className="min-w-0 px-5 py-3">
-      <div className="text-[12px] font-medium text-muted-foreground">{label}</div>
+      <div className="text-[13px] font-medium text-muted-foreground">{label}</div>
       <div key={value} className={cn("motion-value-update mt-1 text-[20px] font-semibold tracking-[-0.03em] text-foreground", valueClassName)}>{value}</div>
-      <div className="mt-1 text-[11px] text-muted-foreground">{helper}</div>
+      <div className="mt-1 text-[12px] text-muted-foreground">{helper}</div>
     </div>
   );
 }
