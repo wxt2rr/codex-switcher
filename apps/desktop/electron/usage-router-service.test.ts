@@ -1596,6 +1596,180 @@ test("environment Gateway converts Responses requests and Chat SSE responses thr
   }
 });
 
+test("environment Gateway bridges a non-streaming Chat request when Responses upstream requires SSE", async () => {
+  const upstreamBodies: Array<Record<string, unknown>> = [];
+  const upstream = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+    upstreamBodies.push(body);
+    if (body.stream !== true) {
+      response.statusCode = 400;
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ detail: "Stream must be set to true" }));
+      return;
+    }
+    response.setHeader("content-type", "text/event-stream");
+    response.end([
+      `data: ${JSON.stringify({ type: "response.created", response: { id: "resp-bridge-1", status: "in_progress" } })}\n\n`,
+      `data: ${JSON.stringify({ type: "response.output_text.delta", response_id: "resp-bridge-1", delta: "hello from SSE" })}\n\n`,
+      `data: ${JSON.stringify({ type: "response.completed", response: { id: "resp-bridge-1", status: "completed", usage: { input_tokens: 3, output_tokens: 4, total_tokens: 7 } } })}\n\n`,
+      "data: [DONE]\n\n",
+    ].join(""));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const address = upstream.address(); assert(address && typeof address !== "string");
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-nonstream-bridge-"));
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+  const route = {
+    routeId: "route-responses-nonstream-bridge", envName: "work", accountName: "responses", providerId: "responses",
+    exposedModelId: "bridge-model", upstreamModel: "responses-model", upstreamBaseUrl: `http://127.0.0.1:${address.port}/v1`,
+    originalBaseUrl: "default", protocol: "responses" as const, reasoningProfile: "auto" as const,
+    capabilities: { streaming: true }, enabled: true, createdAt: 1, updatedAt: 1,
+  };
+  const gateway = {
+    gatewayId: "gateway-nonstream-bridge", envName: "work", routeIds: [route.routeId], defaultRouteId: route.routeId,
+    routeGroups: { "bridge-model": { id: "bridge-model", exposedModelId: "bridge-model", routeIds: [route.routeId], strategy: "order" as const, sessionPolicy: "off" as const, fallbackEnabled: true, capabilities: { streaming: true } } },
+    enabled: true, createdAt: 1, updatedAt: 1,
+  };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  try {
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(route) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}/secret`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify({ upstreamApiKey: "sk-bridge", localRouteToken: "local-bridge" }),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway) })).status, 204);
+
+    const response = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/chat/completions`, {
+      method: "POST", headers: { authorization: "Bearer local-bridge", "content-type": "application/json" },
+      body: JSON.stringify({ model: "bridge-model", messages: [{ role: "user", content: "hello" }], stream: false }),
+    });
+    assert.equal(response.status, 200, await response.clone().text());
+    const body = await response.json() as { object: string; choices: Array<{ message: { content: string } }>; usage: { prompt_tokens: number; completion_tokens: number } };
+    assert.equal(body.object, "chat.completion");
+    assert.equal(body.choices[0]?.message.content, "hello from SSE");
+    assert.equal(body.usage.prompt_tokens, 3);
+    assert.equal(body.usage.completion_tokens, 4);
+    assert.equal(upstreamBodies.length, 2);
+    assert.equal(upstreamBodies[0]?.stream, false);
+    assert.equal(upstreamBodies[1]?.stream, true);
+  } finally {
+    await service.close();
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
+});
+
+test("environment Gateway preserves a Responses upstream error instead of returning an empty Chat success", async () => {
+  const upstream = createServer(async (_request, response) => {
+    response.statusCode = 400;
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ detail: "invalid request from upstream" }));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const address = upstream.address(); assert(address && typeof address !== "string");
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-upstream-error-"));
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+  const route = {
+    routeId: "route-responses-error", envName: "work", accountName: "responses", providerId: "responses",
+    exposedModelId: "error-model", upstreamModel: "responses-error-model", upstreamBaseUrl: `http://127.0.0.1:${address.port}/v1`,
+    originalBaseUrl: "default", protocol: "responses" as const, reasoningProfile: "auto" as const,
+    enabled: true, createdAt: 1, updatedAt: 1,
+  };
+  const gateway = {
+    gatewayId: "gateway-responses-error", envName: "work", routeIds: [route.routeId], defaultRouteId: route.routeId,
+    routeGroups: { "error-model": { id: "error-model", exposedModelId: "error-model", routeIds: [route.routeId], strategy: "order" as const, sessionPolicy: "off" as const, fallbackEnabled: true } },
+    enabled: true, createdAt: 1, updatedAt: 1,
+  };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  try {
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(route) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}/secret`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify({ upstreamApiKey: "sk-error", localRouteToken: "local-error" }),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway) })).status, 204);
+
+    const response = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/chat/completions`, {
+      method: "POST", headers: { authorization: "Bearer local-error", "content-type": "application/json" },
+      body: JSON.stringify({ model: "error-model", messages: [{ role: "user", content: "hello" }], stream: false }),
+    });
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { detail: "invalid request from upstream" });
+  } finally {
+    await service.close();
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
+});
+
+test("environment Gateway account pools bridge non-streaming Chat requests to Responses members", async () => {
+  const upstreamBodies: Array<Record<string, unknown>> = [];
+  const upstream = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+    upstreamBodies.push(body);
+    if (body.stream !== true) {
+      response.statusCode = 400;
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ detail: "Stream must be set to true" }));
+      return;
+    }
+    response.setHeader("content-type", "text/event-stream");
+    response.end([
+      `data: ${JSON.stringify({ type: "response.output_text.delta", delta: "pool bridge" })}\n\n`,
+      `data: ${JSON.stringify({ type: "response.completed", response: { id: "pool-bridge-response", status: "completed" } })}\n\n`,
+      "data: [DONE]\n\n",
+    ].join(""));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const address = upstream.address(); assert(address && typeof address !== "string");
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-pool-nonstream-bridge-"));
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+  const now = Date.now();
+  const route = {
+    routeId: "route-pool-responses-member", envName: "work", accountName: "pool-account", providerId: "responses",
+    exposedModelId: "pool-bridge-model", upstreamModel: "pool-responses-model", upstreamBaseUrl: `http://127.0.0.1:${address.port}/v1`,
+    originalBaseUrl: "default", protocol: "responses" as const, routeGroupId: "pool-bridge-model", reasoningProfile: "auto" as const,
+    enabled: true, createdAt: now, updatedAt: now,
+  };
+  const pool = {
+    poolId: "pool-nonstream-bridge", envName: "work", protocol: "chat_completions" as const, enabled: true,
+    strategy: "sticky_weighted_round_robin" as const, sessionTtlMinutes: 60, maxFailoverAttempts: 1, maxSameAccountFailures: 1,
+    createdAt: now, updatedAt: now, cursor: 0,
+    members: [{ accountName: "pool-account", routeId: route.routeId, protocol: "chat_completions" as const,
+      upstreamBaseUrl: route.upstreamBaseUrl, originalBaseUrl: route.originalBaseUrl, enabled: true, weight: 1, priority: 0 }],
+  };
+  const gateway = {
+    gatewayId: "gateway-pool-nonstream-bridge", envName: "work", routeIds: [route.routeId], poolId: pool.poolId,
+    routeGroups: { "pool-bridge-model": { id: "pool-bridge-model", exposedModelId: "pool-bridge-model", routeIds: [route.routeId], strategy: "order" as const, sessionPolicy: "off" as const, fallbackEnabled: true } },
+    defaultRouteId: route.routeId, enabled: true, createdAt: now, updatedAt: now,
+  };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  try {
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(route) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/pools`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(pool) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/pools/${pool.poolId}/members/pool-account/secret`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify({ upstreamBearerToken: "pool-key", authMode: "apikey" }),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/pools/${pool.poolId}/token`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify({ localRouteToken: "pool-local" }),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway) })).status, 204);
+
+    const response = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/chat/completions`, {
+      method: "POST", headers: { authorization: "Bearer pool-local", "content-type": "application/json" },
+      body: JSON.stringify({ model: "pool-bridge-model", messages: [{ role: "user", content: "hello" }] }),
+    });
+    assert.equal(response.status, 200, await response.clone().text());
+    assert.equal((await response.json() as { choices: Array<{ message: { content: string } }> }).choices[0]?.message.content, "pool bridge");
+    assert.equal(upstreamBodies.length, 2);
+    assert.equal(upstreamBodies[0]?.stream, false);
+    assert.equal(upstreamBodies[1]?.stream, true);
+  } finally {
+    await service.close();
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
+});
+
 test("environment Gateway restores previous Responses tool calls before converting to Chat", async () => {
   const upstreamBodies: Array<Record<string, unknown>> = [];
   const upstream = createServer(async (request, response) => {

@@ -140,7 +140,8 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.match(accounts, /onImportProviderCredential/);
   assert.match(accounts, /服务商凭据|Provider credential/);
   assert.match(desktopCopy, /independentModelNotSet: "未设置独立模型"/);
-  assert.match(accounts, /CircleHelp/);
+  assert.doesNotMatch(accounts, /CircleHelp/);
+  assert.match(accounts, /cursor-help/);
   assert.doesNotMatch(accounts, /function TooltipHint/);
   assert.doesNotMatch(accounts, /getModelProviderHint/);
   assert.match(accounts, /bg-\[#afc8b4\]/);

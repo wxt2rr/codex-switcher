@@ -59,6 +59,7 @@ import {
   convertGatewayRequestAtRuntime,
   convertGatewayResponseAtRuntime,
   convertGatewayResponseStreamAtRuntime,
+  convertGatewayResponseStreamToJsonAtRuntime,
   initializeGatewayConversionRuntime,
   useLegacyProtocolConversion,
   type GatewayResponseStreamHooks,
@@ -667,6 +668,19 @@ function parseRequestBody(value: Buffer): Record<string, unknown> | undefined {
   }
 }
 
+function forceStreamingRequestBody(value: Buffer | undefined): Buffer | undefined {
+  const body = value ? parseRequestBody(value) : undefined;
+  if (!body || body.stream === true) return undefined;
+  return Buffer.from(JSON.stringify({ ...body, stream: true }));
+}
+
+function isStreamRequiredError(message: string | null): boolean {
+  if (!message) return false;
+  const normalized = message.toLowerCase().replace(/\s+/g, " ").trim();
+  return /\bstream\b.*\bmust\b.*\b(?:be\s+)?set\b.*\btrue\b/.test(normalized)
+    || /\bstream(?:ing)?\b.*\b(?:is\s+)?required\b/.test(normalized);
+}
+
 interface DesktopConversionTrace {
   quality: ConversionQuality;
   diagnostics: ConversionDiagnostic[];
@@ -1139,8 +1153,10 @@ async function proxyAccountPoolRequest(
     }
     const proxy = resolveUpstreamProxy(upstream, effectiveRoute.proxyUrl ?? member.proxyUrl, defaultProxyUrl);
     let upstreamResponse: Response;
-    const executeCandidate = async (): Promise<Response> => pool.protocol === "chat_completions"
-      && (effectiveRoute.protocol === "responses" || effectiveRoute.protocol === "chat_completions")
+    let responseAlreadyConverted = false;
+    const responsesIngress = routeSuffix.replace(/^\/+/, "").split("?", 1)[0] === "responses";
+    const executeCandidate = async (): Promise<Response> => (pool.protocol === "responses" && effectiveRoute.protocol === "chat_completions")
+      || (responsesIngress && pool.protocol === "chat_completions" && effectiveRoute.protocol === "chat_completions")
       ? await handleChatCompatibilityRequest({
         route: { ...effectiveRoute, proxyUrl: proxy.url }, secret: { routeId: effectiveRoute.routeId, upstreamApiKey: secret.upstreamBearerToken, localRouteToken, hydratedAt: secret.hydratedAt },
         authorization: `Bearer ${localRouteToken}`, request: candidateParsedBody ?? {}, headers,
@@ -1190,7 +1206,33 @@ async function proxyAccountPoolRequest(
           }
         }
       }
-      if (pool.protocol !== effectiveRoute.protocol && upstreamResponse.body) {
+      // Credential pools use the same protocol conversion rules as direct
+      // Gateway routes. In particular, a Chat Completions pool member backed
+      // by a Responses-only provider may require an SSE retry for a
+      // non-streaming request.
+      if (!upstreamResponse.ok && pool.protocol === "chat_completions" && effectiveRoute.protocol === "responses" && candidateBody && candidateParsedBody?.stream !== true) {
+        const streamRequiredMessage = await extractSafeUpstreamResponseError(upstreamResponse, `Upstream returned HTTP ${upstreamResponse.status}`);
+        if (isStreamRequiredError(streamRequiredMessage)) {
+          const streamingBody = forceStreamingRequestBody(candidateBody);
+          if (streamingBody) {
+            await upstreamResponse.body?.cancel();
+            candidateBody = streamingBody;
+            candidateParsedBody = parseRequestBody(candidateBody) ?? candidateParsedBody;
+            upstreamResponse = await executeCandidate();
+            if (upstreamResponse.ok && upstreamResponse.headers.get("content-type")?.includes("text/event-stream")) {
+              const bridged = await convertGatewayResponseStreamToJsonAtRuntime(upstreamResponse, effectiveRoute.protocol, pool.protocol, {
+                originModelName: typeof parsedBody?.model === "string" ? parsedBody.model : undefined,
+                upstreamModelName: effectiveUpstreamModel,
+              });
+              if (bridged) {
+                upstreamResponse = bridged;
+                responseAlreadyConverted = true;
+              }
+            }
+          }
+        }
+      }
+      if (pool.protocol !== effectiveRoute.protocol && upstreamResponse.body && !responseAlreadyConverted) {
         upstreamResponse = await convertUpstreamResponse(upstreamResponse, effectiveRoute.protocol, pool.protocol, {
           originModelName: typeof parsedBody?.model === "string" ? parsedBody.model : undefined,
           upstreamModelName: effectiveUpstreamModel,
@@ -1372,6 +1414,10 @@ async function proxyRequest(
   const requestBody = bodyOverride ?? (shouldBufferRequestBody
     ? await readRequestBodyBuffer(request)
     : undefined);
+  const incomingRequestBody = requestBody ? parseRequestBody(requestBody) : undefined;
+  const nonStreamingChatRequest = incomingProtocol === "chat_completions"
+    && Boolean(incomingRequestBody)
+    && incomingRequestBody?.stream !== true;
   for (const [index, candidate] of candidates.entries()) {
     selectedRoute = candidate;
     const candidateSecret = resolveSecret?.(candidate) ?? (candidate.routeId === route.routeId ? secret : undefined);
@@ -1443,6 +1489,7 @@ async function proxyRequest(
           ...(hasBody ? { duplex: "half" } as RequestInit : {}),
         }, proxy.url);
       let response = await sendCandidate();
+      let responseAlreadyConverted = false;
       // An unknown capability is learned from a precise tool-shape rejection,
       // then the same request is retried once after safe tool removal.
       if (!response.ok && capabilityRegistry && candidateBody) {
@@ -1459,7 +1506,35 @@ async function proxyRequest(
           }
         }
       }
+      // A number of Responses-compatible providers expose only the SSE
+      // transport and reject a non-streaming request. Preserve the client's
+      // non-streaming contract by retrying this exact candidate once with
+      // `stream: true`, then aggregate the converted SSE back into one JSON
+      // Chat Completion. Do not apply this to normal streaming requests or to
+      // unrelated provider errors.
+      if (!response.ok && nonStreamingChatRequest && candidate.protocol === "responses") {
+        const streamRequiredMessage = await extractSafeUpstreamResponseError(response, `Upstream returned HTTP ${response.status}`);
+        if (isStreamRequiredError(streamRequiredMessage)) {
+          const streamingBody = forceStreamingRequestBody(candidateBody);
+          if (streamingBody) {
+            await response.body?.cancel();
+            candidateBody = streamingBody;
+            response = await sendCandidate();
+            if (response.ok && response.headers.get("content-type")?.includes("text/event-stream")) {
+              const bridged = await convertGatewayResponseStreamToJsonAtRuntime(response, candidate.protocol, incomingProtocol!, {
+                originModelName: incomingModel,
+                upstreamModelName: candidate.upstreamModel,
+              });
+              if (bridged) {
+                response = bridged;
+                responseAlreadyConverted = true;
+              }
+            }
+          }
+        }
+      }
       const convertedResponse = incomingProtocol && candidate.protocol !== incomingProtocol
+        && !responseAlreadyConverted
         ? await convertUpstreamResponse(response, candidate.protocol, incomingProtocol, {
           originModelName: incomingModel,
           upstreamModelName: candidate.upstreamModel,
@@ -1644,6 +1719,11 @@ async function convertUpstreamResponse(
   metadata: { requestId?: string; originModelName?: string; upstreamModelName?: string } = {},
   hooks?: GatewayResponseStreamHooks,
 ): Promise<Response> {
+  // Never reinterpret an upstream error body as a successful protocol
+  // response. Keeping the original status/body lets the client see the real
+  // provider error and prevents an empty `chat.completion` from being
+  // fabricated for malformed/unsupported requests.
+  if (!response.ok) return response;
   const contentType = response.headers.get("content-type") ?? "";
   if (!response.body) return response;
   if (contentType.includes("text/event-stream")) {
@@ -1653,6 +1733,7 @@ async function convertUpstreamResponse(
     const converted = adaptProtocolSseChunk(source, target, raw);
     const headers = new Headers(response.headers);
     headers.delete("content-length");
+    headers.delete("content-encoding");
     return new Response(converted, { status: response.status, headers });
   }
   if (!contentType.includes("json")) return response;
@@ -1668,11 +1749,13 @@ async function convertUpstreamResponse(
     if (convertedResult) {
       const headers = new Headers(response.headers);
       headers.delete("content-length");
+      headers.delete("content-encoding");
       return new Response(JSON.stringify(convertedResult.value), { status: response.status, statusText: response.statusText, headers });
     }
     const converted = adaptProtocolResponse(source, target, body as Record<string, unknown>);
     const headers = new Headers(response.headers);
     headers.delete("content-length");
+    headers.delete("content-encoding");
     return new Response(JSON.stringify(converted), { status: response.status, headers });
   } catch {
     return response;

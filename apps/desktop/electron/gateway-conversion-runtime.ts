@@ -196,6 +196,88 @@ export async function convertGatewayResponseStreamAtRuntime(
   return new Response(output, { status: response.status, statusText: response.statusText, headers });
 }
 
+/**
+ * Convert an upstream SSE response into one non-streaming response.
+ *
+ * Some Responses-compatible providers only implement the streaming transport
+ * and reject `stream: false`.  The Gateway still has to honor a non-streaming
+ * Chat Completions client, so consume the same shared stream state used by the
+ * normal SSE converter and encode the finalized events as the requested
+ * protocol's JSON response.
+ */
+export async function convertGatewayResponseStreamToJsonAtRuntime(
+  response: Response,
+  source: GatewayProtocol,
+  target: GatewayProtocol,
+  metadata: ConversionMetadata = {},
+  hooks: GatewayResponseStreamHooks = {},
+): Promise<Response | undefined> {
+  const state = await createGatewayResponseStreamStateAtRuntime(source, target, metadata);
+  if (!state || !response.body) return undefined;
+
+  const decoder = new TextDecoder();
+  let pending = "";
+  let hookCalled = false;
+  const notifyFinalized = async (reason: string): Promise<void> => {
+    if (hookCalled) return;
+    hookCalled = true;
+    try {
+      await hooks.onFinalized?.(state, reason);
+    } catch {
+      // History/telemetry persistence must never break a compatibility response.
+    }
+  };
+  const consume = async (block: string): Promise<void> => {
+    const data = block.split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart())
+      .join("\n")
+      .trim();
+    if (!data) return;
+    if (data === "[DONE]") {
+      await finalizeGatewayResponseStreamAtRuntime(state);
+      await notifyFinalized("stop");
+      return;
+    }
+    const parsed = JSON.parse(data) as unknown;
+    if (!isJsonObject(parsed)) return;
+    await convertGatewayStreamChunkAtRuntime(state, parsed);
+    if (state.ended) await notifyFinalized("stop");
+  };
+
+  try {
+    const reader = response.body.getReader();
+    while (true) {
+      const next = await reader.read();
+      pending += decoder.decode(next.value ?? new Uint8Array(), { stream: !next.done });
+      const blocks = pending.split(/\r?\n\r?\n/);
+      pending = blocks.pop() ?? "";
+      for (const block of blocks) await consume(block);
+      if (next.done) break;
+    }
+    pending += decoder.decode();
+    if (pending.trim()) await consume(pending);
+    if (!state.ended) {
+      await finalizeGatewayResponseStreamAtRuntime(state);
+      await notifyFinalized("stop");
+    } else {
+      await notifyFinalized("stop");
+    }
+  } catch (error) {
+    if (!state.ended) {
+      await failGatewayResponseStreamAtRuntime(state, "stream_conversion_failed", error instanceof Error ? error.message : String(error));
+    }
+    await notifyFinalized("error");
+  }
+
+  const encoded = conversionModule!.encodeResponseEvents(target, state.events, metadata);
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  headers.delete("content-encoding");
+  headers.set("content-type", "application/json; charset=utf-8");
+  return new Response(JSON.stringify(encoded), { status: response.status, statusText: response.statusText, headers });
+}
+
 function encodeSseEvent(protocol: GatewayProtocol, event: JsonObject): string {
   const type = typeof event.type === "string" ? event.type : undefined;
   const prefix = (protocol === "responses" || protocol === "anthropic") && type ? `event: ${type}\n` : "";

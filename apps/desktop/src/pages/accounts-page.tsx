@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   CircleCheck,
-  CircleHelp,
   CircleX,
   Check,
   Copy,
@@ -1705,7 +1704,6 @@ function CardUsageRow({
   const resetHint = hasPercent ? formatUsageResetHint(metric.timestamp, language) : percentLabel;
   const exactResetTime = hasPercent ? formatUsageResetTime(metric.timestamp, language) : undefined;
   const exactResetTimeLabel = language === "zh" ? "准确重置时间" : language === "ja" ? "正確なリセット時刻" : "Exact reset time";
-  const exactResetTimeAriaLabel = language === "zh" ? "查看准确重置时间" : language === "ja" ? "正確なリセット時刻を表示" : "View exact reset time";
 
   return (
     <div className="account-usage-row px-0.5 py-1">
@@ -1722,7 +1720,6 @@ function CardUsageRow({
         {hasPercent ? `${percent}%` : ""}
       </span>
       <span className="inline-flex min-w-0 items-center justify-end gap-0.5 text-right text-[10px] font-medium text-muted-foreground [font-variant-numeric:tabular-nums]">
-        <span className="truncate">{resetHint}</span>
         {exactResetTime ? (
           <Tooltip
             content={(
@@ -1732,15 +1729,15 @@ function CardUsageRow({
               </div>
             )}
           >
-            <button
-              type="button"
-              aria-label={exactResetTimeAriaLabel}
-              className="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:bg-black/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            <span
+              tabIndex={0}
+              aria-label={exactResetTimeLabel}
+              className="truncate cursor-help rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
             >
-              <CircleHelp className="size-3" />
-            </button>
+              {resetHint}
+            </span>
           </Tooltip>
-        ) : null}
+        ) : <span className="truncate">{resetHint}</span>}
       </span>
     </div>
   );

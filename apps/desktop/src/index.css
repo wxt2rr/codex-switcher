@@ -9,6 +9,24 @@
   --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-heading: var(--font-sans);
 
+  /* Typography scale - following Apple HIG / macOS conventions */
+  --font-size-page-title: 1.5rem;    /* 24px - Page titles */
+  --font-size-section-title: 1.0625rem; /* 17px - Section/card titles */
+  --font-size-body: 0.8125rem;      /* 13px - Main content */
+  --font-size-label: 0.75rem;       /* 12px - Labels, buttons */
+  --font-size-caption: 0.6875rem;   /* 11px - Secondary info */
+  --font-size-tiny: 0.625rem;       /* 10px - Badges, status tags */
+
+  /* Line heights tuned for system font */
+  --line-height-tight: 1.25;        /* Headings */
+  --line-height-normal: 1.5;        /* Body text */
+  --line-height-relaxed: 1.625;     /* Reading blocks */
+
+  /* Letter spacing */
+  --tracking-tight: -0.02em;        /* Large headings */
+  --tracking-normal: 0;             /* Body */
+  --tracking-wide: 0.02em;          /* Labels, all-caps */
+
   /* Semantic color aliases */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -97,6 +115,14 @@
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 
   --radius: 0.875rem;
+
+  /* Font size utilities */
+  --text-tiny: var(--font-size-tiny);
+  --text-caption: var(--font-size-caption);
+  --text-label: var(--font-size-label);
+  --text-body: var(--font-size-body);
+  --text-section-title: var(--font-size-section-title);
+  --text-page-title: var(--font-size-page-title);
 }
 
 :root {
@@ -249,33 +275,43 @@ body {
   transform-origin: bottom right;
 }
 
+@keyframes motion-select-open {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-select-offset, -4px)) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes motion-select-close {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(var(--motion-select-offset, -2px)) scale(0.98);
+  }
+}
+
 .motion-select-content {
-  opacity: 0;
-  transform: translateY(var(--motion-select-offset, -4px)) scale(0.96);
-  transition:
-    opacity var(--motion-popover-exit) var(--ease-out),
-    transform var(--motion-popover-exit) var(--ease-out);
+  opacity: 1;
+  transform: translateY(0) scale(1);
   will-change: transform, opacity;
   pointer-events: none;
 }
 
 .motion-select-content[data-state="open"] {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-  transition-duration: var(--motion-popover-enter);
   pointer-events: auto;
-
-  @starting-style {
-    opacity: 0;
-    transform: translateY(var(--motion-select-offset, -4px)) scale(0.96);
-  }
+  animation: motion-select-open var(--motion-popover-enter) var(--ease-out) both;
 }
 
 .motion-select-content[data-state="closed"] {
-  opacity: 0;
-  transform: translateY(var(--motion-select-offset, -2px)) scale(0.98);
-  transition-duration: var(--motion-popover-exit);
   pointer-events: none;
+  animation: motion-select-close var(--motion-popover-exit) var(--ease-out) both;
 }
 
 .motion-select-content[data-side="top"] {
@@ -610,6 +646,55 @@ body {
   0%, 100% { opacity: 0.56; }
   50% { opacity: 0.9; }
 }
+
+/* Progress bar entrance animation */
+.progress-bar-fill {
+  transform-origin: left;
+  animation: progress-fill 0.8s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+
+@keyframes progress-fill {
+  from {
+    transform: scaleX(0);
+    opacity: 0.5;
+  }
+  to {
+    transform: scaleX(var(--progress-value, 0));
+    opacity: 1;
+  }
+}
+
+/* Content fade-in after skeleton */
+.content-fade-in {
+  animation: content-fade-in 0.3s ease-out forwards;
+}
+
+@keyframes content-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Staggered card entrance */
+.card-enter {
+  opacity: 0;
+  transform: translateY(8px);
+  animation: card-enter 0.4s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+  animation-delay: var(--card-delay, 0ms);
+}
+
+@keyframes card-enter {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 
 .usage-request-table {
   min-height: clamp(300px, 52vh, 620px);

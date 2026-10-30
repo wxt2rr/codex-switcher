@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
+import { useEffect, useId, useRef, useState, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
 
 import { cn } from "@/lib/utils";
 import {
@@ -11,6 +11,11 @@ import {
 import type { SelectFieldItem } from "./select-field";
 import { toSelectItems } from "./select-field";
 import { isPointInsideHoverMenu } from "./hover-menu-intent";
+import {
+  SELECT_HOVER_CLOSE_DELAY,
+  SELECT_HOVER_OPEN_DELAY,
+  selectHoverCoordinator,
+} from "./select-hover-coordinator";
 
 export function Field({
   label,
@@ -77,6 +82,7 @@ export function Select({
   const normalizedItems = toSelectItems(items);
   const selectedItem = normalizedItems.find((item) => item.value === value);
   const [open, setOpen] = useState(false);
+  const selectId = useId();
   const closeTimerRef = useRef<number | null>(null);
   const openTimerRef = useRef<number | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -99,6 +105,7 @@ export function Select({
 
   function handleHoverOpen() {
     if (disabled) return;
+    selectHoverCoordinator.activate(selectId);
     cancelClose();
     cancelOpen();
     isHoveringRef.current = true;
@@ -107,7 +114,7 @@ export function Select({
       if (isHoveringRef.current) {
         setOpen(true);
       }
-    }, 40);
+    }, SELECT_HOVER_OPEN_DELAY);
   }
 
   function handleHoverLeave() {
@@ -116,8 +123,11 @@ export function Select({
     // Immediate close when leaving, no delay
     cancelClose();
     closeTimerRef.current = window.setTimeout(() => {
-      setOpen(false);
-    }, 50);
+      if (!isHoveringRef.current) {
+        selectHoverCoordinator.release(selectId);
+        setOpen(false);
+      }
+    }, SELECT_HOVER_CLOSE_DELAY);
   }
 
   function scheduleClose(point?: { x: number; y: number }) {
@@ -131,10 +141,25 @@ export function Select({
       )) return;
       // Always close if we're not hovering
       if (!isHoveringRef.current) {
+        selectHoverCoordinator.release(selectId);
         setOpen(false);
       }
-    }, 50);
+    }, SELECT_HOVER_CLOSE_DELAY);
   }
+
+  useEffect(() => {
+    if (!openOnHover) return;
+
+    return selectHoverCoordinator.register(selectId, {
+      cancelPendingOpen: cancelOpen,
+      close: () => {
+        isHoveringRef.current = false;
+        cancelClose();
+        cancelOpen();
+        setOpen(false);
+      },
+    });
+  }, [openOnHover, selectId]);
 
   useEffect(() => {
     if (!open || !openOnHover) return;
@@ -151,23 +176,14 @@ export function Select({
         isHoveringRef.current = true;
         cancelClose();
       } else {
-        // Only close if we're not hovering over another Select
-        // Use a small delay to allow for smooth transitions between Selects
-        if (!isHoveringRef.current) {
-          scheduleClose(point);
-        }
+        isHoveringRef.current = false;
+        scheduleClose(point);
       }
     }
-
-    // Use a unique identifier for this Select instance
-    const instanceId = Math.random().toString(36).substr(2, 9);
-    (window as any).__selectInstances = (window as any).__selectInstances || new Map();
-    (window as any).__selectInstances.set(instanceId, { close: () => setOpen(false) });
 
     document.addEventListener("pointermove", handlePointerMove, true);
     return () => {
       document.removeEventListener("pointermove", handlePointerMove, true);
-      (window as any).__selectInstances?.delete(instanceId);
       cancelClose();
       cancelOpen();
     };
@@ -181,8 +197,22 @@ export function Select({
     };
   }, []);
 
+  function handleOpenChange(nextOpen: boolean) {
+    if (nextOpen && openOnHover) {
+      selectHoverCoordinator.activate(selectId);
+      isHoveringRef.current = true;
+    }
+    if (!nextOpen) {
+      isHoveringRef.current = false;
+      cancelClose();
+      cancelOpen();
+      selectHoverCoordinator.release(selectId);
+    }
+    setOpen(nextOpen);
+  }
+
   return (
-    <UiSelect value={value} onValueChange={onValueChange} disabled={disabled} open={open} onOpenChange={setOpen}>
+    <UiSelect value={value} onValueChange={onValueChange} disabled={disabled} open={open} onOpenChange={handleOpenChange}>
       <SelectTrigger
         ref={triggerRef}
         className={className}
@@ -208,7 +238,7 @@ export function Select({
                   event.preventDefault();
                   event.stopPropagation();
                   if (!item.actionDisabled) item.onAction?.();
-                  setOpen(false);
+                  handleOpenChange(false);
                 }}
                 onClick={(event) => {
                   event.preventDefault();
