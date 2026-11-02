@@ -252,6 +252,30 @@ function normalizeResponsesRequest(
   }
 }
 
+/**
+ * Protocol conversion creates a fresh request body, so privacy/compatibility
+ * fields normalized before conversion must be applied once more to the final
+ * upstream protocol. This matters for local Agent clients that send Chat
+ * Completions to a Responses-only route: the shared converter intentionally
+ * only carries canonical fields and therefore cannot preserve `store`.
+ */
+function normalizeConvertedResponsesRequest(
+  body: Buffer | undefined,
+  targetProtocol: RouteProtocol,
+  forceStoreFalse: boolean,
+): Buffer | undefined {
+  if (!forceStoreFalse || targetProtocol !== "responses" || !body?.length) return body;
+  try {
+    const parsed = JSON.parse(body.toString("utf8")) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return body;
+    const record = parsed as Record<string, unknown>;
+    if (record.store === false) return body;
+    return Buffer.from(JSON.stringify({ ...record, store: false }));
+  } catch {
+    return body;
+  }
+}
+
 function hasUsableRouteCredential(
   route: Pick<RouteTarget, "providerId"> | undefined,
   secret: {
@@ -1147,7 +1171,7 @@ async function proxyAccountPoolRequest(
     if (candidateParsedBody && pool.protocol !== effectiveRoute.protocol) {
       const converted = await convertRequestForRoute(pool.protocol, effectiveRoute.protocol, candidateParsedBody, effectiveUpstreamModel,
         typeof parsedBody?.model === "string" ? parsedBody.model : undefined, effectiveRoute);
-      candidateBody = converted.body;
+      candidateBody = normalizeConvertedResponsesRequest(converted.body, effectiveRoute.protocol, forceResponsesStoreFalse) ?? converted.body;
       conversionTrace = converted;
       finalConversionQuality = converted.quality;
       finalConversionDiagnostics = converted.diagnostics;
@@ -1218,7 +1242,7 @@ async function proxyAccountPoolRequest(
             if (pool.protocol !== effectiveRoute.protocol) {
               const converted = await convertRequestForRoute(pool.protocol, effectiveRoute.protocol, candidateParsedBody, effectiveUpstreamModel,
                 typeof parsedBody?.model === "string" ? parsedBody.model : undefined, effectiveRoute);
-              candidateBody = converted.body;
+              candidateBody = normalizeConvertedResponsesRequest(converted.body, effectiveRoute.protocol, forceResponsesStoreFalse) ?? converted.body;
               conversionTrace = converted;
               finalConversionQuality = converted.quality;
               finalConversionDiagnostics = converted.diagnostics;
@@ -1486,7 +1510,7 @@ async function proxyRequest(
       if (parsed) {
         const converted = await convertRequestForRoute(incomingProtocol, candidate.protocol, parsed,
           candidate.upstreamModel ?? incomingModel, incomingModel, candidate);
-        candidateBody = converted.body;
+        candidateBody = normalizeConvertedResponsesRequest(converted.body, candidate.protocol, forceResponsesStoreFalse) ?? converted.body;
         conversionTrace = converted;
       }
     }
