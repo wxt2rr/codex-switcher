@@ -108,14 +108,19 @@ test("reset-card IPC patches reject unknown and unsafe fields", () => {
 });
 
 test("subscription usage cache keeps reset timestamps for renderer countdowns", () => {
+  const resetAt = new Date("2026-11-02T12:34:00.000Z");
+  const pad = (value: number) => String(value).padStart(2, "0");
   const value = __testUtils.formatSubscriptionUsageMetric({
     name: "five-hour",
     usedPercent: 33,
-    resetsAt: new Date("2026-11-02T12:34:00.000Z").getTime(),
+    resetsAt: resetAt.getTime(),
     used: true,
     exhausted: false,
   });
-  assert.match(value, /^33% \(11-02 20:34\)$/);
+  assert.equal(
+    value,
+    `33% (${pad(resetAt.getMonth() + 1)}-${pad(resetAt.getDate())} ${pad(resetAt.getHours())}:${pad(resetAt.getMinutes())})`,
+  );
   assert.equal(__testUtils.formatSubscriptionUsageMetric(undefined), "-");
 });
 

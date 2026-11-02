@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.98 - 2026-11-02
+
+- Fixed the cross-platform reset-card usage metric test so release runners format timestamps in their local timezone.
+
 ## 0.1.97 - 2026-11-02
 
 - Restored the desktop management UI to the stable pre-UI/UX-optimization baseline.
