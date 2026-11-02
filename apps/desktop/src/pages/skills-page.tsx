@@ -440,7 +440,7 @@ export function SkillsPage({
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-[13px] font-semibold text-neutral-900 dark:text-neutral-100">{zh ? "同步目录" : ja ? "同期ディレクトリ" : "Sync directories"}</div>
+              <div className="text-[13px] font-semibold text-foreground">{zh ? "同步目录" : ja ? "同期ディレクトリ" : "Sync directories"}</div>
               <div className="mt-0.5 text-[12px] text-muted-foreground">{zh ? "内置与自定义服务商统一管理" : "Manage built-in and custom providers"}</div>
             </div>
             <Button type="button" variant="secondary" size="sm" onClick={() => setAddProviderOpen((value) => !value)}>
@@ -509,7 +509,7 @@ function MarketplaceRow({ skill, language, onDetail, onInstall, installing, disa
     <ListCard className="group flex min-h-[96px] items-center gap-3 px-4 py-3.5">
       <SkillIcon label={skill.name} />
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[14px] font-semibold text-neutral-900 dark:text-neutral-100">{skill.name}</div>
+        <div className="truncate text-[14px] font-semibold text-foreground">{skill.name}</div>
         <p className="mt-1 line-clamp-2 min-h-9 text-[13px] leading-[18px] text-muted-foreground dark:text-muted-foreground">{skill.description || skill.source}</p>
         <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">{skill.source}{skill.installs ? ` · ${formatCount(skill.installs)} installs` : ""}</p>
       </div>
@@ -537,7 +537,7 @@ function InstalledRow({ skill, language, updateAvailable, canManage, onDetail, o
       <SkillIcon label={skill.name} linked={skill.linked} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
-          <div className="truncate text-[14px] font-semibold text-neutral-900 dark:text-neutral-100">{skill.name}</div>
+          <div className="truncate text-[14px] font-semibold text-foreground">{skill.name}</div>
           {skill.linked ? <span className="shrink-0 text-[11px] text-sky-600 dark:text-sky-300">{zh ? "软链接" : "linked"}</span> : null}
         </div>
         <p className="mt-1 line-clamp-2 min-h-9 text-[13px] leading-[18px] text-muted-foreground dark:text-muted-foreground">{skill.description || (zh ? "暂无描述" : "No description")}</p>
@@ -643,7 +643,7 @@ function SkillDetailPanel({ selection, language, onClose, onInstall }: {
           <div className="flex items-start gap-3">
             <SkillIcon label={skill.name} linked={installed?.linked} />
             <div className="min-w-0">
-              <h3 className="text-[16px] font-semibold text-neutral-950 dark:text-neutral-50">{skill.name}</h3>
+              <h3 className="text-[16px] font-semibold text-foreground">{skill.name}</h3>
               <p className="mt-1.5 whitespace-pre-wrap text-[13px] leading-5 text-muted-foreground dark:text-muted-foreground">
                 {skill.description || (zh ? "暂无描述" : ja ? "説明はありません" : "No description available")}
               </p>
@@ -654,7 +654,7 @@ function SkillDetailPanel({ selection, language, onClose, onInstall }: {
         <dl className="ui-surface overflow-hidden">
           {detailRows.map((row) => <div key={row.label} className="grid grid-cols-[84px_minmax(0,1fr)] gap-3 border-b border-[var(--cs-border-subtle)] px-4 py-3 last:border-b-0">
             <dt className="text-[12px] font-medium text-muted-foreground">{row.label}</dt>
-            <dd className="min-w-0 break-all font-mono text-[12px] leading-5 text-neutral-700 dark:text-neutral-200">{row.value}</dd>
+            <dd className="min-w-0 break-all font-mono text-[12px] leading-5 text-foreground">{row.value}</dd>
           </div>)}
         </dl>
 

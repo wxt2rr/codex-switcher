@@ -95,7 +95,7 @@ export function useAdaptiveMenuLayout(
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
     };
-  });
+  }, [open, rootRef, menuRef]);
 
   return layout;
 }

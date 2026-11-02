@@ -91,7 +91,7 @@ function StatusTargetCard({
       <div className="responsive-actions">
         <button
           type="button"
-          className="flex size-8 items-center justify-center rounded-lg border border-border bg-white text-foreground"
+          className="ui-control-surface flex size-8 items-center justify-center text-foreground"
           aria-label={language === "zh" ? "认证状态" : "Auth state"}
           title={language === "zh" ? "认证状态" : "Auth state"}
         >
@@ -149,7 +149,7 @@ export function OverviewPage({
             variant="outline"
             onClick={onRefresh}
             disabled={busy}
-            className="h-9 rounded-lg border-border bg-white px-4 text-[13px] shadow-none"
+            className="h-9 px-4 text-[13px] shadow-none"
           >
             <RefreshCw className="size-4" />
             {busy ? pageCopy.common.refreshing : refreshLabel}
