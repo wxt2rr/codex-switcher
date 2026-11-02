@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.96 - 2026-11-02
+
+- Fixed the cross-platform reset-card usage metric regression test so release runners use their local timezone consistently.
+- Reissued the complete desktop UI/UX optimization release with a stable packaging gate.
+
 ## 0.1.95 - 2026-11-02
 
 - Completed the systematic desktop UI/UX optimization across all management pages and overlays.

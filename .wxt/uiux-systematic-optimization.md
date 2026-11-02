@@ -21,7 +21,7 @@
 | 4 | 完整优化账号页信息层级与重置卡/模型测试/操作菜单 | `accounts-page.tsx`, account primitives | 账号组件测试、交互手验 | done | 账号卡片、重置卡、模型暴露面板、批量选择、筛选、状态和操作菜单已迁移到共享 surface/status/toggle/button 语义；全量测试通过 |
 | 5 | 完整迁移服务商、模型、插件、环境、用量、操作/设置页 | `providers-page.tsx`, `models-page.tsx`, `plugins-page.tsx`, `environments-page.tsx`, `usage-page.tsx`, `operations-page.tsx`, `skills-page.tsx` | 各页面测试、构建、响应式审查 | done | 管理页面统一标题、工具栏、卡片、状态色、代码块、控件和响应式间距；定向 49 项与全量 582 项测试通过 |
 | 6 | 统一 loading/empty/error/progress、响应式和 reduced-motion | `dashboard-kit.tsx`, pages, `index.css` | 状态矩阵、125%/150% 缩放检查 | done | loading/empty/error/progress、focus、overlay、motion、surface 与 z-index token 已集中；减少无效动效和监听器重复注册，构建通过 |
-| 7 | 回归验证、记录证据并交付 | 全部桌面 UI | `npm run desktop:test`, `npm run desktop:build`, 视觉/键盘手验 | done | 类型检查、diff 检查、定向 49/49、全量 581/582（1 项既有可选 E2E 跳过）和桌面构建均通过；已准备 v0.1.95 发布 |
+| 7 | 回归验证、记录证据并交付 | 全部桌面 UI | `npm run desktop:test`, `npm run desktop:build`, 视觉/键盘手验 | done | 类型检查、diff 检查、定向 49/49、全量 581/582（1 项既有可选 E2E 跳过）和桌面构建均通过；修复跨时区测试后已准备 v0.1.96 发布 |
 
 ## Rules
 - 同时只能有一个 `in_progress`。
