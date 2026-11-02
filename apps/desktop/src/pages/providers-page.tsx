@@ -112,7 +112,7 @@ export function ProvidersPage({
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
                             <h2 className="truncate text-[14px] font-semibold text-foreground dark:text-white">{item.displayName}</h2>
-                            <span className="inline-flex h-5 items-center rounded-md bg-accent/80 px-2 text-[11px] font-medium text-muted-foreground dark:bg-[#202733]/80 dark:text-muted-foreground">
+                            <span className="ui-surface-muted inline-flex h-5 items-center px-2 text-[11px] font-medium text-muted-foreground">
                               {item.authMethods.includes("subscription") ? (zh ? "订阅" : "Subscription") : item.category === "local" ? (zh ? "本地" : "Local") : (zh ? "API" : "API")}
                             </span>
                           </div>
@@ -150,7 +150,7 @@ export function ProvidersPage({
       >
         {activeProvider ? (
           <div className="grid gap-4">
-            <div className="flex items-center gap-3 rounded-lg border border-black/[0.05] bg-muted p-3">
+            <div className="ui-surface-muted flex items-center gap-3 p-3">
               <ProviderIcon providerId={activeProvider.iconKey} iconUrl={activeProvider.iconUrl} displayName={activeProvider.displayName} size={36} />
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-foreground">{activeProvider.displayName}</div>
@@ -165,7 +165,7 @@ export function ProvidersPage({
               <SoftBadge label={zh ? "Codex: Responses" : "Codex: Responses"} tone="brand" />
               {conversionLabel(activeProvider, zh) ? <SoftBadge label={conversionLabel(activeProvider, zh)!} tone={activeProvider.capabilities.protocolConversion ? "success" : "neutral"} /> : null}
             </div>
-            <div className="grid gap-2 rounded-lg bg-muted p-3 text-[13px] text-muted-foreground">
+            <div className="ui-surface-muted grid gap-2 p-3 text-[13px] text-muted-foreground">
               <div className="flex justify-between gap-4"><span>{zh ? "Codex 接入协议" : "Codex ingress"}</span><span>Responses</span></div>
               <div className="flex justify-between gap-4"><span>{zh ? "服务商上游协议" : "Provider upstream"}</span><span className="text-right">{activeProvider.protocols.map((protocol) => protocolLabel(protocol)).join(" / ")}</span></div>
               <div className="flex justify-between gap-4"><span>{zh ? "网关转换" : "Gateway conversion"}</span><span>{activeProvider.capabilities.protocolConversion ? (zh ? "Responses → 上游协议" : "Responses → upstream") : (zh ? "无需转换" : "Not needed")}</span></div>
@@ -174,11 +174,11 @@ export function ProvidersPage({
               <div className="flex justify-between gap-4"><span>{zh ? "凭据刷新" : "Credential refresh"}</span><span>{activeProvider.capabilities.tokenRefresh ? (zh ? "支持" : "Supported") : "—"}</span></div>
               <div className="flex justify-between gap-4"><span>{zh ? "协议转换" : "Protocol conversion"}</span><span>{activeProvider.capabilities.protocolConversion ? (zh ? "支持" : "Supported") : "—"}</span></div>
             </div>
-            <div className="border-t border-black/[0.06] pt-4">
+            <div className="border-t border-[var(--cs-border-subtle)] pt-4">
               <div className="mb-2 text-[13px] font-semibold text-muted-foreground">{zh ? "已连接的环境账号" : "Connected environment accounts"}</div>
               {providerAccounts.length ? (
                 <div className="grid gap-2">
-                  {providerAccounts.map((account) => <div key={`${account.envName}/${account.name}`} className="rounded-lg bg-muted px-3 py-2 text-[13px]">{account.envName} / {account.name}</div>)}
+                  {providerAccounts.map((account) => <div key={`${account.envName}/${account.name}`} className="ui-surface-muted px-3 py-2 text-[13px]">{account.envName} / {account.name}</div>)}
                 </div>
               ) : <div className="text-[13px] text-muted-foreground">{zh ? "还没有账号连接" : "No account connection yet"}</div>}
             </div>

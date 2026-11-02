@@ -361,7 +361,7 @@ export function SkillsPage({
                   openOnHover={false}
                   items={(snapshot?.catalogSources ?? []).map((source) => ({ value: source.id, label: source.name }))}
                   placeholder={zh ? "选择来源" : "Select source"}
-                  className="h-8 w-[150px] border-transparent bg-[#f7f8fa] text-[13px] dark:bg-[#1b2129]"
+                  className="ui-control-surface h-8 w-[150px] text-[13px]"
                 />
                 <Button variant="secondary" size="icon" className="size-8" onClick={() => void loadSnapshot(true)} disabled={loading} title={zh ? "刷新技能列表" : "Refresh skill list"} aria-label={zh ? "刷新技能列表" : "Refresh skill list"}>
                   <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
@@ -419,7 +419,7 @@ export function SkillsPage({
           <Field label={zh ? "Skill 名称" : "Skill name"} hint={zh ? "仓库只有一个 Skill 时可留空" : "Optional when the repository contains one skill"}>
             <Input value={skillName} onChange={(event) => setSkillName(event.target.value)} placeholder="skill-name" />
           </Field>
-          <div className="rounded-lg bg-muted px-3 py-3 text-[13px] leading-5 text-muted-foreground dark:bg-[#1b2129] dark:text-muted-foreground">
+          <div className="ui-status-message ui-status-message-neutral text-[13px] leading-5">
             {zh ? "安装过程只复制 Skill 文件，不会执行仓库脚本或安装钩子。" : "Installation copies skill files only. Repository scripts and install hooks are never executed."}
           </div>
           <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setInstallOpen(false)}>{zh ? "取消" : "Cancel"}</Button>
@@ -448,7 +448,7 @@ export function SkillsPage({
             </Button>
           </div>
           {addProviderOpen ? (
-            <section className="rounded-lg border border-black/[0.06] bg-[#f7f8fa] p-4 dark:border-white/[0.08] dark:bg-[#1b2129]">
+            <section className="ui-surface-muted p-4">
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field label={zh ? "服务商名称" : "Provider name"}>
                   <Input value={customProviderName} onChange={(event) => setCustomProviderName(event.target.value)} placeholder={zh ? "例如：Trae" : "For example: Trae"} maxLength={64} />
@@ -560,18 +560,18 @@ function CodexEnvironmentBinding({ scope, language }: { scope: SkillScope; langu
   const zh = language === "zh";
   const ja = language === "ja";
   return (
-    <section data-codex-environment={scope.envName} className="rounded-lg border border-black/[0.06] p-4 dark:border-white/[0.08]">
+    <section data-codex-environment={scope.envName} className="ui-surface p-4">
       <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <div className="truncate text-[13px] font-semibold text-neutral-900 dark:text-neutral-100">{scope.name}</div>
+            <div className="truncate text-[13px] font-semibold text-foreground">{scope.name}</div>
             <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground">{scope.path}</div>
             <div className="mt-1.5 text-[11px] font-medium text-muted-foreground dark:text-muted-foreground">
               {zh ? `主存储 · ${scope.skills.length} 个 Skill` : ja ? `メインストレージ · ${scope.skills.length} Skill` : `Primary store · ${scope.skills.length} skills`}
             </div>
           </div>
-        <label className="motion-toggle relative inline-flex h-[22px] w-[38px] shrink-0 cursor-default items-center rounded-lg bg-primary" title={zh ? "Codex 环境默认开启" : "Codex environments are always enabled"}>
+        <label className="ui-toggle ui-toggle-checked relative inline-flex h-[22px] w-[38px] shrink-0 cursor-default items-center" title={zh ? "Codex 环境默认开启" : "Codex environments are always enabled"}>
           <input type="checkbox" checked disabled readOnly aria-label={`${scope.name} ${zh ? "默认开启" : "always enabled"}`} className="peer sr-only" />
-          <span className="motion-toggle-thumb absolute left-0 top-[2px] size-[18px] translate-x-[18px] rounded-lg bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)]" />
+          <span className="ui-toggle-thumb absolute left-0 top-[3px] size-4 translate-x-4 rounded-full" />
         </label>
       </div>
     </section>
@@ -586,17 +586,17 @@ function ProviderBindingEditor({ binding, draft, codexScopes, language, onChange
   const zh = language === "zh";
   const value = draft ?? { enabled: binding.enabled, sourceEnv: binding.sourceEnv, targetPath: binding.targetPath };
   return (
-    <section className="rounded-lg border border-black/[0.06] p-4 dark:border-white/[0.08]">
+    <section className="ui-surface p-4">
       <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0"><div className="text-[13px] font-semibold text-neutral-900 dark:text-neutral-100">{binding.name}</div>
+        <div className="min-w-0"><div className="text-[13px] font-semibold text-foreground">{binding.name}</div>
           <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground">{value.targetPath}</div></div>
         <div className="flex shrink-0 items-center gap-2">
           {onDelete ? <Button type="button" variant="ghost" size="icon" className="size-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" onClick={onDelete}
             title={zh ? "删除自定义服务商" : "Delete custom provider"} aria-label={zh ? `删除 ${binding.name}` : `Delete ${binding.name}`}><Trash2 className="size-4" /></Button> : null}
-          <label className={`motion-toggle relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer items-center rounded-lg ${value.enabled ? "bg-primary" : "bg-[#d1d1d6] dark:bg-slate-700"}`}>
+          <label className={cn("ui-toggle relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer items-center", value.enabled && "ui-toggle-checked")}>
             <input type="checkbox" checked={value.enabled} onChange={(event) => onChange({ enabled: event.target.checked,
               sourceEnv: event.target.checked ? value.sourceEnv ?? codexScopes[0]?.envName : value.sourceEnv })} className="peer sr-only" />
-            <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-lg bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${value.enabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
+            <span className="ui-toggle-thumb" />
           </label>
         </div>
       </div>
@@ -639,7 +639,7 @@ function SkillDetailPanel({ selection, language, onClose, onInstall }: {
       closeLabel={zh ? "关闭" : "Close"}
     >
       {skill ? <div className="space-y-5">
-        <div className="rounded-lg border border-black/[0.06] bg-[#f7f8fa] p-4 dark:border-white/[0.08] dark:bg-[#1b2129]">
+        <div className="ui-surface-muted p-4">
           <div className="flex items-start gap-3">
             <SkillIcon label={skill.name} linked={installed?.linked} />
             <div className="min-w-0">
@@ -651,8 +651,8 @@ function SkillDetailPanel({ selection, language, onClose, onInstall }: {
           </div>
         </div>
 
-        <dl className="overflow-hidden rounded-lg border border-black/[0.06] dark:border-white/[0.08]">
-          {detailRows.map((row) => <div key={row.label} className="grid grid-cols-[84px_minmax(0,1fr)] gap-3 border-b border-black/[0.05] px-4 py-3 last:border-b-0 dark:border-white/[0.06]">
+        <dl className="ui-surface overflow-hidden">
+          {detailRows.map((row) => <div key={row.label} className="grid grid-cols-[84px_minmax(0,1fr)] gap-3 border-b border-[var(--cs-border-subtle)] px-4 py-3 last:border-b-0">
             <dt className="text-[12px] font-medium text-muted-foreground">{row.label}</dt>
             <dd className="min-w-0 break-all font-mono text-[12px] leading-5 text-neutral-700 dark:text-neutral-200">{row.value}</dd>
           </div>)}
@@ -678,15 +678,15 @@ function localizeSkillState(skill: InstalledSkill, language: UiLanguage): string
 }
 
 function SkillIcon({ linked = false }: { label: string; linked?: boolean }) {
-  return <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-accent text-muted-foreground dark:bg-[#202733] dark:text-muted-foreground/60">
+  return <div className="ui-surface-muted flex size-10 shrink-0 items-center justify-center text-muted-foreground">
     {linked ? <Link2 className="size-[17px]" /> : <PackageOpen className="size-[17px]" />}
   </div>;
 }
 
 function EmptyState({ icon, title, description, action }: { icon: ReactNode; title: string; description: string; action?: ReactNode }) {
   return <div className="flex min-h-[240px] flex-col items-center justify-center text-center">
-    <div className="flex size-10 items-center justify-center rounded-lg bg-accent text-muted-foreground dark:bg-[#1b2129]">{icon}</div>
-    <h3 className="mt-3 text-[14px] font-semibold text-neutral-800 dark:text-neutral-100">{title}</h3>
+    <div className="ui-surface-muted flex size-10 items-center justify-center text-muted-foreground">{icon}</div>
+    <h3 className="mt-3 text-[14px] font-semibold text-foreground">{title}</h3>
     <p className="mt-1 max-w-[460px] text-[13px] leading-5 text-muted-foreground">{description}</p>
     {action ? <div className="mt-4">{action}</div> : null}
   </div>;

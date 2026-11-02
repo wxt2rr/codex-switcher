@@ -8,8 +8,8 @@ import type { OverviewPayload, UsageFilter, UsagePricingProfile, UsageSnapshot }
 import type { UiLanguage } from "../i18n";
 import { StatCard } from "../components/dashboard-kit";
 import { UsageDonut, UsageTrendChart, formatCompact } from "../components/usage-charts";
-import { SidePanel } from "../components/admin-primitives";
-import { ListPageHeader, PageScrollArea } from "../components/account-list-primitives";
+import { SidePanel, StatusMessage } from "../components/admin-primitives";
+import { ListPageFrame, ListPageHeader } from "../components/account-list-primitives";
 import { cn } from "../lib/utils";
 import {
   buildUsageFilter,
@@ -113,9 +113,7 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
       accounts={overview.accounts} onBack={() => setRequestDetails(null)} />;
   }
   return (
-    <section className="h-full min-h-0 overflow-hidden px-6 pb-6 pt-6 xl:px-8 xl:pb-8 xl:pt-8">
-      <PageScrollArea>
-        <div className="admin-page-content flex min-h-full flex-col gap-3">
+    <ListPageFrame contentClassName="gap-3">
         <ListPageHeader
           title={zh ? "使用统计" : "Usage Analytics"}
           subtitle={zh ? "按环境、账号、Base URL 和模型近实时统计路由请求的 Token 使用量。" : "Near-real-time routed token usage by environment, account, Base URL, and model."}
@@ -129,10 +127,10 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
           <Select value={accountName} onValueChange={setAccountName} items={[{ value: "all", label: zh ? "全部账号" : "All accounts" }, ...accounts.map((item) => ({ value: item.name, label: item.name }))]} className="ui-control-surface h-8 w-[130px]" />
           <Select value={baseUrl} onValueChange={setBaseUrl} items={[{ value: "all", label: "Base URL" }, ...snapshot.baseUrls.map((item) => ({ value: item.baseUrl ?? item.key, label: item.baseUrl ?? item.key }))]} className="ui-control-surface h-8 min-w-[150px] max-w-[240px]" />
           <Select value={model} onValueChange={setModel} items={[{ value: "all", label: zh ? "全部模型" : "All models" }, ...snapshot.models.map((item) => ({ value: item.model ?? item.key, label: item.model ?? item.key }))]} className="ui-control-surface h-8 w-[130px]" />
-          <div className="ml-auto flex h-8 items-center overflow-hidden rounded-lg bg-[#f3f4f6]">
-            <button type="button" className="motion-interactive-color flex size-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-[#ebeef2] hover:text-neutral-800 disabled:cursor-wait" onClick={() => void refresh()} disabled={loading} aria-label={zh ? "立即刷新" : "Refresh now"} title={zh ? "立即刷新" : "Refresh now"}><RefreshCw className={cn("size-3.5", loading && "animate-spin")} /></button>
+          <div className="ui-control-surface ml-auto flex h-8 items-center overflow-hidden">
+            <button type="button" className="motion-interactive-color flex size-8 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground disabled:cursor-wait" onClick={() => void refresh()} disabled={loading} aria-label={zh ? "立即刷新" : "Refresh now"} title={zh ? "立即刷新" : "Refresh now"}><RefreshCw className={cn("size-3.5", loading && "animate-spin")} /></button>
             {customRefreshEditing ? (
-              <div className="flex items-center border-l border-black/[0.05]">
+              <div className="flex items-center border-l border-[var(--cs-border-subtle)]">
                 <Input data-usage-refresh-input type="number" min={1} max={3600} value={customRefreshDraft}
                   onChange={(event) => setCustomRefreshDraft(event.target.value)}
                   onKeyDown={(event) => { if (event.key === "Enter") commitCustomRefreshInterval(); if (event.key === "Escape") setCustomRefreshEditing(false); }}
@@ -145,12 +143,12 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
               <Select value={refreshIntervalIsPreset ? String(refreshIntervalSeconds) : "custom"}
                 onValueChange={(value) => { if (value === "custom") { setCustomRefreshDraft(String(refreshIntervalSeconds)); setCustomRefreshEditing(true); return; } setRefreshIntervalSeconds(normalizeRefreshSeconds(Number(value))); }}
                 items={[...REFRESH_INTERVAL_PRESETS.map((seconds) => ({ value: String(seconds), label: `${seconds}s` })), { value: "custom", label: refreshIntervalIsPreset ? (zh ? "自定义" : "Custom") : `${refreshIntervalSeconds}s` }]}
-                className="h-8 w-[64px] rounded-none border-l border-black/[0.05] bg-transparent px-2 text-[13px] shadow-none" />
+                className="h-8 w-[64px] rounded-none border-l border-[var(--cs-border-subtle)] bg-transparent px-2 text-[13px] shadow-none" />
             )}
           </div>
           <Button variant="ghost" className="size-8 p-0" onClick={() => void openPricing()} aria-label={zh ? "价格配置" : "Pricing settings"} title={zh ? "价格配置" : "Pricing settings"}><Settings2 className="size-4" /></Button>
         </div>
-        {error ? <div className="border-l-2 border-rose-500 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div> : null}
+        {error ? <StatusMessage tone="error" title={zh ? "加载使用统计失败" : "Usage statistics failed"}>{error}</StatusMessage> : null}
 
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <StatCard label={zh ? "请求数" : "Requests"} value={String(snapshot.summary.requests)} helper={snapshot.summary.requestsWithoutUsage ? `${snapshot.summary.requestsWithoutUsage} ${zh ? "条无用量数据" : "without usage"}` : zh ? "已记录响应" : "Recorded responses"} />
@@ -200,9 +198,7 @@ export function UsagePage({ overview, language, bridge }: { overview: OverviewPa
             <div className="divide-y divide-slate-200 border-y border-slate-200">{pricing.map((item) => <div key={`${item.kind}/${item.baseUrl}/${item.modelPattern}`} className="py-3 text-[13px]"><div className="flex justify-between"><b>{item.kind === "actual" ? (zh ? "实际" : "Actual") : (zh ? "标准" : "Standard")}</b><span>{item.modelPattern}</span></div><div className="mt-1 truncate text-muted-foreground">{item.baseUrl}</div><div className="mt-1 text-muted-foreground">Input ${item.inputPerMillion} · Output ${item.outputPerMillion} · Reasoning ${item.reasoningPerMillion ?? item.outputPerMillion}</div></div>)}</div>
           </div>
         </SidePanel>
-        </div>
-      </PageScrollArea>
-    </section>
+    </ListPageFrame>
   );
 }
 

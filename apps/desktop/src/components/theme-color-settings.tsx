@@ -149,7 +149,7 @@ export function ThemeColorSettings({ language }: { language: "zh" | "en" | "ja" 
                   "size-8 rounded-[var(--radius-control)] border-2 transition-all hover:scale-105",
                   currentThemeColor === color.value
                     ? "border-primary scale-110"
-                    : "border-transparent hover:border-black/[0.1]"
+                    : "border-transparent hover:border-[var(--cs-border)]"
                 )}
                 style={{ backgroundColor: color.value }}
                 onClick={() => handleThemeColorChange(color.value)}
@@ -166,13 +166,13 @@ export function ThemeColorSettings({ language }: { language: "zh" | "en" | "ja" 
               type="color"
               value={currentThemeColor}
               onChange={(e) => handleThemeColorChange(e.target.value)}
-              className="size-10 cursor-pointer rounded-lg border border-black/[0.08]"
+              className="ui-control-surface size-10 cursor-pointer"
             />
             <Input
               value={currentThemeColor}
               onChange={(e) => handleThemeColorChange(e.target.value)}
               placeholder="#000000"
-              className="h-9 flex-1 rounded-lg border-border bg-white text-[13px] shadow-none"
+              className="ui-control-surface h-9 flex-1 text-[13px] shadow-none"
             />
           </div>
 

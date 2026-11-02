@@ -224,17 +224,17 @@ export function PluginsPage({
       />
 
       <div className="flex items-center justify-between gap-3" role="tablist">
-        <div className="inline-flex items-center gap-1 rounded-lg bg-[#eef1f5] p-1 dark:bg-[#1b2129]">
+        <div className="ui-segmented-control">
           {(["installed", "market"] as const).map((item) => (
             <button key={item} type="button" role="tab" aria-selected={tab === item} onClick={() => setTab(item)}
-              className={cn("rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors", tab === item ? "bg-white text-neutral-900 shadow-sm dark:bg-[#2a333f] dark:text-white" : "text-muted-foreground hover:text-neutral-900 dark:text-muted-foreground dark:hover:text-white")}>
+              className={cn("ui-segmented-item", tab === item && "ui-segmented-item-active")}>
               {item === "installed" ? (zh ? "已安装" : "Installed") : (zh ? "插件市场" : "Market")}
             </button>
           ))}
         </div>
         {tab === "market" ? (
           <div className="hidden items-center gap-2 md:flex">
-            <Input value={marketUrl} onChange={(event) => setMarketUrl(event.target.value)} placeholder={zh ? "市场索引 URL（可选）" : "Market index URL (optional)"} className="h-7 w-[250px] rounded-lg bg-white/70 text-[12px] dark:bg-[#222a34]" />
+            <Input value={marketUrl} onChange={(event) => setMarketUrl(event.target.value)} placeholder={zh ? "市场索引 URL（可选）" : "Market index URL (optional)"} className="ui-control-surface h-8 w-[250px] text-[12px]" />
           </div>
         ) : null}
       </div>
@@ -275,7 +275,7 @@ export function PluginsPage({
             <Input value={gitRef} onChange={(event) => setGitRef(event.target.value)} placeholder="v1.0.0 or 0123456" />
           </Field> : null}
           <Field label="plugin.json" hint={zh ? "Manifest 必须声明 provider 或 middleware 权限；不要把密钥放进插件目录。" : "The manifest must declare provider or middleware permission; never put secrets in the plugin directory."}>
-            <textarea value={manifestJson} onChange={(event) => setManifestJson(event.target.value)} className="min-h-[220px] w-full rounded-lg border border-transparent bg-[#f1f4f8] p-3 font-mono text-[12px] outline-none focus:border-transparent focus:ring-0 dark:bg-[#19212b]" placeholder={'{\n  "id": "my-plugin",\n  "name": "My plugin",\n  "version": "1.0.0",\n  "apiVersion": 2,\n  "entry": "plugin.mjs",\n  "permissions": ["provider"]\n}'} />
+            <textarea value={manifestJson} onChange={(event) => setManifestJson(event.target.value)} className="ui-control-surface min-h-[220px] w-full p-3 font-mono text-[12px] leading-5 outline-none focus:border-[var(--cs-border)] focus:ring-0" placeholder={'{\n  "id": "my-plugin",\n  "name": "My plugin",\n  "version": "1.0.0",\n  "apiVersion": 2,\n  "entry": "plugin.mjs",\n  "permissions": ["provider"]\n}'} />
           </Field>
           <Button onClick={() => void installLocalPlugin()} disabled={Boolean(busyId)}><Download className="mr-1.5 size-4" />{zh ? "校验并安装" : "Verify and install"}</Button>
         </div>
@@ -341,10 +341,10 @@ function PluginInstallDialog({
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={pluginInstallProgressPercent(state.step)}
-            className="h-2 overflow-hidden rounded-lg bg-accent dark:bg-slate-800"
+            className="h-2 overflow-hidden rounded-full bg-accent"
           >
             <div
-              className="h-full rounded-lg bg-primary/100 transition-[width] duration-300 ease-out"
+              className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
               style={{ width: `${pluginInstallProgressPercent(state.step)}%` }}
             />
           </div>
@@ -359,9 +359,9 @@ function PluginInstallDialog({
             <span>{zh ? "插件已完成校验并启动，可以在“已安装”中管理。" : "The plugin was verified and started. Manage it from Installed."}</span>
           </div>
           <div className="grid grid-cols-2 gap-2 text-[13px]">
-            <div className="rounded-lg bg-white px-3 py-2.5 dark:bg-slate-900"><div className="text-muted-foreground">{zh ? "版本" : "Version"}</div><div className="mt-1 font-medium text-neutral-800 dark:text-white">v{state.result.version}</div></div>
-            <div className="rounded-lg bg-white px-3 py-2.5 dark:bg-slate-900"><div className="text-muted-foreground">{zh ? "耗时" : "Elapsed"}</div><div className="mt-1 font-medium text-neutral-800 dark:text-white">{formatElapsed(state.elapsedMs)}</div></div>
-            <div className="col-span-2 rounded-lg bg-white px-3 py-2.5 dark:bg-slate-900"><div className="text-muted-foreground">{zh ? "运行状态" : "Runtime"}</div><div className="mt-1 font-medium text-primary dark:text-emerald-400">{state.result.active ? (zh ? "运行中" : "Active") : (zh ? "已安装，待启用" : "Installed, inactive")}</div></div>
+            <div className="ui-surface-muted px-3 py-2.5"><div className="text-muted-foreground">{zh ? "版本" : "Version"}</div><div className="mt-1 font-medium text-foreground">v{state.result.version}</div></div>
+            <div className="ui-surface-muted px-3 py-2.5"><div className="text-muted-foreground">{zh ? "耗时" : "Elapsed"}</div><div className="mt-1 font-medium text-foreground">{formatElapsed(state.elapsedMs)}</div></div>
+            <div className="ui-surface-muted col-span-2 px-3 py-2.5"><div className="text-muted-foreground">{zh ? "运行状态" : "Runtime"}</div><div className="mt-1 font-medium text-primary">{state.result.active ? (zh ? "运行中" : "Active") : (zh ? "已安装，待启用" : "Installed, inactive")}</div></div>
           </div>
         </div>
       ) : (
@@ -370,7 +370,7 @@ function PluginInstallDialog({
             <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
             <span>{zh ? "安装未完成，原有插件版本已保留。" : "Installation did not complete. The previous plugin version was preserved."}</span>
           </div>
-          <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-destructive/10 px-3 py-2.5 font-mono text-[12px] leading-5 text-rose-800 dark:bg-rose-950/30 dark:text-destructive">{state.error}</pre>
+          <pre className="ui-status-message ui-status-message-error max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-5">{state.error}</pre>
           <p className="text-[13px] leading-5 text-muted-foreground">{zh ? "关闭提示后可以重新安装；如果问题持续，请查看插件详情中的运行诊断。" : "Close this message and try again. If it persists, review Runtime diagnostics in the plugin details."}</p>
         </div>
       )}
@@ -459,7 +459,7 @@ function PluginIcon({ plugin }: { plugin: Pick<ProviderPluginSnapshot, "icon" | 
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) { return <div className="flex items-start justify-between gap-4"><span>{label}</span><span className="max-w-[280px] break-words text-right font-medium text-slate-700 dark:text-slate-200">{value}</span></div>; }
-function EmptyState({ label }: { label: string }) { return <div className="rounded-[14px] border border-dashed border-black/[0.08] bg-white px-5 py-12 text-center text-[13px] text-muted-foreground dark:border-white/[0.08] dark:bg-[#141a22]">{label}</div>; }
+function EmptyState({ label }: { label: string }) { return <div className="ui-empty-state px-5 py-12 text-center text-[13px] text-muted-foreground">{label}</div>; }
 function trustLabel(value: string | undefined, zh: boolean) { if (value === "official") return zh ? "官方" : "Official"; if (value === "verified") return zh ? "已验证" : "Verified"; if (value === "community") return zh ? "社区" : "Community"; return zh ? "本地" : "Local"; }
 
 function comparePluginVersions(left: string, right: string): number {

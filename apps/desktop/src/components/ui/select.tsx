@@ -31,9 +31,9 @@ function SelectTrigger({
     <SelectPrimitive.Trigger
       data-slot="select-trigger"
       className={cn(
-        "border-input aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:bg-input/30 dark:hover:bg-input/50",
+        "aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive",
         "ui-control-surface group flex h-9 w-full items-center justify-between gap-2 px-3 py-2 text-[13px] whitespace-nowrap shadow-none outline-none dark:text-foreground",
-        "hover:bg-[#eef1f4] dark:hover:bg-[#202a36] disabled:cursor-not-allowed disabled:opacity-50",
+        "disabled:cursor-not-allowed disabled:opacity-50",
         "[&>span]:line-clamp-1",
         className,
       )}

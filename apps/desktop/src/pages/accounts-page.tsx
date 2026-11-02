@@ -39,6 +39,7 @@ import { EmptyList, ListCard, ListStack } from "../components/account-list-primi
 import {
   ConfirmDialog,
   SidePanel,
+  Toggle,
 } from "../components/admin-primitives";
 import { Field, Input, Select, Textarea } from "../components/form-primitives";
 import type { AccountRequestHealth, AccountSummary, OverviewPayload } from "../desktop-model";
@@ -684,7 +685,7 @@ export function AccountsPage({
                   <RefreshCw className={cn("size-3.5", authMetricsLoading && "animate-spin")} />
                 </button>
                 {customRefreshEditing ? (
-                  <div className="flex items-center border-l border-black/[0.05]">
+                  <div className="flex items-center border-l border-[var(--cs-border-subtle)]">
                     <Input
                       data-auth-refresh-input
                       type="number"
@@ -734,7 +735,7 @@ export function AccountsPage({
                           : `${authRefreshIntervalSeconds}s`,
                       },
                     ]}
-                    className="h-8 w-[64px] rounded-none border-l border-black/[0.05] bg-transparent px-2 text-[13px] shadow-none"
+                    className="h-8 w-[64px] rounded-none border-l border-[var(--cs-border-subtle)] bg-transparent px-2 text-[13px] shadow-none"
                   />
                 )}
               </div>
@@ -875,7 +876,7 @@ export function AccountsPage({
             </Field>
           ) : null}
           {providerMode && managedProvider ? (
-            <div className="rounded-lg bg-primary/10 px-3 py-2 text-xs leading-5 text-primary dark:bg-primary/20 dark:text-primary">
+            <div className="ui-status-message ui-status-message-success px-3 py-2 text-xs leading-5">
               {language === "zh" ? "插件会自动启动本机服务、发现模型并注入连接密钥。" : language === "ja" ? "プラグインがローカルサービスを起動し、モデルと接続キーを自動管理します。" : "The plugin starts the local service and manages model discovery and connection keys automatically."}
             </div>
           ) : null}
@@ -891,7 +892,7 @@ export function AccountsPage({
                 />
                 <button
                   type="button"
-                  className="motion-interactive-color absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-[#eef1f4] hover:text-foreground"
+                  className="ui-control-surface motion-interactive-color absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center text-muted-foreground hover:text-foreground"
                   onClick={() => setShowApiKeyDraft((value) => !value)}
                   aria-label={
                     showApiKeyDraft
@@ -1475,7 +1476,7 @@ function AccountListCard({
         )}
       </div>
 
-      <div className="responsive-actions min-h-full border-l border-black/[0.05] pl-4">
+              <div className="responsive-actions min-h-full border-l border-[var(--cs-border-subtle)] pl-4">
         <CardTargetButton
           active={account.isCurrentCli}
           disabled={busy}
@@ -1564,7 +1565,7 @@ function AccountListCard({
         />
         <button
           type="button"
-          className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[13px] font-medium text-foreground ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
+          className="ui-control-surface motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap px-3 text-[13px] font-medium text-foreground disabled:cursor-not-allowed disabled:opacity-55"
           onClick={onOpenModels}
           disabled={busy}
           title={language === "zh" ? "选择账号暴露的模型" : "Choose exposed models"}
@@ -1574,7 +1575,7 @@ function AccountListCard({
         </button>
         <button
           type="button"
-          className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[13px] font-medium text-foreground ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
+          className="ui-control-surface motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap px-3 text-[13px] font-medium text-foreground disabled:cursor-not-allowed disabled:opacity-55"
           onClick={() => {
             onPrimeAccount(account);
             onLogin();
@@ -1835,7 +1836,7 @@ function ResetCardIndicator({
               ) : null}
               <div className="mt-2 flex items-center justify-between gap-2 border-t border-black/[0.05] pt-2 dark:border-white/[0.08]">
                 <span className="text-[11px] text-muted-foreground">{language === "zh" ? "此账号自动使用" : "Automatic use for this account"}</span>
-                <button type="button" role="switch" aria-checked={autoUseEnabled} disabled={busy || !settings} onClick={() => snapshot && void onSetAutoUse(snapshot.accountKey, { enabled: !autoUseEnabled })} className={cn("relative h-5 w-9 rounded-full", autoUseEnabled ? "bg-primary" : "bg-[#d1d1d6]")}><span className={cn("absolute left-0.5 top-0.5 size-4 rounded-full bg-white shadow", autoUseEnabled ? "translate-x-4" : "translate-x-0")} /></button>
+                <Toggle checked={autoUseEnabled} onChange={(checked) => snapshot && void onSetAutoUse(snapshot.accountKey, { enabled: checked })} label={language === "zh" ? "此账号自动使用重置卡" : "Automatic reset-card use for this account"} disabled={busy || !settings} />
               </div>
               <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
                 <span>{language === "zh" ? "账号触发策略" : "Account trigger"}</span>
@@ -1849,7 +1850,7 @@ function ResetCardIndicator({
                     { value: "expiring", label: language === "zh" ? "即将到期" : "Expiring" },
                     { value: "both", label: language === "zh" ? "两者" : "Both" },
                   ]}
-                  className="h-7 w-[142px] bg-white text-[11px] dark:bg-[#1b2129]"
+                  className="ui-control-surface h-7 w-[142px] text-[11px]"
                   openOnHover={false}
                 />
               </div>
@@ -1863,7 +1864,7 @@ function ResetCardIndicator({
                     { value: "grace", label: language === "zh" ? "倒计时缓冲" : "Grace period" },
                     { value: "confirm", label: language === "zh" ? "需要确认" : "Confirm" },
                   ]}
-                  className="h-7 w-[142px] bg-white text-[11px] dark:bg-[#1b2129]"
+                  className="ui-control-surface h-7 w-[142px] text-[11px]"
                   openOnHover={false}
                 />
               </div>
@@ -1919,7 +1920,7 @@ function RowActionMenu({
     <div ref={rootRef} className="relative">
       <button
         type="button"
-        className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[13px] font-medium text-foreground ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
+        className="ui-control-surface motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap px-3 text-[13px] font-medium text-foreground disabled:cursor-not-allowed disabled:opacity-55"
         onClick={() => setOpen((value) => !value)}
         disabled={disabled}
         aria-expanded={open}
@@ -1934,7 +1935,7 @@ function RowActionMenu({
           data-state={open ? "open" : "closed"}
           data-menu-placement={placement}
           className={cn(
-            "motion-popover-enter absolute right-0 z-20 min-w-[188px] overflow-visible rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md",
+            "motion-popover-enter ui-overlay-surface absolute right-0 z-[var(--z-popover)] min-w-[188px] overflow-visible p-1.5",
             placement === "up" ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]",
           )}
           style={{ transformOrigin: placement === "up" ? "bottom right" : "top right", maxHeight: availableHeight }}
@@ -1947,8 +1948,8 @@ function RowActionMenu({
             />
           ) : (
             <button key={item.key} type="button"
-              className={cn("motion-interactive-color flex w-full items-center rounded-lg px-3 py-2 text-left text-[13px] font-medium",
-                item.tone === "danger" ? "text-destructive hover:bg-destructive/10" : "text-foreground hover:bg-[#f6f7f9]")}
+              className={cn("motion-interactive-color flex w-full items-center rounded-[var(--radius-control)] px-3 py-2 text-left text-[13px] font-medium",
+                item.tone === "danger" ? "text-destructive hover:bg-destructive/10" : "text-foreground hover:bg-[var(--cs-surface-muted)]")}
               onClick={() => { setOpen(false); item.onSelect?.(); }}>
               {item.label}
             </button>
@@ -1976,7 +1977,7 @@ function RowActionSubmenu({
 
   return (
     <div ref={triggerRef} className="relative" onPointerEnter={openOnHover} onPointerLeave={closeOnHover}>
-      <button type="button" className="motion-interactive-color flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] font-medium text-foreground hover:bg-[#f6f7f9]"
+      <button type="button" className="motion-interactive-color flex w-full items-center justify-between rounded-[var(--radius-control)] px-3 py-2 text-left text-[13px] font-medium text-foreground hover:bg-[var(--cs-surface-muted)]"
         aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span>{item.label}</span>
         <ChevronRight className="size-3.5 text-muted-foreground" />
@@ -1985,10 +1986,10 @@ function RowActionSubmenu({
         <div ref={menuRef} data-state={open ? "open" : "closed"} data-submenu-placement={placement}
           className={cn("absolute right-full z-30 pr-2", !open && "pointer-events-none", placement === "up" ? "bottom-[-4px]" : "top-[-4px]")}
           style={{ maxHeight: availableHeight }}>
-          <div className="motion-popover-enter min-w-[180px] overflow-y-auto rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md"
+          <div className="motion-popover-enter ui-overlay-surface min-w-[180px] overflow-y-auto p-1.5"
             style={{ maxHeight: availableHeight }}>
             {item.children.map((child) => (
-              <button key={child.key} type="button" className="motion-interactive-color block w-full rounded-lg px-3 py-2 text-left text-[13px] font-medium text-foreground hover:bg-[#f6f7f9]"
+              <button key={child.key} type="button" className="motion-interactive-color block w-full rounded-[var(--radius-control)] px-3 py-2 text-left text-[13px] font-medium text-foreground hover:bg-[var(--cs-surface-muted)]"
                 onClick={() => { onClose(); child.onSelect(); }}>
                 {child.label}
               </button>
@@ -2266,7 +2267,7 @@ function CardTargetButton({
           className={cn("absolute right-0 z-20 overflow-visible", !open && "pointer-events-none", placement === "up" ? "bottom-full pb-2" : "top-full pt-2")}
           style={{ maxHeight: availableHeight }}
         >
-          <div data-state={open ? "open" : "closed"} className="motion-popover-enter min-w-[172px] rounded-lg border border-black/[0.08] bg-white p-1 shadow-md">
+          <div data-state={open ? "open" : "closed"} className="motion-popover-enter ui-overlay-surface min-w-[172px] p-1">
             {items.map((item) => (
               <div
                 key={item.key}
@@ -2289,8 +2290,8 @@ function CardTargetButton({
                 <button
                   type="button"
                   className={cn(
-                    "motion-interactive-color flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] font-medium text-foreground hover:bg-[#f6f7f9] hover:text-foreground",
-                    item.key === primaryStrategy && "bg-[#f5f7fa] text-foreground",
+                    "motion-interactive-color flex w-full items-center justify-between rounded-[var(--radius-control)] px-3 py-2 text-left text-[13px] font-medium text-foreground hover:bg-[var(--cs-surface-muted)] hover:text-foreground",
+                    item.key === primaryStrategy && "ui-selected-control",
                     item.disabled && "cursor-not-allowed text-muted-foreground/60 hover:bg-transparent hover:text-muted-foreground/60",
                   )}
                   disabled={item.disabled}
@@ -2314,18 +2315,18 @@ function CardTargetButton({
                       projectPlacement === "up" ? "bottom-[-4px]" : "top-[-4px]",
                     )}
                   >
-                    <div data-state={projectOpen ? "open" : "closed"} className="motion-popover-enter flex w-[280px] flex-col overflow-hidden rounded-lg border border-black/[0.08] bg-white p-1 shadow-md" style={{ maxHeight: projectAvailableHeight }}>
+                    <div data-state={projectOpen ? "open" : "closed"} className="motion-popover-enter ui-overlay-surface flex w-[280px] flex-col overflow-hidden p-1" style={{ maxHeight: projectAvailableHeight }}>
                       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                         {projects.map((project) => (
-                          <button key={project.path} type="button" title={project.path} className="motion-interactive-color block w-full rounded-lg px-3 py-2 text-left hover:bg-[#f6f7f9]" onClick={() => { setOpen(false); projectMenu.setOpen(false); onSelectProject?.(project.path); }}>
+                          <button key={project.path} type="button" title={project.path} className="motion-interactive-color block w-full rounded-[var(--radius-control)] px-3 py-2 text-left hover:bg-[var(--cs-surface-muted)]" onClick={() => { setOpen(false); projectMenu.setOpen(false); onSelectProject?.(project.path); }}>
                             <span className="block truncate text-[13px] font-medium text-foreground">{project.name}</span>
                             <span className="block truncate text-[11px] text-muted-foreground">{project.path}</span>
                           </button>
                         ))}
                       </div>
-                      <div className="mt-1 border-t border-black/[0.06] pt-1">
-                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[13px] text-foreground hover:bg-[#f6f7f9]" onClick={() => { setOpen(false); projectMenu.setOpen(false); onSelectProject?.(""); }}>{homeLabel}</button>
-                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[13px] text-foreground hover:bg-[#f6f7f9]" onClick={() => { void onPickDirectory?.().then((path) => { if (path) { setOpen(false); projectMenu.setOpen(false); onSelectProject?.(path); } }); }}>{pickDirectoryLabel}</button>
+                      <div className="mt-1 border-t border-[var(--cs-border-subtle)] pt-1">
+                        <button type="button" className="block w-full rounded-[var(--radius-control)] px-3 py-2 text-left text-[13px] text-foreground hover:bg-[var(--cs-surface-muted)]" onClick={() => { setOpen(false); projectMenu.setOpen(false); onSelectProject?.(""); }}>{homeLabel}</button>
+                        <button type="button" className="block w-full rounded-[var(--radius-control)] px-3 py-2 text-left text-[13px] text-foreground hover:bg-[var(--cs-surface-muted)]" onClick={() => { void onPickDirectory?.().then((path) => { if (path) { setOpen(false); projectMenu.setOpen(false); onSelectProject?.(path); } }); }}>{pickDirectoryLabel}</button>
                       </div>
                     </div>
                   </div>

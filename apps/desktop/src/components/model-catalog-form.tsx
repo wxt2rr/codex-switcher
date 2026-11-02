@@ -82,9 +82,9 @@ function MultiSelectField({
 }) {
   const selectedSet = useMemo(() => new Set(selected), [selected]);
   return (
-    <div className="grid grid-cols-2 gap-2 rounded-lg bg-[#f1f4f8] p-2 dark:bg-[#19212b]">
+    <div className="ui-surface-muted grid grid-cols-2 gap-2 p-2">
       {options.map((option) => (
-        <label key={option} className="flex min-h-8 items-center gap-2 rounded-md px-2 text-[13px] text-foreground hover:bg-white/70 dark:text-foreground dark:hover:bg-white/[0.06]">
+        <label key={option} className="flex min-h-8 items-center gap-2 rounded-[var(--radius-control)] px-2 text-[13px] text-foreground hover:bg-[var(--cs-surface)]">
           <input
             type="checkbox"
             checked={selectedSet.has(option)}
@@ -124,9 +124,9 @@ function ReasoningLevelsField({
   }));
 
   return (
-    <div className="grid gap-2 rounded-lg bg-[#f1f4f8] p-2 dark:bg-[#19212b]">
+    <div className="ui-surface-muted grid gap-2 p-2">
       {MODEL_CATALOG_ENUMS.reasoningEfforts.map((effort) => (
-        <label key={effort} className="flex min-h-8 items-start gap-2 rounded-md px-2 py-1.5 text-[13px] text-foreground hover:bg-white/70 dark:text-foreground dark:hover:bg-white/[0.06]">
+        <label key={effort} className="flex min-h-8 items-start gap-2 rounded-[var(--radius-control)] px-2 py-1.5 text-[13px] text-foreground hover:bg-[var(--cs-surface)]">
           <input
             type="checkbox"
             checked={selected.has(effort)}
@@ -185,7 +185,7 @@ export function ModelCatalogForm({
     if (field.kind === "boolean") {
       return (
         <Field key={field.key} label={label} hint={hint}>
-          <label className="flex h-9 items-center gap-2 rounded-lg bg-[#f1f4f8] px-3 text-[13px] text-foreground dark:bg-[#19212b] dark:text-foreground">
+          <label className="ui-control-surface flex h-9 items-center gap-2 px-3 text-[13px] text-foreground">
             <input type="checkbox" checked={current === true} onChange={(event) => updateField(field.key, event.target.checked)} className="size-3.5 accent-primary" />
             {zh ? "启用" : "Enabled"}
           </label>
@@ -256,7 +256,7 @@ export function ModelCatalogForm({
         const fields = group.keys.map((key) => fieldByKey.get(key)).filter((field): field is ModelCatalogFieldDefinition => Boolean(field));
         return (
           <section key={group.title} className="space-y-3">
-            <div className="border-b border-black/[0.06] pb-2 text-[13px] font-semibold text-muted-foreground dark:border-white/[0.08] dark:text-muted-foreground">{zh ? group.title : group.titleEn}</div>
+            <div className="border-b border-[var(--cs-border-subtle)] pb-2 text-[13px] font-semibold text-muted-foreground">{zh ? group.title : group.titleEn}</div>
             <div className="grid gap-3 md:grid-cols-2">
               {fields.map((field) => <div key={field.key} className={field.kind === "textarea" || field.kind === "json" || field.kind === "multi_select" || field.kind === "reasoning_levels" ? "md:col-span-2" : undefined}>{renderField(field)}</div>)}
             </div>

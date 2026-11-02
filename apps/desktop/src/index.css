@@ -665,6 +665,170 @@ select:focus:not(:focus-visible) {
   box-shadow: var(--cs-shadow-popover);
 }
 
+.ui-segmented-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border: 1px solid var(--cs-border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--cs-surface-muted);
+}
+
+.ui-segmented-item {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius-control) - 0.125rem);
+  padding: 0.375rem 0.75rem;
+  color: var(--cs-muted-foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  transition:
+    background-color var(--cs-motion-fast) var(--cs-ease-out),
+    color var(--cs-motion-fast) var(--cs-ease-out),
+    box-shadow var(--cs-motion-fast) var(--cs-ease-out);
+}
+
+.ui-segmented-item:hover {
+  color: var(--foreground);
+}
+
+.ui-segmented-item-active {
+  border-color: var(--cs-border-subtle);
+  background: var(--cs-surface);
+  color: var(--foreground);
+  box-shadow: var(--cs-shadow-xs);
+}
+
+.ui-settings-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-card);
+  background: var(--cs-surface-muted);
+  padding: 0.75rem 1rem;
+}
+
+.ui-toggle {
+  position: relative;
+  display: inline-flex;
+  height: 1.375rem;
+  width: 2.375rem;
+  flex-shrink: 0;
+  align-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: var(--cs-border);
+  padding: 0;
+  transition: background-color var(--cs-motion-fast) var(--cs-ease-out);
+}
+
+.ui-toggle:hover {
+  background: var(--cs-muted-foreground);
+}
+
+.ui-toggle-checked,
+.ui-toggle-checked:hover {
+  background: var(--cs-primary);
+}
+
+.ui-toggle-thumb {
+  position: absolute;
+  top: 0.1875rem;
+  left: 0.1875rem;
+  height: 1rem;
+  width: 1rem;
+  border-radius: 999px;
+  background: var(--cs-primary-foreground);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.22);
+  transition: transform var(--cs-motion-fast) var(--cs-ease-out);
+}
+
+.ui-toggle-checked .ui-toggle-thumb {
+  transform: translateX(1rem);
+}
+
+.ui-toggle-disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.ui-status-message {
+  border: 1px solid var(--cs-border-subtle);
+  border-radius: var(--radius-card);
+  padding: 0.75rem 1rem;
+}
+
+.ui-status-message-neutral {
+  background: var(--cs-surface-muted);
+  color: var(--cs-muted-foreground);
+}
+
+.ui-status-message-success {
+  border-color: color-mix(in srgb, var(--cs-success) 26%, transparent);
+  background: color-mix(in srgb, var(--cs-success-background) 76%, var(--cs-surface));
+  color: var(--cs-success);
+}
+
+.ui-status-message-warning {
+  border-color: color-mix(in srgb, var(--cs-warm) 30%, transparent);
+  background: color-mix(in srgb, var(--cs-warm-background) 76%, var(--cs-surface));
+  color: var(--foreground);
+}
+
+.ui-status-message-error {
+  border-color: color-mix(in srgb, var(--cs-danger) 26%, transparent);
+  background: color-mix(in srgb, var(--cs-danger-background) 76%, var(--cs-surface));
+  color: var(--cs-danger);
+}
+
+.ui-status-pill {
+  border-radius: var(--radius-control);
+}
+
+.ui-scroll-region {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.ui-empty-state {
+  border: 1px dashed var(--cs-border);
+  border-radius: var(--radius-card);
+  background: var(--cs-surface-muted);
+}
+
+.ui-model-option {
+  border: 1px solid var(--cs-border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--cs-surface);
+  transition:
+    background-color var(--cs-motion-fast) var(--cs-ease-out),
+    border-color var(--cs-motion-fast) var(--cs-ease-out),
+    box-shadow var(--cs-motion-fast) var(--cs-ease-out);
+}
+
+.ui-model-option:hover {
+  border-color: var(--cs-border);
+  background: var(--cs-surface-muted);
+}
+
+.ui-model-option-selected {
+  border-color: var(--cs-selected-border);
+  background: var(--cs-selected-background);
+}
+
+.ui-model-option-warning {
+  border-color: color-mix(in srgb, var(--cs-warm) 40%, var(--cs-border-subtle));
+  background: color-mix(in srgb, var(--cs-warm-background) 56%, var(--cs-surface));
+}
+
 /* ===== Responsive management pages ===== */
 .admin-page-content {
   container-name: admin-page;

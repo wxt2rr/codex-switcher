@@ -39,7 +39,7 @@ test("skills page reuses the shared management-page visual system", () => {
   assert.match(source, /ListPageFrame/);
   assert.match(source, /ListCard/);
   assert.match(source, /ui-selected-control/);
-  assert.match(source, /rounded-\[14px\][^\n]*bg-white/);
+  assert.match(source, /<ListCard[^>]*className="[^"]*min-h-\[96px\]/);
 });
 
 test("provider sync is global and each provider selects one Codex source environment", () => {
@@ -49,7 +49,7 @@ test("provider sync is global and each provider selects one Codex source environ
   assert.match(source, /data-codex-environment=\{scope\.envName\}/);
   assert.match(source, /scope\.path/);
   assert.match(source, /checked disabled readOnly/);
-  assert.match(source, /bg-primary/);
+  assert.match(source, /ui-toggle-checked|ui-selected-control/);
   assert.doesNotMatch(source, /data-codex-environment=\{scope\.envName\}[\s\S]{0,500}<PackageOpen/);
   assert.match(source, /Primary store · \$\{scope\.skills\.length\} skills/);
   assert.match(source, /Source environment/);

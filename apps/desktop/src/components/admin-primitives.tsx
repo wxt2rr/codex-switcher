@@ -54,6 +54,121 @@ export function PageHeader({
   );
 }
 
+/** A compact section heading used inside settings and detail surfaces. */
+export function SectionHeader({
+  title,
+  description,
+  action,
+}: {
+  title: string;
+  description?: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <h3 className="text-[14px] font-semibold tracking-[-0.01em] text-foreground">{title}</h3>
+        {description ? <p className="mt-1 max-w-2xl text-[12px] leading-5 text-muted-foreground">{description}</p> : null}
+      </div>
+      {action ? <div className="shrink-0">{action}</div> : null}
+    </div>
+  );
+}
+
+export function SegmentedControl<T extends string>({
+  value,
+  items,
+  onChange,
+  ariaLabel,
+}: {
+  value: T;
+  items: Array<{ value: T; label: string; icon?: ReactNode }>;
+  onChange: (value: T) => void;
+  ariaLabel?: string;
+}) {
+  return (
+    <div className="ui-segmented-control" role="group" aria-label={ariaLabel}>
+      {items.map((item) => (
+        <button
+          key={item.value}
+          type="button"
+          aria-pressed={value === item.value}
+          className={cn("ui-segmented-item", value === item.value && "ui-segmented-item-active")}
+          onClick={() => onChange(item.value)}
+        >
+          {item.icon}
+          {item.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function SettingsRow({
+  title,
+  description,
+  children,
+  className,
+}: {
+  title: string;
+  description?: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn("ui-settings-row", className)}>
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] font-medium text-foreground">{title}</div>
+        {description ? <div className="mt-0.5 text-[12px] leading-5 text-muted-foreground">{description}</div> : null}
+      </div>
+      <div className="shrink-0">{children}</div>
+    </div>
+  );
+}
+
+export function Toggle({
+  checked,
+  onChange,
+  label,
+  disabled = false,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-label={label}
+      aria-checked={checked}
+      disabled={disabled}
+      className={cn("ui-toggle", checked && "ui-toggle-checked", disabled && "ui-toggle-disabled")}
+      onClick={() => onChange(!checked)}
+    >
+      <span className="ui-toggle-thumb" aria-hidden="true" />
+    </button>
+  );
+}
+
+export function StatusMessage({
+  tone = "neutral",
+  title,
+  children,
+}: {
+  tone?: "neutral" | "success" | "warning" | "error";
+  title?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className={cn("ui-status-message", `ui-status-message-${tone}`)} role={tone === "error" ? "alert" : undefined}>
+      {title ? <div className="text-[13px] font-semibold">{title}</div> : null}
+      <div className={cn(title && "mt-1", "text-[12px] leading-5")}>{children}</div>
+    </div>
+  );
+}
+
 /* ─── Page Toolbar ─── */
 
 export function PageToolbar({
@@ -444,11 +559,11 @@ export function SummaryPanel({
       ? "border-primary/20 bg-primary/10 text-primary"
       : summary?.tone === "warn"
         ? "border-border bg-muted text-foreground"
-        : "border-neutral-100 bg-muted/60 text-foreground";
+        : "border-border bg-muted/60 text-foreground";
 
   return (
     <section
-      className="rounded-[18px] bg-white shadow-[0_12px_36px_rgba(15,23,42,0.045)]"
+      className="ui-surface overflow-hidden shadow-[var(--cs-shadow-xs)]"
     >
       <div className="px-5 py-3.5">
         <h3 className="text-[16px] font-semibold text-foreground">{title}</h3>
@@ -473,7 +588,7 @@ export function SummaryPanel({
                     {section.entries.map((entry) => (
                       <div
                         key={`${section.title}-${entry.label}-${entry.value}`}
-                        className="flex items-start justify-between gap-4 rounded-lg bg-white/80 px-3 py-2 text-[13px] text-foreground"
+                        className="ui-surface-muted flex items-start justify-between gap-4 px-3 py-2 text-[13px] text-foreground"
                       >
                         <span className="text-muted-foreground">{entry.label}</span>
                         <span className="text-right font-medium">{entry.value}</span>
@@ -485,7 +600,7 @@ export function SummaryPanel({
             </div>
           </div>
         ) : (
-          <div className="rounded-lg border border-dashed border-border bg-muted/60 px-4 py-8 text-sm text-muted-foreground">
+          <div className="ui-empty-state px-4 py-8 text-sm text-muted-foreground">
             {emptyLabel}
           </div>
         )}
@@ -497,7 +612,7 @@ export function SummaryPanel({
           <pre
             className={cn(
               "min-h-[240px] overflow-auto rounded-lg",
-              "bg-[#fafafa] p-4 text-xs leading-6 text-muted-foreground",
+              "ui-surface-muted p-4 text-xs leading-6 text-muted-foreground",
               "font-mono",
             )}
           >

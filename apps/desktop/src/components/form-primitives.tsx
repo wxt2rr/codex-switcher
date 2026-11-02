@@ -35,8 +35,8 @@ export function Field({
       {(hint || error) && (
         <span
           className={cn(
-            "text-xs transition-colors",
-            error ? "text-rose-500" : "text-neutral-400",
+            "text-[12px] leading-5 transition-colors",
+            error ? "text-destructive" : "text-muted-foreground",
           )}
         >
           {error ?? hint}

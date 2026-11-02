@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.94 - 2026-11-02
+
+- Completed the shared management UI migration across providers, models, plugins, skills, environments, usage, accounts, and settings.
+- Added semantic controls for segmented views, settings rows, toggles, status messages, empty states, model options, overlays, and responsive list surfaces.
+- Standardized hover/select motion, focus feedback, portal layering, reduced-motion behavior, and compact status indicators.
+- Updated desktop UI regression contracts to verify the new semantic design system.
+
 ## 0.1.93 - 2026-11-02
 
 - Unified the desktop UI foundation with semantic surface, border, focus, motion, radius, shadow, and stacking tokens across management pages.

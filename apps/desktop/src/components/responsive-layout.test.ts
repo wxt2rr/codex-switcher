@@ -209,11 +209,11 @@ test("selected controls share the green theme treatment", () => {
   assert.match(css, /\.management-list-card:focus-within,\s*\.management-list-card:has\(\[aria-expanded="true"\]\)\s*\{[^}]*box-shadow:/s);
   assert.match(primitives, /active\s*\?\s*"ui-selected-control"/);
   assert.match(accounts, /active \? "ui-selected-control"/);
-  assert.match(desktopShell, /\? "bg-\[#f1f3f5\] text-foreground dark:bg-\[#1b2129\] dark:text-white"/);
-  assert.doesNotMatch(desktopShell, /ui-selected-control/);
-  assert.match(environments, /\? "ui-selected-control rounded-lg border px-3 py-1\.5 text-xs font-semibold"/);
-  assert.match(models, /mode === "form" \? "ui-selected-control"/);
-  assert.match(models, /mode === "json" \? "ui-selected-control"/);
+  assert.match(desktopShell, /\? "ui-selected-control"/);
+  assert.doesNotMatch(desktopShell, /bg-\[#f1f3f5\] text-foreground dark:bg-\[#1b2129\] dark:text-white/);
+  assert.match(environments, /\? "ui-selected-control ui-segmented-item-active ui-segmented-item text-xs font-semibold"/);
+  assert.match(models, /mode === "form" \? "ui-selected-control ui-segmented-item-active"/);
+  assert.match(models, /mode === "json" \? "ui-selected-control ui-segmented-item-active"/);
   assert.doesNotMatch(models, /overflow-hidden rounded-xl border border-black\/\[0\.06\]/);
   assert.doesNotMatch(overview, /sm:grid-cols-3 sm:divide-x sm:divide-y-0/);
 });
@@ -330,8 +330,9 @@ test("desktop motion is restrained and respects reduced-motion preferences", () 
   assert.doesNotMatch(tooltip, /data-\[state=delayed-open\]:animate-in|data-\[state=closed\]:animate-out/);
   assert.match(select, /motion-select-content/);
   assert.match(tooltip, /motion-tooltip-content/);
-  assert.match(operations, /motion-toggle/);
-  assert.match(operations, /motion-toggle-thumb/);
+  assert.match(operations, /<Toggle /);
+  assert.match(adminPrimitives, /ui-toggle/);
+  assert.match(adminPrimitives, /ui-toggle-thumb/);
   assert.match(operations, /环境历史/);
   assert.match(operations, /max=\{365\}/);
   assert.match(operations, /后台异步执行，不影响应用启动和使用/);
@@ -441,7 +442,7 @@ test("system tools use clear navigation and page naming", () => {
   assert.match(i18n, /operations:\s*"设置"/);
   assert.match(operations, /return "设置"/);
   assert.match(operations, /管理 Codex 安装路径、网络代理和运行日志/);
-  assert.match(operations, /role="switch"/);
+  assert.match(adminPrimitives, /role="switch"/);
   assert.match(operations, /CLI 启动/);
   assert.match(operations, /启动CLI时自动恢复最近第N次对话/);
   assert.match(operations, /本地路由/);
@@ -457,8 +458,8 @@ test("system tools use clear navigation and page naming", () => {
   assert.doesNotMatch(desktopShell, /languageOptions/);
   assert.match(operations, /Codex 安装/);
   assert.match(operations, /bg-primary/);
-  assert.match(operations, /absolute left-0 top-\[2px\]/);
   assert.match(operations, /iconUrl: terminal\.iconUrl/);
+  assert.match(operations, /ui-control-surface h-9 w-\[170px\]/);
   assert.match(operations, /openOnHover=\{false\}/);
   assert.match(operations, /onCliTerminalScan/);
   assert.match(operations, /language === "zh" \? "第" : "#"/);
@@ -510,8 +511,8 @@ test("usage visualizations draw in once without replaying on background refresh"
 });
 
 test("environment route status uses a compact semantic indicator", () => {
-  assert.match(environments, /runtime\.tone === "success" \? "bg-primary\/100"/);
-  assert.match(environments, /runtime\.tone === "warn" \? "bg-warm-500"/);
+  assert.match(environments, /runtime\.tone === "success" && "bg-primary\/10 text-primary"/);
+  assert.match(environments, /runtime\.tone === "warn" && "bg-warm-50 text-warm-600"/);
   assert.match(environments, /网关已配置，服务未运行/);
   assert.match(environments, /gatewayIsRunning/);
   assert.match(environments, /border-primary\/30 bg-primary\/10 text-primary/);

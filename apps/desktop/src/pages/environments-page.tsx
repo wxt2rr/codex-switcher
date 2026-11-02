@@ -254,7 +254,7 @@ function EnvironmentActionMenu({
     <div ref={rootRef} className="relative shrink-0">
       <button
         type="button"
-        className="motion-interactive-color flex size-9 items-center justify-center rounded-lg bg-[#f7f8fa] text-neutral-700 hover:bg-[#eef1f4] hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-55"
+        className="ui-control-surface motion-interactive-color flex size-9 items-center justify-center text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
         onClick={() => setOpen((value) => !value)}
         disabled={busy}
         aria-label={language === "zh" ? "更多操作" : language === "ja" ? "その他の操作" : "More actions"}
@@ -270,7 +270,7 @@ function EnvironmentActionMenu({
           data-state={open ? "open" : "closed"}
           data-menu-placement={placement}
           className={cn(
-            "motion-popover-enter absolute right-0 z-40 min-w-[172px] overflow-y-auto rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md",
+            "motion-popover-enter ui-overlay-surface absolute right-0 z-[var(--z-popover)] min-w-[172px] overflow-y-auto p-1.5",
             placement === "up" ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]",
           )}
           style={{ transformOrigin: placement === "up" ? "bottom right" : "top right", maxHeight: availableHeight }}
@@ -282,7 +282,7 @@ function EnvironmentActionMenu({
               type="button"
               className={cn(
                 "motion-interactive-color flex w-full items-center rounded-lg px-3 py-2 text-left text-[13px] font-medium",
-                item.tone === "danger" ? "text-destructive hover:bg-destructive/10" : "text-neutral-700 hover:bg-[#f6f7f9]",
+                item.tone === "danger" ? "text-destructive hover:bg-destructive/10" : "text-foreground hover:bg-[var(--cs-surface-muted)]",
               )}
               onClick={() => {
                 setOpen(false);
@@ -350,7 +350,7 @@ function EnvCard({
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h3 className="truncate text-[17px] font-semibold tracking-[-0.02em] text-neutral-950">{env.name}</h3>
+            <h3 className="truncate text-[17px] font-semibold tracking-[-0.02em] text-foreground">{env.name}</h3>
             {currentTargetBadges.map((target) => <SoftBadge key={target} tone="brand" label={target} className="h-5 px-2 text-[11px]" />)}
             <SoftBadge
               tone={isGatewayEnabled ? "brand" : "neutral"}
@@ -360,12 +360,12 @@ function EnvCard({
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
             <span className={cn(
-              "inline-flex h-6 items-center gap-1.5 rounded-md px-2 font-medium",
+              "ui-status-pill inline-flex h-6 items-center gap-1.5 px-2 font-medium",
               runtime.tone === "success" && "bg-primary/10 text-primary",
               runtime.tone === "warn" && "bg-warm-50 text-warm-600",
               runtime.tone === "neutral" && "bg-accent text-muted-foreground",
             )}>
-              <span className={cn("size-1.5 rounded-lg", runtime.tone === "success" ? "bg-primary/100" : runtime.tone === "warn" ? "bg-warm-500" : "bg-slate-300")} />
+              <span className={cn("size-1.5 rounded-full", runtime.tone === "success" ? "bg-primary" : runtime.tone === "warn" ? "bg-warm-500" : "bg-muted-foreground/40")} />
               {runtime.label}
             </span>
             <span className="text-muted-foreground">{language === "zh" ? `${accountCount} 个账号` : language === "ja" ? `${accountCount} アカウント` : `${accountCount} accounts`}</span>
@@ -423,7 +423,7 @@ function EnvCard({
         </div>
       </div>
 
-      <div className="grid gap-3 border-t border-black/[0.06] pt-3 dark:border-white/[0.07] sm:grid-cols-2">
+      <div className="grid gap-3 border-t border-[var(--cs-border-subtle)] pt-3 sm:grid-cols-2">
         <div className="min-w-0">
           <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">{language === "zh" ? "环境路径" : language === "ja" ? "環境パス" : "Environment path"}</div>
           <div className="mt-1 truncate font-mono text-[12px] text-muted-foreground" title={env.path}>{env.path}</div>
@@ -436,7 +436,7 @@ function EnvCard({
         </div>
       </div>
       {routeStatus?.localAgentAccessEnabled ? (
-        <div className="rounded-xl border border-primary/15 bg-primary/[0.035] px-3.5 py-3">
+        <div className="ui-status-message ui-status-message-success px-3.5 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <div className="text-[12px] font-semibold text-neutral-800">{language === "zh" ? "本机 Agent 接入" : language === "ja" ? "ローカル Agent 接続" : "Local Agent access"}</div>
@@ -452,11 +452,11 @@ function EnvCard({
               [language === "zh" ? "Models" : "Models", routeStatus.localAgentModelsUrl],
               [language === "zh" ? "API Key" : "API Key", routeStatus.localAgentAccessToken],
             ] as const).map(([label, value]) => value ? (
-              <div key={label} className="min-w-0 rounded-lg border border-black/[0.05] bg-white/70 px-2.5 py-2 dark:border-white/[0.07] dark:bg-white/[0.03]">
+              <div key={label} className="ui-surface-muted min-w-0 px-2.5 py-2">
                 <div className="text-[11px] font-medium text-muted-foreground">{label}</div>
                 <div className="mt-1 flex min-w-0 items-center gap-1">
                   <div className="min-w-0 flex-1 truncate font-mono text-[11px] text-neutral-700" title={value}>{label === "API Key" ? `${value.slice(0, 4)}••••${value.slice(-4)}` : value}</div>
-                  <button type="button" className="shrink-0 rounded p-1 text-muted-foreground hover:bg-black/[0.05] hover:text-neutral-800" onClick={() => onCopyLocalAgentValue(value, label)} aria-label={`${label} copy`}>
+                  <button type="button" className="ui-control-surface shrink-0 p-1 text-muted-foreground hover:text-foreground" onClick={() => onCopyLocalAgentValue(value, label)} aria-label={`${label} copy`}>
                     <Copy className="size-3.5" />
                   </button>
                 </div>
@@ -1048,8 +1048,8 @@ export function EnvironmentsPage({
                 type="button"
                 className={
                   configTab === tab
-                    ? "ui-selected-control rounded-lg border px-3 py-1.5 text-xs font-semibold"
-                    : "rounded-lg border border-transparent bg-[#f3f4f6] px-3 py-1.5 text-xs font-semibold text-muted-foreground"
+                    ? "ui-selected-control ui-segmented-item-active ui-segmented-item text-xs font-semibold"
+                    : "ui-segmented-item text-xs font-semibold"
                 }
                 onClick={() => setConfigTab(tab)}
                 aria-pressed={configTab === tab}
@@ -1105,13 +1105,13 @@ export function EnvironmentsPage({
                 { value: "config.toml", label: "config.toml" },
                 { value: "auth.json", label: "auth.json" },
               ]}
-              className="h-8 w-[140px] rounded-lg bg-[#f7f8fa] text-[13px]"
+              className="ui-control-surface h-8 w-[140px] text-[13px]"
             />
           </div>
 
           <div className="max-h-[460px] space-y-3 overflow-auto pr-1">
             {historyGroups.length === 0 ? (
-              <div className="rounded-lg bg-[#f7f8fa] px-4 py-10 text-center text-sm text-muted-foreground">
+              <div className="ui-empty-state px-4 py-10 text-center text-sm text-muted-foreground">
                 {language === "zh" ? "暂无修改历史" : "No history yet"}
               </div>
             ) : null}
@@ -1123,7 +1123,7 @@ export function EnvironmentsPage({
               return (
                 <div
                   key={group.key}
-                  className="rounded-lg bg-[#f7f8fa] px-4 py-4"
+                  className="ui-surface-muted px-4 py-4"
                 >
                   <div className="flex items-start gap-3">
                     <input
@@ -1141,7 +1141,7 @@ export function EnvironmentsPage({
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 text-[13px] font-semibold text-neutral-900">
                         <span>{formatHistoryTimestamp(group.createdAt)}</span>
-                        <span className="rounded-md bg-white px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                        <span className="ui-surface-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
                           {localizeHistorySource(group.source, language)}
                         </span>
                       </div>
@@ -1149,14 +1149,14 @@ export function EnvironmentsPage({
                         {(["config.toml", "auth.json"] as const).map((fileType) => {
                           const file = group.files[fileType];
                           return (
-                            <div key={fileType} className="rounded-lg bg-white px-3 py-3">
+                            <div key={fileType} className="ui-surface px-3 py-3">
                               <div className="flex items-center gap-2 text-[13px] font-semibold text-neutral-900">
                                 <span>{fileType}</span>
                                 <span
                                   className={
                                     file.changed
-                                      ? "rounded-md bg-[#eef4ff] px-2 py-0.5 text-[11px] font-medium text-sky-700"
-                                      : "rounded-md bg-[#f3f4f6] px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                                      ? "ui-status-message-success rounded-[var(--radius-control)] px-2 py-0.5 text-[11px] font-medium"
+                                      : "ui-surface-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
                                   }
                                 >
                                   {file.changed
@@ -1168,7 +1168,7 @@ export function EnvironmentsPage({
                                       : "Unchanged"}
                                 </span>
                               </div>
-                              <div className="mt-2 max-h-[140px] overflow-auto rounded-lg bg-[#fbfbfc] px-3 py-2 font-mono text-[12px] leading-5 text-muted-foreground whitespace-pre-wrap break-all">
+                              <div className="ui-surface-muted mt-2 max-h-[140px] overflow-auto px-3 py-2 font-mono text-[12px] leading-5 text-muted-foreground whitespace-pre-wrap break-all">
                                 {file.changed
                                   ? file.content || (language === "zh" ? "空文件" : "Empty file")
                                   : language === "zh"
@@ -1182,7 +1182,7 @@ export function EnvironmentsPage({
                     </div>
                     <button
                       type="button"
-                      className="flex size-8 items-center justify-center rounded-lg bg-white text-muted-foreground"
+                      className="ui-control-surface flex size-8 items-center justify-center text-muted-foreground"
                       onClick={async () => {
                         let restored = false;
                         for (const entryId of groupIds) {
