@@ -49,8 +49,8 @@ function OperationCard({
     <ListCard className="responsive-record-row grid min-h-[106px] grid-cols-[minmax(180px,0.62fr)_minmax(0,1.55fr)] items-center gap-5">
       <div className="flex min-w-0 items-center">
         <div className="min-w-0">
-          <h3 className="truncate text-[17px] font-semibold tracking-[-0.02em] text-foreground">{title}</h3>
-          <p className="mt-1 text-[13px] text-muted-foreground">{subtitle}</p>
+          <h3 className="truncate text-[17px] font-semibold tracking-[-0.02em] text-neutral-950 dark:text-neutral-50">{title}</h3>
+          <p className="mt-1 text-[13px] text-slate-500 dark:text-slate-400">{subtitle}</p>
         </div>
       </div>
       <div className="min-w-0">{children}</div>
@@ -217,7 +217,7 @@ export function OperationsPage({
           subtitle={language === "zh" ? "从 GitHub 检查并下载新版本；安装方式按当前平台能力处理。" : "Check and download releases from GitHub; installation follows the current platform capabilities."}
         >
           <div className="ui-settings-row flex-wrap">
-            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted-foreground">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-slate-600">
               <span>
                 {!autoUpdateStatus.enabled
                   ? (language === "zh" ? "未配置更新源" : "Feed not configured")
@@ -237,10 +237,10 @@ export function OperationsPage({
                                 ? (language === "zh" ? "当前平台需手动安装" : "Manual installation required")
                                 : autoUpdateStatus.state}
               </span>
-              {autoUpdateStatus.currentVersion ? <span className="shrink-0 text-[12px] text-muted-foreground">· {language === "zh" ? "当前版本" : "Current"} v{autoUpdateStatus.currentVersion}</span> : null}
-              {autoUpdateStatus.version ? <span className="shrink-0 text-[12px] text-muted-foreground">· {language === "zh" ? "目标版本" : "Target"} v{autoUpdateStatus.version}</span> : null}
+              {autoUpdateStatus.currentVersion ? <span className="shrink-0 text-[12px] text-slate-400">· {language === "zh" ? "当前版本" : "Current"} v{autoUpdateStatus.currentVersion}</span> : null}
+              {autoUpdateStatus.version ? <span className="shrink-0 text-[12px] text-slate-400">· {language === "zh" ? "目标版本" : "Target"} v{autoUpdateStatus.version}</span> : null}
             </div>
-            {autoUpdateStatus.message ? <span className="text-[12px] text-muted-foreground">{autoUpdateStatus.message}</span> : null}
+            {autoUpdateStatus.message ? <span className="text-[12px] text-slate-400">{autoUpdateStatus.message}</span> : null}
             <div className="ml-auto flex gap-2">
               <button type="button" className="ui-control-surface h-8 px-3 text-[12px] font-medium text-foreground disabled:cursor-not-allowed disabled:opacity-50" disabled={!autoUpdateStatus.enabled || ["checking", "downloading", "installing"].includes(autoUpdateStatus.state)} onClick={onCheckForAutoUpdate}>{language === "zh" ? "检查并下载" : "Check & download"}</button>
               <button type="button" className="h-8 rounded-[var(--radius-control)] bg-primary px-3 text-[12px] font-medium text-primary-foreground transition-colors hover:bg-[var(--cs-primary-hover)] disabled:cursor-not-allowed disabled:opacity-50" disabled={autoUpdateStatus.state !== "downloaded"} onClick={onInstallDownloadedUpdate}>{autoUpdateStatus.installMode === "manual" ? (language === "zh" ? "打开安装包" : "Open installer") : autoUpdateStatus.installMode === "unsupported" ? (language === "zh" ? "打开发布页" : "Open release page") : (language === "zh" ? "安装并重启" : "Install & restart")}</button>
@@ -268,46 +268,46 @@ export function OperationsPage({
           subtitle={language === "zh" ? "后台同步 Codex/Plus 订阅额度；自动使用默认关闭，使用前会重新校验并记录操作。" : "Sync Codex/Plus subscription quota in the background. Automatic use is off by default and revalidated before every consume."}
         >
           <div className="ui-surface-muted space-y-3 p-3">
-            {!resetCardSettings ? <div className="ui-status-message ui-status-message-neutral text-[13px]">{language === "zh" ? "正在加载设置…" : "Loading settings…"}</div> : (
+            {!resetCardSettings ? <div className="text-[13px] text-slate-500">{language === "zh" ? "正在加载设置…" : "Loading settings…"}</div> : (
               <>
                 <div className="grid gap-3 md:grid-cols-2">
-                  <label className="flex items-center justify-between gap-3 text-[13px] text-foreground">
+                  <label className="flex items-center justify-between gap-3 text-[13px] text-neutral-800">
                     <span>{language === "zh" ? "刷新间隔（分钟）" : "Refresh interval (minutes)"}</span>
                     <Input type="number" min={1} max={60} value={resetCardSettings.refreshIntervalMinutes} onChange={(event) => onResetCardSettingsChange({ refreshIntervalMinutes: Math.max(1, Math.min(60, Number(event.target.value) || 5)) })} className="ui-control-surface h-8 w-20 text-center" />
                   </label>
-                  <label className="flex items-center justify-between gap-3 text-[13px] text-foreground">
+                  <label className="flex items-center justify-between gap-3 text-[13px] text-neutral-800">
                     <span>{language === "zh" ? "到期提醒" : "Expiry reminder"}</span>
                     <Select value={resetCardSettings.expiryReminder} onValueChange={(value) => onResetCardSettingsChange({ expiryReminder: value as ResetCardSettings["expiryReminder"] })} items={["off", "24h", "12h", "6h", "3h", "1h", "30m"].map((value) => ({ value, label: value === "off" ? (language === "zh" ? "关闭" : "Off") : value }))} className="ui-control-surface h-8 w-24" openOnHover={false} />
                   </label>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
-                  <label className="flex items-center justify-between gap-3 text-[13px] text-foreground">
+                  <label className="flex items-center justify-between gap-3 text-[13px] text-neutral-800">
                     <span>{language === "zh" ? "自动使用触发条件" : "Automatic use trigger"}</span>
                     <Select value={resetCardSettings.autoUseMode} onValueChange={(value) => onResetCardSettingsChange({ autoUseMode: value as ResetCardSettings["autoUseMode"] })} items={[{ value: "off", label: language === "zh" ? "关闭" : "Off" }, { value: "weekly-exhausted", label: language === "zh" ? "周额度耗尽" : "Weekly exhausted" }, { value: "expiring", label: language === "zh" ? "即将到期" : "Expiring" }, { value: "both", label: language === "zh" ? "两者" : "Both" }]} className="ui-control-surface h-8 w-36" openOnHover={false} />
                   </label>
-                  <label className="flex items-center justify-between gap-3 text-[13px] text-foreground">
+                  <label className="flex items-center justify-between gap-3 text-[13px] text-neutral-800">
                     <span>{language === "zh" ? "使用前策略" : "Before-use policy"}</span>
                     <Select value={resetCardSettings.preConsumeMode} onValueChange={(value) => onResetCardSettingsChange({ preConsumeMode: value as ResetCardSettings["preConsumeMode"] })} items={[{ value: "grace", label: language === "zh" ? "倒计时 30 秒" : "30-second grace" }, { value: "confirm", label: language === "zh" ? "需要确认" : "Require confirmation" }]} className="ui-control-surface h-8 w-36" openOnHover={false} />
                   </label>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
-                  <label className="flex items-center justify-between gap-3 text-[13px] text-foreground">
+                  <label className="flex items-center justify-between gap-3 text-[13px] text-neutral-800">
                     <span>{language === "zh" ? "缓冲倒计时（秒）" : "Grace period (seconds)"}</span>
                     <Input type="number" min={5} max={300} value={resetCardSettings.preConsumeGraceSeconds} disabled={resetCardSettings.preConsumeMode !== "grace"} onChange={(event) => onResetCardSettingsChange({ preConsumeGraceSeconds: Math.max(5, Math.min(300, Number(event.target.value) || 30)) })} className="ui-control-surface h-8 w-20 text-center" />
                   </label>
-                  <label className="flex items-center justify-between gap-3 text-[13px] text-foreground">
+                  <label className="flex items-center justify-between gap-3 text-[13px] text-neutral-800">
                     <span>{language === "zh" ? "自动使用前提醒" : "Notify before automatic use"}</span>
                     <Toggle checked={resetCardSettings.notifyBeforeAutoUse} onChange={(checked) => onResetCardSettingsChange({ notifyBeforeAutoUse: checked })} label={language === "zh" ? "自动使用前提醒" : "Notify before automatic use"} />
                   </label>
                 </div>
-                <div className="flex items-center justify-between gap-3 border-t border-border/70 pt-3">
+                <div className="flex items-center justify-between gap-3 border-t border-black/[0.05] pt-3">
                   <div>
-                    <div className="text-[13px] font-medium text-foreground">{language === "zh" ? "系统通知" : "System notifications"}</div>
-                    <div className="text-[11px] text-muted-foreground">{resetCardNotificationStatus?.supported ? (language === "zh" ? "支持到期、同步和自动使用提醒" : "Expiry, sync, and auto-use alerts") : (language === "zh" ? "当前平台将使用应用内提醒" : "In-app fallback will be used")}</div>
+                    <div className="text-[13px] font-medium text-neutral-800">{language === "zh" ? "系统通知" : "System notifications"}</div>
+                    <div className="text-[11px] text-slate-400">{resetCardNotificationStatus?.supported ? (language === "zh" ? "支持到期、同步和自动使用提醒" : "Expiry, sync, and auto-use alerts") : (language === "zh" ? "当前平台将使用应用内提醒" : "In-app fallback will be used")}</div>
                   </div>
                   <Toggle checked={resetCardSettings.notificationsEnabled} onChange={(checked) => onResetCardSettingsChange({ notificationsEnabled: checked })} label={language === "zh" ? "系统通知" : "System notifications"} />
                 </div>
-                <div className="text-[11px] leading-5 text-muted-foreground">
+                <div className="text-[11px] leading-5 text-slate-400">
                   {language === "zh"
                     ? "重置卡属于不可逆操作；每次使用前都会重新读取额度和卡片，并为同一账号加锁避免重复消费。Codex/Plus 接口属于上游私有能力，账号或版本不支持时会明确显示为不可用，不会误显示为 0。后台提醒需要应用保持运行；网关自动使用仅在账号池没有可用回退且明确额度耗尽时触发。"
                     : "Reset-card use is irreversible. Usage and cards are re-read before each consume and account-level locking prevents duplicate consumption. Codex/Plus endpoints are private upstream capabilities; unsupported accounts or versions are shown as unavailable rather than zero. Background reminders require the app to stay running, and gateway automation only runs after the pool has no viable fallback and quota exhaustion is confirmed."}
@@ -323,11 +323,11 @@ export function OperationsPage({
         >
           <div className="ui-settings-row">
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-medium text-foreground">{language === "zh" ? "自动清理历史" : language === "ja" ? "履歴を自動削除" : "Clean history automatically"}</div>
-              <div className="mt-0.5 text-[12px] text-muted-foreground">{language === "zh" ? "后台异步执行，不影响应用启动和使用" : language === "ja" ? "バックグラウンドで実行され、起動や操作を妨げません" : "Runs in the background without delaying app startup"}</div>
+              <div className="text-[13px] font-medium text-neutral-800">{language === "zh" ? "自动清理历史" : language === "ja" ? "履歴を自動削除" : "Clean history automatically"}</div>
+              <div className="mt-0.5 text-[12px] text-slate-400">{language === "zh" ? "后台异步执行，不影响应用启动和使用" : language === "ja" ? "バックグラウンドで実行され、起動や操作を妨げません" : "Runs in the background without delaying app startup"}</div>
             </div>
             {envHistoryRetention.enabled ? (
-              <label className="flex shrink-0 items-center gap-1.5 text-[12px] text-muted-foreground">
+              <label className="flex shrink-0 items-center gap-1.5 text-[12px] text-slate-500">
                 <span>{language === "zh" ? "保留" : language === "ja" ? "保持" : "Keep"}</span>
                 <Input
                   aria-label={language === "zh" ? "环境历史保留天数" : "Environment history retention days"}
@@ -355,10 +355,10 @@ export function OperationsPage({
         >
           <div className="ui-settings-row">
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-medium text-foreground">
+              <div className="text-[13px] font-medium text-neutral-800">
                 {language === "zh" ? "恢复 Codex 生成图片" : language === "ja" ? "Codex 生成画像を復元" : "Recover Codex generated images"}
               </div>
-              <div className="mt-0.5 text-[12px] text-muted-foreground">
+              <div className="mt-0.5 text-[12px] text-slate-400">
                 {language === "zh"
                   ? `开启后自动安装到全部 Codex 环境（${generatedImageRecovery.installedEnvironments}/${generatedImageRecovery.totalEnvironments}）`
                   : language === "ja"
@@ -376,10 +376,10 @@ export function OperationsPage({
         >
           <div className="ui-settings-row">
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-medium text-foreground">
+              <div className="text-[13px] font-medium text-neutral-800">
                 {language === "zh" ? "显示环境首字母标识" : language === "ja" ? "環境の頭文字を表示" : "Show environment initials"}
               </div>
-              <div className="mt-0.5 text-[12px] text-muted-foreground">
+              <div className="mt-0.5 text-[12px] text-slate-400">
                 {!appEnvironmentBadges.supported
                   ? language === "zh" ? "当前系统或原生组件暂不支持" : language === "ja" ? "現在のシステムでは利用できません" : "Unavailable on this system"
                   : language === "zh" ? "默认关闭；不会修改 Codex App，也不会自动重启" : language === "ja" ? "既定ではオフ。Codex App の変更や自動再起動は行いません" : "Off by default; never modifies or automatically restarts Codex App"}
@@ -410,15 +410,15 @@ export function OperationsPage({
                 return (
                   <div key={key} className="ui-settings-row">
                     <div className="min-w-0 flex-1">
-                      <div className="text-[13px] font-medium text-foreground">{title}</div>
-                      <div className="mt-0.5 text-[12px] text-muted-foreground">{subtitle}</div>
+                      <div className="text-[13px] font-medium text-neutral-800">{title}</div>
+                      <div className="mt-0.5 text-[12px] text-slate-400">{subtitle}</div>
                     </div>
                     <Toggle checked={enabled} onChange={(checked) => onAppPresenceChange({ ...appPresence, [key]: checked })} label={title} disabled={appPresenceSaving || !appPresence.supported || isLastVisibleIcon} />
                   </div>
                 );
               })}
             </div>
-            <div className="text-[12px] text-muted-foreground">
+            <div className="text-[12px] text-slate-400">
               {!appPresence.supported
                 ? language === "zh" ? "当前系统不支持此设置" : language === "ja" ? "現在のシステムでは利用できません" : "This setting is unavailable on the current system"
                 : language === "zh" ? "至少保留菜单栏图标或 Dock 图标中的一个；默认仅显示 Dock 图标" : language === "ja" ? "メニューバーまたは Dock の少なくとも一方を有効にします。既定では Dock のみ表示" : "Keep at least one icon visible; by default only the Dock icon is shown"}
@@ -428,15 +428,15 @@ export function OperationsPage({
 
         <ListCard className="responsive-record-row overflow-visible px-5 py-0">
           <div className="grid min-h-[116px] items-center gap-5 lg:grid-cols-[minmax(180px,0.62fr)_minmax(0,1.55fr)]">
-            <div><h3 className="text-[17px] font-semibold tracking-[-0.02em] text-foreground">{language === "zh" ? "CLI 启动" : "CLI Launch"}</h3><p className="mt-1 text-[13px] text-muted-foreground">{language === "zh" ? "设置启动终端与对话恢复方式" : "Configure the terminal and session resume behavior"}</p></div>
+            <div><h3 className="text-[17px] font-semibold tracking-[-0.02em] text-neutral-950">{language === "zh" ? "CLI 启动" : "CLI Launch"}</h3><p className="mt-1 text-[13px] text-slate-500">{language === "zh" ? "设置启动终端与对话恢复方式" : "Configure the terminal and session resume behavior"}</p></div>
             <div className="grid gap-3 py-3 md:grid-cols-2">
               <div className="ui-settings-row">
-                <div className="min-w-0 flex-1"><div className="text-[13px] font-medium text-foreground">{language === "zh" ? "默认终端" : "Default terminal"}</div><div className="mt-0.5 text-[12px] text-muted-foreground">{language === "zh" ? "打开 CLI 使用的软件" : "Application used to open CLI"}</div></div>
+                <div className="min-w-0 flex-1"><div className="text-[13px] font-medium text-neutral-800">{language === "zh" ? "默认终端" : "Default terminal"}</div><div className="mt-0.5 text-[12px] text-slate-400">{language === "zh" ? "打开 CLI 使用的软件" : "Application used to open CLI"}</div></div>
                 <Select value={cliTerminalSettings?.selectedId} onValueChange={(value) => onCliTerminalChange(value as CliTerminalId)} items={(cliTerminalSettings?.terminals ?? []).map((terminal) => ({ value: terminal.id, label: terminal.label, iconUrl: terminal.iconUrl }))} placeholder={language === "zh" ? "扫描中…" : "Scanning…"} disabled={cliTerminalSaving || !cliTerminalSettings} openOnHover={false} className="ui-control-surface h-9 w-[170px]" />
                 <IconActionButton icon={<RefreshCw className={`size-4 ${cliTerminalSaving ? "animate-spin" : ""}`} />} label={language === "zh" ? "重新扫描终端" : "Rescan terminals"} onClick={onCliTerminalScan} disabled={cliTerminalSaving} />
               </div>
               <div className="ui-settings-row">
-                <div className="min-w-0 flex-1"><div className="text-[13px] font-medium text-foreground">{language === "zh" ? "自动恢复对话" : language === "ja" ? "会話を自動再開" : "Auto resume"}</div><div className="mt-0.5 text-[12px] text-muted-foreground">{language === "zh" ? "启动CLI时自动恢复最近第N次对话" : language === "ja" ? "CLI 起動時に直近 N 番目の会話を自動再開" : "Resume the Nth most recent conversation when launching CLI"}</div></div>
+                <div className="min-w-0 flex-1"><div className="text-[13px] font-medium text-neutral-800">{language === "zh" ? "自动恢复对话" : language === "ja" ? "会話を自動再開" : "Auto resume"}</div><div className="mt-0.5 text-[12px] text-slate-400">{language === "zh" ? "启动CLI时自动恢复最近第N次对话" : language === "ja" ? "CLI 起動時に直近 N 番目の会話を自動再開" : "Resume the Nth most recent conversation when launching CLI"}</div></div>
                 {cliAutoResume.enabled ? <label className="flex items-center gap-1.5 text-[12px] text-muted-foreground"><span>{language === "zh" ? "第" : "#"}</span><Input type="number" min={1} step={1} value={sessionNumberDraft} onChange={(event) => setSessionNumberDraft(event.target.value)} onBlur={commitSessionNumber} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} disabled={autoResumeSaving} className="ui-control-surface h-8 w-14 px-2 text-center tabular-nums" /><span>{language === "zh" ? "个" : ""}</span></label> : null}
                 <Toggle checked={cliAutoResume.enabled} onChange={(checked) => onCliAutoResumeChange({ ...cliAutoResume, enabled: checked })} label={language === "zh" ? "启用 CLI 自动恢复对话" : "Enable CLI auto resume"} disabled={autoResumeSaving} />
               </div>
@@ -451,8 +451,8 @@ export function OperationsPage({
           <div className="grid gap-3 md:grid-cols-2">
             <div className="ui-settings-row">
               <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-medium text-foreground">{language === "zh" ? "路由起始端口" : language === "ja" ? "ルート開始ポート" : "Router start port"}</div>
-                <div className="mt-0.5 text-[12px] text-muted-foreground">{language === "zh" ? "占用时自动递增并记住，下次启动生效" : language === "ja" ? "使用中なら自動で増分し、次回起動から適用" : "Auto-increments when occupied and applies next launch"}</div>
+                <div className="text-[13px] font-medium text-neutral-800">{language === "zh" ? "路由起始端口" : language === "ja" ? "ルート開始ポート" : "Router start port"}</div>
+                <div className="mt-0.5 text-[12px] text-slate-400">{language === "zh" ? "占用时自动递增并记住，下次启动生效" : language === "ja" ? "使用中なら自動で増分し、次回起動から適用" : "Auto-increments when occupied and applies next launch"}</div>
               </div>
               <Input
                 aria-label={language === "zh" ? "路由起始端口" : "Router start port"}
@@ -470,8 +470,8 @@ export function OperationsPage({
             </div>
             <div className="ui-settings-row">
               <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-medium text-foreground">{language === "zh" ? "退出应用时停止路由" : language === "ja" ? "終了時にルートを停止" : "Stop routing when quitting"}</div>
-                <div className="mt-0.5 text-[12px] text-muted-foreground">{language === "zh" ? "开启后，依赖路由的 CLI 会在退出时断开" : language === "ja" ? "有効にすると、ルートを使用中の CLI は切断されます" : "When enabled, CLI sessions using routing will disconnect"}</div>
+                <div className="text-[13px] font-medium text-neutral-800">{language === "zh" ? "退出应用时停止路由" : language === "ja" ? "終了時にルートを停止" : "Stop routing when quitting"}</div>
+                <div className="mt-0.5 text-[12px] text-slate-400">{language === "zh" ? "开启后，依赖路由的 CLI 会在退出时断开" : language === "ja" ? "有効にすると、ルートを使用中の CLI は切断されます" : "When enabled, CLI sessions using routing will disconnect"}</div>
               </div>
               <Toggle checked={routerLifecycle.stopOnAppQuit} onChange={(checked) => onRouterLifecycleChange({ stopOnAppQuit: checked })} label={language === "zh" ? "退出应用时停止路由" : language === "ja" ? "終了時にルートを停止" : "Stop routing when quitting"} disabled={routerLifecycleSaving} />
             </div>
@@ -484,8 +484,8 @@ export function OperationsPage({
         >
           <div className="ui-settings-row">
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-medium text-foreground">{language === "zh" ? "登录系统时自动启动" : language === "ja" ? "ログイン時に自動起動" : "Start automatically at login"}</div>
-              <div className="mt-0.5 text-[12px] text-muted-foreground">{launchAtLogin.supported ? (language === "zh" ? "仅在 macOS 和 Windows 上由系统管理" : language === "ja" ? "macOS と Windows のシステム設定で管理" : "Managed by the operating system on macOS and Windows") : (language === "zh" ? "当前系统暂不支持登录启动" : language === "ja" ? "現在のシステムでは利用できません" : "Unavailable on this system")}</div>
+              <div className="text-[13px] font-medium text-neutral-800">{language === "zh" ? "登录系统时自动启动" : language === "ja" ? "ログイン時に自動起動" : "Start automatically at login"}</div>
+              <div className="mt-0.5 text-[12px] text-slate-400">{launchAtLogin.supported ? (language === "zh" ? "仅在 macOS 和 Windows 上由系统管理" : language === "ja" ? "macOS と Windows のシステム設定で管理" : "Managed by the operating system on macOS and Windows") : (language === "zh" ? "当前系统暂不支持登录启动" : language === "ja" ? "現在のシステムでは利用できません" : "Unavailable on this system")}</div>
             </div>
             <Toggle checked={launchAtLogin.enabled} onChange={onLaunchAtLoginChange} label={language === "zh" ? "登录系统时自动启动" : "Start automatically at login"} disabled={launchAtLoginSaving || !launchAtLogin.supported} />
           </div>
@@ -493,7 +493,7 @@ export function OperationsPage({
 
         <ListCard className="responsive-record-row px-5 py-0">
           <div className="grid min-h-[150px] items-center gap-5 lg:grid-cols-[minmax(180px,0.62fr)_minmax(0,1.55fr)]">
-            <div><h3 className="text-[17px] font-semibold tracking-[-0.02em] text-foreground">{language === "zh" ? "Codex 安装" : "Codex Installation"}</h3><p className="mt-1 text-[13px] text-muted-foreground">{language === "zh" ? "配置CLI 与 APP 的安装路径后，支持一键启动与切换" : language === "ja" ? "CLI と App のインストール先を設定し、ワンクリックで起動・切替" : "Configure CLI and App paths for one-click launch and switching"}</p></div>
+            <div><h3 className="text-[17px] font-semibold tracking-[-0.02em] text-neutral-950">{language === "zh" ? "Codex 安装" : "Codex Installation"}</h3><p className="mt-1 text-[13px] text-slate-500">{language === "zh" ? "配置CLI 与 APP 的安装路径后，支持一键启动与切换" : language === "ja" ? "CLI と App のインストール先を設定し、ワンクリックで起動・切替" : "Configure CLI and App paths for one-click launch and switching"}</p></div>
             <div className="space-y-2 py-3">
               {(["cli", "app"] as const).map((kind) => { const status = toolStatuses.find((item) => item.kind === kind); const title = kind === "cli" ? "CLI" : "App"; return <div key={kind} className="ui-settings-row grid grid-cols-[48px_minmax(0,1fr)_auto] items-center"><span className="text-[13px] font-medium text-foreground">{title}</span><Input value={toolDrafts[kind]} onChange={(event) => onToolDraftChange(kind, event.target.value)} placeholder={status?.detectedPath || (language === "zh" ? `请输入 Codex ${title} 路径` : `Enter Codex ${title} path`)} className="ui-control-surface h-9 text-[13px]" /><div className="responsive-actions"><IconActionButton icon={<Save className="size-4" />} label={language === "zh" ? "保存路径" : "Save path"} onClick={() => onToolSave(kind)} disabled={busy} /><IconActionButton icon={<RotateCcw className="size-4" />} label={language === "zh" ? "恢复自动检测" : "Use automatic detection"} onClick={() => onToolReset(kind)} disabled={busy} /></div></div>; })}
             </div>
@@ -538,7 +538,7 @@ export function OperationsPage({
             <div className="responsive-actions">
               <IconActionButton icon={<FileSearch className="size-4" />} label={pageCopy.operations.readLog} onClick={onReadLog} disabled={busy} />
             </div>
-            <pre className="ui-code-block col-span-full max-h-[260px] overflow-auto whitespace-pre-wrap break-words px-4 py-3 font-mono text-[12px] leading-5">
+            <pre className="col-span-full max-h-[260px] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-[#111827] px-4 py-3 font-mono text-[12px] leading-5 text-slate-200">
               {logContent || (language === "zh" ? "暂无日志" : language === "ja" ? "ログはありません" : "No log entries")}
             </pre>
           </div>

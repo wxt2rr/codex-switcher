@@ -32,9 +32,9 @@ export function ListLoadingState({ rows = 4 }: { rows?: number }) {
       {Array.from({ length: rows }, (_, index) => (
         <div key={index} className="list-loading-row ui-surface px-5 py-4">
           <div className="flex items-center gap-4">
-            <span className="h-4 w-1/4 rounded bg-border/80" />
-            <span className="h-3 flex-1 rounded bg-border/70" />
-            <span className="h-8 w-20 rounded-lg bg-border/70" />
+            <span className="h-4 w-1/4 rounded bg-slate-200/80 dark:bg-slate-700/70" />
+            <span className="h-3 flex-1 rounded bg-slate-200/70 dark:bg-slate-700/60" />
+            <span className="h-8 w-20 rounded-lg bg-slate-200/70 dark:bg-slate-700/60" />
           </div>
         </div>
       ))}
@@ -48,7 +48,7 @@ export function ListPageHeader({
   search,
   searchPlaceholder,
   onSearchChange,
-  showFilter = false,
+  showFilter = true,
   actions,
   layout = "inline",
 }: {
@@ -174,7 +174,7 @@ export function SoftBadge({
         tone === "brand" && "bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary-foreground",
         tone === "success" && "bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary-foreground",
         tone === "warn" && "bg-warm-50 text-warm-600 dark:bg-warm-950/50 dark:text-warm-300",
-        tone === "neutral" && "bg-accent text-muted-foreground",
+        tone === "neutral" && "bg-accent text-muted-foreground dark:bg-[#202733] dark:text-muted-foreground/60",
         className,
       )}
     >
@@ -196,7 +196,7 @@ export function RunStatusBadge({
         "inline-flex h-5 items-center rounded-[var(--radius-control)] px-2 text-[11px] font-semibold",
         tone === "success" && "bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary-foreground",
         tone === "warn" && "bg-warm-50 text-warm-600 dark:bg-warm-950/50 dark:text-warm-300",
-        tone === "neutral" && "bg-accent text-muted-foreground",
+        tone === "neutral" && "bg-accent text-muted-foreground dark:bg-[#202733] dark:text-muted-foreground/60",
       )}
     >
       {label}

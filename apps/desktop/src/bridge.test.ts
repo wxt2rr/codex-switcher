@@ -499,7 +499,7 @@ test("reset-card UI exposes safe state, pending-action controls, and accessible 
   const operations = await readFile(join(process.cwd(), "src", "pages", "operations-page.tsx"), "utf8");
   assert.match(accounts, /data-reset-card-account-key/);
   assert.match(accounts, /pendingActions\.map/);
-  assert.match(accounts, /<Toggle/);
+  assert.match(accounts, /role="switch" aria-checked/);
   assert.match(accounts, /status === "unsupported"/);
   assert.match(accounts, /status === "empty"/);
   assert.match(accounts, /onConfirmPending/);

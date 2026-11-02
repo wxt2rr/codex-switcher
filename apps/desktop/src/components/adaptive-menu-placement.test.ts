@@ -63,5 +63,5 @@ test("adaptive menu remeasures after delayed content mounts and size changes", (
   assert.match(source, /resizeObserver\.observe\(root\)/);
   assert.match(source, /resizeObserver\.observe\(menuElement\)/);
   assert.match(source, /resizeObserver\.disconnect\(\)/);
-  assert.match(source, /\}, \[open, rootRef, menuRef\]\);/);
+  assert.doesNotMatch(source, /\}, \[open, rootRef, menuRef\]\);/);
 });

@@ -15,21 +15,27 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-foreground text-background shadow-none " +
-          "hover:bg-foreground/90 active:bg-foreground/80",
+          "bg-foreground text-background dark:bg-neutral-100 dark:text-neutral-950 " +
+          "shadow-none " +
+          "hover:bg-neutral-800 dark:hover:bg-white " +
+          "active:bg-neutral-900 dark:active:bg-neutral-200",
         secondary:
-          "ui-control-surface text-secondary-foreground " +
-          "hover:bg-[var(--cs-surface-subtle)] active:bg-[var(--cs-surface-muted)]",
+          "bg-secondary text-secondary-foreground dark:bg-[#1b2129] dark:text-slate-100 " +
+          "hover:bg-[#eceef1] dark:hover:bg-[#232a34] " +
+          "active:bg-[#e7e9ed] dark:active:bg-[#28303a]",
         outline:
-          "ui-control-surface border border-[var(--cs-border-subtle)] bg-transparent text-foreground " +
-          "shadow-none hover:bg-[var(--cs-surface-subtle)] active:bg-[var(--cs-surface-muted)]",
+          "border border-transparent bg-muted dark:bg-[#161c24] dark:text-slate-100 " +
+          "shadow-none " +
+          "hover:bg-[#eef1f4] dark:hover:bg-[#1d2430] " +
+          "active:bg-[#e8ebef] dark:active:bg-[#222a35]",
         ghost:
           "shadow-none " +
           "hover:bg-accent hover:text-accent-foreground",
         destructive:
           "bg-destructive text-white " +
           "shadow-none " +
-          "hover:bg-destructive/90 active:bg-destructive/80",
+          "hover:bg-rose-700 " +
+          "active:bg-rose-700",
       },
       size: {
         default: "h-9 px-4 py-2",

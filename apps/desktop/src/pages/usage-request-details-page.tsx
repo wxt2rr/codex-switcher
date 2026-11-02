@@ -10,7 +10,6 @@ import type { UiLanguage } from "../i18n";
 import { cn } from "../lib/utils";
 import { formatCompact } from "../components/usage-charts";
 import { ListLoadingState, PageScrollArea } from "../components/account-list-primitives";
-import { StatusMessage } from "../components/admin-primitives";
 
 const emptyPage: UsageRequestPage = {
   generatedAt: 0,
@@ -127,42 +126,42 @@ export function UsageRequestDetailsPage({
           </div>
         </header>
 
-        <div className="ui-surface-muted responsive-toolbar flex flex-wrap items-center gap-2 p-3">
+        <div className="responsive-toolbar flex flex-wrap items-center gap-2 rounded-[14px] border border-black/[0.05] bg-white p-3">
           <div className="relative min-w-[220px] flex-1">
             <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)}
               placeholder={zh ? "搜索请求 ID、模型或端点" : "Search request ID, model, or endpoint"}
-              className="ui-control-surface h-8 pl-10 text-[13px] shadow-none" />
+              className="h-8 border-transparent bg-[#f7f8fa] pl-10 text-[13px] shadow-none" />
           </div>
           <Select value={envName} onValueChange={(value) => { setPage(1); setEnvName(value); setAccountName("all"); }}
             items={[{ value: "all", label: zh ? "全部环境" : "All environments" }, ...environmentNames.map((value) => ({ value, label: value }))]}
-            className="ui-control-surface h-8 w-[130px]" />
+            className="h-8 w-[130px] border-transparent bg-[#f7f8fa]" />
           <Select value={accountName} onValueChange={(value) => updateFilter(setAccountName, value)}
             items={[{ value: "all", label: zh ? "全部账号" : "All accounts" }, ...accountNames.map((value) => ({ value, label: value }))]}
-            className="ui-control-surface h-8 w-[130px]" />
+            className="h-8 w-[130px] border-transparent bg-[#f7f8fa]" />
           <Select value={model} onValueChange={(value) => updateFilter(setModel, value)}
             items={[{ value: "all", label: zh ? "全部模型" : "All models" }, ...data.facets.models.map((value) => ({ value, label: value }))]}
-            className="ui-control-surface h-8 w-[140px]" />
+            className="h-8 w-[140px] border-transparent bg-[#f7f8fa]" />
           <Select value={endpoint} onValueChange={(value) => updateFilter(setEndpoint, value)}
             items={[{ value: "all", label: zh ? "全部端点" : "All endpoints" }, ...data.facets.endpoints.map((value) => ({ value, label: value }))]}
-            className="ui-control-surface h-8 w-[150px]" />
+            className="h-8 w-[150px] border-transparent bg-[#f7f8fa]" />
           <Select value={poolId} onValueChange={(value) => updateFilter(setPoolId, value)}
             items={[{ value: "all", label: zh ? "全部凭证池" : "All credential pools" }, ...data.facets.poolIds.map((value) => ({ value, label: value }))]}
-            className="ui-control-surface h-8 w-[145px]" />
+            className="h-8 w-[145px] border-transparent bg-[#f7f8fa]" />
           <Select value={failoverReason} onValueChange={(value) => updateFilter(setFailoverReason, value)}
             items={[{ value: "all", label: zh ? "全部切换原因" : "All failovers" }, ...data.facets.failoverReasons.map((value) => ({ value, label: value }))]}
-            className="ui-control-surface h-8 w-[145px]" />
+            className="h-8 w-[145px] border-transparent bg-[#f7f8fa]" />
           <Select value={status} onValueChange={(value) => { setPage(1); setStatus(value as typeof status); }}
             items={[{ value: "all", label: zh ? "全部状态" : "All statuses" }, { value: "success", label: zh ? "成功" : "Success" }, { value: "error", label: zh ? "失败" : "Failed" }]}
-            className="ui-control-surface h-8 w-[110px]" />
+            className="h-8 w-[110px] border-transparent bg-[#f7f8fa]" />
         </div>
 
-        {error ? <StatusMessage tone="error">{error}</StatusMessage> : null}
+        {error ? <div className="border-l-2 border-rose-500 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div> : null}
 
-        <section className="ui-surface usage-request-table min-h-0 flex-1 overflow-hidden">
+        <section className="usage-request-table min-h-0 flex-1 overflow-hidden rounded-[14px] border border-black/[0.05] bg-white">
           {loading && data.generatedAt === 0 ? <div className="h-full overflow-auto p-2"><ListLoadingState rows={6} /></div> : <div className="h-full overflow-auto">
             <table className="w-full min-w-[1380px] text-left text-[13px]">
-              <thead className="border-b border-border bg-[var(--cs-surface-muted)] text-muted-foreground">
+              <thead className="border-b border-slate-200 bg-[#fafbfc] text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3 font-medium">{zh ? "时间 / 请求 ID" : "Time / Request ID"}</th>
                   <th className="px-3 font-medium">{zh ? "环境 / 账号" : "Environment / Account"}</th>
@@ -181,9 +180,9 @@ export function UsageRequestDetailsPage({
               </thead>
               <tbody>
                 {data.items.map((item) => (
-                  <tr key={item.requestId} className="border-b border-border/70 last:border-b-0 hover:bg-[var(--cs-surface-muted)]">
-                    <td className="px-4 py-3.5"><div className="whitespace-nowrap font-medium text-foreground">{new Date(item.completedAt).toLocaleString()}</div><div className="mt-1 max-w-[180px] truncate font-mono text-[11px] text-muted-foreground" title={item.requestId}>{item.requestId}</div></td>
-                    <td className="px-3"><div className="font-medium text-foreground">{item.envName}</div><div className="mt-1 text-muted-foreground">{item.accountName}</div></td>
+                  <tr key={item.requestId} className="border-b border-slate-100 last:border-b-0 hover:bg-[#fafbfc]">
+                    <td className="px-4 py-3.5"><div className="whitespace-nowrap font-medium text-neutral-800">{new Date(item.completedAt).toLocaleString()}</div><div className="mt-1 max-w-[180px] truncate font-mono text-[11px] text-muted-foreground" title={item.requestId}>{item.requestId}</div></td>
+                    <td className="px-3"><div className="font-medium text-neutral-800">{item.envName}</div><div className="mt-1 text-muted-foreground">{item.accountName}</div></td>
                     <td className="max-w-[150px] truncate px-3 font-medium" title={item.model ?? "unknown"}>{item.model ?? "unknown"}</td>
                     <td className="max-w-[180px] truncate px-3 font-mono text-[12px] text-muted-foreground" title={item.endpoint}>{item.endpoint}</td>
                     <td className="px-3"><RequestStatus item={item} zh={zh} /></td>
@@ -208,7 +207,7 @@ export function UsageRequestDetailsPage({
           <div className="flex items-center gap-2">
             <Select value={String(pageSize)} onValueChange={(value) => { setPage(1); setPageSize(Number(value)); }}
               items={[20, 50, 100].map((value) => ({ value: String(value), label: zh ? `${value} 条/页` : `${value} / page` }))}
-              className="ui-control-surface h-8 w-[105px]" />
+              className="h-8 w-[105px] bg-white" />
             <Button variant="outline" className="size-8 p-0" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={loading || data.page <= 1}
               aria-label={zh ? "上一页" : "Previous page"} title={zh ? "上一页" : "Previous page"}><ChevronLeft className="size-4" /></Button>
             <Button variant="outline" className="size-8 p-0" onClick={() => setPage((value) => Math.min(data.totalPages, value + 1))} disabled={loading || data.page >= data.totalPages}
@@ -261,7 +260,7 @@ function RoutingAttempts({ item, zh }: { item: UsageRequestRecord; zh: boolean }
   const attempts = item.attempts ?? [];
   const trigger = (
     <button type="button" className="cursor-help text-left outline-none focus-visible:ring-0 focus-visible:outline-none">
-      <div className="font-medium text-foreground">{item.attemptCount ?? Math.max(1, attempts.length)} {zh ? "次" : "attempts"}</div>
+      <div className="font-medium text-neutral-700">{item.attemptCount ?? Math.max(1, attempts.length)} {zh ? "次" : "attempts"}</div>
       {item.failoverReason ? <div className="mt-1 max-w-[150px] truncate text-[11px] text-warm-600">{formatFailureReason(item.failoverReason, zh)}</div> : null}
     </button>
   );

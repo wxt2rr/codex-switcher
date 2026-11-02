@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { useDelayedUnmount } from "./use-delayed-unmount";
 
 const dialogOverlayClass =
-  "motion-dialog-overlay fixed inset-0 z-[var(--z-dialog)] flex items-center justify-center overflow-y-auto bg-[var(--cs-overlay-scrim)] px-6 py-4";
+  "motion-dialog-overlay fixed inset-0 z-[var(--z-dialog)] flex items-center justify-center overflow-y-auto bg-slate-950/[0.22] px-6 py-4";
 const dialogSurfaceClass =
   "motion-dialog-enter ui-overlay-surface w-full bg-popover p-6";
 

@@ -146,7 +146,7 @@ export function ThemeColorSettings({ language }: { language: "zh" | "en" | "ja" 
                 key={color.value}
                 type="button"
                 className={cn(
-                  "size-8 rounded-[var(--radius-control)] border-2 transition-[border-color,transform] duration-[160ms] ease-[var(--cs-ease-out)] hover:scale-105",
+                  "size-8 rounded-[var(--radius-control)] border-2 transition-all hover:scale-105",
                   currentThemeColor === color.value
                     ? "border-primary scale-110"
                     : "border-transparent hover:border-[var(--cs-border)]"

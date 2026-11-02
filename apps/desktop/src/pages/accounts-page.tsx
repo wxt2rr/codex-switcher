@@ -980,12 +980,11 @@ export function AccountsPage({
                   <div className="text-sm font-medium text-foreground">{language === "zh" ? "兼容路由" : "Compatibility route"}</div>
                   <div className="mt-0.5 text-xs text-muted-foreground">{language === "zh" ? "仅为此账号转换 Responses 与 Chat Completions" : "Convert Responses and Chat Completions for this account only"}</div>
                 </div>
-                <Toggle
-                  checked={compatibilityEnabled}
-                  onChange={() => toggleCompatibility()}
-                  label={language === "zh" ? "启用兼容路由" : "Enable compatibility route"}
-                  disabled={compatibilityBusy}
-                />
+                <button type="button" role="switch" aria-checked={compatibilityEnabled} disabled={compatibilityBusy}
+                  onClick={toggleCompatibility}
+                  className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-lg disabled:opacity-60 ${compatibilityEnabled ? "bg-primary" : "bg-[#d1d1d6]"}`}>
+                  <span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-lg bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${compatibilityEnabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} />
+                </button>
               </div>
               <Field label={language === "zh" ? "上游模型（可选）" : "Upstream model (optional)"}>
                 <Input value={compatibilityModel} onChange={(event) => setCompatibilityModel(event.target.value)} placeholder="provider-model-id" />
@@ -1373,7 +1372,7 @@ function AccountListCard({
       className={cn(
         "responsive-record-row responsive-account-row grid min-h-[92px] items-center gap-4",
         focusedResetCardAccountKey && resetCardSnapshot?.accountKey === focusedResetCardAccountKey
-          && "ring-1 ring-[var(--cs-border)] ring-offset-1 transition-shadow",
+          && "ring-1 ring-black/[0.10] ring-offset-1 transition-shadow",
       )}
     >
       <div className="min-w-0">
@@ -1417,7 +1416,7 @@ function AccountListCard({
                 <span className="min-w-0 truncate text-[14px] font-medium text-foreground [font-variant-numeric:tabular-nums]">{baseUrl}</span>
                 <button
                   type="button"
-                  className="ui-control-surface motion-interactive-color inline-flex size-6 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
+                  className="motion-interactive-color inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-white hover:text-foreground"
                   onClick={() => onCopyBaseUrl(baseUrl)}
                   aria-label={language === "zh" ? "复制 Base URL" : language === "ja" ? "Base URL をコピー" : "Copy Base URL"}
                   title={language === "zh" ? "复制完整 Base URL" : language === "ja" ? "完全な Base URL をコピー" : "Copy full Base URL"}
@@ -1435,7 +1434,7 @@ function AccountListCard({
                 <span className="min-w-0 truncate font-mono text-[13px] text-muted-foreground [font-variant-numeric:tabular-nums]">{maskedApiKey}</span>
                 <button
                   type="button"
-                  className="ui-control-surface motion-interactive-color inline-flex size-6 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
+                  className="motion-interactive-color inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-white hover:text-foreground"
                   onClick={() => onCopyApiKey(apiKeyValue)}
                   aria-label={language === "zh" ? "复制 API Key" : language === "ja" ? "API Key をコピー" : "Copy API key"}
                   title={language === "zh" ? "复制完整 API Key" : language === "ja" ? "完全な API Key をコピー" : "Copy full API key"}
@@ -1828,14 +1827,14 @@ function ResetCardIndicator({
                         </div>
                         <div className="flex shrink-0 gap-1.5">
                           {action.requiresConfirmation ? <button type="button" className="rounded-md bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground disabled:opacity-50" disabled={pendingBusy === action.id} onClick={() => { setPendingBusy(action.id); void onConfirmPending(action.accountKey, action.id).finally(() => setPendingBusy(undefined)); }}>{language === "zh" ? "确认" : "Confirm"}</button> : null}
-                          <button type="button" className="ui-control-surface rounded-md px-2 py-1 text-[10px] font-medium text-muted-foreground hover:text-foreground disabled:opacity-50" disabled={pendingBusy === action.id} onClick={() => { setPendingBusy(action.id); void onCancelPending(action.accountKey, action.id).finally(() => setPendingBusy(undefined)); }}>{language === "zh" ? "取消" : "Cancel"}</button>
+                          <button type="button" className="rounded-md px-2 py-1 text-[10px] font-medium text-muted-foreground ring-1 ring-black/[0.08] hover:text-foreground disabled:opacity-50" disabled={pendingBusy === action.id} onClick={() => { setPendingBusy(action.id); void onCancelPending(action.accountKey, action.id).finally(() => setPendingBusy(undefined)); }}>{language === "zh" ? "取消" : "Cancel"}</button>
                         </div>
                       </div>
                     );
                   })}
                 </div>
               ) : null}
-              <div className="mt-2 flex items-center justify-between gap-2 border-t border-border/70 pt-2">
+              <div className="mt-2 flex items-center justify-between gap-2 border-t border-black/[0.05] pt-2 dark:border-white/[0.08]">
                 <span className="text-[11px] text-muted-foreground">{language === "zh" ? "此账号自动使用" : "Automatic use for this account"}</span>
                 <Toggle checked={autoUseEnabled} onChange={(checked) => snapshot && void onSetAutoUse(snapshot.accountKey, { enabled: checked })} label={language === "zh" ? "此账号自动使用重置卡" : "Automatic reset-card use for this account"} disabled={busy || !settings} />
               </div>
@@ -2040,7 +2039,7 @@ function CardUsageRow({
     <div className="account-usage-row px-0.5 py-1">
       <span className="truncate text-[12px] font-semibold text-foreground">{label}</span>
       <div className="min-w-0">
-        <div className="h-1.5 overflow-hidden rounded-lg bg-border/80">
+        <div className="h-1.5 overflow-hidden rounded-lg bg-slate-200/80">
           <div
             className={cn("h-full origin-left rounded-lg transition-[transform,background-color] duration-[220ms] ease-[cubic-bezier(0.23,1,0.32,1)]", getUsageProgressClass(percent))}
             style={{ transform: `scaleX(${percent / 100})` }}
@@ -2129,8 +2128,8 @@ function RequestHealthRow({
         : value ? (language === "zh" ? "命中" : "Hit") : (language === "zh" ? "未命中" : "Miss");
     return {
       className: kind === "success"
-        ? value ? "bg-primary/45" : "bg-destructive/45"
-        : value === null ? "bg-muted" : value ? "bg-primary/45" : "bg-border",
+        ? value ? "bg-[#afc8b4]" : "bg-[#e6b3a9]"
+        : value === null ? "bg-[#ece9e3]" : value ? "bg-[#afc8b4]" : "bg-[#d9d4cc]",
       title: `${new Date(segment.completedAt).toLocaleString()} · ${stateLabel}`,
     };
   });
@@ -2231,8 +2230,8 @@ function CardTargetButton({
       <div
         className={cn(
           "motion-interactive-color flex h-9 overflow-hidden rounded-lg border border-transparent",
-          active ? "ui-selected-control" : "ui-control-surface text-foreground",
-          !disabled && !active && "hover:bg-[var(--cs-surface-subtle)] hover:text-foreground",
+          active ? "ui-selected-control" : "bg-[#fafafa] text-foreground",
+          !disabled && !active && "hover:bg-[#f3f4f6] hover:text-foreground",
           disabled && "cursor-not-allowed opacity-55",
         )}
       >
@@ -2251,7 +2250,7 @@ function CardTargetButton({
           type="button"
           className={cn(
             "motion-interactive-color flex h-full w-8 items-center justify-center text-muted-foreground",
-            !disabled && "hover:bg-[var(--cs-surface-subtle)] hover:text-foreground",
+            !disabled && "hover:bg-black/[0.035] hover:text-foreground",
           )}
           onClick={() => setOpen(!open)}
           disabled={disabled}

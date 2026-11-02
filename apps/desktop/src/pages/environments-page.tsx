@@ -439,7 +439,7 @@ function EnvCard({
         <div className="ui-status-message ui-status-message-success px-3.5 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <div className="text-[12px] font-semibold text-foreground">{language === "zh" ? "本机 Agent 接入" : language === "ja" ? "ローカル Agent 接続" : "Local Agent access"}</div>
+              <div className="text-[12px] font-semibold text-neutral-800">{language === "zh" ? "本机 Agent 接入" : language === "ja" ? "ローカル Agent 接続" : "Local Agent access"}</div>
               <div className="mt-0.5 text-[11px] text-muted-foreground">{language === "zh" ? `127.0.0.1:${routeStatus.port ?? "—"}，仅本机可访问，不对局域网或公网开放` : language === "ja" ? `127.0.0.1:${routeStatus.port ?? "—"} のみで待受けます` : `127.0.0.1:${routeStatus.port ?? "—"} · loopback only`}</div>
             </div>
             <div className="flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
@@ -455,7 +455,7 @@ function EnvCard({
               <div key={label} className="ui-surface-muted min-w-0 px-2.5 py-2">
                 <div className="text-[11px] font-medium text-muted-foreground">{label}</div>
                 <div className="mt-1 flex min-w-0 items-center gap-1">
-                  <div className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground" title={value}>{label === "API Key" ? `${value.slice(0, 4)}••••${value.slice(-4)}` : value}</div>
+                  <div className="min-w-0 flex-1 truncate font-mono text-[11px] text-neutral-700" title={value}>{label === "API Key" ? `${value.slice(0, 4)}••••${value.slice(-4)}` : value}</div>
                   <button type="button" className="ui-control-surface shrink-0 p-1 text-muted-foreground hover:text-foreground" onClick={() => onCopyLocalAgentValue(value, label)} aria-label={`${label} copy`}>
                     <Copy className="size-3.5" />
                   </button>
@@ -832,18 +832,18 @@ export function EnvironmentsPage({
           </Button>
 
           {conversationRepairDialog?.phase === "analyzing" ? (
-            <div className="ui-surface-muted flex items-center gap-2 px-3 py-3 text-[13px] text-muted-foreground">
+            <div className="flex items-center gap-2 rounded-lg bg-[#f7f8fa] px-3 py-3 text-[13px] text-muted-foreground">
               <LoaderCircle className="size-4 animate-spin" />
               {language === "zh" ? "正在扫描所有 Codex 环境…" : language === "ja" ? "すべての Codex 環境をスキャン中…" : "Scanning all Codex environments…"}
             </div>
           ) : null}
 
           {repairInspection ? (
-            <div className="ui-surface-muted space-y-3 p-4">
+            <div className="space-y-3 rounded-lg border border-black/[0.06] bg-[#fbfbfc] p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-[12px] font-medium uppercase tracking-[0.08em] text-muted-foreground">{language === "zh" ? "分析结果" : language === "ja" ? "分析結果" : "Inspection result"}</div>
-                  <div className="mt-1 break-all font-mono text-[13px] text-foreground">{repairInspection.conversationId}</div>
+                  <div className="mt-1 break-all font-mono text-[13px] text-neutral-800">{repairInspection.conversationId}</div>
                 </div>
                 <SoftBadge
                   tone={repairInspection.status === "ambiguous" ? "warn" : "neutral"}
@@ -869,7 +869,7 @@ export function EnvironmentsPage({
               {selectedRepairCandidate ? (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm font-semibold text-foreground">{selectedRepairCandidate.envName}</span>
+                    <span className="text-sm font-semibold text-neutral-900">{selectedRepairCandidate.envName}</span>
                     <span className={cn("rounded-md px-2 py-1 text-[11px] font-semibold", conversationRepairStatusClass(selectedRepairCandidate.status))}>
                       {conversationRepairStatusLabel(selectedRepairCandidate.status, language)}
                     </span>
@@ -881,9 +881,9 @@ export function EnvironmentsPage({
                       [language === "zh" ? "历史模型" : "Recorded model", selectedRepairCandidate.recordedModel ?? "—"],
                       [language === "zh" ? "当前模型" : "Current model", selectedRepairCandidate.currentModel ?? "—"],
                     ].map(([label, value]) => (
-                      <div key={String(label)} className="ui-surface-muted min-w-0 px-3 py-2">
+                      <div key={String(label)} className="min-w-0 rounded-lg bg-white px-3 py-2">
                         <div className="text-[11px] text-muted-foreground">{label}</div>
-                        <div className="mt-1 truncate font-mono text-[12px] text-foreground" title={String(value)}>{value}</div>
+                        <div className="mt-1 truncate font-mono text-[12px] text-slate-700" title={String(value)}>{value}</div>
                       </div>
                     ))}
                   </div>
@@ -933,12 +933,12 @@ export function EnvironmentsPage({
 
       <SidePanel open={poolOpen} title={language === "zh" ? `${poolEnvName} · 凭证池` : `${poolEnvName} · Credential pool`} onClose={() => setPoolOpen(false)} closeLabel={pageCopy.common.close}>
         <div className="space-y-4">
-          <div className="ui-surface-muted px-4 py-3 text-xs leading-5 text-muted-foreground">
+          <div className="rounded-lg bg-[#f7f8fa] px-4 py-3 text-xs leading-5 text-muted-foreground">
             {language === "zh" ? "新会话按权重选择账号，同一会话优先保持原账号；只有限流、额度或网络失败才会自动切换。Responses 模式支持 AUTH 与 API Key 混合自动分发。" : "New sessions use weighted selection and stay on one account; failover is limited to rate, quota, and network failures. Responses pools can mix AUTH and API-key accounts."}
           </div>
           {poolStatus?.health.length ? <div className="grid gap-2 sm:grid-cols-2">
-            {poolStatus.health.map((item) => <div key={item.accountName} className="ui-surface-muted flex items-center justify-between px-3 py-2 text-xs">
-              <span className="truncate font-medium text-foreground">{item.accountName}</span>
+            {poolStatus.health.map((item) => <div key={item.accountName} className="flex items-center justify-between rounded-lg border border-black/[0.05] bg-white px-3 py-2 text-xs">
+              <span className="truncate font-medium text-neutral-800">{item.accountName}</span>
               <SoftBadge tone={item.state === "healthy" ? "success" : item.state === "cooldown" ? "warn" : "neutral"} label={item.state === "healthy" ? (language === "zh" ? "可用" : "Healthy") : item.state === "cooldown" ? (language === "zh" ? "冷却中" : "Cooldown") : item.state} />
             </div>)}
           </div> : null}
@@ -954,13 +954,13 @@ export function EnvironmentsPage({
             }} items={[{ value: "responses", label: "Responses" }, { value: "chat_completions", label: "Chat Completions" }]} />
           </Field>
           <Field label={language === "zh" ? "分发策略" : "Dispatch strategy"}>
-            <div className="ui-surface-muted px-3 py-2 text-sm text-foreground">{language === "zh" ? "会话粘性 + 加权轮询" : "Sticky session + weighted round robin"}</div>
+            <div className="rounded-lg bg-[#f7f8fa] px-3 py-2 text-sm text-slate-700">{language === "zh" ? "会话粘性 + 加权轮询" : "Sticky session + weighted round robin"}</div>
           </Field>
           <Field label={language === "zh" ? "参与轮询的账号" : "Pool members"}>
-            <div className="ui-surface-muted space-y-2 p-3">
+            <div className="space-y-2 rounded-lg bg-[#f7f8fa] p-3">
               {poolEnvAccounts.map((account, index) => {
                 const selected = poolMembers.includes(account.name);
-                return <label key={account.name} className="ui-surface flex items-center gap-3 px-3 py-2 text-sm">
+                return <label key={account.name} className="flex items-center gap-3 rounded-lg bg-white px-3 py-2 text-sm">
                   <input type="checkbox" checked={selected} onChange={(event) => setPoolMembers((current) => event.target.checked ? [...current, account.name] : current.filter((name) => name !== account.name))} />
                   <span className="min-w-0 flex-1 truncate">{account.name}</span>
                   <Input
@@ -1096,7 +1096,7 @@ export function EnvironmentsPage({
       >
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-3">
-            <div className="text-sm font-semibold text-foreground">{historyEnvName}</div>
+            <div className="text-sm font-semibold text-neutral-900">{historyEnvName}</div>
             <Select
               value={historyFilter}
               onValueChange={(value) => setHistoryFilter(value as "all" | "config.toml" | "auth.json")}
@@ -1139,7 +1139,7 @@ export function EnvironmentsPage({
                       className="mt-1"
                     />
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
+                      <div className="flex items-center gap-2 text-[13px] font-semibold text-neutral-900">
                         <span>{formatHistoryTimestamp(group.createdAt)}</span>
                         <span className="ui-surface-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
                           {localizeHistorySource(group.source, language)}
@@ -1150,7 +1150,7 @@ export function EnvironmentsPage({
                           const file = group.files[fileType];
                           return (
                             <div key={fileType} className="ui-surface px-3 py-3">
-                              <div className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
+                              <div className="flex items-center gap-2 text-[13px] font-semibold text-neutral-900">
                                 <span>{fileType}</span>
                                 <span
                                   className={
@@ -1231,7 +1231,7 @@ export function EnvironmentsPage({
         open={syncHistoryOpen}
         title={language === "zh" ? "同步对话列表" : language === "ja" ? "会話履歴を同期" : "Sync conversation history"}
         impact={
-          <div className="space-y-2 text-sm text-muted-foreground">
+          <div className="space-y-2 text-sm text-neutral-500">
             <div>{language === "zh" ? `将环境 ${syncHistoryEnvName} 中旧会话的 provider 标识统一为 codex_switcher_router。` : `Normalize existing sessions in ${syncHistoryEnvName} to codex_switcher_router.`}</div>
             <div>{language === "zh" ? "只修改会话元数据和索引，不修改消息内容。执行前会自动备份；请先关闭该环境正在运行的 Codex。同步列表不保证跨服务商继续上下文。" : "Only metadata and index records change. A backup is created first; close Codex for this environment before continuing. Unified visibility does not guarantee cross-provider continuation."}</div>
           </div>
@@ -1274,7 +1274,7 @@ export function EnvironmentsPage({
         >
           {syncHistoryDialog.phase === "running" ? (
             <div className="space-y-4">
-              <div className="flex items-center gap-3 text-sm font-medium text-foreground">
+              <div className="flex items-center gap-3 text-sm font-medium text-neutral-800">
                 <LoaderCircle className="size-4 animate-spin text-muted-foreground" />
                 <span>
                   {language === "zh"
@@ -1319,16 +1319,16 @@ export function EnvironmentsPage({
                   [language === "zh" ? "更新会话" : language === "ja" ? "更新したセッション" : "Sessions", syncHistoryDialog.result.sessionsUpdated],
                   [language === "zh" ? "更新索引" : language === "ja" ? "更新したスレッド" : "Threads", syncHistoryDialog.result.threadsUpdated],
                 ].map(([label, value]) => (
-                  <div key={String(label)} className="ui-surface-muted px-3 py-2.5 text-center">
+                  <div key={String(label)} className="rounded-lg bg-white px-3 py-2.5 text-center">
                     <div className="text-[12px] text-muted-foreground">{label}</div>
-                    <div className="mt-1 text-base font-semibold text-foreground">{value}</div>
+                    <div className="mt-1 text-base font-semibold text-neutral-800">{value}</div>
                   </div>
                 ))}
               </div>
               <div className="space-y-1 text-[13px] leading-5 text-muted-foreground">
-                <div>Provider：<code className="break-all text-foreground">{syncHistoryDialog.result.providerId}</code></div>
+                <div>Provider：<code className="break-all text-slate-700">{syncHistoryDialog.result.providerId}</code></div>
                 {syncHistoryDialog.result.backupPath ? (
-                  <div>{language === "zh" ? "备份位置" : language === "ja" ? "バックアップ先" : "Backup"}：<code className="break-all text-foreground">{syncHistoryDialog.result.backupPath}</code></div>
+                  <div>{language === "zh" ? "备份位置" : language === "ja" ? "バックアップ先" : "Backup"}：<code className="break-all text-slate-700">{syncHistoryDialog.result.backupPath}</code></div>
                 ) : null}
               </div>
             </div>
@@ -1348,16 +1348,16 @@ export function EnvironmentsPage({
           selectedDeleteEnv ? (
             <div className="space-y-2.5 text-sm">
               <div className="flex justify-between gap-4">
-                <span className="text-muted-foreground">{pageCopy.common.environment}</span>
-                <span className="font-medium text-foreground">{selectedDeleteEnv.name}</span>
+                <span className="text-neutral-400">{pageCopy.common.environment}</span>
+                <span className="font-medium text-neutral-700">{selectedDeleteEnv.name}</span>
               </div>
               <div className="flex justify-between gap-4">
-                <span className="text-muted-foreground">{pageCopy.environments.countColumn}</span>
-                <span className="font-medium text-foreground">{selectedDeleteAccounts}</span>
+                <span className="text-neutral-400">{pageCopy.environments.countColumn}</span>
+                <span className="font-medium text-neutral-700">{selectedDeleteAccounts}</span>
               </div>
             </div>
           ) : (
-            <div className="text-sm text-muted-foreground">{pageCopy.environments.deleteMissing}</div>
+            <div className="text-sm text-neutral-400">{pageCopy.environments.deleteMissing}</div>
           )
         }
         confirmLabel={pageCopy.environments.deleteConfirm}

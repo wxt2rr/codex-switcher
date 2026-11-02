@@ -144,8 +144,8 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.match(accounts, /cursor-help/);
   assert.doesNotMatch(accounts, /function TooltipHint/);
   assert.doesNotMatch(accounts, /getModelProviderHint/);
-  assert.match(accounts, /bg-primary\/45/);
-  assert.match(accounts, /bg-destructive\/45/);
+  assert.match(accounts, /bg-\[#afc8b4\]/);
+  assert.match(accounts, /bg-\[#e6b3a9\]/);
   assert.match(css, /\.account-model-actions\s*\{[^}]*width:\s*2rem;/s);
   assert.match(reactApp, /Base URL 已复制/);
   assert.match(reactApp, /API Key 已复制/);
@@ -387,7 +387,7 @@ test("dialogs use a restrained native-style overlay and single surface", () => {
   assert.doesNotMatch(adminPrimitives, /items-start justify-center/);
   assert.doesNotMatch(adminPrimitives, /style=\{\{ alignItems: "flex-start" \}\}/);
   assert.match(adminPrimitives, /dialogOverlayClass/);
-  assert.match(adminPrimitives, /bg-\[var\(--cs-overlay-scrim\)\]/);
+  assert.match(adminPrimitives, /bg-slate-950\/\[0\.22\]/);
   assert.doesNotMatch(adminPrimitives, /backdrop-blur/);
   assert.match(adminPrimitives, /ui-overlay-surface/);
   assert.match(adminPrimitives, /dialogSurfaceClass/);

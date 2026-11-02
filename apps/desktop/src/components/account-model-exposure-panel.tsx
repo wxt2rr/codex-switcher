@@ -200,7 +200,7 @@ export function AccountModelExposurePanel({
             ? "服务商返回的模型和模型页手动配置的模型可以同时选择；刷新失败不会删除上次结果。"
             : "Discovered and manually configured models can be selected together; a failed refresh keeps the last result."}
           >
-            <button type="button" aria-label={zh ? "查看模型暴露说明" : "View model exposure details"} className="ui-control-surface inline-flex size-5 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground">
+            <button type="button" aria-label={zh ? "查看模型暴露说明" : "View model exposure details"} className="inline-flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-neutral-700">
               <CircleHelp className="size-3.5" />
             </button>
           </Tooltip>
@@ -272,7 +272,7 @@ export function AccountModelExposurePanel({
         <div className="ui-surface-muted flex shrink-0 items-center px-3 py-2">
           <label
             className={cn(
-              "inline-flex items-center gap-1.5 text-[12px] font-medium text-foreground",
+              "inline-flex items-center gap-1.5 text-[12px] font-medium text-neutral-800",
               candidates.length === 0 ? "cursor-not-allowed opacity-50" : "cursor-pointer",
             )}
             title={zh ? "选择或取消当前筛选结果" : "Select or clear the current filtered results"}
@@ -326,7 +326,7 @@ export function AccountModelExposurePanel({
                   />
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2">
-                      <span className="truncate text-[13px] font-medium text-foreground">{model.entry.display_name}</span>
+                      <span className="truncate text-[13px] font-medium text-neutral-900">{model.entry.display_name}</span>
                       {checked ? <Check className="size-3.5 shrink-0 text-primary" /> : null}
                     </span>
                     <span className="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground">{model.entry.slug}</span>
