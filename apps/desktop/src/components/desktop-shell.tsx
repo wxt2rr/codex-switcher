@@ -112,7 +112,7 @@ export function DesktopShell({
       aria-expanded={sidebarExpanded}
       onClick={() => setSidebarExpanded((current) => !current)}
       className={cn(
-        "ui-control-surface flex size-9 shrink-0 items-center justify-center text-muted-foreground shadow-none",
+        "flex size-9 shrink-0 items-center justify-center rounded-lg bg-transparent text-muted-foreground shadow-none transition-[background-color,color] duration-[160ms] ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-black/[0.045] hover:text-foreground dark:text-muted-foreground dark:hover:bg-white/[0.07] dark:hover:text-white",
         getDesktopShellSidebarToggleClass(platform, sidebarExpanded),
         noDragClass,
       )}
@@ -123,12 +123,12 @@ export function DesktopShell({
 
   return (
     <TooltipProvider>
-    <div className="desktop-shell-root h-screen overflow-hidden bg-[var(--cs-background)] text-foreground">
+    <div className="desktop-shell-root h-screen overflow-hidden bg-[#f7f8fa] text-foreground dark:bg-[#0f1318] dark:text-neutral-100">
       <div className="flex h-full">
         <aside
           data-expanded={sidebarExpanded}
           className={cn(
-            "motion-sidebar-panel relative flex shrink-0 flex-col overflow-hidden border-r border-[var(--cs-border-subtle)] bg-[var(--cs-surface)] pb-7 pt-5",
+            "motion-sidebar-panel relative flex shrink-0 flex-col overflow-hidden border-r border-black/[0.06] bg-white pb-7 pt-5 dark:border-white/[0.07] dark:bg-[#11151a]",
             sidebarExpanded ? "w-[208px] px-4" : "w-[78px] items-center px-3",
           )}
         >
@@ -146,7 +146,7 @@ export function DesktopShell({
             )}
           >
             <div className="motion-sidebar-label min-w-0 overflow-hidden">
-              <div className="truncate text-[17px] font-semibold tracking-[-0.02em] text-foreground">{brand}</div>
+              <div className="truncate text-[17px] font-semibold tracking-[-0.02em] text-foreground dark:text-neutral-50">{brand}</div>
             </div>
 
             {!isMacDesktop ? sidebarToggle : null}
@@ -172,8 +172,8 @@ export function DesktopShell({
                     "flex h-11 items-center rounded-lg transition-[background-color,color] duration-[180ms] ease-[cubic-bezier(0.23,1,0.32,1)]",
                     sidebarExpanded ? "w-full justify-start gap-3 px-3.5" : "size-11 justify-center",
                     isActive
-                      ? "ui-selected-control"
-                      : "text-foreground hover:bg-[var(--cs-surface-muted)] hover:text-foreground",
+                      ? "bg-[#f1f3f5] text-foreground dark:bg-[#1b2129] dark:text-white"
+                      : "text-foreground hover:bg-[#f6f7f8] hover:text-foreground dark:text-muted-foreground dark:hover:bg-[#171c23] dark:hover:text-white",
                   )}
                   aria-pressed={isActive}
                 >
@@ -206,8 +206,8 @@ export function DesktopShell({
                 onMouseEnter={() => onNoticePauseChange?.(true)}
                 onMouseLeave={() => onNoticePauseChange?.(false)}
                 className={cn(
-                  "motion-notice-enter ui-overlay-surface flex min-w-[280px] max-w-[420px] items-center gap-2.5 px-4 py-3 text-sm font-medium",
-                  "pointer-events-auto",
+                  "motion-notice-enter flex min-w-[280px] max-w-[420px] items-center gap-2.5 rounded-lg border border-black/[0.08] bg-white px-4 py-3 text-sm font-medium shadow-[0_8px_28px_rgba(15,23,42,0.12)]",
+                  "pointer-events-auto dark:border-white/[0.1] dark:bg-[#171b21]",
                   messageClass,
                 )}
                 role={message.tone === "error" ? "alert" : "status"}
@@ -221,7 +221,7 @@ export function DesktopShell({
 
           {updatePrompt ? (
             <section
-              className="ui-overlay-surface fixed bottom-5 right-5 z-[var(--z-toast)] w-[min(360px,calc(100vw-2rem))] p-4"
+              className="fixed bottom-5 right-5 z-[60] w-[min(360px,calc(100vw-2rem))] rounded-2xl border border-primary/30/80 bg-white p-4 shadow-[0_12px_36px_rgba(15,23,42,0.16)] dark:border-emerald-900/70 dark:bg-[#171b21]"
               role="status"
               aria-live="polite"
             >
@@ -231,8 +231,8 @@ export function DesktopShell({
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-3">
-                    <h2 className="text-[13px] font-semibold text-foreground">{updatePrompt.title}</h2>
-                    <span className="ui-surface-muted shrink-0 px-1.5 py-0.5 text-[11px] font-medium text-primary">v{updatePrompt.version}</span>
+                    <h2 className="text-[13px] font-semibold text-foreground dark:text-white">{updatePrompt.title}</h2>
+                    <span className="shrink-0 rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary dark:bg-emerald-950/60 dark:text-primary">v{updatePrompt.version}</span>
                   </div>
                   <p className="mt-1 text-[12px] leading-5 text-muted-foreground dark:text-muted-foreground">{updatePrompt.description}</p>
                 </div>
@@ -240,7 +240,7 @@ export function DesktopShell({
               <div className="mt-3 flex items-center justify-end gap-2">
                 <button
                   type="button"
-                  className="ui-control-surface h-8 px-2.5 text-[12px] font-medium text-muted-foreground hover:text-foreground"
+                  className="rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground dark:text-muted-foreground dark:hover:bg-white/[0.07] dark:hover:text-slate-200"
                   onClick={updatePrompt.onSkip}
                   disabled={updatePrompt.busy}
                 >
@@ -248,7 +248,7 @@ export function DesktopShell({
                 </button>
                 <button
                   type="button"
-                  className="h-8 rounded-[var(--radius-control)] bg-primary px-3 text-[12px] font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-[var(--cs-primary-hover)] disabled:cursor-wait disabled:opacity-55"
+                  className="rounded-lg bg-primary px-3 py-1.5 text-[12px] font-semibold text-primary-foreground shadow-sm transition-opacity hover:opacity-90 disabled:cursor-wait disabled:opacity-55"
                   onClick={updatePrompt.onInstall}
                   disabled={updatePrompt.busy}
                 >

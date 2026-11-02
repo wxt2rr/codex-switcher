@@ -7,7 +7,6 @@ import { Input } from "./form-primitives";
 
 // Preset colors for theme selection
 const presetColors = [
-  { name: "Green", value: "#10b981" },
   { name: "Blue", value: "#3b82f6" },
   { name: "Indigo", value: "#6366f1" },
   { name: "Purple", value: "#8b5cf6" },
@@ -17,7 +16,7 @@ const presetColors = [
   { name: "Amber", value: "#f59e0b" },
   { name: "Yellow", value: "#eab308" },
   { name: "Lime", value: "#84cc16" },
-  { name: "Lime Green", value: "#22c55e" },
+  { name: "Green", value: "#22c55e" },
   { name: "Emerald", value: "#10b981" },
   { name: "Teal", value: "#14b8a6" },
   { name: "Cyan", value: "#06b6d4" },
@@ -61,20 +60,10 @@ function addAlpha(color: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-function readableForeground(color: string): string {
-  const hex = color.replace("#", "");
-  const channels = [0, 2, 4].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16) / 255);
-  const luminance = channels.reduce((total, channel, index) => {
-    const linear = channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
-    return total + linear * [0.2126, 0.7152, 0.0722][index];
-  }, 0);
-  return luminance > 0.58 ? "#052e1b" : "#ffffff";
-}
-
 // Apply theme color to CSS variables
 function applyThemeColor(color: string) {
   document.documentElement.style.setProperty("--cs-primary", color);
-  document.documentElement.style.setProperty("--cs-primary-foreground", readableForeground(color));
+  document.documentElement.style.setProperty("--cs-primary-foreground", "#ffffff");
   // Generate a lighter version for selected background
   const lighterColor = lightenColor(color, 0.9);
   document.documentElement.style.setProperty("--cs-selected-background", lighterColor);
@@ -88,7 +77,7 @@ function applyThemeColor(color: string) {
 
 export function ThemeColorSettings({ language }: { language: "zh" | "en" | "ja" }) {
   const [themeColorPickerOpen, setThemeColorPickerOpen] = useState(false);
-  const [currentThemeColor, setCurrentThemeColor] = useState("#10b981");
+  const [currentThemeColor, setCurrentThemeColor] = useState("#3b82f6");
 
   // Load theme color from localStorage on mount
   useEffect(() => {
@@ -112,7 +101,7 @@ export function ThemeColorSettings({ language }: { language: "zh" | "en" | "ja" 
   }
 
   return (
-    <div className="ui-surface-muted space-y-4 px-4 py-3">
+    <div className="space-y-4 rounded-lg bg-[#f7f8fa] px-4 py-3">
       <div className="flex items-center gap-4">
         <div className="flex-1">
           <div className="text-[13px] font-medium text-foreground">
@@ -124,7 +113,7 @@ export function ThemeColorSettings({ language }: { language: "zh" | "en" | "ja" 
         </div>
         <div className="flex items-center gap-2">
           <div
-            className="size-8 rounded-[var(--radius-control)] border border-[var(--cs-border-subtle)] shadow-sm"
+            className="size-8 rounded-lg border border-black/[0.08] shadow-sm"
             style={{ backgroundColor: currentThemeColor }}
           />
           <Button
@@ -139,17 +128,17 @@ export function ThemeColorSettings({ language }: { language: "zh" | "en" | "ja" 
       </div>
 
       {themeColorPickerOpen ? (
-        <div className="space-y-3 border-t border-[var(--cs-border-subtle)] pt-3">
+        <div className="space-y-3 border-t border-black/[0.06] pt-3">
           <div className="grid grid-cols-8 gap-2">
             {presetColors.map((color) => (
               <button
                 key={color.value}
                 type="button"
                 className={cn(
-                  "size-8 rounded-[var(--radius-control)] border-2 transition-all hover:scale-105",
+                  "size-8 rounded-lg border-2 transition-all hover:scale-105",
                   currentThemeColor === color.value
                     ? "border-primary scale-110"
-                    : "border-transparent hover:border-[var(--cs-border)]"
+                    : "border-transparent hover:border-black/[0.1]"
                 )}
                 style={{ backgroundColor: color.value }}
                 onClick={() => handleThemeColorChange(color.value)}
@@ -166,13 +155,13 @@ export function ThemeColorSettings({ language }: { language: "zh" | "en" | "ja" 
               type="color"
               value={currentThemeColor}
               onChange={(e) => handleThemeColorChange(e.target.value)}
-              className="ui-control-surface size-10 cursor-pointer"
+              className="size-10 cursor-pointer rounded-lg border border-black/[0.08]"
             />
             <Input
               value={currentThemeColor}
               onChange={(e) => handleThemeColorChange(e.target.value)}
               placeholder="#000000"
-              className="ui-control-surface h-9 flex-1 text-[13px] shadow-none"
+              className="h-9 flex-1 rounded-lg border-border bg-white text-[13px] shadow-none"
             />
           </div>
 

@@ -19,7 +19,7 @@ test("account model exposure panel keeps discovery, manual models, retry, and ex
   assert.match(source, /全部服务商/);
   assert.match(source, /providerOptions/);
   assert.match(source, /<Select/);
-  assert.match(source, /ui-surface-muted grid shrink-0 gap-2/);
+  assert.match(source, /grid shrink-0 gap-2 rounded-lg border/);
   assert.match(source, /flex min-w-0 flex-wrap items-center gap-2/);
   assert.doesNotMatch(source, /<select[\s>]/);
 });

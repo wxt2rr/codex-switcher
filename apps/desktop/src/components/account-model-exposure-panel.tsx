@@ -191,7 +191,7 @@ export function AccountModelExposurePanel({
       scrollable={false}
     >
       <div className="flex min-h-0 flex-1 flex-col gap-4">
-        <div className="ui-status-message ui-status-message-neutral flex shrink-0 items-center gap-2 text-[11px] leading-5">
+        <div className="flex shrink-0 items-center gap-2 rounded-lg border border-black/[0.05] bg-[#fafbfc] px-3 py-2 text-[11px] leading-5 text-muted-foreground">
           <Info className="size-3.5 shrink-0 text-muted-foreground" />
           <span className="truncate">
             {zh ? "选择的模型会暴露给当前账号，保存后可在模型页继续调整。" : "Selected models are exposed to this account and can be adjusted later on the Models page."}
@@ -206,7 +206,7 @@ export function AccountModelExposurePanel({
           </Tooltip>
         </div>
         {catalogFallback ? (
-          <div role="status" className="ui-status-message ui-status-message-warning shrink-0 text-[12px] leading-5">
+          <div role="status" className="shrink-0 rounded-lg border border-warm-200 bg-warm-50/70 px-3.5 py-3 text-[12px] leading-5 text-warm-700">
             <div className="font-medium">
               {discovery?.state === "failed"
                 ? (zh ? "尝试抓取服务商模型失败" : "Failed to fetch provider models")
@@ -218,7 +218,7 @@ export function AccountModelExposurePanel({
             </div>
           </div>
         ) : null}
-        <div className="ui-surface-muted grid shrink-0 gap-2 p-1.5">
+        <div className="grid shrink-0 gap-2 rounded-lg border border-black/[0.05] bg-white p-1.5">
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={zh ? "搜索模型、服务商或标识" : "Search model, provider, or id"} className="pl-9" />
@@ -240,7 +240,7 @@ export function AccountModelExposurePanel({
                 })),
               ]}
               openOnHover={false}
-              className="ui-control-surface h-9 min-w-[140px] flex-1 text-[12px] sm:max-w-[180px]"
+              className="h-9 min-w-[140px] flex-1 bg-white text-[12px] sm:max-w-[180px]"
             />
             <Select
               value={modelFilter}
@@ -250,7 +250,7 @@ export function AccountModelExposurePanel({
                 { value: "selected", label: zh ? "已选择" : "Selected" },
               ]}
               openOnHover={false}
-              className="ui-control-surface h-9 min-w-[100px] flex-1 text-[12px] sm:max-w-[130px]"
+              className="h-9 min-w-[100px] flex-1 bg-white text-[12px] sm:max-w-[130px]"
             />
             <Tooltip content={zh ? "重新拉取模型列表" : "Refresh model list"}>
               <Button type="button" variant="outline" size="icon" onClick={() => void loadModels(true)} disabled={refreshing || loading || !accountKey} aria-label={zh ? "刷新模型列表" : "Refresh model list"}>
@@ -262,14 +262,14 @@ export function AccountModelExposurePanel({
                 type="button"
                 onClick={onOpenModelSettings}
                 aria-label={zh ? "打开模型设置" : "Open model settings"}
-                className="ui-control-surface inline-flex size-9 items-center justify-center text-muted-foreground hover:text-foreground"
+                className="inline-flex size-9 items-center justify-center rounded-lg border border-black/[0.08] bg-white text-muted-foreground transition-colors hover:bg-muted hover:text-neutral-900"
               >
                 <CircleHelp className="size-4" />
               </button>
             </Tooltip>
           </div>
         </div>
-        <div className="ui-surface-muted flex shrink-0 items-center px-3 py-2">
+        <div className="flex shrink-0 items-center rounded-lg border border-black/[0.05] bg-[#fafbfc] px-3 py-2">
           <label
             className={cn(
               "inline-flex items-center gap-1.5 text-[12px] font-medium text-neutral-800",
@@ -297,7 +297,7 @@ export function AccountModelExposurePanel({
           aria-busy={refreshing}
         >
           {candidates.length === 0 ? (
-            <div className="ui-empty-state px-4 py-8 text-center text-[12px] leading-5 text-muted-foreground">
+            <div className="rounded-lg border border-dashed border-black/[0.1] px-4 py-8 text-center text-[12px] leading-5 text-muted-foreground">
               {zh ? "没有可选择的模型。可以先在模型页面添加手动模型，或检查服务商凭据后重试。" : "No selectable models. Add a manual model on the Models page or retry after checking the credential."}
             </div>
           ) : candidates.map((model) => {
@@ -315,7 +315,7 @@ export function AccountModelExposurePanel({
             const checked = selectedIds.includes(model.id);
             const historicalBinding = !catalogFallback && Boolean(providerModelKey && !discovered && checked);
             return (
-              <div key={model.id} className={cn("ui-model-option flex items-start gap-3 px-3.5 py-3", historicalBinding ? "ui-model-option-warning" : checked ? "ui-model-option-selected" : "")}>
+              <div key={model.id} className={cn("flex items-start gap-3 rounded-lg border px-3.5 py-3 transition-colors", historicalBinding ? "border-warm-200 bg-warm-50/40" : checked ? "border-neutral-300 bg-neutral-50" : "border-black/[0.07] bg-white hover:bg-neutral-50")}>
                 <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
                   <input type="checkbox" checked={checked} onChange={(event) => toggleModel(model.id, event.target.checked)} className="mt-1 size-4 accent-primary" />
                   <ProviderIcon
@@ -358,7 +358,7 @@ export function AccountModelExposurePanel({
             );
           })}
         </div>
-        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-[var(--cs-border-subtle)] pt-4">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-black/[0.06] pt-4">
           <span className="text-[11px] leading-5 text-muted-foreground">{zh ? "可在模型页面继续调整优先级、权重和上游模型名。" : "Adjust priority, weight, and upstream ids later on the Models page."}</span>
           <div className="flex shrink-0 gap-2">
             <Button type="button" variant="outline" onClick={onClose}>{zh ? "取消" : "Cancel"}</Button>

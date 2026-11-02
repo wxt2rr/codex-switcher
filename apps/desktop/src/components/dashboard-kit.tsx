@@ -19,7 +19,7 @@ export function DashboardCard({
   return (
     <article
       className={cn(
-        "ui-surface p-5 shadow-[var(--cs-shadow-xs)] dark:bg-[var(--cs-surface)]",
+        "rounded-[14px] border border-border bg-white p-5",
         className,
       )}
     >
@@ -42,8 +42,8 @@ export function DashboardCardHeader({
   return (
     <div className="mb-5 flex items-start justify-between gap-3">
       <div>
-        <div className="text-[15px] font-semibold tracking-tight text-foreground">{title}</div>
-        <div className="mt-1 text-[12px] leading-5 text-muted-foreground">{subtitle}</div>
+        <div className="text-[17px] font-semibold tracking-tight text-foreground">{title}</div>
+        <div className="mt-1 text-[13px] leading-5 text-muted-foreground">{subtitle}</div>
       </div>
       {actionLabel ? (
         <Button size="sm" variant="outline" onClick={onAction} className="shrink-0">
@@ -74,8 +74,8 @@ export function MetricBlock({
 
 export function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="ui-surface-muted px-4 py-3">
-      <div className="text-[12px] font-medium text-muted-foreground">{label}</div>
+    <div className="rounded-lg border border-neutral-100 bg-muted/80 px-4 py-3">
+      <div className="text-[13px] font-medium text-muted-foreground">{label}</div>
       <div key={value} className="motion-value-update mt-1 text-sm font-medium text-foreground">{value}</div>
     </div>
   );
@@ -83,7 +83,7 @@ export function InfoRow({ label, value }: { label: string; value: string }) {
 
 export function BigNumber({ value, label }: { value: string; label: string }) {
   return (
-    <div className="ui-surface-muted px-4 py-5">
+    <div className="rounded-lg border border-neutral-100 bg-muted/80 px-4 py-5">
       <div key={value} className="motion-value-update text-4xl font-semibold tracking-tight text-foreground">{value}</div>
       <div className="mt-2 text-sm font-medium text-muted-foreground">{label}</div>
     </div>

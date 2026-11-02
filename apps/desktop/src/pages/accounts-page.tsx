@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import {
   CircleCheck,
   CircleX,
@@ -39,7 +38,6 @@ import { EmptyList, ListCard, ListStack } from "../components/account-list-primi
 import {
   ConfirmDialog,
   SidePanel,
-  Toggle,
 } from "../components/admin-primitives";
 import { Field, Input, Select, Textarea } from "../components/form-primitives";
 import type { AccountRequestHealth, AccountSummary, OverviewPayload } from "../desktop-model";
@@ -605,30 +603,30 @@ export function AccountsPage({
   }
 
   return (
-    <section className="h-full min-h-0 overflow-hidden px-5 pb-5 pt-5 xl:px-7 xl:pb-7 xl:pt-7">
+    <section className="h-full min-h-0 overflow-hidden px-6 pb-6 pt-6 xl:px-8 xl:pb-8 xl:pt-8">
       <div className="admin-page-content flex h-full w-full flex-col gap-3">
         <div className="shrink-0 flex flex-col gap-4">
           <div className="flex items-start justify-between gap-6">
             <div className="space-y-1">
-              <h2 className="text-[22px] font-semibold tracking-[-0.035em] text-foreground">
+              <h2 className="text-[24px] font-semibold tracking-[-0.04em] text-foreground">
                 {language === "zh" ? "账号管理" : language === "ja" ? "アカウント管理" : "Account Management"}
               </h2>
-              <p className="max-w-2xl text-[12px] leading-5 text-muted-foreground">
+              <p className="text-[13px] leading-6 text-muted-foreground">
                 {language === "zh" ? "统一管理订阅授权、服务商账号连接和运行时配置。模型绑定请在模型页面维护。" : language === "ja" ? "サブスクリプション認証、プロバイダー接続、ランタイム設定をまとめて管理します。モデルのバインドはモデル画面で管理します。" : "Manage subscription auth, provider connections, and runtime settings. Model bindings are managed on the Models page."}
               </p>
             </div>
           </div>
 
-          <div className="ui-surface-muted px-3 py-2.5 shadow-[var(--cs-shadow-xs)]">
-            <div className="responsive-toolbar flex flex-col items-stretch gap-2.5 sm:flex-row sm:items-center sm:flex-wrap">
-              <div className="relative min-w-0 flex-1 sm:min-w-[220px]">
+          <div className="rounded-[18px] bg-white px-3 py-2.5 ring-1 ring-black/[0.04] shadow-[0_10px_30px_rgba(15,23,42,0.03)]">
+            <div className="responsive-toolbar flex items-center gap-2.5">
+              <div className="relative min-w-[220px] flex-1">
                 <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   data-account-search-input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder={language === "zh" ? "搜索账号、环境或 Base URL" : pageCopy.accounts.searchPlaceholder}
-                  className="ui-control-surface h-8 pl-10 text-[13px] shadow-none"
+                  className="h-8 rounded-lg border-transparent bg-[#fbfbfc] pl-10 text-[13px] shadow-none focus:border-transparent focus:ring-0"
                 />
               </div>
               <Select
@@ -652,7 +650,7 @@ export function AccountsPage({
                     onAction: () => markDefaultEnvironment(env.name),
                   })),
                 ]}
-                className="ui-control-surface h-8 w-[140px] px-3 text-[13px] shadow-none"
+                className="h-8 w-[140px] rounded-lg border-transparent bg-[#fbfbfc] px-3 text-[13px] shadow-none"
               />
               <Select
                 value={modeFilter}
@@ -662,7 +660,7 @@ export function AccountsPage({
                   { value: "apikey", label: localizeAuthMode("apikey", language) },
                   { value: "auth", label: localizeAuthMode("auth", language) },
                 ]}
-                className="ui-control-surface h-8 w-[128px] px-3 text-[13px] shadow-none"
+                className="h-8 w-[128px] rounded-lg border-transparent bg-[#fbfbfc] px-3 text-[13px] shadow-none"
               />
               <Select
                 value={sortMode}
@@ -671,12 +669,12 @@ export function AccountsPage({
                   { value: "recent", label: language === "zh" ? "最近使用" : "Recently used" },
                   { value: "name", label: language === "zh" ? "名称排序" : "By name" },
                 ]}
-                className="ui-control-surface h-8 w-[128px] px-3 text-[13px] shadow-none"
+                className="h-8 w-[128px] rounded-lg border-transparent bg-[#fbfbfc] px-3 text-[13px] shadow-none"
               />
-              <div className="ui-control-surface flex h-8 items-center overflow-hidden">
+              <div className="flex h-8 items-center overflow-hidden rounded-lg bg-[#f3f4f6]">
                 <button
                   type="button"
-                  className="motion-interactive-color flex size-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-wait"
+                  className="motion-interactive-color flex size-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-[#ebeef2] hover:text-foreground disabled:cursor-wait"
                   aria-label={language === "zh" ? "立即刷新用量" : "Refresh usage now"}
                   title={language === "zh" ? "立即刷新用量" : "Refresh usage now"}
                   onClick={onRefreshAuthMetrics}
@@ -685,7 +683,7 @@ export function AccountsPage({
                   <RefreshCw className={cn("size-3.5", authMetricsLoading && "animate-spin")} />
                 </button>
                 {customRefreshEditing ? (
-                  <div className="flex items-center border-l border-[var(--cs-border-subtle)]">
+                  <div className="flex items-center border-l border-black/[0.05]">
                     <Input
                       data-auth-refresh-input
                       type="number"
@@ -735,12 +733,12 @@ export function AccountsPage({
                           : `${authRefreshIntervalSeconds}s`,
                       },
                     ]}
-                    className="h-8 w-[64px] rounded-none border-l border-[var(--cs-border-subtle)] bg-transparent px-2 text-[13px] shadow-none"
+                    className="h-8 w-[64px] rounded-none border-l border-black/[0.05] bg-transparent px-2 text-[13px] shadow-none"
                   />
                 )}
               </div>
               <Button
-                className="ml-auto h-8 rounded-[var(--radius-control)] px-3.5 text-[12px] font-semibold shadow-none"
+                className="ml-auto h-8 rounded-lg bg-neutral-950 px-3.5 text-[13px] font-semibold text-white shadow-none hover:bg-neutral-800"
                 onClick={() => {
                   onPrimeAccount(undefined);
                   setLoginDrawerOpen(true);
@@ -876,7 +874,7 @@ export function AccountsPage({
             </Field>
           ) : null}
           {providerMode && managedProvider ? (
-            <div className="ui-status-message ui-status-message-success px-3 py-2 text-xs leading-5">
+            <div className="rounded-lg bg-primary/10 px-3 py-2 text-xs leading-5 text-primary dark:bg-primary/20 dark:text-primary">
               {language === "zh" ? "插件会自动启动本机服务、发现模型并注入连接密钥。" : language === "ja" ? "プラグインがローカルサービスを起動し、モデルと接続キーを自動管理します。" : "The plugin starts the local service and manages model discovery and connection keys automatically."}
             </div>
           ) : null}
@@ -892,7 +890,7 @@ export function AccountsPage({
                 />
                 <button
                   type="button"
-                  className="ui-control-surface motion-interactive-color absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center text-muted-foreground hover:text-foreground"
+                  className="motion-interactive-color absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-[#eef1f4] hover:text-foreground"
                   onClick={() => setShowApiKeyDraft((value) => !value)}
                   aria-label={
                     showApiKeyDraft
@@ -1476,7 +1474,7 @@ function AccountListCard({
         )}
       </div>
 
-              <div className="responsive-actions min-h-full border-l border-[var(--cs-border-subtle)] pl-4">
+      <div className="responsive-actions min-h-full border-l border-black/[0.05] pl-4">
         <CardTargetButton
           active={account.isCurrentCli}
           disabled={busy}
@@ -1565,7 +1563,7 @@ function AccountListCard({
         />
         <button
           type="button"
-          className="ui-control-surface motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap px-3 text-[13px] font-medium text-foreground disabled:cursor-not-allowed disabled:opacity-55"
+          className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[13px] font-medium text-foreground ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
           onClick={onOpenModels}
           disabled={busy}
           title={language === "zh" ? "选择账号暴露的模型" : "Choose exposed models"}
@@ -1575,7 +1573,7 @@ function AccountListCard({
         </button>
         <button
           type="button"
-          className="ui-control-surface motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap px-3 text-[13px] font-medium text-foreground disabled:cursor-not-allowed disabled:opacity-55"
+          className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[13px] font-medium text-foreground ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
           onClick={() => {
             onPrimeAccount(account);
             onLogin();
@@ -1661,7 +1659,6 @@ function ResetCardIndicator({
   compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [popoverPosition, setPopoverPosition] = useState({ top: 0, left: 0 });
   const [busy, setBusy] = useState(false);
   const [consumeCardId, setConsumeCardId] = useState<string>();
   const [pendingBusy, setPendingBusy] = useState<string>();
@@ -1730,22 +1727,6 @@ function ResetCardIndicator({
   };
   useEffect(() => {
     if (!open) return;
-    const updatePosition = () => {
-      const rect = triggerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const width = 300;
-      const margin = 12;
-      const left = Math.min(Math.max(margin, rect.left), Math.max(margin, window.innerWidth - width - margin));
-      const below = rect.bottom + 8;
-      const estimatedHeight = Math.min(440, Math.max(160, window.innerHeight * 0.5));
-      const top = below + estimatedHeight <= window.innerHeight - margin
-        ? below
-        : Math.max(margin, rect.top - estimatedHeight - 8);
-      setPopoverPosition({ top, left });
-    };
-    updatePosition();
-    window.addEventListener("resize", updatePosition);
-    window.addEventListener("scroll", updatePosition, true);
     const handlePointerMove = (event: PointerEvent) => {
       const target = event.target;
       if (isInsidePopover(target) || hasOpenNestedSelect() || isInsideNestedSelect(target)) {
@@ -1756,8 +1737,6 @@ function ResetCardIndicator({
     };
     document.addEventListener("pointermove", handlePointerMove, true);
     return () => {
-      window.removeEventListener("resize", updatePosition);
-      window.removeEventListener("scroll", updatePosition, true);
       document.removeEventListener("pointermove", handlePointerMove, true);
       cancelScheduledClose();
     };
@@ -1768,8 +1747,8 @@ function ResetCardIndicator({
         ref={triggerRef}
         type="button"
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-[var(--radius-control)] text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-none",
-          compact ? "ui-control-surface h-6 px-2" : "px-1 py-1",
+          "inline-flex items-center gap-1.5 rounded-md text-[11px] text-muted-foreground transition-colors hover:bg-black/[0.04] hover:text-foreground focus:outline-none dark:hover:bg-white/[0.06]",
+          compact ? "h-6 border border-black/[0.06] bg-[#f7f8fa] px-2 dark:border-white/[0.08] dark:bg-[#1b2129]" : "px-1 py-1",
         )}
         aria-expanded={open}
         aria-label={language === "zh" ? `重置卡：${statusLabel}` : `Reset cards: ${statusLabel}`}
@@ -1781,11 +1760,10 @@ function ResetCardIndicator({
         <CreditCard className="size-3.5" />
         <span className={cn("font-semibold tabular-nums", snapshot?.isStale && "text-amber-600")}>{statusLabel}</span>
       </button>
-      {open && typeof document !== "undefined" ? createPortal(
+      {open ? (
         <div
           ref={popoverRef}
-          className="ui-overlay-surface fixed z-[var(--z-popover)] w-[min(300px,calc(100vw-24px))] p-3 text-[12px]"
-          style={{ top: popoverPosition.top, left: popoverPosition.left }}
+          className="absolute left-2 top-full z-30 mt-1 w-[300px] rounded-xl border border-black/[0.08] bg-white p-3 text-[12px] shadow-[0_12px_30px_rgba(15,23,42,0.14)] dark:border-white/[0.10] dark:bg-[#141a22] dark:shadow-[0_12px_30px_rgba(0,0,0,0.35)]"
           onMouseEnter={cancelScheduledClose}
           onMouseLeave={scheduleClose}
         >
@@ -1800,7 +1778,7 @@ function ResetCardIndicator({
               <div className="mt-2 space-y-1.5">
                 {snapshot.cards.length === 0 ? <div className={cn("text-muted-foreground", snapshot.lastError && "text-amber-700")}>{snapshot.lastError ?? (language === "zh" ? "暂无可用重置卡" : "No available reset cards")}</div> : null}
                 {snapshot.cards.map((card) => (
-                  <div key={card.id} className="ui-surface-muted px-2.5 py-2">
+                  <div key={card.id} className="rounded-lg bg-[#f7f8fa] px-2.5 py-2 dark:bg-[#1b2129]">
                     <div className="flex items-center justify-between gap-2 text-foreground">
                       <span>{card.type === "weekly" ? (language === "zh" ? "周额度" : "Weekly") : card.type === "five-hour" ? (language === "zh" ? "五小时额度" : "Five-hour") : (language === "zh" ? "重置卡" : "Reset")}</span>
                       <span className="font-mono text-[10px] text-muted-foreground">{card.id}</span>
@@ -1836,7 +1814,7 @@ function ResetCardIndicator({
               ) : null}
               <div className="mt-2 flex items-center justify-between gap-2 border-t border-black/[0.05] pt-2 dark:border-white/[0.08]">
                 <span className="text-[11px] text-muted-foreground">{language === "zh" ? "此账号自动使用" : "Automatic use for this account"}</span>
-                <Toggle checked={autoUseEnabled} onChange={(checked) => snapshot && void onSetAutoUse(snapshot.accountKey, { enabled: checked })} label={language === "zh" ? "此账号自动使用重置卡" : "Automatic reset-card use for this account"} disabled={busy || !settings} />
+                <button type="button" role="switch" aria-checked={autoUseEnabled} disabled={busy || !settings} onClick={() => snapshot && void onSetAutoUse(snapshot.accountKey, { enabled: !autoUseEnabled })} className={cn("relative h-5 w-9 rounded-full", autoUseEnabled ? "bg-primary" : "bg-[#d1d1d6]")}><span className={cn("absolute left-0.5 top-0.5 size-4 rounded-full bg-white shadow", autoUseEnabled ? "translate-x-4" : "translate-x-0")} /></button>
               </div>
               <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
                 <span>{language === "zh" ? "账号触发策略" : "Account trigger"}</span>
@@ -1850,7 +1828,7 @@ function ResetCardIndicator({
                     { value: "expiring", label: language === "zh" ? "即将到期" : "Expiring" },
                     { value: "both", label: language === "zh" ? "两者" : "Both" },
                   ]}
-                  className="ui-control-surface h-7 w-[142px] text-[11px]"
+                  className="h-7 w-[142px] bg-white text-[11px] dark:bg-[#1b2129]"
                   openOnHover={false}
                 />
               </div>
@@ -1864,7 +1842,7 @@ function ResetCardIndicator({
                     { value: "grace", label: language === "zh" ? "倒计时缓冲" : "Grace period" },
                     { value: "confirm", label: language === "zh" ? "需要确认" : "Confirm" },
                   ]}
-                  className="ui-control-surface h-7 w-[142px] text-[11px]"
+                  className="h-7 w-[142px] bg-white text-[11px] dark:bg-[#1b2129]"
                   openOnHover={false}
                 />
               </div>
@@ -1874,7 +1852,7 @@ function ResetCardIndicator({
               </div>
             </>
           )}
-        </div>, document.body,
+        </div>
       ) : null}
     </div>
   );
@@ -1920,7 +1898,7 @@ function RowActionMenu({
     <div ref={rootRef} className="relative">
       <button
         type="button"
-        className="ui-control-surface motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap px-3 text-[13px] font-medium text-foreground disabled:cursor-not-allowed disabled:opacity-55"
+        className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[13px] font-medium text-foreground ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
         onClick={() => setOpen((value) => !value)}
         disabled={disabled}
         aria-expanded={open}
@@ -1935,7 +1913,7 @@ function RowActionMenu({
           data-state={open ? "open" : "closed"}
           data-menu-placement={placement}
           className={cn(
-            "motion-popover-enter ui-overlay-surface absolute right-0 z-[var(--z-popover)] min-w-[188px] overflow-visible p-1.5",
+            "motion-popover-enter absolute right-0 z-20 min-w-[188px] overflow-visible rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md",
             placement === "up" ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]",
           )}
           style={{ transformOrigin: placement === "up" ? "bottom right" : "top right", maxHeight: availableHeight }}
@@ -1948,8 +1926,8 @@ function RowActionMenu({
             />
           ) : (
             <button key={item.key} type="button"
-              className={cn("motion-interactive-color flex w-full items-center rounded-[var(--radius-control)] px-3 py-2 text-left text-[13px] font-medium",
-                item.tone === "danger" ? "text-destructive hover:bg-destructive/10" : "text-foreground hover:bg-[var(--cs-surface-muted)]")}
+              className={cn("motion-interactive-color flex w-full items-center rounded-lg px-3 py-2 text-left text-[13px] font-medium",
+                item.tone === "danger" ? "text-destructive hover:bg-destructive/10" : "text-foreground hover:bg-[#f6f7f9]")}
               onClick={() => { setOpen(false); item.onSelect?.(); }}>
               {item.label}
             </button>
@@ -1977,7 +1955,7 @@ function RowActionSubmenu({
 
   return (
     <div ref={triggerRef} className="relative" onPointerEnter={openOnHover} onPointerLeave={closeOnHover}>
-      <button type="button" className="motion-interactive-color flex w-full items-center justify-between rounded-[var(--radius-control)] px-3 py-2 text-left text-[13px] font-medium text-foreground hover:bg-[var(--cs-surface-muted)]"
+      <button type="button" className="motion-interactive-color flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] font-medium text-foreground hover:bg-[#f6f7f9]"
         aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span>{item.label}</span>
         <ChevronRight className="size-3.5 text-muted-foreground" />
@@ -1986,10 +1964,10 @@ function RowActionSubmenu({
         <div ref={menuRef} data-state={open ? "open" : "closed"} data-submenu-placement={placement}
           className={cn("absolute right-full z-30 pr-2", !open && "pointer-events-none", placement === "up" ? "bottom-[-4px]" : "top-[-4px]")}
           style={{ maxHeight: availableHeight }}>
-          <div className="motion-popover-enter ui-overlay-surface min-w-[180px] overflow-y-auto p-1.5"
+          <div className="motion-popover-enter min-w-[180px] overflow-y-auto rounded-lg border border-black/[0.08] bg-white p-1.5 shadow-md"
             style={{ maxHeight: availableHeight }}>
             {item.children.map((child) => (
-              <button key={child.key} type="button" className="motion-interactive-color block w-full rounded-[var(--radius-control)] px-3 py-2 text-left text-[13px] font-medium text-foreground hover:bg-[var(--cs-surface-muted)]"
+              <button key={child.key} type="button" className="motion-interactive-color block w-full rounded-lg px-3 py-2 text-left text-[13px] font-medium text-foreground hover:bg-[#f6f7f9]"
                 onClick={() => { onClose(); child.onSelect(); }}>
                 {child.label}
               </button>
@@ -2267,7 +2245,7 @@ function CardTargetButton({
           className={cn("absolute right-0 z-20 overflow-visible", !open && "pointer-events-none", placement === "up" ? "bottom-full pb-2" : "top-full pt-2")}
           style={{ maxHeight: availableHeight }}
         >
-          <div data-state={open ? "open" : "closed"} className="motion-popover-enter ui-overlay-surface min-w-[172px] p-1">
+          <div data-state={open ? "open" : "closed"} className="motion-popover-enter min-w-[172px] rounded-lg border border-black/[0.08] bg-white p-1 shadow-md">
             {items.map((item) => (
               <div
                 key={item.key}
@@ -2290,8 +2268,8 @@ function CardTargetButton({
                 <button
                   type="button"
                   className={cn(
-                    "motion-interactive-color flex w-full items-center justify-between rounded-[var(--radius-control)] px-3 py-2 text-left text-[13px] font-medium text-foreground hover:bg-[var(--cs-surface-muted)] hover:text-foreground",
-                    item.key === primaryStrategy && "ui-selected-control",
+                    "motion-interactive-color flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] font-medium text-foreground hover:bg-[#f6f7f9] hover:text-foreground",
+                    item.key === primaryStrategy && "bg-[#f5f7fa] text-foreground",
                     item.disabled && "cursor-not-allowed text-muted-foreground/60 hover:bg-transparent hover:text-muted-foreground/60",
                   )}
                   disabled={item.disabled}
@@ -2315,18 +2293,18 @@ function CardTargetButton({
                       projectPlacement === "up" ? "bottom-[-4px]" : "top-[-4px]",
                     )}
                   >
-                    <div data-state={projectOpen ? "open" : "closed"} className="motion-popover-enter ui-overlay-surface flex w-[280px] flex-col overflow-hidden p-1" style={{ maxHeight: projectAvailableHeight }}>
+                    <div data-state={projectOpen ? "open" : "closed"} className="motion-popover-enter flex w-[280px] flex-col overflow-hidden rounded-lg border border-black/[0.08] bg-white p-1 shadow-md" style={{ maxHeight: projectAvailableHeight }}>
                       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                         {projects.map((project) => (
-                          <button key={project.path} type="button" title={project.path} className="motion-interactive-color block w-full rounded-[var(--radius-control)] px-3 py-2 text-left hover:bg-[var(--cs-surface-muted)]" onClick={() => { setOpen(false); projectMenu.setOpen(false); onSelectProject?.(project.path); }}>
+                          <button key={project.path} type="button" title={project.path} className="motion-interactive-color block w-full rounded-lg px-3 py-2 text-left hover:bg-[#f6f7f9]" onClick={() => { setOpen(false); projectMenu.setOpen(false); onSelectProject?.(project.path); }}>
                             <span className="block truncate text-[13px] font-medium text-foreground">{project.name}</span>
                             <span className="block truncate text-[11px] text-muted-foreground">{project.path}</span>
                           </button>
                         ))}
                       </div>
-                      <div className="mt-1 border-t border-[var(--cs-border-subtle)] pt-1">
-                        <button type="button" className="block w-full rounded-[var(--radius-control)] px-3 py-2 text-left text-[13px] text-foreground hover:bg-[var(--cs-surface-muted)]" onClick={() => { setOpen(false); projectMenu.setOpen(false); onSelectProject?.(""); }}>{homeLabel}</button>
-                        <button type="button" className="block w-full rounded-[var(--radius-control)] px-3 py-2 text-left text-[13px] text-foreground hover:bg-[var(--cs-surface-muted)]" onClick={() => { void onPickDirectory?.().then((path) => { if (path) { setOpen(false); projectMenu.setOpen(false); onSelectProject?.(path); } }); }}>{pickDirectoryLabel}</button>
+                      <div className="mt-1 border-t border-black/[0.06] pt-1">
+                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[13px] text-foreground hover:bg-[#f6f7f9]" onClick={() => { setOpen(false); projectMenu.setOpen(false); onSelectProject?.(""); }}>{homeLabel}</button>
+                        <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[13px] text-foreground hover:bg-[#f6f7f9]" onClick={() => { void onPickDirectory?.().then((path) => { if (path) { setOpen(false); projectMenu.setOpen(false); onSelectProject?.(path); } }); }}>{pickDirectoryLabel}</button>
                       </div>
                     </div>
                   </div>

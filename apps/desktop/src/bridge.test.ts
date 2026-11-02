@@ -509,5 +509,5 @@ test("reset-card UI exposes safe state, pending-action controls, and accessible 
   assert.match(accounts, /document\.addEventListener\("pointermove", handlePointerMove, true\)/);
   assert.match(operations, /preConsumeGraceSeconds/);
   assert.match(operations, /notifyBeforeAutoUse/);
-  assert.match(operations, /<Toggle/);
+  assert.match(operations, /role="switch" aria-checked/);
 });

@@ -30,13 +30,13 @@ export function Field({
 }) {
   return (
     <div className="grid gap-1.5">
-      <label className="text-[12px] font-medium tracking-[0.01em] text-muted-foreground">{label}</label>
+      <label className="text-[13px] font-medium text-neutral-700">{label}</label>
       {children}
       {(hint || error) && (
         <span
           className={cn(
-            "text-[12px] leading-5 transition-colors",
-            error ? "text-destructive" : "text-muted-foreground",
+            "text-xs transition-colors",
+            error ? "text-rose-500" : "text-neutral-400",
           )}
         >
           {error ?? hint}
@@ -51,10 +51,11 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
     <input
       {...props}
       className={cn(
-        "ui-control-surface h-9 w-full px-3",
-        "text-[13px] text-foreground placeholder:text-muted-foreground",
-        "outline-none",
-        "focus:border-[var(--cs-border)] focus:ring-0 focus:ring-offset-0",
+        "h-9 w-full rounded-lg border border-transparent bg-[#f1f4f8] px-3 dark:bg-[#19212b]",
+        "text-[13px] text-neutral-800 placeholder:text-neutral-400 dark:text-slate-100 dark:placeholder:text-muted-foreground",
+        "outline-none transition-[background-color,color,border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]",
+        "hover:bg-[#e9eef5] dark:hover:bg-[#202a36]",
+        "focus:border-transparent focus:ring-0 focus:ring-offset-0",
         props.className,
       )}
     />
@@ -183,6 +184,34 @@ export function Select({
     });
   }, [openOnHover, selectId]);
 
+  useEffect(() => {
+    if (!open || !openOnHover) return;
+
+    function handlePointerMove(event: PointerEvent) {
+      const point = { x: event.clientX, y: event.clientY };
+      lastPointerRef.current = point;
+      const isInside = isPointInsideHoverMenu(
+        point,
+        triggerRef.current?.getBoundingClientRect() ?? null,
+        contentRef.current?.getBoundingClientRect() ?? null,
+        10,
+      );
+      if (isInside) {
+        isHoveringRef.current = true;
+        cancelClose();
+      } else {
+        isHoveringRef.current = false;
+        scheduleClose(point);
+      }
+    }
+
+    document.addEventListener("pointermove", handlePointerMove, true);
+    return () => {
+      document.removeEventListener("pointermove", handlePointerMove, true);
+      cancelClose();
+    };
+  }, [open, openOnHover, selectId]);
+
   // Clean up on unmount
   useEffect(() => {
     return () => {
@@ -267,10 +296,11 @@ export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
     <textarea
       {...props}
       className={cn(
-        "ui-control-surface min-h-[120px] w-full px-3 py-2.5",
-        "text-[13px] text-foreground placeholder:text-muted-foreground",
-        "outline-none",
-        "focus:border-[var(--cs-border)] focus:ring-0 focus:ring-offset-0",
+        "min-h-[120px] w-full rounded-lg border border-transparent bg-[#f1f4f8] px-3 py-2.5 dark:bg-[#19212b]",
+        "text-[13px] text-neutral-800 placeholder:text-neutral-400 dark:text-slate-100 dark:placeholder:text-muted-foreground",
+        "outline-none transition-[background-color,color,border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]",
+        "hover:bg-[#e9eef5] dark:hover:bg-[#202a36]",
+        "focus:border-transparent focus:ring-0 focus:ring-offset-0",
         "resize-y",
         props.className,
       )}
