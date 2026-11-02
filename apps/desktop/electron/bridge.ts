@@ -189,6 +189,24 @@ import { stripExcludedGatewayFields } from "./gateway-admin-configuration.js";
 import { MacDockBadgeAdapter, WindowsTaskbarBadgeAdapter } from "./app-environment-badge-adapters.js";
 import { discoverGatewayAccountModels, discoverGatewayProviderModels } from "./gateway-model-discovery.js";
 import { fetchWithOptionalProxy } from "./upstream-proxy.js";
+import { SubscriptionQuotaManager } from "./subscription-quota-manager.js";
+import {
+  buildAccountReferences,
+  canonicalAccountKey,
+  extractSubscriptionCredentials,
+  isEligibleSubscriptionAccount,
+  type CodexSubscriptionAccount,
+} from "./codex-reset-card-utils.js";
+import type {
+  AutoUseMode,
+  ResetCardNotificationStatus,
+  ResetCardOperationEvent,
+  ResetCardRefreshResult,
+  ResetCardSettings,
+  ResetCardSnapshot,
+} from "../src/reset-card-model.js";
+import { DesktopNotificationService, type DesktopNotificationConstructor, type DesktopNotificationWindow } from "./desktop-notification-service.js";
+import { decideResetGatewayAdmission } from "./codex-reset-gateway-admission.js";
 import type {
   ProviderAuthMethod,
   ProviderAccountRef,
@@ -325,6 +343,14 @@ let desktopOperationsLoaderForTest:
   | undefined;
 let usageRouterManager: UsageRouterManager | undefined;
 let usageRouterManagerStateDir: string | undefined;
+let subscriptionQuotaManager: SubscriptionQuotaManager | undefined;
+let subscriptionQuotaManagerStateDir: string | undefined;
+let desktopNotificationService: DesktopNotificationService | undefined;
+let desktopNotificationDependencies: {
+  getWindow: () => DesktopNotificationWindow | undefined;
+  getWindows: () => DesktopNotificationWindow[];
+  notification: DesktopNotificationConstructor;
+} | undefined;
 let envHistoryCleanupQueue: Promise<void> = Promise.resolve();
 let skillManager: SkillManager | undefined;
 let skillManagerStateDir: string | undefined;
@@ -423,10 +449,236 @@ function getUsageRouterManager(): UsageRouterManager {
         const proxy = await resolveUsageProxy();
         return proxy || undefined;
       },
+      gatewayResetAdmission: (input) => getSubscriptionQuotaManager().consumeForGateway(input),
     });
     usageRouterManagerStateDir = stateDir;
   }
   return usageRouterManager;
+}
+
+function getDesktopNotificationService(): DesktopNotificationService {
+  if (!desktopNotificationService) {
+    desktopNotificationService = new DesktopNotificationService({
+      ...(desktopNotificationDependencies ?? {}),
+    });
+  }
+  return desktopNotificationService;
+}
+
+/** Inject Electron-only dependencies from the main process without making the
+ * bridge module depend on Electron named exports during browser/test imports. */
+export function configureDesktopNotificationService(options: {
+  getWindow: () => DesktopNotificationWindow | undefined;
+  getWindows: () => DesktopNotificationWindow[];
+  notification: DesktopNotificationConstructor;
+}): void {
+  desktopNotificationDependencies = options;
+  desktopNotificationService = undefined;
+}
+
+function broadcastResetCardEvent(channel: "desktop:resetCardSnapshot" | "desktop:resetCardOperation" | "desktop:resetCardNotification" | "desktop:resetCardNotificationClick", payload: unknown): void {
+  for (const window of desktopNotificationDependencies?.getWindows() ?? []) {
+    if (window.isDestroyed()) continue;
+    window.webContents.send(channel, payload);
+  }
+}
+
+async function discoverSubscriptionAccounts(): Promise<CodexSubscriptionAccount[]> {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const references = buildAccountReferences(state);
+  const proxyUrl = await resolveUsageProxy();
+  const accounts: CodexSubscriptionAccount[] = [];
+  for (const [envName, environment] of Object.entries(state.envs)) {
+    for (const [accountName, account] of Object.entries(environment.accounts)) {
+      if (!isEligibleSubscriptionAccount(account)) continue;
+      const credentials = extractSubscriptionCredentials(account.authData);
+      if (!credentials.accessToken) continue;
+      const authFile = await resolveAuthFile(envName, accountName, environment.path);
+      if (!authFile) continue;
+      const accountKey = canonicalAccountKey({
+        providerId: account.runtime.providerId,
+        accountId: credentials.accountId,
+        workspaceId: credentials.workspaceId,
+        email: credentials.email,
+        accessToken: credentials.accessToken,
+      });
+      const accountReferences = references.get(accountKey)
+        ?? [{ accountKey, envName, accountName, authMode: account.authMode, preferredAuthMethod: account.runtime.preferredAuthMethod }];
+      accounts.push({
+        accountKey,
+        envName,
+        accountName,
+        authMode: account.authMode,
+        preferredAuthMethod: account.runtime.preferredAuthMethod,
+        authFile,
+        homePath: environment.path,
+        accessToken: credentials.accessToken,
+        ...(credentials.accountId ? { accountId: credentials.accountId } : {}),
+        ...(credentials.workspaceId ? { workspaceId: credentials.workspaceId } : {}),
+        ...(proxyUrl ? { proxyUrl } : {}),
+        references: accountReferences,
+      });
+    }
+  }
+  return accounts;
+}
+
+function getSubscriptionQuotaManager(): SubscriptionQuotaManager {
+  const stateDir = getStateDir();
+  if (!subscriptionQuotaManager || subscriptionQuotaManagerStateDir !== stateDir) {
+    const notifications = getDesktopNotificationService();
+    subscriptionQuotaManager = new SubscriptionQuotaManager({
+      stateDir,
+      discoverAccounts: discoverSubscriptionAccounts,
+      onSnapshot: (snapshot) => {
+        cacheSubscriptionUsageMetrics(snapshot);
+        broadcastResetCardEvent("desktop:resetCardSnapshot", snapshot);
+      },
+      onOperation: (event) => broadcastResetCardEvent("desktop:resetCardOperation", event),
+      onNotify: async (input) => {
+        const settings = await subscriptionQuotaManager?.getSettings();
+        if (!settings) return;
+        notifications.setEnabled(settings.notificationsEnabled);
+        const reference = input.snapshot?.envNames?.[0] && input.snapshot?.accountNames?.[0]
+          ? { envName: input.snapshot.envNames[0], accountName: input.snapshot.accountNames[0] }
+          : undefined;
+        const title = input.kind === "expiring" ? "Codex 重置卡即将到期"
+          : input.kind === "pre-consume" ? "即将使用 Codex 重置卡"
+          : input.kind === "consumed" ? "Codex 重置卡已使用"
+            : input.kind === "reauth-required" ? "Codex 账号需要重新登录" : "Codex 订阅同步提醒";
+        notifications.notify({ title, body: input.message, accountKey: input.accountKey, ...reference, tag: `${input.kind}:${input.accountKey}` });
+      },
+      allowWeeklyAutoUse: async (accountKey) => canConsumeWeeklyReset(accountKey),
+    });
+    subscriptionQuotaManagerStateDir = stateDir;
+  }
+  return subscriptionQuotaManager;
+}
+
+function cacheSubscriptionUsageMetrics(snapshot: ResetCardSnapshot): void {
+  const usage5h = snapshot.usageWindows.find((window) => window.name === "five-hour");
+  const usageWeekly = snapshot.usageWindows.find((window) => window.name === "weekly");
+  snapshot.envNames.forEach((envName, index) => {
+    const accountName = snapshot.accountNames[index];
+    if (!accountName) return;
+    const key = `${envName}/${accountName}`;
+    const previous = authMetricsCache.get(key)?.value;
+    // The subscription manager starts during app boot, before the account
+    // metrics request normally populates email/plan. Do not seed the cache
+    // with placeholder identity data here: that would make the first
+    // accounts-page render show "-" until the next subscription refresh.
+    // Once profile metrics exist, only the usage fields are overlaid so the
+    // live reset timestamp is preserved without clobbering identity fields.
+    if (!previous) return;
+    const value = {
+      email: previous.email,
+      plan: snapshot.plan ?? previous.plan,
+      usage5h: formatSubscriptionUsageMetric(usage5h),
+      usageWeekly: formatSubscriptionUsageMetric(usageWeekly),
+    };
+    authMetricsCache.set(key, { value, expiresAt: Math.max(Date.now() + AUTH_METRICS_TTL_MS, snapshot.nextRefreshAt ?? 0) });
+  });
+}
+
+export function formatSubscriptionUsageMetric(window: ResetCardSnapshot["usageWindows"][number] | undefined): string {
+  if (window?.usedPercent === undefined) return "-";
+  const percent = `${Math.round(window.usedPercent)}%`;
+  if (window.resetsAt === undefined || !Number.isFinite(window.resetsAt)) return percent;
+  const resetAt = new Date(window.resetsAt);
+  if (!Number.isFinite(resetAt.getTime())) return percent;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  // Keep the legacy auth-metrics wire format so the renderer can continue
+  // to show a live local countdown instead of falling back to "待刷新".
+  return `${percent} (${pad(resetAt.getMonth() + 1)}-${pad(resetAt.getDate())} ${pad(resetAt.getHours())}:${pad(resetAt.getMinutes())})`;
+}
+
+async function canConsumeWeeklyReset(accountKey: string): Promise<boolean> {
+  const accounts = await discoverSubscriptionAccounts();
+  const refs = accounts.find((account) => account.accountKey === accountKey)?.references ?? [];
+  const pools = await getUsageRouterManager().listAccountPools().catch(() => []);
+  for (const reference of refs) {
+    const pool = pools.find((candidate) => candidate.envName === reference.envName && candidate.enabled
+      && candidate.members.some((member) => member.enabled && member.accountName === reference.accountName));
+    if (!pool) continue;
+    const viableFallback = pool.health.some((health) => health.accountName !== reference.accountName
+      && ["healthy", "degraded"].includes(health.state));
+    const admission = decideResetGatewayAdmission({
+      subscriptionAccount: true,
+      weeklyExhausted: true,
+      poolEnabled: true,
+      viableFallback,
+      alreadyRetried: false,
+    });
+    if (!admission.allowed) return false;
+  }
+  return true;
+}
+
+export async function startSubscriptionQuotaManager(): Promise<void> {
+  await getSubscriptionQuotaManager().start();
+}
+
+export async function stopSubscriptionQuotaManager(): Promise<void> {
+  await subscriptionQuotaManager?.stop();
+}
+
+export async function refreshSubscriptionQuotaOnFocus(): Promise<void> {
+  if (!subscriptionQuotaManager) return;
+  await subscriptionQuotaManager.notifyAppFocus();
+}
+
+export async function refreshSubscriptionQuotaOnResume(): Promise<void> {
+  if (!subscriptionQuotaManager) return;
+  await subscriptionQuotaManager.notifySystemResume();
+}
+
+export async function refreshSubscriptionQuotaAfterAccountMutation(): Promise<void> {
+  if (!subscriptionQuotaManager) return;
+  await subscriptionQuotaManager.notifyAccountsChanged();
+}
+
+export async function listResetCardSnapshots(): Promise<ResetCardSnapshot[]> {
+  return getSubscriptionQuotaManager().getSnapshots();
+}
+
+export async function refreshResetCardAccount(accountKey: string): Promise<ResetCardRefreshResult> {
+  const manager = getSubscriptionQuotaManager();
+  return manager.refreshAccount(accountKey, true);
+}
+
+export async function getResetCardSettings(): Promise<ResetCardSettings> {
+  return getSubscriptionQuotaManager().getSettings();
+}
+
+export async function setResetCardSettings(value: Partial<ResetCardSettings>): Promise<ResetCardSettings> {
+  const settings = await getSubscriptionQuotaManager().setSettings(value);
+  getDesktopNotificationService().setEnabled(settings.notificationsEnabled);
+  return settings;
+}
+
+export async function setResetCardAccountAutoUse(accountKey: string, input: { enabled?: boolean; autoUseMode?: AutoUseMode; preConsumeMode?: ResetCardSettings["preConsumeMode"] }): Promise<ResetCardSettings> {
+  return getSubscriptionQuotaManager().setAccountAutoUse(accountKey, input);
+}
+
+export async function consumeResetCard(accountKey: string, cardId?: string, confirmed = false): Promise<Awaited<ReturnType<SubscriptionQuotaManager["consume"]>>> {
+  return getSubscriptionQuotaManager().consume(accountKey, cardId, "manual", undefined, confirmed);
+}
+
+export async function listPendingResetCardActions() {
+  return getSubscriptionQuotaManager().getPendingActions();
+}
+
+export async function confirmPendingResetCard(accountKey: string, actionId?: string): Promise<void> {
+  await getSubscriptionQuotaManager().confirmPendingAction(accountKey, actionId);
+}
+
+export async function cancelPendingResetCard(accountKey: string, actionId?: string): Promise<void> {
+  await getSubscriptionQuotaManager().cancelPendingAction(accountKey, actionId);
+}
+
+export function getResetCardNotificationStatus(): ResetCardNotificationStatus {
+  return getDesktopNotificationService().getStatus();
 }
 
 export async function getEnvironmentRouteStatuses() {
@@ -5498,9 +5750,15 @@ export const __testUtils = {
     desktopOperationsLoaderForTest = loader;
   },
   resetUsageRouterManagerForTest() {
+    const current = usageRouterManager;
     usageRouterManager = undefined;
     usageRouterManagerStateDir = undefined;
+    // Tests can start a real router or its loopback admission server. Make
+    // the reset tear down those handles instead of orphaning listeners that
+    // keep the isolated Node test worker alive indefinitely.
+    void current?.stopService().catch(() => undefined);
   },
+  formatSubscriptionUsageMetric,
 };
 
 async function loadDesktopOperationsService(): Promise<DesktopOperationsServiceLike> {

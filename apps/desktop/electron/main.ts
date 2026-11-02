@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, net, shell, Tray, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, net, Notification, powerMonitor, shell, Tray, type IpcMainInvokeEvent } from "electron";
 import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
@@ -15,6 +15,21 @@ import {
   launchCliInTerminal,
   loadAuthMetrics,
   loadOverview,
+  startSubscriptionQuotaManager,
+  stopSubscriptionQuotaManager,
+  listResetCardSnapshots,
+  refreshResetCardAccount,
+  getResetCardSettings,
+  setResetCardSettings,
+  setResetCardAccountAutoUse,
+  consumeResetCard,
+  listPendingResetCardActions,
+  confirmPendingResetCard,
+  cancelPendingResetCard,
+  getResetCardNotificationStatus,
+  configureDesktopNotificationService,
+  refreshSubscriptionQuotaOnFocus,
+  refreshSubscriptionQuotaOnResume,
   logoutAccount,
   logoutApp,
   importDefaultEnv,
@@ -139,6 +154,7 @@ import {
   repairSkillProvider,
   repairLegacyEnvironmentConfigs,
 } from "./bridge.js";
+import { validateResetCardAccountSettingsPatch, validateResetCardSettingsPatch } from "./codex-subscription-state.js";
 import { closeProviderPluginRuntime } from "./provider-plugin-runtime.js";
 import { createDesktopAutoUpdateController, restartAfterRollback, type AutoUpdaterLike } from "./auto-update.js";
 import { createLinuxAppImageInstallScript, createUpdateHelperPath, createWindowsInstallScript, resolveUpdateInstallMode, type UpdateInstallResult } from "./update-installer.js";
@@ -447,6 +463,11 @@ async function applyAppPresenceSettings(settings: AppPresenceStatus): Promise<vo
 }
 
 app.whenReady().then(async () => {
+  configureDesktopNotificationService({
+    getWindow: () => BrowserWindow.getAllWindows().find((window) => !window.isDestroyed()),
+    getWindows: () => BrowserWindow.getAllWindows(),
+    notification: Notification,
+  });
   // Windows packaged/AppContainer builds cannot write arbitrary directories
   // under USERPROFILE or the legacy state directory. Keep managed plugin data
   // in a dedicated application-data directory and pass the same absolute
@@ -506,6 +527,9 @@ app.whenReady().then(async () => {
     console.warn("Codex legacy config migration failed", error);
   });
   await createWindow();
+  await startSubscriptionQuotaManager().catch((error) => {
+    recordStartupDiagnostic("Subscription quota manager failed to start", error);
+  });
   await applyAppPresenceSettings(await getAppPresenceSettings());
   autoUpdateController.markHealthy();
   startDesktopUpdateSchedule(autoUpdateController);
@@ -517,7 +541,10 @@ app.whenReady().then(async () => {
       await createWindow().catch((error) => showStartupFailure(error));
     }
     void synchronizeAppEnvironmentBadges().catch(() => undefined);
+    void refreshSubscriptionQuotaOnFocus().catch(() => undefined);
   });
+  app.on("browser-window-focus", () => { void refreshSubscriptionQuotaOnFocus().catch(() => undefined); });
+  powerMonitor.on("resume", () => { void refreshSubscriptionQuotaOnResume().catch(() => undefined); });
 }).catch((error) => {
   // Never leave a packaged Windows install with an unexplained blank window
   // when a startup dependency or renderer entry point fails. Keep the process
@@ -546,6 +573,7 @@ app.on("before-quit", (event) => {
   void getRouterLifecycleSettings()
     .then(async (settings) => {
       if (settings.stopOnAppQuit) await stopUsageRouter();
+      await stopSubscriptionQuotaManager();
     })
     .catch(() => undefined)
     .finally(() => {
@@ -589,6 +617,37 @@ function registerHandlers() {
   }
   ipcMain.handle("desktop:loadOverview", () => loadOverview());
   ipcMain.handle("desktop:loadAuthMetrics", () => loadAuthMetrics());
+  ipcMain.handle("desktop:listResetCardSnapshots", () => listResetCardSnapshots());
+  ipcMain.handle("desktop:refreshResetCardAccount", (_event: IpcMainInvokeEvent, accountKey: unknown) => {
+    if (typeof accountKey !== "string" || accountKey.length < 3 || accountKey.length > 512) throw new Error("Invalid subscription account key");
+    return refreshResetCardAccount(accountKey);
+  });
+  ipcMain.handle("desktop:getResetCardSettings", () => getResetCardSettings());
+  ipcMain.handle("desktop:setResetCardSettings", (_event: IpcMainInvokeEvent, value: unknown) => {
+    return setResetCardSettings(validateResetCardSettingsPatch(value));
+  });
+  ipcMain.handle("desktop:setResetCardAccountAutoUse", (_event: IpcMainInvokeEvent, accountKey: unknown, value: unknown) => {
+    if (typeof accountKey !== "string" || accountKey.length < 3 || accountKey.length > 512) throw new Error("Invalid subscription account key");
+    return setResetCardAccountAutoUse(accountKey, validateResetCardAccountSettingsPatch(value));
+  });
+  ipcMain.handle("desktop:consumeResetCard", (_event: IpcMainInvokeEvent, accountKey: unknown, cardId: unknown, confirmed: unknown) => {
+    if (typeof accountKey !== "string" || accountKey.length < 3 || accountKey.length > 512) throw new Error("Invalid subscription account key");
+    if (cardId !== undefined && (typeof cardId !== "string" || cardId.length < 3 || cardId.length > 128)) throw new Error("Invalid reset-card id");
+    if (confirmed !== true) throw new Error("Manual reset-card consumption requires explicit confirmation");
+    return consumeResetCard(accountKey, cardId as string | undefined, true);
+  });
+  ipcMain.handle("desktop:listPendingResetCardActions", () => listPendingResetCardActions());
+  ipcMain.handle("desktop:confirmPendingResetCard", (_event: IpcMainInvokeEvent, accountKey: unknown, actionId: unknown) => {
+    if (typeof accountKey !== "string" || accountKey.length < 3 || accountKey.length > 512) throw new Error("Invalid subscription account key");
+    if (actionId !== undefined && (typeof actionId !== "string" || actionId.length < 3 || actionId.length > 128)) throw new Error("Invalid pending action id");
+    return confirmPendingResetCard(accountKey, actionId as string | undefined);
+  });
+  ipcMain.handle("desktop:cancelPendingResetCard", (_event: IpcMainInvokeEvent, accountKey: unknown, actionId: unknown) => {
+    if (typeof accountKey !== "string" || accountKey.length < 3 || accountKey.length > 512) throw new Error("Invalid subscription account key");
+    if (actionId !== undefined && (typeof actionId !== "string" || actionId.length < 3 || actionId.length > 128)) throw new Error("Invalid pending action id");
+    return cancelPendingResetCard(accountKey, actionId as string | undefined);
+  });
+  ipcMain.handle("desktop:getResetCardNotificationStatus", () => getResetCardNotificationStatus());
   ipcMain.handle("desktop:getCodexToolPaths", () => getCodexToolPaths());
   ipcMain.handle("desktop:getCliAutoResumeSettings", () => getCliAutoResumeSettings());
   ipcMain.handle("desktop:getEnvHistoryRetentionSettings", () => getEnvHistoryRetentionSettings());

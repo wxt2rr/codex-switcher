@@ -533,6 +533,15 @@ import type {
   UsageRequestQuery,
   UsageSnapshot,
 } from "./desktop-model";
+import type {
+  AutoUseMode,
+  ResetCardNotificationStatus,
+  ResetCardOperationEvent,
+  ResetCardRefreshResult,
+  ResetCardSettings,
+  ResetCardSnapshot,
+  ResetCardPendingAction,
+} from "./reset-card-model";
 
 export interface DesktopElectronApi {
   loadOverview(): Promise<string>;
@@ -546,6 +555,20 @@ export interface DesktopElectronApi {
   getRouterPortSettings(): Promise<RouterPortSettings>;
   getLaunchAtLoginSettings(): Promise<LaunchAtLoginStatus>;
   getAppPresenceSettings(): Promise<AppPresenceStatus>;
+  listResetCardSnapshots?(): Promise<ResetCardSnapshot[]>;
+  refreshResetCardAccount?(accountKey: string): Promise<ResetCardRefreshResult>;
+  getResetCardSettings?(): Promise<ResetCardSettings>;
+  setResetCardSettings?(value: Partial<ResetCardSettings>): Promise<ResetCardSettings>;
+  setResetCardAccountAutoUse?(accountKey: string, value: { enabled?: boolean; autoUseMode?: AutoUseMode; preConsumeMode?: ResetCardSettings["preConsumeMode"] }): Promise<ResetCardSettings>;
+  consumeResetCard?(accountKey: string, cardId?: string, confirmed?: boolean): Promise<unknown>;
+  listPendingResetCardActions?(): Promise<ResetCardPendingAction[]>;
+  confirmPendingResetCard?(accountKey: string, actionId?: string): Promise<void>;
+  cancelPendingResetCard?(accountKey: string, actionId?: string): Promise<void>;
+  getResetCardNotificationStatus?(): Promise<ResetCardNotificationStatus>;
+  onResetCardSnapshot?(listener: (snapshot: ResetCardSnapshot) => void): () => void;
+  onResetCardOperation?(listener: (event: ResetCardOperationEvent) => void): () => void;
+  onResetCardNotification?(listener: (value: { title: string; body: string; accountKey?: string }) => void): () => void;
+  onResetCardNotificationClick?(listener: (value: { accountKey?: string; envName?: string; accountName?: string }) => void): () => void;
   detectCodexToolPaths(): Promise<CodexToolStatus[]>;
   setCodexToolPath(kind: "cli" | "app", path: string): Promise<CodexToolStatus>;
   clearCodexToolPath(kind: "cli" | "app"): Promise<CodexToolStatus>;
@@ -682,6 +705,20 @@ export interface DesktopBridge {
   getRouterPortSettings(): Promise<RouterPortSettings>;
   getLaunchAtLoginSettings(): Promise<LaunchAtLoginStatus>;
   getAppPresenceSettings(): Promise<AppPresenceStatus>;
+  listResetCardSnapshots(): Promise<ResetCardSnapshot[]>;
+  refreshResetCardAccount(accountKey: string): Promise<ResetCardRefreshResult>;
+  getResetCardSettings(): Promise<ResetCardSettings>;
+  setResetCardSettings(value: Partial<ResetCardSettings>): Promise<ResetCardSettings>;
+  setResetCardAccountAutoUse(accountKey: string, value: { enabled?: boolean; autoUseMode?: AutoUseMode; preConsumeMode?: ResetCardSettings["preConsumeMode"] }): Promise<ResetCardSettings>;
+  consumeResetCard(accountKey: string, cardId?: string, confirmed?: boolean): Promise<unknown>;
+  listPendingResetCardActions(): Promise<ResetCardPendingAction[]>;
+  confirmPendingResetCard(accountKey: string, actionId?: string): Promise<void>;
+  cancelPendingResetCard(accountKey: string, actionId?: string): Promise<void>;
+  getResetCardNotificationStatus(): Promise<ResetCardNotificationStatus>;
+  onResetCardSnapshot(listener: (snapshot: ResetCardSnapshot) => void): () => void;
+  onResetCardOperation(listener: (event: ResetCardOperationEvent) => void): () => void;
+  onResetCardNotification(listener: (value: { title: string; body: string; accountKey?: string }) => void): () => void;
+  onResetCardNotificationClick(listener: (value: { accountKey?: string; envName?: string; accountName?: string }) => void): () => void;
   detectCodexToolPaths(): Promise<CodexToolStatus[]>;
   setCodexToolPath(kind: "cli" | "app", path: string): Promise<CodexToolStatus>;
   clearCodexToolPath(kind: "cli" | "app"): Promise<CodexToolStatus>;
@@ -820,6 +857,20 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       getRouterPortSettings: unavailable,
       getLaunchAtLoginSettings: unavailable,
       getAppPresenceSettings: unavailable,
+      listResetCardSnapshots: unavailable,
+      refreshResetCardAccount: unavailable,
+      getResetCardSettings: unavailable,
+      setResetCardSettings: unavailable,
+      setResetCardAccountAutoUse: unavailable,
+      consumeResetCard: unavailable,
+      listPendingResetCardActions: unavailable,
+      confirmPendingResetCard: unavailable,
+      cancelPendingResetCard: unavailable,
+      getResetCardNotificationStatus: unavailable,
+      onResetCardSnapshot: () => () => undefined,
+      onResetCardOperation: () => () => undefined,
+      onResetCardNotification: () => () => undefined,
+      onResetCardNotificationClick: () => () => undefined,
       detectCodexToolPaths: unavailable,
       setCodexToolPath: unavailable,
       clearCodexToolPath: unavailable,
@@ -941,6 +992,20 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
 
   return {
     ...api,
+    listResetCardSnapshots: api.listResetCardSnapshots ?? (async () => []),
+    refreshResetCardAccount: api.refreshResetCardAccount ?? (async (accountKey) => ({ snapshot: { accountKey, envNames: [], accountNames: [], status: "unsupported", cards: [], count: 0, usageWindows: [], isStale: false }, refreshedAt: Date.now() })),
+    getResetCardSettings: api.getResetCardSettings ?? (async () => ({ version: 1, refreshIntervalMinutes: 5, expiryReminder: "3h", notificationsEnabled: false, autoUseMode: "off", preConsumeMode: "grace", preConsumeGraceSeconds: 30, notifyBeforeAutoUse: true, perAccount: {} })),
+    setResetCardSettings: api.setResetCardSettings ?? (async (value) => ({ version: 1, refreshIntervalMinutes: 5, expiryReminder: "3h", notificationsEnabled: false, autoUseMode: "off", preConsumeMode: "grace", preConsumeGraceSeconds: 30, notifyBeforeAutoUse: true, perAccount: {}, ...value })),
+    setResetCardAccountAutoUse: api.setResetCardAccountAutoUse ?? (async () => ({ version: 1, refreshIntervalMinutes: 5, expiryReminder: "3h", notificationsEnabled: false, autoUseMode: "off", preConsumeMode: "grace", preConsumeGraceSeconds: 30, notifyBeforeAutoUse: true, perAccount: {} })),
+    consumeResetCard: api.consumeResetCard ?? (async () => ({ code: "failed", message: "Reset-card consumption is unavailable" })),
+    listPendingResetCardActions: api.listPendingResetCardActions ?? (async () => []),
+    confirmPendingResetCard: api.confirmPendingResetCard ?? (async () => undefined),
+    cancelPendingResetCard: api.cancelPendingResetCard ?? (async () => undefined),
+    getResetCardNotificationStatus: api.getResetCardNotificationStatus ?? (async () => ({ supported: false, permission: "unsupported", enabled: false })),
+    onResetCardSnapshot: api.onResetCardSnapshot ?? (() => () => undefined),
+    onResetCardOperation: api.onResetCardOperation ?? (() => () => undefined),
+    onResetCardNotification: api.onResetCardNotification ?? (() => () => undefined),
+    onResetCardNotificationClick: api.onResetCardNotificationClick ?? (() => () => undefined),
     loadProviderPluginDiagnostics: api.loadProviderPluginDiagnostics ?? (async () => []),
     loadProviderPluginSettings: api.loadProviderPluginSettings ?? (async (id) => ({ pluginId: id, values: {}, secretKeys: [] })),
     saveProviderPluginSettings: api.saveProviderPluginSettings ?? (async (id, values) => ({ pluginId: id, values, secretKeys: [] })),
@@ -1057,6 +1122,20 @@ function createBrowserPreviewBridge(): DesktopBridge {
     getRouterPortSettings: async () => ({ preferredPort: 17832 }),
     getLaunchAtLoginSettings: async () => ({ enabled: false, supported: true }),
     getAppPresenceSettings: async () => ({ menuBar: false, dock: true, supported: true, platform: "darwin" }),
+    listResetCardSnapshots: async () => [],
+    refreshResetCardAccount: async (accountKey) => ({ snapshot: { accountKey, envNames: [], accountNames: [], status: "unsupported", cards: [], count: 0, usageWindows: [], isStale: false }, refreshedAt: Date.now() }),
+    getResetCardSettings: async () => ({ version: 1, refreshIntervalMinutes: 5, expiryReminder: "3h", notificationsEnabled: false, autoUseMode: "off", preConsumeMode: "grace", preConsumeGraceSeconds: 30, notifyBeforeAutoUse: true, perAccount: {} }),
+    setResetCardSettings: async (value) => ({ version: 1, refreshIntervalMinutes: 5, expiryReminder: "3h", notificationsEnabled: false, autoUseMode: "off", preConsumeMode: "grace", preConsumeGraceSeconds: 30, notifyBeforeAutoUse: true, perAccount: {}, ...value }),
+    setResetCardAccountAutoUse: async (_accountKey, value) => ({ version: 1, refreshIntervalMinutes: 5, expiryReminder: "3h", notificationsEnabled: false, autoUseMode: "off", preConsumeMode: "grace", preConsumeGraceSeconds: 30, notifyBeforeAutoUse: true, perAccount: {}, ...value }),
+    consumeResetCard: async () => ({ code: "failed", message: "Reset-card consumption is unavailable in browser preview" }),
+    listPendingResetCardActions: async () => [],
+    confirmPendingResetCard: async () => undefined,
+    cancelPendingResetCard: async () => undefined,
+    getResetCardNotificationStatus: async () => ({ supported: false, permission: "unsupported", enabled: false, message: "Preview mode" }),
+    onResetCardSnapshot: () => () => undefined,
+    onResetCardOperation: () => () => undefined,
+    onResetCardNotification: () => () => undefined,
+    onResetCardNotificationClick: () => () => undefined,
     detectCodexToolPaths: async () => [],
     setCodexToolPath: async (kind, path) => ({ kind, path, detectedPath: "", manualPath: path, source: "manual", available: true }),
     clearCodexToolPath: async (kind) => ({ kind, path: "", detectedPath: "", manualPath: "", source: "missing", available: false }),

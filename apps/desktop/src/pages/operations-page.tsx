@@ -22,6 +22,7 @@ import { getDesktopCopy } from "../desktop-copy";
 import { localizeLogKind } from "../desktop-utils";
 import type { UiLanguage } from "../i18n";
 import type { AppEnvironmentBadgeStatus, AppPresenceStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexToolStatus, DesktopAutoUpdateStatus, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, LaunchAtLoginStatus, RouterLifecycleSettings, RouterPortSettings } from "../bridge";
+import type { ResetCardNotificationStatus, ResetCardSettings } from "../reset-card-model";
 
 function pageTitle(language: UiLanguage) {
   if (language === "zh") return "设置";
@@ -108,6 +109,9 @@ export function OperationsPage({
   autoUpdateStatus,
   onCheckForAutoUpdate,
   onInstallDownloadedUpdate,
+  resetCardSettings,
+  resetCardNotificationStatus,
+  onResetCardSettingsChange,
 }: {
   language: UiLanguage;
   languageOptions: Array<{ value: UiLanguage; label: string }>;
@@ -159,6 +163,9 @@ export function OperationsPage({
   autoUpdateStatus: DesktopAutoUpdateStatus;
   onCheckForAutoUpdate: () => void;
   onInstallDownloadedUpdate: () => void;
+  resetCardSettings: ResetCardSettings | null;
+  resetCardNotificationStatus: ResetCardNotificationStatus | null;
+  onResetCardSettingsChange: (value: Partial<ResetCardSettings>) => void;
 }) {
   const pageCopy = getDesktopCopy(language);
   const [sessionNumberDraft, setSessionNumberDraft] = useState(String(cliAutoResume.sessionNumber));
@@ -253,6 +260,60 @@ export function OperationsPage({
               openOnHover={false}
               className="h-9 max-w-[260px] bg-white"
             />
+          </div>
+        </OperationCard>
+
+        <OperationCard
+          title={language === "zh" ? "订阅额度与重置卡" : "Subscription quota & reset cards"}
+          subtitle={language === "zh" ? "后台同步 Codex/Plus 订阅额度；自动使用默认关闭，使用前会重新校验并记录操作。" : "Sync Codex/Plus subscription quota in the background. Automatic use is off by default and revalidated before every consume."}
+        >
+          <div className="space-y-3 rounded-lg bg-[#f7f8fa] px-4 py-3">
+            {!resetCardSettings ? <div className="text-[13px] text-slate-500">{language === "zh" ? "正在加载设置…" : "Loading settings…"}</div> : (
+              <>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="flex items-center justify-between gap-3 text-[13px] text-neutral-800">
+                    <span>{language === "zh" ? "刷新间隔（分钟）" : "Refresh interval (minutes)"}</span>
+                    <Input type="number" min={1} max={60} value={resetCardSettings.refreshIntervalMinutes} onChange={(event) => onResetCardSettingsChange({ refreshIntervalMinutes: Math.max(1, Math.min(60, Number(event.target.value) || 5)) })} className="h-8 w-20 bg-white text-center" />
+                  </label>
+                  <label className="flex items-center justify-between gap-3 text-[13px] text-neutral-800">
+                    <span>{language === "zh" ? "到期提醒" : "Expiry reminder"}</span>
+                    <Select value={resetCardSettings.expiryReminder} onValueChange={(value) => onResetCardSettingsChange({ expiryReminder: value as ResetCardSettings["expiryReminder"] })} items={["off", "24h", "12h", "6h", "3h", "1h", "30m"].map((value) => ({ value, label: value === "off" ? (language === "zh" ? "关闭" : "Off") : value }))} className="h-8 w-24 bg-white" openOnHover={false} />
+                  </label>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="flex items-center justify-between gap-3 text-[13px] text-neutral-800">
+                    <span>{language === "zh" ? "自动使用触发条件" : "Automatic use trigger"}</span>
+                    <Select value={resetCardSettings.autoUseMode} onValueChange={(value) => onResetCardSettingsChange({ autoUseMode: value as ResetCardSettings["autoUseMode"] })} items={[{ value: "off", label: language === "zh" ? "关闭" : "Off" }, { value: "weekly-exhausted", label: language === "zh" ? "周额度耗尽" : "Weekly exhausted" }, { value: "expiring", label: language === "zh" ? "即将到期" : "Expiring" }, { value: "both", label: language === "zh" ? "两者" : "Both" }]} className="h-8 w-36 bg-white" openOnHover={false} />
+                  </label>
+                  <label className="flex items-center justify-between gap-3 text-[13px] text-neutral-800">
+                    <span>{language === "zh" ? "使用前策略" : "Before-use policy"}</span>
+                    <Select value={resetCardSettings.preConsumeMode} onValueChange={(value) => onResetCardSettingsChange({ preConsumeMode: value as ResetCardSettings["preConsumeMode"] })} items={[{ value: "grace", label: language === "zh" ? "倒计时 30 秒" : "30-second grace" }, { value: "confirm", label: language === "zh" ? "需要确认" : "Require confirmation" }]} className="h-8 w-36 bg-white" openOnHover={false} />
+                  </label>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="flex items-center justify-between gap-3 text-[13px] text-neutral-800">
+                    <span>{language === "zh" ? "缓冲倒计时（秒）" : "Grace period (seconds)"}</span>
+                    <Input type="number" min={5} max={300} value={resetCardSettings.preConsumeGraceSeconds} disabled={resetCardSettings.preConsumeMode !== "grace"} onChange={(event) => onResetCardSettingsChange({ preConsumeGraceSeconds: Math.max(5, Math.min(300, Number(event.target.value) || 30)) })} className="h-8 w-20 bg-white text-center" />
+                  </label>
+                  <label className="flex items-center justify-between gap-3 text-[13px] text-neutral-800">
+                    <span>{language === "zh" ? "自动使用前提醒" : "Notify before automatic use"}</span>
+                    <button type="button" role="switch" aria-checked={resetCardSettings.notifyBeforeAutoUse} onClick={() => onResetCardSettingsChange({ notifyBeforeAutoUse: !resetCardSettings.notifyBeforeAutoUse })} className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full ${resetCardSettings.notifyBeforeAutoUse ? "bg-primary" : "bg-[#d1d1d6]"}`}><span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${resetCardSettings.notifyBeforeAutoUse ? "translate-x-[18px]" : "translate-x-[2px]"}`} /></button>
+                  </label>
+                </div>
+                <div className="flex items-center justify-between gap-3 border-t border-black/[0.05] pt-3">
+                  <div>
+                    <div className="text-[13px] font-medium text-neutral-800">{language === "zh" ? "系统通知" : "System notifications"}</div>
+                    <div className="text-[11px] text-slate-400">{resetCardNotificationStatus?.supported ? (language === "zh" ? "支持到期、同步和自动使用提醒" : "Expiry, sync, and auto-use alerts") : (language === "zh" ? "当前平台将使用应用内提醒" : "In-app fallback will be used")}</div>
+                  </div>
+                  <button type="button" role="switch" aria-checked={resetCardSettings.notificationsEnabled} onClick={() => onResetCardSettingsChange({ notificationsEnabled: !resetCardSettings.notificationsEnabled })} className={`motion-toggle relative h-[22px] w-[38px] shrink-0 rounded-full ${resetCardSettings.notificationsEnabled ? "bg-primary" : "bg-[#d1d1d6]"}`}><span className={`motion-toggle-thumb absolute left-0 top-[2px] size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.22)] ${resetCardSettings.notificationsEnabled ? "translate-x-[18px]" : "translate-x-[2px]"}`} /></button>
+                </div>
+                <div className="text-[11px] leading-5 text-slate-400">
+                  {language === "zh"
+                    ? "重置卡属于不可逆操作；每次使用前都会重新读取额度和卡片，并为同一账号加锁避免重复消费。Codex/Plus 接口属于上游私有能力，账号或版本不支持时会明确显示为不可用，不会误显示为 0。后台提醒需要应用保持运行；网关自动使用仅在账号池没有可用回退且明确额度耗尽时触发。"
+                    : "Reset-card use is irreversible. Usage and cards are re-read before each consume and account-level locking prevents duplicate consumption. Codex/Plus endpoints are private upstream capabilities; unsupported accounts or versions are shown as unavailable rather than zero. Background reminders require the app to stay running, and gateway automation only runs after the pool has no viable fallback and quota exhaustion is confirmed."}
+                </div>
+              </>
+            )}
           </div>
         </OperationCard>
 

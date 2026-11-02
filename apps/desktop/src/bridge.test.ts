@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import { createDesktopBridge } from "./bridge.js";
 
@@ -490,4 +492,22 @@ test("desktop bridge forwards calls to injected electron api", async () => {
     "checkAccountCompatibility:project:personal",
     "loadUsageRequests:https://api.example.com/v1:1:20",
   ]);
+});
+
+test("reset-card UI exposes safe state, pending-action controls, and accessible settings", async () => {
+  const accounts = await readFile(join(process.cwd(), "src", "pages", "accounts-page.tsx"), "utf8");
+  const operations = await readFile(join(process.cwd(), "src", "pages", "operations-page.tsx"), "utf8");
+  assert.match(accounts, /data-reset-card-account-key/);
+  assert.match(accounts, /pendingActions\.map/);
+  assert.match(accounts, /role="switch" aria-checked/);
+  assert.match(accounts, /status === "unsupported"/);
+  assert.match(accounts, /status === "empty"/);
+  assert.match(accounts, /onConfirmPending/);
+  assert.match(accounts, /onCancelPending/);
+  assert.match(accounts, /data-slot="select-content"\]\[data-state="open"\]/);
+  assert.match(accounts, /popoverRef\.current\?\.querySelector\('\[data-slot="select-trigger"\]\[aria-expanded="true"\]'\)/);
+  assert.match(accounts, /document\.addEventListener\("pointermove", handlePointerMove, true\)/);
+  assert.match(operations, /preConsumeGraceSeconds/);
+  assert.match(operations, /notifyBeforeAutoUse/);
+  assert.match(operations, /role="switch" aria-checked/);
 });

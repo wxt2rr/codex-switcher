@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { createServer, type IncomingMessage, type Server } from "node:http";
 import { join } from "node:path";
 
 import {
@@ -214,9 +215,34 @@ export interface UsageRouterManagerOptions {
   preferredPort?: () => number | Promise<number>;
   launchService?: (preferredPort?: number) => Promise<void>;
   defaultProxyUrl?: () => string | undefined | Promise<string | undefined>;
+  /** Main-process-only hook used by Gateway pools to request one guarded
+   * subscription reset. It is exposed to the child router through a
+   * loopback, bearer-protected control endpoint. */
+  gatewayResetAdmission?: (input: {
+    accountKey?: string;
+    envName?: string;
+    accountName?: string;
+    poolEnabled: boolean;
+    viableFallback: boolean;
+    failureStatus?: number;
+    failureReason?: string;
+    alreadyRetried?: boolean;
+  }) => Promise<unknown>;
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function readAdmissionBody(request: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+    size += buffer.length;
+    if (size > 32 * 1024) throw new Error("Admission payload is too large");
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
 
 function capabilityObservationEntry(key: string, value: unknown): GatewayCapabilityObservationEntry[] {
   if (!value || typeof value !== "object" || Array.isArray(value)) return [];
@@ -312,6 +338,8 @@ async function collectModelTestResult(
 
 export class UsageRouterManager {
   private readonly routerDir: string;
+  private admissionServer?: Server;
+  private admissionEndpoint?: { url: string; token: string };
 
   constructor(private readonly options: UsageRouterManagerOptions) {
     this.routerDir = join(options.stateDir, "usage-router");
@@ -355,10 +383,21 @@ export class UsageRouterManager {
   }
 
   async ensureService(): Promise<RouterStateFile> {
+    await this.ensureGatewayResetAdmissionServer();
     const existing = await this.readState();
     if (existing && await this.isHealthy(existing)) {
       await this.syncDefaultProxy(existing);
-      return existing;
+      try {
+        await this.syncGatewayResetAdmission(existing);
+        return existing;
+      } catch (error) {
+        // A router child from a pre-admission release can still be healthy
+        // after the desktop app is upgraded. Replace it once so the new
+        // control endpoint is available; do not hide unrelated admin errors.
+        if (!this.admissionEndpoint || !/Usage router 404\b/.test(error instanceof Error ? error.message : String(error))) throw error;
+        try { process.kill(existing.pid); } catch { /* stale process */ }
+        await delay(100);
+      }
     }
     if (existing?.pid && existing.pid !== process.pid) {
       try { process.kill(existing.pid); } catch { /* stale process already exited */ }
@@ -383,6 +422,7 @@ export class UsageRouterManager {
       const state = await this.readState();
       if (state && await this.isHealthy(state)) {
         await this.syncDefaultProxy(state);
+        await this.syncGatewayResetAdmission(state);
         return state;
       }
     }
@@ -412,6 +452,77 @@ export class UsageRouterManager {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ proxyUrl: proxyUrl || null }),
     });
+  }
+
+  private async syncGatewayResetAdmission(state: RouterStateFile): Promise<void> {
+    if (!this.admissionEndpoint) return;
+    await this.adminWithState<void>(state, "/admin/reset-admission", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(this.admissionEndpoint),
+    });
+  }
+
+  private async ensureGatewayResetAdmissionServer(): Promise<void> {
+    if (!this.options.gatewayResetAdmission || this.admissionServer) return;
+    const admissionHandler = this.options.gatewayResetAdmission;
+    const token = randomBytes(32).toString("hex");
+    const server = createServer(async (request, response) => {
+      try {
+        if (request.method !== "POST" || request.url !== "/consume") {
+          response.statusCode = 404;
+          response.end();
+          return;
+        }
+        if (request.headers.authorization !== `Bearer ${token}`) {
+          response.statusCode = 401;
+          response.end();
+          return;
+        }
+        const body = await readAdmissionBody(request);
+        const parsed = JSON.parse(body) as Record<string, unknown>;
+        if (parsed.accountKey !== undefined && (typeof parsed.accountKey !== "string" || parsed.accountKey.length < 3 || parsed.accountKey.length > 512)
+          || parsed.envName !== undefined && (typeof parsed.envName !== "string" || parsed.envName.length < 1 || parsed.envName.length > 128)
+          || parsed.accountName !== undefined && (typeof parsed.accountName !== "string" || parsed.accountName.length < 1 || parsed.accountName.length > 128)
+          || (typeof parsed.accountKey !== "string" && (typeof parsed.envName !== "string" || typeof parsed.accountName !== "string"))
+          || parsed.poolEnabled !== true || typeof parsed.viableFallback !== "boolean"
+          || parsed.failureStatus !== undefined && (typeof parsed.failureStatus !== "number" || !Number.isInteger(parsed.failureStatus) || parsed.failureStatus < 100 || parsed.failureStatus > 599)
+          || parsed.failureReason !== undefined && typeof parsed.failureReason !== "string"
+          || parsed.alreadyRetried !== undefined && typeof parsed.alreadyRetried !== "boolean") {
+          response.statusCode = 400;
+          response.end();
+          return;
+        }
+        const result = await admissionHandler({
+          ...(typeof parsed.accountKey === "string" ? { accountKey: parsed.accountKey } : {}),
+          ...(typeof parsed.envName === "string" ? { envName: parsed.envName } : {}),
+          ...(typeof parsed.accountName === "string" ? { accountName: parsed.accountName } : {}),
+          poolEnabled: true,
+          viableFallback: parsed.viableFallback,
+          ...(parsed.failureStatus === undefined ? {} : { failureStatus: parsed.failureStatus as number }),
+          ...(parsed.failureReason === undefined ? {} : { failureReason: parsed.failureReason as string }),
+          ...(parsed.alreadyRetried === undefined ? {} : { alreadyRetried: parsed.alreadyRetried as boolean }),
+        });
+        const payload = JSON.stringify({ consumed: result !== undefined });
+        response.statusCode = 200;
+        response.setHeader("content-type", "application/json");
+        response.end(payload);
+      } catch {
+        if (!response.headersSent) response.statusCode = 500;
+        response.end();
+      }
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      throw new Error("Unable to create Gateway reset admission endpoint");
+    }
+    this.admissionServer = server;
+    this.admissionEndpoint = { url: `http://127.0.0.1:${address.port}`, token };
   }
 
   async refreshDefaultProxy(): Promise<boolean> {
@@ -662,14 +773,25 @@ export class UsageRouterManager {
 
   async stopService(): Promise<boolean> {
     const state = await this.readState();
-    if (!state || !await this.isHealthy(state)) return false;
+    if (!state || !await this.isHealthy(state)) {
+      await this.closeGatewayResetAdmissionServer();
+      return false;
+    }
     await this.adminWithState<void>(state, "/admin/shutdown", { method: "POST" });
     for (let attempt = 0; attempt < 20; attempt += 1) {
       await delay(50);
       if (!await this.isHealthy(state)) return true;
     }
     try { process.kill(state.pid, "SIGTERM"); } catch { /* process already stopped */ }
+    await this.closeGatewayResetAdmissionServer();
     return true;
+  }
+
+  private async closeGatewayResetAdmissionServer(): Promise<void> {
+    const server = this.admissionServer;
+    this.admissionServer = undefined;
+    this.admissionEndpoint = undefined;
+    if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 
   async isEnvironmentEnabled(envName: string): Promise<boolean> {

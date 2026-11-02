@@ -73,6 +73,7 @@ export interface UsageRouterServiceOptions {
   defaultProxyUrl?: string;
   /** Keep the secure default in production while allowing deterministic test/diagnostic hosts. */
   providerPluginSandboxMode?: "required" | "best-effort" | "disabled";
+  gatewayResetAdmission?: { url: string; token: string };
 }
 
 export interface RunningUsageRouterService {
@@ -1075,6 +1076,7 @@ async function proxyAccountPoolRequest(
   capabilityRegistry?: CapabilityRegistry,
   persistCapabilityObservations?: () => void,
   forceResponsesStoreFalse = false,
+  gatewayResetAdmission?: { url: string; token: string },
 ): Promise<void> {
   const startedAt = Date.now();
   const body = bodyOverride ?? (request.method === "GET" || request.method === "HEAD" ? Buffer.alloc(0) : await readRequestBodyBuffer(request));
@@ -1100,8 +1102,9 @@ async function proxyAccountPoolRequest(
   let finalConversionDiagnostics: ConversionDiagnostic[] = [];
   let bindingKeyHash = derived.keyHash;
   let didRelayBytes = false;
+  let gatewayResetAttempted = false;
   const maxSameAccountFailures = Math.min(3, Math.max(1, pool.maxSameAccountFailures ?? 1));
-  const maxAttempts = Math.min(6, Math.max(1, (pool.maxFailoverAttempts + 1) * maxSameAccountFailures));
+  let maxAttempts = Math.min(6, Math.max(1, (pool.maxFailoverAttempts + 1) * maxSameAccountFailures));
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const health = initialPoolHealth(pool, await store.listPoolHealth(pool.poolId));
@@ -1330,6 +1333,51 @@ async function proxyAccountPoolRequest(
       ? observeCapabilityMismatch(capabilityRegistry, persistCapabilityObservations, effectiveRoute, effectiveRoute.protocol, effectiveUpstreamModel, candidateParsedBody, upstreamResponse.status, errorMessagePreview)
       : undefined;
     const reason: PoolFailureReason = capabilityMismatch ? "capability_mismatch" : classifyPoolFailure(upstreamResponse.status);
+    if (!upstreamResponse.ok && !gatewayResetAttempted && gatewayResetAdmission && secret.authMode === "auth"
+      && reason === "quota" && effectiveRoute.envName === pool.envName) {
+      gatewayResetAttempted = true;
+      const viableFallback = health.some((item) => item.accountName !== member.accountName
+        && ["healthy", "degraded"].includes(item.state)
+        && (memberAttempts.get(item.accountName) ?? 0) < maxSameAccountFailures);
+      try {
+        const resetResponse = await fetch(`${gatewayResetAdmission.url.replace(/\/$/, "")}/consume`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${gatewayResetAdmission.token}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            envName: pool.envName,
+            accountName: member.accountName,
+            poolEnabled: true,
+            viableFallback,
+            failureStatus: upstreamResponse.status,
+            failureReason: reason,
+            alreadyRetried: attempt > 0,
+          }),
+          signal: AbortSignal.timeout(125_000),
+        });
+        const resetPayload = resetResponse.ok ? await resetResponse.json().catch(() => undefined) as { consumed?: unknown } | undefined : undefined;
+        if (resetResponse.ok && resetPayload?.consumed === true) {
+          await upstreamResponse.body?.cancel();
+          // Allow exactly one replay of the same subscription member after a
+          // successful reset. The manager has already serialized and
+          // revalidated the destructive operation.
+          memberAttempts.set(member.accountName, 0);
+          maxAttempts = Math.min(6, Math.max(maxAttempts, attempt + 2));
+          retryAccountName = member.accountName;
+          attempts.push({ accountName: member.accountName, startedAt: attemptStartedAt, completedAt: Date.now(),
+            httpStatus: upstreamResponse.status, reason: "quota", errorMessage: errorMessagePreview,
+            retryAfterMs: retryAfterMs(upstreamResponse), outcome: "retry" });
+          finalReason = "quota";
+          finalErrorMessage = errorMessagePreview;
+          continue;
+        }
+      } catch {
+        // A reset control-plane failure must never make the user request fail
+        // differently; normal pool failover/response handling continues.
+      }
+    }
     const retryable = !upstreamResponse.ok && isPoolRetryableFailure(reason, upstreamResponse.status);
     if (retryable && attempt + 1 < maxAttempts) {
       const errorBody = await upstreamResponse.arrayBuffer().catch(() => null);
@@ -2005,6 +2053,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
   // persisted environment gateway table, which has one gateway per env.
   const gatewayPreviews = new Map<string, EnvironmentGateway>();
   const gatewayHealth = new Map<string, { consecutiveFailures: number; cooldownUntil: number | null }>();
+  let gatewayResetAdmission = options.gatewayResetAdmission;
   const gatewayRouteMetrics = new Map<string, GatewayRouteMetricState>();
   const gatewayQuotaState = new Map<string, { windowStartedAt: number; requests: number; tokens: number }>();
   const consumeGatewayQuota = (gateway: EnvironmentGateway, estimatedTokens: number): boolean => {
@@ -2151,6 +2200,26 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
             await closeUpstreamProxyAgents();
             gatewayHealth.clear();
           }
+          response.statusCode = 204;
+          return response.end();
+        }
+        if (url.pathname === "/admin/reset-admission" && request.method === "PUT") {
+          const payload = await readJson(request) as { url?: unknown; token?: unknown };
+          if (payload.url === undefined && payload.token === undefined) {
+            gatewayResetAdmission = undefined;
+            response.statusCode = 204;
+            return response.end();
+          }
+          if (typeof payload.url !== "string" || typeof payload.token !== "string" || !payload.token.trim()) {
+            return sendJson(response, 400, { error: "Invalid reset admission endpoint" });
+          }
+          try {
+            const endpoint = new URL(payload.url);
+            if (endpoint.protocol !== "http:" || endpoint.hostname !== "127.0.0.1" || endpoint.pathname !== "/") throw new Error("Loopback endpoint required");
+          } catch {
+            return sendJson(response, 400, { error: "Reset admission endpoint must be loopback HTTP" });
+          }
+          gatewayResetAdmission = { url: payload.url.replace(/\/$/, ""), token: payload.token };
           response.statusCode = 204;
           return response.end();
         }
@@ -2671,6 +2740,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
             capabilityRegistry,
             persistCapabilityObservations,
             localAgentSurface,
+            gatewayResetAdmission,
           );
         }
         const legacyFallbackRoutes = gateway.routeGroups

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.92 - 2026-11-02
+
+- Added production-grade Codex/Plus subscription quota and reset-card management: background synchronization, durable token-free snapshots, expiry and sync notifications, explicit manual consumption, opt-in automatic use with grace/confirmation, and gateway account-pool admission safeguards.
+- Added account-level reset-card details and controls, settings for refresh/reminders/automatic use, cross-platform native notification fallback, and recovery diagnostics for unsupported private upstream endpoints.
+
 ## 0.8.17 - 2026-08-29
 
 - Added automatic migration across all configured environments for Codex 0.149 authentication changes.

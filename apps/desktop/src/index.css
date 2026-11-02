@@ -730,24 +730,28 @@ body {
 
 @media (hover: hover) and (pointer: fine) {
   .management-list-card:hover {
-    border-color: var(--selected-border-color);
+    border-color: rgb(15 23 42 / 0.08);
     background-color: white;
   }
 }
 
 .management-list-card:focus-within,
 .management-list-card:has([aria-expanded="true"]) {
-  border-color: var(--selected-border-color);
+  border-color: rgb(15 23 42 / 0.08);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
   background-color: white;
 }
 
 .dark .management-list-card:focus-within,
 .dark .management-list-card:has([aria-expanded="true"]) {
+  border-color: rgb(255 255 255 / 0.10);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.20);
   background-color: #141a22;
 }
 
 @media (hover: hover) and (pointer: fine) {
   .dark .management-list-card:hover {
+    border-color: rgb(255 255 255 / 0.10);
     background-color: #141a22;
   }
 }
@@ -757,6 +761,12 @@ body {
 .responsive-record-row:has([aria-expanded="true"]) {
   position: relative;
   z-index: 30;
+}
+
+/* A portal-free card popover must own a higher stacking context than the
+ * neighboring records; otherwise a later record can paint over it. */
+.responsive-record-row:has([aria-expanded="true"]) {
+  z-index: 80;
 }
 
 @media (prefers-reduced-motion: reduce) {

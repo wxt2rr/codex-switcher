@@ -16,6 +16,7 @@ import {
   RefreshCw,
   LoaderCircle,
   ListChecks,
+  CreditCard,
   Star,
   TerminalSquare,
 } from "lucide-react";
@@ -40,6 +41,7 @@ import {
 } from "../components/admin-primitives";
 import { Field, Input, Select, Textarea } from "../components/form-primitives";
 import type { AccountRequestHealth, AccountSummary, OverviewPayload } from "../desktop-model";
+import type { ResetCardPendingAction, ResetCardSettings, ResetCardSnapshot } from "../reset-card-model";
 import { providerIconUrls } from "../components/provider-icon";
 import { AccountModelExposurePanel } from "../components/account-model-exposure-panel";
 import type { AccountCompatibilityStatus, CodexProject, DesktopBridge, DesktopLaunchStrategy, ModelCatalogAppRefreshRequirement, ProviderCatalogItem, ProviderCredentialImportRequest } from "../bridge";
@@ -153,6 +155,12 @@ function getAccountModeItems(providerId: AccountProviderId, language: UiLanguage
   return items.length ? items : [{ value: "apikey", label: localizeAuthMode("apikey", language) }];
 }
 
+function isSubscriptionResetCardAccount(account: AccountSummary): boolean {
+  if (account.authMode !== "auth") return false;
+  const providerId = account.runtime.providerId?.trim().toLowerCase();
+  return !providerId || ["openai", "chatgpt", "chatgpt-subscription", "codex-subscription"].includes(providerId);
+}
+
 function readDefaultAccountEnvironment(): string {
   if (typeof window === "undefined") return "default";
   return window.localStorage.getItem(DEFAULT_ACCOUNT_ENVIRONMENT_KEY)?.trim() || "default";
@@ -218,6 +226,15 @@ export function AccountsPage({
   onCopyApiKey,
   bridge,
   onOpenModelSettings,
+  resetCardSnapshots,
+  onRefreshResetCard,
+  onConsumeResetCard,
+  resetCardSettings,
+  onSetResetCardAccountAutoUse,
+  resetCardPendingActions,
+  onConfirmResetCard,
+  onCancelResetCard,
+  focusedResetCardAccountKey,
   onSuccess,
   onAppRefreshRequired,
   onError,
@@ -276,6 +293,15 @@ export function AccountsPage({
   onCopyApiKey: (value: string) => void;
   bridge: DesktopBridge;
   onOpenModelSettings: () => void;
+  resetCardSnapshots: ResetCardSnapshot[];
+  onRefreshResetCard: (accountKey: string) => Promise<unknown>;
+  onConsumeResetCard: (accountKey: string, cardId?: string) => Promise<unknown>;
+  resetCardSettings: ResetCardSettings | null;
+  onSetResetCardAccountAutoUse: (accountKey: string, value: { enabled?: boolean; autoUseMode?: ResetCardSettings["autoUseMode"]; preConsumeMode?: ResetCardSettings["preConsumeMode"] }) => Promise<unknown>;
+  resetCardPendingActions: ResetCardPendingAction[];
+  onConfirmResetCard: (accountKey: string, actionId: string) => Promise<unknown>;
+  onCancelResetCard: (accountKey: string, actionId: string) => Promise<unknown>;
+  focusedResetCardAccountKey?: string;
   onSuccess: (message: string) => void;
   onAppRefreshRequired: (request: ModelCatalogAppRefreshRequirement) => void;
   onError: (error: unknown) => void;
@@ -355,6 +381,18 @@ export function AccountsPage({
         return a.name.localeCompare(b.name);
       });
   }, [overview.accounts, envFilter, modeFilter, search, sortMode]);
+
+  useEffect(() => {
+    if (!focusedResetCardAccountKey) return;
+    const frame = window.requestAnimationFrame(() => {
+      const element = Array.from(document.querySelectorAll<HTMLElement>("[data-reset-card-account-key]"))
+        .find((candidate) => candidate.dataset.resetCardAccountKey === focusedResetCardAccountKey);
+      element?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [focusedResetCardAccountKey, filteredAccounts.length]);
 
   const selectedAccount = overview.accounts.find(
     (account) => account.envName === accountEnvDraft.trim() && account.name === accountNameDraft.trim(),
@@ -745,6 +783,15 @@ export function AccountsPage({
               onPickDirectory={onPickDirectory}
               onLogin={() => setLoginDrawerOpen(true)}
               onOpenModels={() => openModelExposure(account.envName, account.name)}
+              resetCardSnapshot={resetCardSnapshots.find((snapshot) => snapshot.envNames.some((envName, index) => envName === account.envName && snapshot.accountNames[index] === account.name))}
+              onRefreshResetCard={onRefreshResetCard}
+              onConsumeResetCard={onConsumeResetCard}
+              resetCardSettings={resetCardSettings}
+              onSetResetCardAccountAutoUse={onSetResetCardAccountAutoUse}
+              resetCardPendingActions={resetCardPendingActions}
+              onConfirmResetCard={onConfirmResetCard}
+              onCancelResetCard={onCancelResetCard}
+              focusedResetCardAccountKey={focusedResetCardAccountKey}
               onRelogin={onRelogin}
               onLogoutIntent={() => setLogoutOpen(true)}
               onDelete={() => setDeleteOpen(true)}
@@ -1230,6 +1277,15 @@ function AccountListCard({
   onPickDirectory,
   onLogin,
   onOpenModels,
+  resetCardSnapshot,
+  onRefreshResetCard,
+  onConsumeResetCard,
+  resetCardSettings,
+  onSetResetCardAccountAutoUse,
+  resetCardPendingActions,
+  onConfirmResetCard,
+  onCancelResetCard,
+  focusedResetCardAccountKey,
   onRelogin,
   onLogoutIntent,
   onDelete,
@@ -1256,6 +1312,15 @@ function AccountListCard({
   onPickDirectory: () => Promise<string>;
   onLogin: () => void;
   onOpenModels: () => void;
+  resetCardSnapshot?: ResetCardSnapshot;
+  onRefreshResetCard: (accountKey: string) => Promise<unknown>;
+  onConsumeResetCard: (accountKey: string, cardId?: string) => Promise<unknown>;
+  resetCardSettings: ResetCardSettings | null;
+  onSetResetCardAccountAutoUse: (accountKey: string, value: { enabled?: boolean; autoUseMode?: ResetCardSettings["autoUseMode"]; preConsumeMode?: ResetCardSettings["preConsumeMode"] }) => Promise<unknown>;
+  resetCardPendingActions: ResetCardPendingAction[];
+  onConfirmResetCard: (accountKey: string, actionId: string) => Promise<unknown>;
+  onCancelResetCard: (accountKey: string, actionId: string) => Promise<unknown>;
+  focusedResetCardAccountKey?: string;
   onRelogin: () => Promise<boolean>;
   onLogoutIntent: () => void;
   onDelete: () => void;
@@ -1301,13 +1366,31 @@ function AccountListCard({
 
   return (
     <ListCard
+      data-reset-card-account-key={resetCardSnapshot?.accountKey}
       className={cn(
         "responsive-record-row responsive-account-row grid min-h-[92px] items-center gap-4",
+        focusedResetCardAccountKey && resetCardSnapshot?.accountKey === focusedResetCardAccountKey
+          && "ring-1 ring-black/[0.10] ring-offset-1 transition-shadow",
       )}
     >
       <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
             <h3 className="truncate text-[17px] font-semibold tracking-[-0.02em] text-foreground">{account.name}</h3>
+            {isSubscriptionResetCardAccount(account) || resetCardSnapshot ? (
+              <ResetCardIndicator
+                account={account}
+                snapshot={resetCardSnapshot}
+                language={language}
+                onRefresh={onRefreshResetCard}
+                onConsume={onConsumeResetCard}
+                settings={resetCardSettings}
+                onSetAutoUse={onSetResetCardAccountAutoUse}
+                pendingActions={resetCardPendingActions.filter((action) => action.accountKey === resetCardSnapshot?.accountKey)}
+                onConfirmPending={onConfirmResetCard}
+                onCancelPending={onCancelResetCard}
+                compact
+              />
+            ) : null}
           </div>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             <SoftBadge tone={isAuth ? "brand" : "neutral"} label={formatAccountAuthLabel(account.authMode)} />
@@ -1547,6 +1630,231 @@ function AccountListCard({
         />
       </div>
     </ListCard>
+  );
+}
+
+function ResetCardIndicator({
+  account,
+  snapshot,
+  language,
+  onRefresh,
+  onConsume,
+  settings,
+  onSetAutoUse,
+  pendingActions,
+  onConfirmPending,
+  onCancelPending,
+  compact = false,
+}: {
+  account: AccountSummary;
+  snapshot?: ResetCardSnapshot;
+  language: UiLanguage;
+  onRefresh: (accountKey: string) => Promise<unknown>;
+  onConsume: (accountKey: string, cardId?: string) => Promise<unknown>;
+  settings: ResetCardSettings | null;
+  onSetAutoUse: (accountKey: string, value: { enabled?: boolean; autoUseMode?: ResetCardSettings["autoUseMode"]; preConsumeMode?: ResetCardSettings["preConsumeMode"] }) => Promise<unknown>;
+  pendingActions: ResetCardPendingAction[];
+  onConfirmPending: (accountKey: string, actionId: string) => Promise<unknown>;
+  onCancelPending: (accountKey: string, actionId: string) => Promise<unknown>;
+  compact?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [consumeCardId, setConsumeCardId] = useState<string>();
+  const [pendingBusy, setPendingBusy] = useState<string>();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const closeTimerRef = useRef<number | null>(null);
+  const supported = Boolean(snapshot) || isSubscriptionResetCardAccount(account);
+  const accountOverride = snapshot ? settings?.perAccount[snapshot.accountKey] : undefined;
+  const autoUseMode = accountOverride?.autoUseMode ?? settings?.autoUseMode ?? "off";
+  const autoUseEnabled = snapshot ? (accountOverride?.enabled ?? autoUseMode !== "off") : false;
+  const statusLabel = !snapshot
+    ? language === "zh" ? "同步中" : "Syncing"
+    : snapshot.status === "unsupported"
+      ? language === "zh" ? "不支持" : "Unsupported"
+      : snapshot.status === "unauthorized"
+        ? language === "zh" ? "需重新登录" : "Re-auth required"
+          : ["network-error", "api-error", "parse-error", "rate-limited"].includes(snapshot.status)
+            ? language === "zh" ? "同步失败" : "Sync failed"
+            : snapshot.status === "empty"
+              ? language === "zh" ? "暂无" : "None"
+        : snapshot.isStale
+          ? language === "zh" ? "数据过期" : "Stale"
+          : `${snapshot.count}`;
+  if (!supported) return null;
+  const refresh = async () => {
+    if (!snapshot || busy) return;
+    setBusy(true);
+    try { await onRefresh(snapshot.accountKey); } finally { setBusy(false); }
+  };
+  const consume = async (requestedCardId?: string) => {
+    if (!snapshot || busy) return;
+    const cardId = requestedCardId ?? consumeCardId ?? snapshot.cards.find((card) => card.status === "available")?.id;
+    if (!cardId) return;
+    if (!window.confirm(language === "zh" ? "重置卡使用后不可撤销，确定继续吗？" : "Using a reset card is irreversible. Continue?")) return;
+    setBusy(true);
+    try { await onConsume(snapshot.accountKey, cardId); setConsumeCardId(undefined); } finally { setBusy(false); }
+  };
+  const hasOpenNestedSelect = () => Boolean(
+    popoverRef.current?.querySelector('[data-slot="select-trigger"][aria-expanded="true"]'),
+  );
+  const isInsideNestedSelect = (target: EventTarget | null) => (
+    target instanceof Element && Boolean(target.closest('[data-slot="select-content"][data-state="open"]'))
+  );
+  const cancelScheduledClose = () => {
+    if (closeTimerRef.current === null) return;
+    window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = null;
+  };
+  const scheduleClose = () => {
+    // Radix Select renders its menu in a portal. While the pointer moves from
+    // this card popover into that portal, the popover itself receives
+    // mouseleave even though the user is still interacting with it. Keep the
+    // card open only when one of this popover's own selects is open; unrelated
+    // selects elsewhere in the page must not block closing. The small delay
+    // also bridges the 1px layout gap between the trigger and the popover.
+    cancelScheduledClose();
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      if (hasOpenNestedSelect()) return;
+      setOpen(false);
+    }, 180);
+  };
+  const isInsidePopover = (target: EventTarget | null) => {
+    if (!(target instanceof Node)) return false;
+    return Boolean(triggerRef.current?.contains(target) || popoverRef.current?.contains(target));
+  };
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerMove = (event: PointerEvent) => {
+      const target = event.target;
+      if (isInsidePopover(target) || hasOpenNestedSelect() || isInsideNestedSelect(target)) {
+        cancelScheduledClose();
+        return;
+      }
+      scheduleClose();
+    };
+    document.addEventListener("pointermove", handlePointerMove, true);
+    return () => {
+      document.removeEventListener("pointermove", handlePointerMove, true);
+      cancelScheduledClose();
+    };
+  }, [open]);
+  return (
+    <div className={cn("relative", compact ? "shrink-0" : "mt-1 px-2 py-1")}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-md text-[11px] text-muted-foreground transition-colors hover:bg-black/[0.04] hover:text-foreground focus:outline-none dark:hover:bg-white/[0.06]",
+          compact ? "h-6 border border-black/[0.06] bg-[#f7f8fa] px-2 dark:border-white/[0.08] dark:bg-[#1b2129]" : "px-1 py-1",
+        )}
+        aria-expanded={open}
+        aria-label={language === "zh" ? `重置卡：${statusLabel}` : `Reset cards: ${statusLabel}`}
+        onMouseEnter={() => { cancelScheduledClose(); setOpen(true); }}
+        onFocus={() => { cancelScheduledClose(); setOpen(true); }}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span>{language === "zh" ? "重置卡" : "Reset cards"}</span>
+        <CreditCard className="size-3.5" />
+        <span className={cn("font-semibold tabular-nums", snapshot?.isStale && "text-amber-600")}>{statusLabel}</span>
+      </button>
+      {open ? (
+        <div
+          ref={popoverRef}
+          className="absolute left-2 top-full z-30 mt-1 w-[300px] rounded-xl border border-black/[0.08] bg-white p-3 text-[12px] shadow-[0_12px_30px_rgba(15,23,42,0.14)] dark:border-white/[0.10] dark:bg-[#141a22] dark:shadow-[0_12px_30px_rgba(0,0,0,0.35)]"
+          onMouseEnter={cancelScheduledClose}
+          onMouseLeave={scheduleClose}
+        >
+          {!snapshot ? <div className="text-muted-foreground">{language === "zh" ? "正在读取订阅重置卡…" : "Reading subscription reset cards…"}</div> : (
+            <>
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold text-foreground">{snapshot.status === "empty" ? (language === "zh" ? "暂无可用重置卡" : "No reset cards available") : snapshot.status === "unsupported" ? (language === "zh" ? "此账号不支持订阅重置卡" : "Subscription reset cards are not supported") : snapshot.status === "unauthorized" ? (language === "zh" ? "需要重新登录后同步" : "Re-authenticate to sync") : `${language === "zh" ? "可用重置卡" : "Available reset cards"} ${snapshot.count}`}</span>
+                <button type="button" className="text-muted-foreground hover:text-foreground disabled:opacity-50" onClick={() => void refresh()} disabled={busy} aria-label="Refresh reset cards">
+                  <RefreshCw className={cn("size-3.5", busy && "animate-spin")} />
+                </button>
+              </div>
+              <div className="mt-2 space-y-1.5">
+                {snapshot.cards.length === 0 ? <div className={cn("text-muted-foreground", snapshot.lastError && "text-amber-700")}>{snapshot.lastError ?? (language === "zh" ? "暂无可用重置卡" : "No available reset cards")}</div> : null}
+                {snapshot.cards.map((card) => (
+                  <div key={card.id} className="rounded-lg bg-[#f7f8fa] px-2.5 py-2 dark:bg-[#1b2129]">
+                    <div className="flex items-center justify-between gap-2 text-foreground">
+                      <span>{card.type === "weekly" ? (language === "zh" ? "周额度" : "Weekly") : card.type === "five-hour" ? (language === "zh" ? "五小时额度" : "Five-hour") : (language === "zh" ? "重置卡" : "Reset")}</span>
+                      <span className="font-mono text-[10px] text-muted-foreground">{card.id}</span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                      <span>{card.nonExpiring ? (language === "zh" ? "永久有效" : "No expiry") : card.expiresAt ? new Date(card.expiresAt).toLocaleString() : (language === "zh" ? "有效期未知" : "Expiry unknown")}</span>
+                      {card.status === "available" ? <button type="button" className="text-primary hover:underline disabled:opacity-50" disabled={busy} onClick={() => { setConsumeCardId(card.id); void consume(card.id); }}>{language === "zh" ? "使用" : "Use"}</button> : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {pendingActions.length > 0 ? (
+                <div className="mt-2 rounded-lg border border-primary/15 bg-primary/[0.045] px-2.5 py-2">
+                  {pendingActions.map((action) => {
+                    const seconds = Math.max(0, Math.ceil((action.dueAt - Date.now()) / 1000));
+                    const triggerLabel = action.trigger === "weekly-exhausted"
+                      ? (language === "zh" ? "周额度已耗尽" : "Weekly quota exhausted")
+                      : (language === "zh" ? "重置卡即将到期" : "Card is expiring");
+                    return (
+                      <div key={action.id} className="flex items-start justify-between gap-2 text-[11px]">
+                        <div className="min-w-0">
+                          <div className="font-medium text-foreground">{action.requiresConfirmation ? (language === "zh" ? "等待确认使用" : "Awaiting confirmation") : (language === "zh" ? "即将自动使用" : "Automatic use pending")}</div>
+                          <div className="mt-0.5 text-muted-foreground">{triggerLabel} · {action.requiresConfirmation ? (language === "zh" ? "确认后立即执行" : "Runs after confirmation") : `${language === "zh" ? "剩余" : "in"} ${seconds}${language === "zh" ? "秒" : "s"}`}</div>
+                        </div>
+                        <div className="flex shrink-0 gap-1.5">
+                          {action.requiresConfirmation ? <button type="button" className="rounded-md bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground disabled:opacity-50" disabled={pendingBusy === action.id} onClick={() => { setPendingBusy(action.id); void onConfirmPending(action.accountKey, action.id).finally(() => setPendingBusy(undefined)); }}>{language === "zh" ? "确认" : "Confirm"}</button> : null}
+                          <button type="button" className="rounded-md px-2 py-1 text-[10px] font-medium text-muted-foreground ring-1 ring-black/[0.08] hover:text-foreground disabled:opacity-50" disabled={pendingBusy === action.id} onClick={() => { setPendingBusy(action.id); void onCancelPending(action.accountKey, action.id).finally(() => setPendingBusy(undefined)); }}>{language === "zh" ? "取消" : "Cancel"}</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+              <div className="mt-2 flex items-center justify-between gap-2 border-t border-black/[0.05] pt-2 dark:border-white/[0.08]">
+                <span className="text-[11px] text-muted-foreground">{language === "zh" ? "此账号自动使用" : "Automatic use for this account"}</span>
+                <button type="button" role="switch" aria-checked={autoUseEnabled} disabled={busy || !settings} onClick={() => snapshot && void onSetAutoUse(snapshot.accountKey, { enabled: !autoUseEnabled })} className={cn("relative h-5 w-9 rounded-full", autoUseEnabled ? "bg-primary" : "bg-[#d1d1d6]")}><span className={cn("absolute left-0.5 top-0.5 size-4 rounded-full bg-white shadow", autoUseEnabled ? "translate-x-4" : "translate-x-0")} /></button>
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                <span>{language === "zh" ? "账号触发策略" : "Account trigger"}</span>
+                <Select
+                  value={accountOverride?.autoUseMode ?? "inherit"}
+                  onValueChange={(value) => snapshot && void onSetAutoUse(snapshot.accountKey, { autoUseMode: value === "inherit" ? undefined : value as ResetCardSettings["autoUseMode"] })}
+                  items={[
+                    { value: "inherit", label: language === "zh" ? `继承全局（${settings?.autoUseMode ?? "off"}）` : `Global (${settings?.autoUseMode ?? "off"})` },
+                    { value: "off", label: language === "zh" ? "关闭" : "Off" },
+                    { value: "weekly-exhausted", label: language === "zh" ? "周额度耗尽" : "Weekly exhausted" },
+                    { value: "expiring", label: language === "zh" ? "即将到期" : "Expiring" },
+                    { value: "both", label: language === "zh" ? "两者" : "Both" },
+                  ]}
+                  className="h-7 w-[142px] bg-white text-[11px] dark:bg-[#1b2129]"
+                  openOnHover={false}
+                />
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                <span>{language === "zh" ? "使用前策略" : "Before-use policy"}</span>
+                <Select
+                  value={accountOverride?.preConsumeMode ?? "inherit"}
+                  onValueChange={(value) => snapshot && void onSetAutoUse(snapshot.accountKey, { preConsumeMode: value === "inherit" ? undefined : value as ResetCardSettings["preConsumeMode"] })}
+                  items={[
+                    { value: "inherit", label: language === "zh" ? "继承全局" : "Global" },
+                    { value: "grace", label: language === "zh" ? "倒计时缓冲" : "Grace period" },
+                    { value: "confirm", label: language === "zh" ? "需要确认" : "Confirm" },
+                  ]}
+                  className="h-7 w-[142px] bg-white text-[11px] dark:bg-[#1b2129]"
+                  openOnHover={false}
+                />
+              </div>
+              <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground">
+                <span>{snapshot.observedAt ? `${language === "zh" ? "同步于" : "Synced"} ${new Date(snapshot.observedAt).toLocaleTimeString()}` : ""}</span>
+                {snapshot.isStale ? <span className="text-amber-600">{language === "zh" ? "已过期" : "Stale"}</span> : null}
+              </div>
+            </>
+          )}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

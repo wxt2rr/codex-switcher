@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import {
   __testUtils,
 } from "./bridge.js";
+import { validateResetCardAccountSettingsPatch, validateResetCardSettingsPatch } from "./codex-subscription-state.js";
 import type { GatewayEnvironmentState } from "../../../packages/core/dist/gateway/model.js";
 
 async function writeFileRecursive(path: string, content: string): Promise<void> {
@@ -90,6 +91,39 @@ test("electron bridge validates imports and builds official Codex auth JSON", ()
       last_refresh: "2026-07-26T12:00:00.000Z",
     },
   );
+});
+
+test("reset-card IPC patches reject unknown and unsafe fields", () => {
+  assert.deepEqual(validateResetCardSettingsPatch({ refreshIntervalMinutes: 10, notificationsEnabled: true }), {
+    refreshIntervalMinutes: 10,
+    notificationsEnabled: true,
+  });
+  assert.deepEqual(validateResetCardAccountSettingsPatch({ enabled: true, autoUseMode: "expiring" }), {
+    enabled: true,
+    autoUseMode: "expiring",
+  });
+  assert.throws(() => validateResetCardSettingsPatch({ accessToken: "secret" }), /Unknown reset-card setting/);
+  assert.throws(() => validateResetCardAccountSettingsPatch({ creditId: "raw-upstream-id" }), /Invalid account reset-card settings/);
+  assert.throws(() => validateResetCardAccountSettingsPatch({ enabled: "yes" }), /enabled must be boolean/);
+});
+
+test("subscription usage cache keeps reset timestamps for renderer countdowns", () => {
+  const value = __testUtils.formatSubscriptionUsageMetric({
+    name: "five-hour",
+    usedPercent: 33,
+    resetsAt: new Date("2026-11-02T12:34:00.000Z").getTime(),
+    used: true,
+    exhausted: false,
+  });
+  assert.match(value, /^33% \(11-02 20:34\)$/);
+  assert.equal(__testUtils.formatSubscriptionUsageMetric(undefined), "-");
+});
+
+test("reset-card bridge source keeps credential-bearing work in main and redacts public card ids", async () => {
+  const source = await readBridgeSource();
+  assert.match(source, /export async function consumeResetCard/);
+  assert.match(source, /function broadcastResetCardEvent/);
+  assert.doesNotMatch(source, /broadcastResetCardEvent\([^\n]*accessToken/);
 });
 
 test("electron bridge resolves a legacy OpenAI account to its gateway upstream identity", () => {

@@ -12,6 +12,36 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   getRouterPortSettings: () => ipcRenderer.invoke("desktop:getRouterPortSettings"),
   getLaunchAtLoginSettings: () => ipcRenderer.invoke("desktop:getLaunchAtLoginSettings"),
   getAppPresenceSettings: () => ipcRenderer.invoke("desktop:getAppPresenceSettings"),
+  listResetCardSnapshots: () => ipcRenderer.invoke("desktop:listResetCardSnapshots"),
+  refreshResetCardAccount: (accountKey: string) => ipcRenderer.invoke("desktop:refreshResetCardAccount", accountKey),
+  getResetCardSettings: () => ipcRenderer.invoke("desktop:getResetCardSettings"),
+  setResetCardSettings: (value: Record<string, unknown>) => ipcRenderer.invoke("desktop:setResetCardSettings", value),
+  setResetCardAccountAutoUse: (accountKey: string, value: Record<string, unknown>) => ipcRenderer.invoke("desktop:setResetCardAccountAutoUse", accountKey, value),
+  consumeResetCard: (accountKey: string, cardId?: string, confirmed = false) => ipcRenderer.invoke("desktop:consumeResetCard", accountKey, cardId, confirmed),
+  listPendingResetCardActions: () => ipcRenderer.invoke("desktop:listPendingResetCardActions"),
+  confirmPendingResetCard: (accountKey: string, actionId?: string) => ipcRenderer.invoke("desktop:confirmPendingResetCard", accountKey, actionId),
+  cancelPendingResetCard: (accountKey: string, actionId?: string) => ipcRenderer.invoke("desktop:cancelPendingResetCard", accountKey, actionId),
+  getResetCardNotificationStatus: () => ipcRenderer.invoke("desktop:getResetCardNotificationStatus"),
+  onResetCardSnapshot: (listener: (snapshot: unknown) => void) => {
+    const handler = (_event: unknown, snapshot: unknown) => listener(snapshot);
+    ipcRenderer.on("desktop:resetCardSnapshot", handler);
+    return () => ipcRenderer.removeListener("desktop:resetCardSnapshot", handler);
+  },
+  onResetCardOperation: (listener: (event: unknown) => void) => {
+    const handler = (_event: unknown, value: unknown) => listener(value);
+    ipcRenderer.on("desktop:resetCardOperation", handler);
+    return () => ipcRenderer.removeListener("desktop:resetCardOperation", handler);
+  },
+  onResetCardNotification: (listener: (value: unknown) => void) => {
+    const handler = (_event: unknown, value: unknown) => listener(value);
+    ipcRenderer.on("desktop:resetCardNotification", handler);
+    return () => ipcRenderer.removeListener("desktop:resetCardNotification", handler);
+  },
+  onResetCardNotificationClick: (listener: (value: unknown) => void) => {
+    const handler = (_event: unknown, value: unknown) => listener(value);
+    ipcRenderer.on("desktop:resetCardNotificationClick", handler);
+    return () => ipcRenderer.removeListener("desktop:resetCardNotificationClick", handler);
+  },
   detectCodexToolPaths: () => ipcRenderer.invoke("desktop:detectCodexToolPaths"),
   setCodexToolPath: (kind: "cli" | "app", path: string) => ipcRenderer.invoke("desktop:setCodexToolPath", kind, path),
   clearCodexToolPath: (kind: "cli" | "app") => ipcRenderer.invoke("desktop:clearCodexToolPath", kind),

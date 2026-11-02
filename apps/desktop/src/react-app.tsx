@@ -28,6 +28,7 @@ import {
   type DesktopNotice,
 } from "./desktop-feedback";
 import type { AccountProviderId } from "./pages/accounts-page";
+import type { ResetCardNotificationStatus, ResetCardPendingAction, ResetCardSettings, ResetCardSnapshot } from "./reset-card-model";
 
 const bridge = resolveDesktopBridge();
 const DEEPSEEK_OFFICIAL_BASE_URL = "https://api.deepseek.com";
@@ -52,6 +53,10 @@ export function App() {
   const [view, setView] = useState<NavView>(resolveInitialView);
   const [language, setLanguage] = useState<UiLanguage>(DEFAULT_LANGUAGE);
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
+  const [resetCardSnapshots, setResetCardSnapshots] = useState<ResetCardSnapshot[]>([]);
+  const [resetCardPendingActions, setResetCardPendingActions] = useState<ResetCardPendingAction[]>([]);
+  const [resetCardSettings, setResetCardSettings] = useState<ResetCardSettings | null>(null);
+  const [resetCardNotificationStatus, setResetCardNotificationStatus] = useState<ResetCardNotificationStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [initialLoadingProgress, setInitialLoadingProgress] = useState(0);
@@ -115,6 +120,7 @@ export function App() {
   const [autoUpdateActionBusy, setAutoUpdateActionBusy] = useState(false);
   const [modelCatalogRefreshRequest, setModelCatalogRefreshRequest] = useState<ModelCatalogAppRefreshRequirement | null>(null);
   const [modelCatalogRefreshBusy, setModelCatalogRefreshBusy] = useState(false);
+  const [focusedResetCardAccountKey, setFocusedResetCardAccountKey] = useState<string>();
   const authMetricsRequestRef = useRef(0);
   const authMetricsInFlightRef = useRef(false);
   const proxyDraftDirtyRef = useRef(false);
@@ -124,6 +130,31 @@ export function App() {
   useEffect(() => {
     void initializeApp();
   }, []);
+
+  useEffect(() => {
+    const unsubscribeSnapshot = bridge.onResetCardSnapshot((snapshot) => {
+      setResetCardSnapshots((current) => [...current.filter((item) => item.accountKey !== snapshot.accountKey), snapshot]);
+    });
+    const unsubscribeOperation = bridge.onResetCardOperation((event) => {
+      if (event.status === "failed" || event.status === "ambiguous") setErrorMessage(event.message);
+      if (event.status === "succeeded" && event.type === "consume") setSuccessMessage(event.message);
+      if (event.status === "canceled") setMessage(buildDesktopNotice(language, "info", event.message));
+      void bridge.listPendingResetCardActions().then(setResetCardPendingActions).catch(() => undefined);
+    });
+    const unsubscribeNotification = bridge.onResetCardNotification((notification) => {
+      setMessage(buildDesktopNotice(language, "info", `${notification.title}: ${notification.body}`));
+    });
+    const unsubscribeClick = bridge.onResetCardNotificationClick((value) => {
+      setView("accounts");
+      if (value.accountKey) setFocusedResetCardAccountKey(value.accountKey);
+    });
+    return () => {
+      unsubscribeSnapshot();
+      unsubscribeOperation();
+      unsubscribeNotification();
+      unsubscribeClick();
+    };
+  }, [language]);
 
   useEffect(() => {
     if (!message) {
@@ -219,6 +250,8 @@ export function App() {
     void bridge.getGeneratedImageRecoverySettings().then(setGeneratedImageRecovery).catch(setErrorMessage);
     void bridge.getAppEnvironmentBadgeStatus().then(setAppEnvironmentBadges).catch(setErrorMessage);
     void bridge.getAutoUpdateStatus().then(setAutoUpdateStatus).catch(setErrorMessage);
+    void bridge.getResetCardSettings().then(setResetCardSettings).catch(setErrorMessage);
+    void bridge.getResetCardNotificationStatus().then(setResetCardNotificationStatus).catch(setErrorMessage);
   }, [view]);
 
   useEffect(() => {
@@ -325,12 +358,29 @@ export function App() {
       setErrorMessage(error);
     }
     setInitialLoadingStage("restoring-routes");
+    void bridge.listResetCardSnapshots().then(setResetCardSnapshots).catch(() => undefined);
+    void bridge.listPendingResetCardActions().then(setResetCardPendingActions).catch(() => undefined);
+    void bridge.getResetCardSettings().then(setResetCardSettings).catch(() => undefined);
+    void bridge.getResetCardNotificationStatus().then(setResetCardNotificationStatus).catch(() => undefined);
     await refreshOverview({ loadMetrics: true });
     // Do not discover every provider during startup. Discovery mutates the
     // gateway/model catalog and Codex App watches those files; running it here
     // can make the App restart while the switcher is still restoring routes.
     // Keep the cached snapshot until the user explicitly refreshes discovery
     // from the account/model UI.
+  }
+
+  async function handleResetCardSettingsChange(next: Partial<ResetCardSettings>) {
+    const previous = resetCardSettings;
+    if (previous) setResetCardSettings({ ...previous, ...next });
+    try {
+      const saved = await bridge.setResetCardSettings(next);
+      setResetCardSettings(saved);
+      setResetCardNotificationStatus(await bridge.getResetCardNotificationStatus());
+    } catch (error) {
+      if (previous) setResetCardSettings(previous);
+      setErrorMessage(error);
+    }
   }
 
   async function handleCliTerminalSelection(id: CliTerminalId) {
@@ -671,6 +721,7 @@ export function App() {
       const raw = await bridge.loadOverview();
       const nextOverview = JSON.parse(raw) as OverviewPayload;
       setOverview(nextOverview);
+      void bridge.listResetCardSnapshots().then(setResetCardSnapshots).catch(() => undefined);
       if (initialLoading) {
         setInitialLoadingProgress(88);
         setInitialLoadingStage("ready");
@@ -1483,6 +1534,18 @@ export function App() {
           }}
           bridge={bridge}
           onOpenModelSettings={() => setView("models")}
+          resetCardSnapshots={resetCardSnapshots}
+          resetCardPendingActions={resetCardPendingActions}
+          focusedResetCardAccountKey={focusedResetCardAccountKey}
+          onRefreshResetCard={(accountKey) => bridge.refreshResetCardAccount(accountKey).then((result) => {
+            setResetCardSnapshots((current) => [...current.filter((item) => item.accountKey !== result.snapshot.accountKey), result.snapshot]);
+            return result;
+          }).catch((error) => { setErrorMessage(error); })}
+          onConsumeResetCard={(accountKey, cardId) => bridge.consumeResetCard(accountKey, cardId, true).then(() => bridge.listResetCardSnapshots().then(setResetCardSnapshots)).catch((error) => { setErrorMessage(error); })}
+          onConfirmResetCard={(accountKey, actionId) => bridge.confirmPendingResetCard(accountKey, actionId).then(() => bridge.listPendingResetCardActions().then(setResetCardPendingActions)).catch((error) => { setErrorMessage(error); })}
+          onCancelResetCard={(accountKey, actionId) => bridge.cancelPendingResetCard(accountKey, actionId).then(() => bridge.listPendingResetCardActions().then(setResetCardPendingActions)).catch((error) => { setErrorMessage(error); })}
+          resetCardSettings={resetCardSettings}
+          onSetResetCardAccountAutoUse={(accountKey, value) => bridge.setResetCardAccountAutoUse(accountKey, value).then(setResetCardSettings)}
           onSuccess={setSuccessMessage}
           onAppRefreshRequired={requestModelCatalogRefresh}
           onError={setErrorMessage}
@@ -1578,6 +1641,9 @@ export function App() {
           autoUpdateStatus={autoUpdateStatus}
           onCheckForAutoUpdate={() => void handleCheckForAutoUpdate()}
           onInstallDownloadedUpdate={() => void handleInstallDownloadedUpdate()}
+          resetCardSettings={resetCardSettings}
+          resetCardNotificationStatus={resetCardNotificationStatus}
+          onResetCardSettingsChange={(next) => void handleResetCardSettingsChange(next)}
         />
       ) : null}
 

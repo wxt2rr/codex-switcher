@@ -197,6 +197,7 @@ test("account records keep actions in the row and provide icons for compact cont
   assert.match(accounts, /只有活跃账号支持多开/);
   assert.match(accounts, /title=\{item\.disabled \? item\.disabledHint : undefined\}/);
   assert.match(css, /\.responsive-record-row:has\(\[aria-expanded="true"\]\)/);
+  assert.match(css, /\.responsive-record-row:has\(\[aria-expanded="true"\]\)\s*\{[^}]*z-index:\s*80/s);
   assert.match(css, /\.responsive-record-row:hover/);
   assert.match(css, /\.responsive-record-row:focus-within/);
 });
@@ -204,7 +205,8 @@ test("account records keep actions in the row and provide icons for compact cont
 test("selected controls share the green theme treatment", () => {
   assert.match(css, /--selected-border-color:\s*rgb\(148 163 184 \/ 0\.55\)/);
   assert.match(css, /\.ui-selected-control\s*\{[^}]*border-color:\s*var\(--selected-border-color\);[^}]*background-color:\s*var\(--selected-control-background\);[^}]*color:\s*var\(--selected-control-foreground\);/s);
-  assert.match(css, /\.management-list-card:hover\s*\{[^}]*border-color:\s*var\(--selected-border-color\)/s);
+  assert.match(css, /\.management-list-card:hover\s*\{[^}]*border-color:\s*rgb\(15 23 42 \/ 0\.08\)/s);
+  assert.match(css, /\.management-list-card:focus-within,\s*\.management-list-card:has\(\[aria-expanded="true"\]\)\s*\{[^}]*box-shadow:/s);
   assert.match(primitives, /active\s*\?\s*"ui-selected-control"/);
   assert.match(accounts, /active \? "ui-selected-control"/);
   assert.match(desktopShell, /\? "bg-\[#f1f3f5\] text-foreground dark:bg-\[#1b2129\] dark:text-white"/);
@@ -366,7 +368,7 @@ test("shared selects open on hover without button press scaling", () => {
 
 test("account side panel selects require a manual click", () => {
   const clickOnlySelects = accounts.match(/openOnHover=\{false\}/g) ?? [];
-  assert.equal(clickOnlySelects.length, 11);
+  assert.equal(clickOnlySelects.length, 13);
   assert.match(accounts, /API protocol/);
   assert.match(accounts, /长会话处理/);
   assert.match(accounts, /安全压缩（推荐）/);

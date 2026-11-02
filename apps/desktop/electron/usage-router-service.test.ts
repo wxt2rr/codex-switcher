@@ -722,6 +722,88 @@ test("environment gateway rejects a ChatGPT route without credentials instead of
   }
 });
 
+test("environment Gateway asks the main-process admission hook for one subscription reset and replays the member", async () => {
+  let upstreamCalls = 0;
+  let admissionCalls = 0;
+  let admissionPayload: Record<string, unknown> | undefined;
+  const upstream = createServer(async (request, response) => {
+    upstreamCalls += 1;
+    for await (const _chunk of request) { /* drain */ }
+    if (upstreamCalls === 1) {
+      response.statusCode = 403;
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ error: { message: "weekly quota exhausted" } }));
+      return;
+    }
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ id: "reset-replayed", model: "gpt-subscription", output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }] }));
+  });
+  const admission = createServer(async (request, response) => {
+    admissionCalls += 1;
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    admissionPayload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ consumed: true }));
+  });
+  await Promise.all([
+    new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve)),
+    new Promise<void>((resolve) => admission.listen(0, "127.0.0.1", resolve)),
+  ]);
+  const upstreamAddress = upstream.address();
+  const admissionAddress = admission.address();
+  assert(upstreamAddress && typeof upstreamAddress !== "string");
+  assert(admissionAddress && typeof admissionAddress !== "string");
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-reset-admission-"));
+  const service = await startUsageRouterService({
+    stateDir,
+    adminToken: "secret",
+    gatewayResetAdmission: { url: `http://127.0.0.1:${admissionAddress.port}`, token: "admission-token" },
+  });
+  const now = Date.now();
+  const route = {
+    routeId: "route-reset-subscription", envName: "work", accountName: "plus", providerId: "chatgpt",
+    upstreamBaseUrl: `http://127.0.0.1:${upstreamAddress.port}/v1`, originalBaseUrl: "default",
+    protocol: "responses" as const, exposedModelId: "gpt-subscription", upstreamModel: "gpt-subscription",
+    reasoningProfile: "auto" as const, enabled: true, createdAt: now, updatedAt: now,
+  };
+  const pool = {
+    poolId: "pool-reset-subscription", envName: "work", protocol: "responses" as const, enabled: true,
+    strategy: "sticky_weighted_round_robin" as const, sessionTtlMinutes: 60, maxFailoverAttempts: 0, maxSameAccountFailures: 1,
+    createdAt: now, updatedAt: now, cursor: 0,
+    members: [{ accountName: "plus", routeId: route.routeId, protocol: "responses" as const,
+      upstreamBaseUrl: route.upstreamBaseUrl, originalBaseUrl: route.originalBaseUrl, upstreamModel: route.upstreamModel,
+      enabled: true, weight: 1, priority: 0 }],
+  };
+  const gateway = { gatewayId: "gateway-reset-subscription", envName: "work", routeIds: [route.routeId], poolId: pool.poolId,
+    defaultRouteId: route.routeId, enabled: true, createdAt: now, updatedAt: now };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  try {
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(route) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/pools`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(pool) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/pools/${pool.poolId}/members/plus/secret`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ upstreamBearerToken: "subscription-token", authMode: "auth", accountId: "acct-plus" }) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/pools/${pool.poolId}/token`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ localRouteToken: "pool-token" }) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway) })).status, 204);
+    const response = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "gpt-subscription", input: "hello" }),
+    });
+    const responseBody = await response.text();
+    assert.equal(response.status, 200, responseBody);
+    assert.equal(JSON.parse(responseBody).id, "reset-replayed");
+    assert.equal(upstreamCalls, 2);
+    assert.equal(admissionCalls, 1);
+    assert.deepEqual(admissionPayload, {
+      envName: "work", accountName: "plus", poolEnabled: true, viableFallback: false, failureStatus: 403, failureReason: "quota", alreadyRetried: false,
+    });
+  } finally {
+    await service.close();
+    await Promise.all([
+      new Promise<void>((resolve) => upstream.close(() => resolve())),
+      new Promise<void>((resolve) => admission.close(() => resolve())),
+    ]);
+  }
+});
+
 test("local Agent surface exposes authenticated models and v1 protocol aliases without changing the Codex gateway", async () => {
   let receivedPath = "";
   let receivedAuthorization = "";
