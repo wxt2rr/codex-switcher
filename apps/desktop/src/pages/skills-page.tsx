@@ -309,8 +309,8 @@ export function SkillsPage({
         <div className="relative z-20 shrink-0 flex flex-col gap-3 [-webkit-app-region:no-drag]">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <h2 className="text-[24px] font-semibold tracking-[-0.04em] text-neutral-950 dark:text-neutral-50">{title}</h2>
-              <p className="mt-1 truncate text-[13px] leading-6 text-muted-foreground dark:text-muted-foreground">{subtitle}</p>
+              <h2 className="text-[22px] font-semibold tracking-[-0.035em] text-foreground">{title}</h2>
+              <p className="mt-1 truncate text-[12px] leading-5 text-muted-foreground">{subtitle}</p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <Button variant="secondary" size="sm" onClick={() => setSyncOpen(true)}>
@@ -324,17 +324,17 @@ export function SkillsPage({
             </div>
           </div>
 
-          <div className="relative overflow-hidden rounded-[14px] border border-black/[0.05] bg-white px-2.5 py-2 dark:border-white/[0.07] dark:bg-[#141a22]">
+          <div className="ui-surface-muted relative overflow-hidden px-2.5 py-2 shadow-[var(--cs-shadow-xs)]">
             <div ref={scopeScrollerRef} className="horizontal-scroll-no-bar overflow-x-auto">
             <div className="flex min-w-max items-center gap-1.5" role="tablist" aria-label={zh ? "Skill 范围" : "Skill scopes"}>
               {(snapshot?.scopes ?? [{ id: "marketplace", kind: "marketplace" as const, name: "Marketplace", skills: [] }]).map((scope) => (
                 <button key={scope.id} type="button" role="tab" aria-selected={activeScopeId === scope.id}
                   data-skill-scope-id={scope.id} onClick={() => selectScope(scope.id)}
                   className={cn(
-                    "h-8 rounded-lg border border-transparent px-3.5 text-[13px] font-semibold transition-[background-color,color,border-color,transform] duration-[140ms] ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.97] [-webkit-app-region:no-drag]",
+                    "h-8 rounded-[var(--radius-control)] border border-transparent px-3.5 text-[12px] font-semibold transition-[background-color,color,border-color,transform] duration-[140ms] ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.97] [-webkit-app-region:no-drag]",
                     activeScopeId === scope.id
                       ? "ui-selected-control"
-                      : "text-muted-foreground hover:bg-[#f3f4f6] hover:text-neutral-900 dark:text-muted-foreground dark:hover:bg-[#1b2129] dark:hover:text-white",
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
                   )}>
                   {scope.id === "marketplace" ? (zh ? "市场" : ja ? "マーケット" : "Marketplace") : scope.name}
                 </button>
@@ -345,13 +345,13 @@ export function SkillsPage({
             <div aria-hidden="true" data-visible={scopeOverflow.right} className="skill-scope-edge-fade skill-scope-edge-fade-right" />
           </div>
 
-          <div className="rounded-[14px] border border-black/[0.05] bg-white px-3 py-2.5 dark:border-white/[0.07] dark:bg-[#141a22]">
-            <div className="responsive-toolbar flex items-center gap-2.5">
-            <div className="relative min-w-[220px] max-w-[520px] flex-1">
+          <div className="ui-surface-muted px-3 py-2.5 shadow-[var(--cs-shadow-xs)]">
+            <div className="responsive-toolbar flex flex-col items-stretch gap-2.5 sm:flex-row sm:items-center">
+            <div className="relative min-w-0 max-w-[520px] flex-1 sm:min-w-[220px]">
               <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input value={query} onChange={(event) => setQuery(event.target.value)}
                 placeholder={activeScopeId === "marketplace" ? (zh ? "搜索市场" : "Search marketplace") : (zh ? "搜索已安装 Skill" : "Search installed skills")}
-                className="h-8 rounded-lg border-transparent bg-[#fbfbfc] pl-10 text-[13px] shadow-none dark:bg-[#1b2129]" />
+                className="ui-control-surface h-8 pl-10 text-[13px] shadow-none" />
             </div>
             {activeScope?.kind === "marketplace" ? (
               <div className="ml-auto flex items-center gap-2">

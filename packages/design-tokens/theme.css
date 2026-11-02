@@ -2,44 +2,62 @@
   --cs-font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --cs-background: oklch(0.975 0.004 85);
   --cs-surface: oklch(0.99 0 0);
+  --cs-surface-muted: oklch(0.965 0.004 85);
+  --cs-surface-subtle: oklch(0.95 0.004 85);
   --cs-foreground: oklch(0.18 0 0);
   --cs-muted: oklch(0.965 0 0);
   --cs-muted-foreground: oklch(0.495 0.005 85);
-  --cs-border: oklch(0.9 0 0);
-  --cs-primary: rgb(59 130 246);
+  --cs-border: oklch(0.9 0.004 85);
+  --cs-border-subtle: rgb(15 23 42 / 0.07);
+  --cs-primary: rgb(16 185 129);
   --cs-primary-foreground: rgb(255 255 255);
-  --cs-selected-background: rgb(219 234 254);
-  --cs-selected-foreground: rgb(30 64 175);
-  --cs-selected-border: rgb(59 130 246 / 0.55);
+  --cs-primary-soft: rgb(16 185 129 / 0.1);
+  --cs-primary-hover: rgb(5 150 105);
+  --cs-selected-background: rgb(209 250 229);
+  --cs-selected-foreground: rgb(6 95 70);
+  --cs-selected-border: rgb(16 185 129 / 0.42);
+  --cs-focus-ring: rgb(15 23 42 / 0.34);
+  --cs-focus-ring-soft: rgb(15 23 42 / 0.12);
   --cs-success: oklch(0.596 0.145 163.225);
   --cs-success-background: oklch(0.979 0.021 166.113);
   --cs-danger: oklch(0.586 0.253 17.585);
   --cs-danger-background: oklch(0.969 0.015 12.422);
   --cs-warm: oklch(0.769 0.188 70.08);
   --cs-warm-background: oklch(0.95 0.02 80);
-  --cs-warm: oklch(0.769 0.188 70.08);
-  --cs-warm-background: oklch(0.95 0.02 80);
-  --cs-radius-sm: 0.625rem;   /* 10px - small elements */
-  --cs-radius-md: 0.875rem;   /* 14px - default cards, buttons */
-  --cs-radius-lg: 1.125rem;   /* 18px - large containers */
+  --cs-radius-sm: 0.5rem;
+  --cs-radius-md: 0.75rem;
+  --cs-radius-lg: 1rem;
+  --cs-control-height-sm: 2rem;
+  --cs-control-height-md: 2.25rem;
   --cs-shadow-xs: 0 1px 3px rgb(0 0 0 / 0.04), 0 1px 2px -1px rgb(0 0 0 / 0.04);
   --cs-shadow-sm: 0 1px 3px rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.04);
+  --cs-shadow-popover: 0 16px 36px rgb(15 23 42 / 0.14), 0 2px 8px rgb(15 23 42 / 0.08);
   --cs-shadow-lg: 0 18px 40px rgb(15 23 42 / 0.08);
   --cs-motion-fast: 160ms;
   --cs-motion-normal: 180ms;
+  --cs-motion-overlay: 220ms;
+  --cs-motion-close: 140ms;
   --cs-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 .dark {
   --cs-background: oklch(0.16 0.01 250);
   --cs-surface: oklch(0.2 0.01 250);
+  --cs-surface-muted: oklch(0.22 0.01 250);
+  --cs-surface-subtle: oklch(0.24 0.01 250);
   --cs-foreground: oklch(0.96 0 0);
   --cs-muted: oklch(0.22 0.01 250);
   --cs-muted-foreground: oklch(0.72 0 0);
   --cs-border: oklch(0.3 0.01 250);
-  --cs-primary: rgb(59 130 246);
-  --cs-primary-foreground: rgb(20 35 23);
-  --cs-selected-background: rgb(30 64 175 / 0.72);
-  --cs-selected-foreground: rgb(147 197 253);
-  --cs-selected-border: rgb(100 116 139 / 0.8);
+  --cs-border-subtle: rgb(255 255 255 / 0.09);
+  --cs-primary: rgb(52 211 153);
+  --cs-primary-foreground: rgb(4 47 36);
+  --cs-primary-soft: rgb(52 211 153 / 0.16);
+  --cs-primary-hover: rgb(110 231 183);
+  --cs-selected-background: rgb(6 78 59 / 0.72);
+  --cs-selected-foreground: rgb(167 243 208);
+  --cs-selected-border: rgb(52 211 153 / 0.42);
+  --cs-focus-ring: rgb(255 255 255 / 0.62);
+  --cs-focus-ring-soft: rgb(255 255 255 / 0.18);
+  --cs-shadow-popover: 0 18px 42px rgb(0 0 0 / 0.36), 0 2px 10px rgb(0 0 0 / 0.2);
 }

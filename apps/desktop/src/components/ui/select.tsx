@@ -32,7 +32,7 @@ function SelectTrigger({
       data-slot="select-trigger"
       className={cn(
         "border-input aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:bg-input/30 dark:hover:bg-input/50",
-        "group flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-transparent bg-muted px-3 py-2 text-[13px] whitespace-nowrap shadow-none transition-[background-color,color,border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] outline-none dark:bg-[#19212b] dark:text-foreground",
+        "ui-control-surface group flex h-9 w-full items-center justify-between gap-2 px-3 py-2 text-[13px] whitespace-nowrap shadow-none outline-none dark:text-foreground",
         "hover:bg-[#eef1f4] dark:hover:bg-[#202a36] disabled:cursor-not-allowed disabled:opacity-50",
         "[&>span]:line-clamp-1",
         className,
@@ -61,7 +61,7 @@ function SelectContent({
         data-slot="select-content"
         className={cn(
           "motion-select-content bg-popover text-popover-foreground",
-          "relative z-50 max-h-[min(20rem,var(--radix-select-content-available-height))] min-w-[8rem] overflow-x-hidden overflow-y-auto rounded-lg border border-black/[0.08] bg-white shadow-md dark:border-white/[0.08] dark:bg-[#161c24]",
+          "ui-overlay-surface relative z-[var(--z-popover)] max-h-[min(20rem,var(--radix-select-content-available-height))] min-w-[8rem] overflow-x-hidden overflow-y-auto bg-popover",
           "origin-[var(--radix-select-content-transform-origin)]",
           className,
         )}
@@ -108,7 +108,7 @@ function SelectItem({
     <SelectPrimitive.Item
       data-slot="select-item"
       className={cn(
-        "focus:bg-accent focus:text-foreground relative flex w-full cursor-default items-center gap-2 rounded-lg py-2 pr-2 pl-8 text-[13px] text-foreground outline-none select-none dark:text-foreground dark:focus:bg-[#202733] dark:focus:text-white",
+        "focus:bg-accent focus:text-foreground relative flex w-full cursor-default items-center gap-2 rounded-[var(--radius-control)] py-2 pr-2 pl-8 text-[13px] text-foreground outline-none select-none dark:text-foreground dark:focus:bg-[#202733] dark:focus:text-white",
         "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         className,
       )}

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.93 - 2026-11-02
+
+- Unified the desktop UI foundation with semantic surface, border, focus, motion, radius, shadow, and stacking tokens across management pages.
+- Refined account, environment, skills, and usage layouts with consistent cards, controls, loading states, overlays, and accessible focus behavior.
+- Fixed select hover coordination, reset-card portal layering, and responsive focus regression coverage.
+
 ## 0.1.92 - 2026-11-02
 
 - Added production-grade Codex/Plus subscription quota and reset-card management: background synchronization, durable token-free snapshots, expiry and sync notifications, explicit manual consumption, opt-in automatic use with grace/confirmation, and gateway account-pool admission safeguards.

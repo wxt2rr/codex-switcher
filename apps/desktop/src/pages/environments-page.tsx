@@ -18,6 +18,7 @@ import type {
 import {
   EmptyList,
   ListCard,
+  ListPageHeader,
   ListPageFrame,
   ListStack,
   SoftBadge,
@@ -677,11 +678,16 @@ export function EnvironmentsPage({
 
   return (
     <ListPageFrame className="overflow-hidden" contentClassName="h-full gap-3">
-      <div className="shrink-0 flex flex-col gap-4">
-        <div><h2 className="text-[24px] font-semibold tracking-[-0.04em] text-neutral-950">{pageTitle(language)}</h2><p className="mt-1 text-[13px] leading-6 text-muted-foreground">{pageSubtitle(language)}</p></div>
-        <div className="rounded-[14px] border border-black/[0.05] bg-white px-3 py-2.5">
-          <div className="responsive-toolbar flex items-center gap-2.5">
-            <div className="relative min-w-[220px] flex-1"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={pageCopy.environments.searchPlaceholder} className="h-8 rounded-lg border-transparent bg-[#fbfbfc] pl-10 text-[13px] shadow-none" /></div>
+      <ListPageHeader
+        title={pageTitle(language)}
+        subtitle={pageSubtitle(language)}
+        search={search}
+        searchPlaceholder={pageCopy.environments.searchPlaceholder}
+        onSearchChange={setSearch}
+        showFilter={false}
+        layout="stacked"
+        actions={(
+          <>
             <Button
               variant="outline"
               className="h-8 rounded-lg px-3.5 text-[13px] shadow-none"
@@ -699,9 +705,9 @@ export function EnvironmentsPage({
               <FolderPlus className="size-4" />
               {pageCopy.environments.create}
             </Button>
-          </div>
-        </div>
-      </div>
+          </>
+        )}
+      />
 
       <ListStack>
           {filteredEnvs.length === 0 ? (

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   CircleCheck,
   CircleX,
@@ -603,30 +604,30 @@ export function AccountsPage({
   }
 
   return (
-    <section className="h-full min-h-0 overflow-hidden px-6 pb-6 pt-6 xl:px-8 xl:pb-8 xl:pt-8">
+    <section className="h-full min-h-0 overflow-hidden px-5 pb-5 pt-5 xl:px-7 xl:pb-7 xl:pt-7">
       <div className="admin-page-content flex h-full w-full flex-col gap-3">
         <div className="shrink-0 flex flex-col gap-4">
           <div className="flex items-start justify-between gap-6">
             <div className="space-y-1">
-              <h2 className="text-[24px] font-semibold tracking-[-0.04em] text-foreground">
+              <h2 className="text-[22px] font-semibold tracking-[-0.035em] text-foreground">
                 {language === "zh" ? "账号管理" : language === "ja" ? "アカウント管理" : "Account Management"}
               </h2>
-              <p className="text-[13px] leading-6 text-muted-foreground">
+              <p className="max-w-2xl text-[12px] leading-5 text-muted-foreground">
                 {language === "zh" ? "统一管理订阅授权、服务商账号连接和运行时配置。模型绑定请在模型页面维护。" : language === "ja" ? "サブスクリプション認証、プロバイダー接続、ランタイム設定をまとめて管理します。モデルのバインドはモデル画面で管理します。" : "Manage subscription auth, provider connections, and runtime settings. Model bindings are managed on the Models page."}
               </p>
             </div>
           </div>
 
-          <div className="rounded-[18px] bg-white px-3 py-2.5 ring-1 ring-black/[0.04] shadow-[0_10px_30px_rgba(15,23,42,0.03)]">
-            <div className="responsive-toolbar flex items-center gap-2.5">
-              <div className="relative min-w-[220px] flex-1">
+          <div className="ui-surface-muted px-3 py-2.5 shadow-[var(--cs-shadow-xs)]">
+            <div className="responsive-toolbar flex flex-col items-stretch gap-2.5 sm:flex-row sm:items-center sm:flex-wrap">
+              <div className="relative min-w-0 flex-1 sm:min-w-[220px]">
                 <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   data-account-search-input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder={language === "zh" ? "搜索账号、环境或 Base URL" : pageCopy.accounts.searchPlaceholder}
-                  className="h-8 rounded-lg border-transparent bg-[#fbfbfc] pl-10 text-[13px] shadow-none focus:border-transparent focus:ring-0"
+                  className="ui-control-surface h-8 pl-10 text-[13px] shadow-none"
                 />
               </div>
               <Select
@@ -650,7 +651,7 @@ export function AccountsPage({
                     onAction: () => markDefaultEnvironment(env.name),
                   })),
                 ]}
-                className="h-8 w-[140px] rounded-lg border-transparent bg-[#fbfbfc] px-3 text-[13px] shadow-none"
+                className="ui-control-surface h-8 w-[140px] px-3 text-[13px] shadow-none"
               />
               <Select
                 value={modeFilter}
@@ -660,7 +661,7 @@ export function AccountsPage({
                   { value: "apikey", label: localizeAuthMode("apikey", language) },
                   { value: "auth", label: localizeAuthMode("auth", language) },
                 ]}
-                className="h-8 w-[128px] rounded-lg border-transparent bg-[#fbfbfc] px-3 text-[13px] shadow-none"
+                className="ui-control-surface h-8 w-[128px] px-3 text-[13px] shadow-none"
               />
               <Select
                 value={sortMode}
@@ -669,12 +670,12 @@ export function AccountsPage({
                   { value: "recent", label: language === "zh" ? "最近使用" : "Recently used" },
                   { value: "name", label: language === "zh" ? "名称排序" : "By name" },
                 ]}
-                className="h-8 w-[128px] rounded-lg border-transparent bg-[#fbfbfc] px-3 text-[13px] shadow-none"
+                className="ui-control-surface h-8 w-[128px] px-3 text-[13px] shadow-none"
               />
-              <div className="flex h-8 items-center overflow-hidden rounded-lg bg-[#f3f4f6]">
+              <div className="ui-control-surface flex h-8 items-center overflow-hidden">
                 <button
                   type="button"
-                  className="motion-interactive-color flex size-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-[#ebeef2] hover:text-foreground disabled:cursor-wait"
+                  className="motion-interactive-color flex size-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-wait"
                   aria-label={language === "zh" ? "立即刷新用量" : "Refresh usage now"}
                   title={language === "zh" ? "立即刷新用量" : "Refresh usage now"}
                   onClick={onRefreshAuthMetrics}
@@ -738,7 +739,7 @@ export function AccountsPage({
                 )}
               </div>
               <Button
-                className="ml-auto h-8 rounded-lg bg-neutral-950 px-3.5 text-[13px] font-semibold text-white shadow-none hover:bg-neutral-800"
+                className="ml-auto h-8 rounded-[var(--radius-control)] px-3.5 text-[12px] font-semibold shadow-none"
                 onClick={() => {
                   onPrimeAccount(undefined);
                   setLoginDrawerOpen(true);
@@ -1659,6 +1660,7 @@ function ResetCardIndicator({
   compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [popoverPosition, setPopoverPosition] = useState({ top: 0, left: 0 });
   const [busy, setBusy] = useState(false);
   const [consumeCardId, setConsumeCardId] = useState<string>();
   const [pendingBusy, setPendingBusy] = useState<string>();
@@ -1727,6 +1729,22 @@ function ResetCardIndicator({
   };
   useEffect(() => {
     if (!open) return;
+    const updatePosition = () => {
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const width = 300;
+      const margin = 12;
+      const left = Math.min(Math.max(margin, rect.left), Math.max(margin, window.innerWidth - width - margin));
+      const below = rect.bottom + 8;
+      const estimatedHeight = Math.min(440, Math.max(160, window.innerHeight * 0.5));
+      const top = below + estimatedHeight <= window.innerHeight - margin
+        ? below
+        : Math.max(margin, rect.top - estimatedHeight - 8);
+      setPopoverPosition({ top, left });
+    };
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
     const handlePointerMove = (event: PointerEvent) => {
       const target = event.target;
       if (isInsidePopover(target) || hasOpenNestedSelect() || isInsideNestedSelect(target)) {
@@ -1737,6 +1755,8 @@ function ResetCardIndicator({
     };
     document.addEventListener("pointermove", handlePointerMove, true);
     return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
       document.removeEventListener("pointermove", handlePointerMove, true);
       cancelScheduledClose();
     };
@@ -1747,8 +1767,8 @@ function ResetCardIndicator({
         ref={triggerRef}
         type="button"
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-md text-[11px] text-muted-foreground transition-colors hover:bg-black/[0.04] hover:text-foreground focus:outline-none dark:hover:bg-white/[0.06]",
-          compact ? "h-6 border border-black/[0.06] bg-[#f7f8fa] px-2 dark:border-white/[0.08] dark:bg-[#1b2129]" : "px-1 py-1",
+          "inline-flex items-center gap-1.5 rounded-[var(--radius-control)] text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-none",
+          compact ? "ui-control-surface h-6 px-2" : "px-1 py-1",
         )}
         aria-expanded={open}
         aria-label={language === "zh" ? `重置卡：${statusLabel}` : `Reset cards: ${statusLabel}`}
@@ -1760,10 +1780,11 @@ function ResetCardIndicator({
         <CreditCard className="size-3.5" />
         <span className={cn("font-semibold tabular-nums", snapshot?.isStale && "text-amber-600")}>{statusLabel}</span>
       </button>
-      {open ? (
+      {open && typeof document !== "undefined" ? createPortal(
         <div
           ref={popoverRef}
-          className="absolute left-2 top-full z-30 mt-1 w-[300px] rounded-xl border border-black/[0.08] bg-white p-3 text-[12px] shadow-[0_12px_30px_rgba(15,23,42,0.14)] dark:border-white/[0.10] dark:bg-[#141a22] dark:shadow-[0_12px_30px_rgba(0,0,0,0.35)]"
+          className="ui-overlay-surface fixed z-[var(--z-popover)] w-[min(300px,calc(100vw-24px))] p-3 text-[12px]"
+          style={{ top: popoverPosition.top, left: popoverPosition.left }}
           onMouseEnter={cancelScheduledClose}
           onMouseLeave={scheduleClose}
         >
@@ -1778,7 +1799,7 @@ function ResetCardIndicator({
               <div className="mt-2 space-y-1.5">
                 {snapshot.cards.length === 0 ? <div className={cn("text-muted-foreground", snapshot.lastError && "text-amber-700")}>{snapshot.lastError ?? (language === "zh" ? "暂无可用重置卡" : "No available reset cards")}</div> : null}
                 {snapshot.cards.map((card) => (
-                  <div key={card.id} className="rounded-lg bg-[#f7f8fa] px-2.5 py-2 dark:bg-[#1b2129]">
+                  <div key={card.id} className="ui-surface-muted px-2.5 py-2">
                     <div className="flex items-center justify-between gap-2 text-foreground">
                       <span>{card.type === "weekly" ? (language === "zh" ? "周额度" : "Weekly") : card.type === "five-hour" ? (language === "zh" ? "五小时额度" : "Five-hour") : (language === "zh" ? "重置卡" : "Reset")}</span>
                       <span className="font-mono text-[10px] text-muted-foreground">{card.id}</span>
@@ -1852,7 +1873,7 @@ function ResetCardIndicator({
               </div>
             </>
           )}
-        </div>
+        </div>, document.body,
       ) : null}
     </div>
   );
