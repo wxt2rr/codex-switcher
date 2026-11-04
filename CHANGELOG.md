@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.100 - 2026-11-04
+
+- Hardened asynchronous Gateway pool telemetry coverage so macOS CI waits for the completed trace event without introducing an unbounded delay.
+
 ## 0.1.99 - 2026-11-04
 
 - Fixed duplicate assistant messages when Responses streaming output is converted to Chat Completions, including replayed `output_item.done` and terminal `response.completed` payloads.

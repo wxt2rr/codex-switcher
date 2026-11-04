@@ -1751,8 +1751,14 @@ test("environment Gateway converts a Responses credential pool member to an Anth
     assert.equal(converted.id, "pool_msg_converted");
     assert.equal(converted.output[0]?.content[0]?.text, "pool converted reply");
     assert.equal(converted.usage.total_tokens, 5);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    const trace = await (await fetch(`${service.origin}/admin/trace?event=pool_request_completed&limit=10`, { headers: { authorization: "Bearer secret" } })).json() as Array<{ conversionQuality?: string | null; conversionDiagnostics?: unknown[] }>;
+    let trace: Array<{ conversionQuality?: string | null; conversionDiagnostics?: unknown[] }> = [];
+    // Pool telemetry is appended through a serialized JSONL queue after the
+    // response has been sent. Give slower CI runners a bounded opportunity to
+    // observe the completed event instead of racing a fixed 20ms delay.
+    for (let attempt = 0; attempt < 40 && trace.length === 0; attempt += 1) {
+      trace = await (await fetch(`${service.origin}/admin/trace?event=pool_request_completed&limit=10`, { headers: { authorization: "Bearer secret" } })).json() as Array<{ conversionQuality?: string | null; conversionDiagnostics?: unknown[] }>;
+      if (trace.length === 0) await new Promise((resolve) => setTimeout(resolve, 25));
+    }
     assert.equal(trace[0]?.conversionQuality, "fair");
     assert.equal(JSON.stringify(trace[0]?.conversionDiagnostics).includes("anthropic_default_max_tokens"), true);
   } finally {
