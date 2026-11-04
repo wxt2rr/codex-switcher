@@ -167,6 +167,18 @@ function readCapabilityProfile(raw: Record<string, unknown>): GatewayModelDefini
   }
   const search = raw.supports_search_tool ?? raw.supportsSearchTool;
   if (typeof search === "boolean") result["tools.hosted.web_search"] = { status: search ? "supported" : "unsupported", source: "preset" };
+  const addSampling = (id: string, value: unknown): void => {
+    if (typeof value === "boolean") result[id] = { status: value ? "supported" : "unsupported", source: "discovery" };
+  };
+  addSampling("params.temperature", raw.temperature ?? nestedCapabilities?.temperature);
+  addSampling("params.top_p", raw.top_p ?? raw.topP ?? nestedCapabilities?.top_p ?? nestedCapabilities?.topP);
+  addSampling("params.top_k", raw.top_k ?? raw.topK ?? nestedCapabilities?.top_k ?? nestedCapabilities?.topK);
+  // Several provider catalogs use `temperature: false` to mean that the
+  // whole classic sampling family is unavailable. Keep top_p explicit so a
+  // target encoder cannot accidentally reintroduce it.
+  if (result["params.temperature"]?.status === "unsupported" && !result["params.top_p"]) {
+    result["params.top_p"] = { ...result["params.temperature"] };
+  }
   return result;
 }
 

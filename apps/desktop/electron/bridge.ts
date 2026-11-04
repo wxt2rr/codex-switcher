@@ -3523,6 +3523,7 @@ export async function discoverAccountModels(envName: string, accountName: string
         vision: model.capabilities.vision !== false,
         streaming: model.capabilities.streaming !== false,
       },
+      ...(model.capabilityProfile ? { capabilityProfile: model.capabilityProfile } : {}),
       source: model.source ?? "discovery",
       status: "available",
     }));

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.99 - 2026-11-04
+
+- Fixed duplicate assistant messages when Responses streaming output is converted to Chat Completions, including replayed `output_item.done` and terminal `response.completed` payloads.
+- Completed the gateway protocol-conversion parity work across request/response, streaming, tool calls, media, reasoning, history, capability filtering, and provider adapters.
+- Added regression coverage for bidirectional tool conversion, multimodal streams, provider capability mismatches, and canonical output replay suppression.
+
 ## 0.1.98 - 2026-11-02
 
 - Fixed the cross-platform reset-card usage metric test so release runners format timestamps in their local timezone.

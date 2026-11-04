@@ -31,8 +31,16 @@ export async function resolveMediaPart(
 
 export function asMediaPart(value: JsonValue | undefined): CanonicalMediaPart | undefined {
   if (!isObject(value)) return undefined;
+  // OpenAI Chat Completions documents image_url as an object, but a number of
+  // compatible clients/relays send the URL directly. Accept both forms so a
+  // valid image part cannot be downgraded to an unknown text part at the
+  // protocol boundary.
   if (isObject(value.image_url)) return { type: "image", url: asString(value.image_url.url) };
-  if (value.type === "input_image") return { type: "image", url: asString(value.image_url) };
+  if (typeof value.image_url === "string") return { type: "image", url: value.image_url };
+  if (value.type === "input_image") {
+    if (typeof value.image_url === "string") return { type: "image", url: value.image_url };
+    if (isObject(value.image_url)) return { type: "image", url: asString(value.image_url.url) };
+  }
   if (isObject(value.source) && value.source.type === "url") return { type: "image", url: asString(value.source.url) };
   if (isObject(value.source) && value.source.type === "base64") return { type: "image", data: asString(value.source.data), mimeType: asString(value.source.media_type) };
   if (isObject(value.inlineData)) return { type: "image", data: asString(value.inlineData.data), mimeType: asString(value.inlineData.mimeType) };

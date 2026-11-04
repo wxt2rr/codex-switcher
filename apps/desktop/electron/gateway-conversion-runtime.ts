@@ -16,17 +16,34 @@ export interface GatewayResponseStreamHooks {
 let conversionModule: GatewayConversionModule | undefined;
 
 export function useLegacyProtocolConversion(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.CODEX_SWITCHER_LEGACY_PROTOCOL_CONVERSION?.trim().toLowerCase() === "1"
-    || env.CODEX_SWITCHER_LEGACY_PROTOCOL_CONVERSION?.trim().toLowerCase() === "true";
+  // The legacy transformers are retained as source-compatible test helpers,
+  // but they are no longer a selectable runtime path.  Allowing an
+  // environment toggle here would reintroduce the very capability drift the
+  // shared Gateway converter is meant to eliminate. Read the argument so
+  // callers can keep their old signature without leaking configuration into
+  // production behavior.
+  void env;
+  return false;
 }
 
 /** Load the shared conversion engine from the workspace or packaged resources. */
 export async function initializeGatewayConversionRuntime(): Promise<boolean> {
   if (conversionModule) return true;
-  const runtimePath = resolveRuntimeResource(join("packages", "gateway", "dist", "conversion", "index.js"), {
-    currentFile: typeof __filename === "string" ? __filename : join(process.cwd(), "apps", "desktop", "electron", "gateway-conversion-runtime.ts"),
-    resourcesPath: getConfiguredResourcesPath(),
-  });
+  const relativePath = join("packages", "gateway", "dist", "conversion", "index.js");
+  const currentFile = typeof __filename === "string" ? __filename : join(process.cwd(), "apps", "desktop", "electron", "gateway-conversion-runtime.ts");
+  // During development/tests an old packaged app may still be present in
+  // CODEX_SWITCHER_DESKTOP_RESOURCES_PATH. Prefer the workspace build so a
+  // freshly compiled converter is actually exercised. In a packaged app the
+  // workspace root is unavailable and resolution falls back to Resources.
+  let runtimePath: string;
+  try {
+    runtimePath = resolveRuntimeResource(relativePath, { currentFile });
+  } catch {
+    runtimePath = resolveRuntimeResource(relativePath, { currentFile, resourcesPath: getConfiguredResourcesPath() });
+  }
+  if (!existsSync(runtimePath)) {
+    runtimePath = resolveRuntimeResource(relativePath, { currentFile, resourcesPath: getConfiguredResourcesPath() });
+  }
   if (!existsSync(runtimePath)) return false;
   try {
     const dynamicImport = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<GatewayConversionModule>;
@@ -60,6 +77,29 @@ export async function convertGatewayResponseAtRuntime(
   return conversionModule!.convertGatewayResponse(source, target, body, metadata, options);
 }
 
+/**
+ * Encode the canonical response events accumulated by a streaming conversion
+ * into the requested non-streaming envelope.  Compatibility adapters use the
+ * exact same event state for history persistence and for a JSON fallback, so
+ * the stream and non-stream paths cannot drift apart.
+ */
+export async function encodeGatewayResponseEventsAtRuntime(
+  target: GatewayProtocol,
+  events: readonly import("../../../packages/gateway/dist/conversion/index.js").ConversionResponseEvent[],
+  metadata: ConversionMetadata = {},
+): Promise<JsonObject | undefined> {
+  if (!(await initializeGatewayConversionRuntime())) return undefined;
+  return conversionModule!.encodeResponseEvents(target, events, metadata);
+}
+
+/** Rebuild lossless Responses history with the same converter used on the wire. */
+export async function buildGatewayStreamHistoryAtRuntime(
+  events: readonly import("../../../packages/gateway/dist/conversion/index.js").ConversionResponseEvent[],
+): Promise<{ items: JsonObject[]; calls: Array<{ id: string; name: string; arguments: string; kind?: "function" | "custom" | "tool_search" | "hosted"; raw?: JsonObject; itemId?: string; outputIndex?: number; signature?: string }> } | undefined> {
+  if (!(await initializeGatewayConversionRuntime())) return undefined;
+  return conversionModule!.buildStreamHistory(events);
+}
+
 export async function createGatewayResponseStreamStateAtRuntime(
   source: GatewayProtocol,
   target: GatewayProtocol,
@@ -90,9 +130,11 @@ export async function failGatewayResponseStreamAtRuntime(
   state: ResponseStreamState,
   code: string,
   message: string,
+  retryable = false,
+  details?: JsonObject,
 ): Promise<ConversionResult<JsonObject[]> | undefined> {
   if (!(await initializeGatewayConversionRuntime())) return undefined;
-  return conversionModule!.failResponseStream(state, code, message);
+  return conversionModule!.failResponseStream(state, code, message, retryable, details);
 }
 
 /** Convert an upstream SSE response without buffering the complete response. */
@@ -178,7 +220,8 @@ export async function convertGatewayResponseStreamAtRuntime(
           controller.close();
         } catch (error) {
           if (!state.ended) {
-            const failed = await failGatewayResponseStreamAtRuntime(state, "stream_conversion_failed", error instanceof Error ? error.message : String(error));
+            const aborted = error instanceof DOMException && error.name === "AbortError";
+            const failed = await failGatewayResponseStreamAtRuntime(state, aborted ? "client_cancelled" : "stream_conversion_failed", error instanceof Error ? error.message : String(error), false, errorDetails(error));
             emit(failed?.value ?? []);
           }
           await notifyFinalized("error");
@@ -265,7 +308,8 @@ export async function convertGatewayResponseStreamToJsonAtRuntime(
     }
   } catch (error) {
     if (!state.ended) {
-      await failGatewayResponseStreamAtRuntime(state, "stream_conversion_failed", error instanceof Error ? error.message : String(error));
+      const aborted = error instanceof DOMException && error.name === "AbortError";
+      await failGatewayResponseStreamAtRuntime(state, aborted ? "client_cancelled" : "stream_conversion_failed", error instanceof Error ? error.message : String(error), false, errorDetails(error));
     }
     await notifyFinalized("error");
   }
@@ -286,4 +330,14 @@ function encodeSseEvent(protocol: GatewayProtocol, event: JsonObject): string {
 
 function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function errorDetails(value: unknown): JsonObject | undefined {
+  if (!isJsonObject(value)) return undefined;
+  const details: JsonObject = {};
+  for (const key of ["status", "status_code", "request_id", "type", "code", "name"]) {
+    const child = value[key];
+    if (typeof child === "string" || typeof child === "number") details[key] = child;
+  }
+  return Object.keys(details).length ? details : undefined;
 }

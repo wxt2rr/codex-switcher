@@ -81,6 +81,25 @@ export function filterUnsupportedHostedTools(body: import("../../../packages/gat
   return capabilityModule?.filterUnsupportedHostedTools(body, profile, policy) ?? { body, omitted: [] };
 }
 
+/** Apply all route-level capability degradation rules in one operation. */
+export function filterUnsupportedRouteCapabilities(
+  body: import("../../../packages/gateway/dist/protocol.js").JsonObject,
+  profile: CapabilityProfile | undefined,
+  policy: "safe" | "allow",
+  protocol: string,
+): { body: import("../../../packages/gateway/dist/protocol.js").JsonObject; omitted: Array<{ field: string; capability: CapabilityId; reason: string }> } {
+  if (!capabilityModule) return { body, omitted: [] };
+  const hosted = capabilityModule.filterUnsupportedHostedTools(body, profile, policy);
+  const sampling = capabilityModule.filterUnsupportedParameters(hosted.body, profile, policy, protocol);
+  return {
+    body: sampling.body,
+    omitted: [
+      ...hosted.omitted.map((item) => ({ field: `tools.${item.type}`, capability: item.capability, reason: item.reason })),
+      ...sampling.omitted,
+    ],
+  };
+}
+
 export function classifyCapabilityMismatch(input: Parameters<GatewayCapabilityModule["classifyCapabilityMismatch"]>[0]): CapabilityMismatch | undefined {
   return capabilityModule?.classifyCapabilityMismatch(input);
 }

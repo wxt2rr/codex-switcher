@@ -213,8 +213,21 @@ export function transformResponsesRequest(input: TransformResponsesRequestInput)
     messages,
     stream,
     ...(stream ? { stream_options: { include_usage: true } } : {}),
-    ...(registry.chatTools.length ? { tools: registry.chatTools } : {}),
+    ...(registry.chatTools.filter((tool) => {
+      const name = record(tool.function)?.name;
+      return typeof name !== "string" || registry.byChatName.get(name)?.originalType !== "web_search";
+    }).length ? { tools: registry.chatTools.filter((tool) => {
+      const name = record(tool.function)?.name;
+      return typeof name !== "string" || registry.byChatName.get(name)?.originalType !== "web_search";
+    }) } : {}),
   };
+  const webSearch = Array.isArray(request.tools)
+    ? request.tools.find((raw) => record(raw)?.type === "web_search" || record(raw)?.type === "web_search_preview")
+    : undefined;
+  if (webSearch && record(webSearch)) {
+    const value = record(webSearch)!;
+    body.web_search_options = record(value.web_search_options) ?? {};
+  }
   const toolChoice = transformToolChoice(request.tool_choice, registry);
   if (toolChoice !== undefined) body.tool_choice = toolChoice;
   if (typeof request.parallel_tool_calls === "boolean") body.parallel_tool_calls = request.parallel_tool_calls;

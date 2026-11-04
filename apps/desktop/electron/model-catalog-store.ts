@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import type { GatewayCapabilityProfile } from "../../../packages/core/dist/gateway/model.js";
 
 export type ModelCatalogEntry = Record<string, unknown> & {
   slug: string;
@@ -46,6 +47,8 @@ export interface AccountDiscoveredModel {
     vision?: boolean;
     streaming: boolean;
   };
+  /** Fine-grained provider/model observations retained from discovery. */
+  capabilityProfile?: GatewayCapabilityProfile;
   contextWindow?: number;
   source: "preset" | "discovery" | "manual" | "cached";
   status: AccountModelAvailability;
@@ -245,6 +248,7 @@ export function createModelCatalogStore(path: string): ModelCatalogStore {
           ...(rawModel.iconKey?.trim() ? { iconKey: rawModel.iconKey.trim() } : {}),
           protocols: [...new Set(rawModel.protocols.map((protocol) => protocol.trim()).filter(Boolean))],
           capabilities: normalizeModelCapabilities(rawModel.capabilities),
+          ...(rawModel.capabilityProfile ? { capabilityProfile: normalizeCapabilityProfile(rawModel.capabilityProfile) } : {}),
           ...(Number.isFinite(rawModel.contextWindow) && rawModel.contextWindow && rawModel.contextWindow > 0
             ? { contextWindow: Math.floor(rawModel.contextWindow) }
             : {}),
@@ -444,6 +448,9 @@ export function projectAccountBindingsFromCatalog(
             && target.entry.input_modalities.includes("image"),
           streaming: target.entry.streaming !== false,
         },
+        ...(isRecord(target.entry.capabilityProfile)
+          ? { capabilityProfile: normalizeCapabilityProfile(target.entry.capabilityProfile) }
+          : {}),
         ...(typeof target.entry.context_window === "number" && target.entry.context_window > 0
           ? { contextWindow: Math.floor(target.entry.context_window) }
           : {}),
@@ -621,6 +628,7 @@ function upsertDiscoveredCatalogModel(
     // opt in explicitly through the optional capability field.
     supports_parallel_tool_calls: model.capabilities.parallelToolCalls === true,
     input_modalities: model.capabilities.vision !== false ? ["text", "image"] : ["text"],
+    ...(model.capabilityProfile ? { capabilityProfile: model.capabilityProfile } : {}),
     ...(model.contextWindow ? { context_window: model.contextWindow, max_context_window: model.contextWindow } : {}),
   });
   if (existing) {
@@ -748,6 +756,26 @@ function normalizeModelCapabilities(value: AccountDiscoveredModel["capabilities"
     vision: value?.vision !== false,
     streaming: value?.streaming !== false,
   };
+}
+
+function normalizeCapabilityProfile(value: unknown): GatewayCapabilityProfile {
+  if (!isRecord(value)) return {};
+  const result: GatewayCapabilityProfile = {};
+  for (const [id, raw] of Object.entries(value)) {
+    if (!isRecord(raw)) continue;
+    const status = raw.status;
+    const source = raw.source;
+    if (!(["supported", "unsupported", "unknown", "degraded"] as const).includes(status as never)) continue;
+    if (!(["provider", "preset", "discovery", "probe", "observed", "legacy"] as const).includes(source as never)) continue;
+    result[id] = {
+      status: status as GatewayCapabilityProfile[string]["status"],
+      source: source as GatewayCapabilityProfile[string]["source"],
+      ...(typeof raw.checkedAt === "number" ? { checkedAt: raw.checkedAt } : {}),
+      ...(typeof raw.expiresAt === "number" ? { expiresAt: raw.expiresAt } : {}),
+      ...(typeof raw.evidence === "string" ? { evidence: raw.evidence.slice(0, 500) } : {}),
+    };
+  }
+  return result;
 }
 
 function modelSupportsToolsForCatalogEntry(entry: ModelCatalogEntry): boolean {
@@ -1061,6 +1089,9 @@ function normalizeAccountModelDiscoveries(value: unknown): Record<string, Accoun
               streaming: rawModel.capabilities.streaming !== false,
             }
           : { reasoning: false, tools: false, streaming: true }),
+        ...(isRecord(rawModel.capabilityProfile)
+          ? { capabilityProfile: normalizeCapabilityProfile(rawModel.capabilityProfile) }
+          : {}),
         ...(typeof rawModel.contextWindow === "number" && Number.isFinite(rawModel.contextWindow) && rawModel.contextWindow > 0
           ? { contextWindow: Math.floor(rawModel.contextWindow) }
           : {}),

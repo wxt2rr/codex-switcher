@@ -349,6 +349,28 @@ function modelCapabilityProfile(entry: ModelCatalogEntry): GatewayCapabilityProf
   if (Array.isArray(entry.input_modalities) && entry.input_modalities.includes("image")) add("input.image", true);
   if (modelSupportsTools(entry)) add("tools.function", true);
   if (Array.isArray(entry.supported_reasoning_levels) || entry.supports_reasoning_summaries === true) add("output.reasoning", true);
+  const nested = entry.capabilities && typeof entry.capabilities === "object" && !Array.isArray(entry.capabilities)
+    ? entry.capabilities as Record<string, unknown>
+    : undefined;
+  const addSampling = (id: string, value: unknown): void => {
+    if (typeof value === "boolean" && !profile[id]) profile[id] = { status: value ? "supported" : "unsupported", source: "preset", checkedAt: now };
+  };
+  if (entry.capabilityProfile && typeof entry.capabilityProfile === "object" && !Array.isArray(entry.capabilityProfile)) {
+    for (const [id, observation] of Object.entries(entry.capabilityProfile as Record<string, unknown>)) {
+      if (!observation || typeof observation !== "object" || Array.isArray(observation)) continue;
+      const item = observation as Record<string, unknown>;
+      if (["supported", "unsupported", "unknown", "degraded"].includes(String(item.status))
+        && ["provider", "preset", "discovery", "probe", "observed", "legacy"].includes(String(item.source))) {
+        profile[id] = item as unknown as GatewayCapabilityProfile[string];
+      }
+    }
+  }
+  addSampling("params.temperature", entry.temperature ?? nested?.temperature);
+  addSampling("params.top_p", entry.top_p ?? entry.topP ?? nested?.top_p ?? nested?.topP);
+  addSampling("params.top_k", entry.top_k ?? entry.topK ?? nested?.top_k ?? nested?.topK);
+  if (profile["params.temperature"]?.status === "unsupported" && !profile["params.top_p"]) {
+    profile["params.top_p"] = { ...profile["params.temperature"] };
+  }
   return profile;
 }
 

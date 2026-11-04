@@ -36,6 +36,95 @@ test("the Chat Completions codec downgrades developer messages to system", () =>
         { role: "user", content: "hello" },
     ]);
 });
+test("public codec preserves request controls and Gemini snake_case", () => {
+    const request = decodeGatewayRequest("gemini", {
+        model: "gemini",
+        system_instruction: { parts: [{ text: "rules" }] },
+        contents: [{ role: "user", parts: [{ text: "hello" }, { inline_data: { mime_type: "image/png", data: "abc" } }] }],
+        tools: [{ function_declarations: [{ name: "lookup", parameters: { type: "object", properties: { snake_case: { type: "string" } } } }] }],
+        generation_config: { max_output_tokens: 99, stop_sequences: ["END"] },
+    }, { ...context, protocol: "gemini" });
+    assert.equal(request.parameters?.maxTokens, 99);
+    const chat = encodeGatewayRequest("chat_completions", request, "chat");
+    assert.equal(chat.max_tokens, 99);
+    assert.deepEqual(chat.tools[0]?.function, { name: "lookup", parameters: { type: "object", properties: { snake_case: { type: "string" } } } });
+});
+test("public codec preserves Anthropic token budgets and Gemini structured output", () => {
+    const anthropic = decodeGatewayRequest("anthropic", {
+        model: "claude",
+        messages: [{ role: "user", content: "json" }],
+        max_tokens: 777,
+        output_config: { format: { type: "json_schema", schema: { type: "object" } } },
+    }, { ...context, protocol: "anthropic" });
+    const anthropicBody = encodeGatewayRequest("anthropic", anthropic, "claude");
+    assert.equal(anthropicBody.max_tokens, 777);
+    assert.deepEqual(anthropicBody.output_config, { format: { type: "json_schema", schema: { type: "object" } } });
+    const gemini = decodeGatewayRequest("gemini", {
+        model: "gemini",
+        contents: [{ role: "user", parts: [{ text: "json" }] }],
+        generation_config: { response_mime_type: "application/json", response_schema: { type: "object" } },
+    }, { ...context, protocol: "gemini" });
+    assert.deepEqual(gemini.parameters?.responseFormat, { type: "json_schema", schema: { type: "object" } });
+    const geminiBody = encodeGatewayRequest("gemini", gemini, "gemini");
+    assert.deepEqual(geminiBody.generationConfig.responseSchema, { type: "object" });
+});
+test("tool encoders keep Responses and Chat field placement distinct", () => {
+    const chat = decodeGatewayRequest("chat_completions", {
+        model: "m",
+        messages: [{ role: "user", content: "hello" }],
+        tools: [{ type: "function", function: { name: "search", description: "Search", parameters: { type: "object" }, strict: true } }],
+    }, { ...context, protocol: "chat_completions" });
+    const responses = encodeGatewayRequest("responses", chat, "upstream");
+    assert.deepEqual(responses.tools, [{ type: "function", name: "search", description: "Search", parameters: { type: "object" }, strict: true }]);
+    assert.equal(responses.tools[0]?.function, undefined);
+    const responseInput = decodeGatewayRequest("responses", {
+        model: "m",
+        input: "hello",
+        tools: [{ type: "function", name: "search", parameters: { type: "object" }, strict: true }],
+    }, context);
+    const chatOutput = encodeGatewayRequest("chat_completions", responseInput, "upstream");
+    assert.deepEqual(chatOutput.tools, [{ type: "function", function: { name: "search", parameters: { type: "object" }, strict: true } }]);
+});
+test("public Chat codec keeps hosted web search at the top level", () => {
+    const request = decodeGatewayRequest("chat_completions", {
+        model: "m",
+        messages: [{ role: "user", content: "search" }],
+        web_search_options: { search_context_size: "high" },
+    }, { ...context, protocol: "chat_completions" });
+    assert.equal(request.tools[0]?.kind, "web_search");
+    const encoded = encodeGatewayRequest("chat_completions", request, "upstream");
+    assert.deepEqual(encoded.web_search_options, { search_context_size: "high" });
+    assert.equal(encoded.tools, undefined);
+});
+test("Responses namespaces are grouped and preserve child function fields", () => {
+    const request = decodeGatewayRequest("responses", {
+        model: "m",
+        input: "hello",
+        tools: [{ type: "namespace", name: "crm", description: "CRM", defer_loading: true, tools: [{ type: "function", name: "lookup", parameters: { type: "object" }, defer_loading: true }] }],
+    }, context);
+    const body = encodeGatewayRequest("responses", request, "upstream");
+    assert.deepEqual(body.tools, [{ type: "namespace", name: "crm", description: "CRM", defer_loading: true, tools: [{ type: "function", name: "lookup", parameters: { type: "object" }, defer_loading: true }] }]);
+});
+test("public codec preserves Responses tool items when hopping through the IR", () => {
+    const request = decodeGatewayRequest("responses", {
+        model: "m",
+        input: [
+            { role: "user", content: [{ type: "input_text", text: "look up" }] },
+            { id: "fc-item", type: "function_call", call_id: "call-1", name: "lookup", arguments: "{\"q\":\"x\"}" },
+            { type: "function_call_output", call_id: "call-1", output: "ok" },
+        ],
+    }, context);
+    assert.equal(request.messages.flatMap((message) => message.parts).filter((part) => part.type === "tool_use").length, 1);
+    assert.equal(request.messages.flatMap((message) => message.parts).filter((part) => part.type === "tool_result").length, 1);
+    const chat = encodeGatewayRequest("chat_completions", request, "m");
+    assert.deepEqual(chat.messages.map((message) => message.role), ["user", "assistant", "tool"]);
+    assert.equal((chat.messages[1]?.tool_calls)[0]?.id, "call-1");
+    assert.equal(chat.messages[2]?.tool_call_id, "call-1");
+    const responses = encodeGatewayRequest("responses", request, "m");
+    assert.equal(responses.input.some((item) => item.type === "function_call" && item.id === "fc-item"), true);
+    assert.equal(responses.input.some((item) => item.type === "function_call_output" && item.call_id === "call-1"), true);
+    assert.equal((responses.input[0]?.content)[0]?.type, "input_text");
+});
 test("response events round-trip across non-streaming protocol envelopes", () => {
     const body = { id: "resp-1", output: [{ type: "message", content: [{ type: "output_text", text: "hello" }] }], usage: { input_tokens: 2, output_tokens: 3 } };
     const events = decodeGatewayResponse("responses", body);
@@ -43,6 +132,28 @@ test("response events round-trip across non-streaming protocol envelopes", () =>
     for (const protocol of ["responses", "chat_completions", "anthropic", "gemini"]) {
         assert.ok(encodeGatewayResponse(protocol, events));
     }
+});
+test("public response IR retains Responses item locations and encrypted reasoning", () => {
+    const events = decodeGatewayResponse("responses", {
+        id: "r-lifecycle",
+        output: [
+            { id: "rs-1", type: "reasoning", encrypted_content: "enc", summary: [{ type: "summary_text", text: "plan" }] },
+            { id: "msg-1", type: "message", content: [{ type: "output_text", text: "answer" }] },
+            { id: "fc-1", type: "function_call", call_id: "call-1", name: "lookup", arguments: "{}" },
+        ],
+    });
+    const reasoning = events.find((event) => event.type === "reasoning_delta" && Boolean(event.encryptedContent));
+    assert.deepEqual(reasoning && { itemId: reasoning.itemId, outputIndex: reasoning.outputIndex, encryptedContent: reasoning.encryptedContent }, { itemId: "rs-1", outputIndex: undefined, encryptedContent: "enc" });
+    const call = events.find((event) => event.type === "tool_call_delta");
+    assert.deepEqual(call && { itemId: call.itemId, outputIndex: call.outputIndex }, { itemId: "fc-1", outputIndex: undefined });
+    const encoded = encodeGatewayResponse("responses", events);
+    assert.equal(JSON.stringify(encoded).includes('"encrypted_content":"enc"'), true);
+});
+test("stream lifecycle frames do not synthesize terminal events", () => {
+    const created = decodeGatewayResponse("responses", { type: "response.created", response: { id: "r", status: "in_progress" } });
+    assert.equal(created.some((event) => event.type === "message_end"), false);
+    const chunk = decodeGatewayResponse("chat_completions", { id: "c", choices: [{ delta: { content: "hi" }, finish_reason: null }] });
+    assert.equal(chunk.some((event) => event.type === "message_end"), false);
 });
 test("the full protocol matrix preserves images, reasoning, tools, tool calls, usage and cache counters", () => {
     const requests = {

@@ -49,6 +49,32 @@ test("model catalog store rejects duplicate slugs and unknown binding ids", asyn
   await assert.rejects(store.setAccountBindings("default/default", ["missing"]), /not found/);
 });
 
+test("model discovery retains fine-grained sampling capability observations", async () => {
+  const root = await mkdtemp(join(tmpdir(), "model-catalog-store-capabilities-"));
+  const store = createModelCatalogStore(join(root, "models.json"));
+  await store.saveAccountModelDiscovery({
+    accountKey: "default/relay",
+    providerId: "relay",
+    state: "ready",
+    models: [{
+      providerModelKey: "relay:reasoning-model",
+      providerId: "relay",
+      upstreamModelId: "reasoning-model",
+      displayName: "Reasoning Model",
+      protocols: ["chat_completions"],
+      capabilities: { reasoning: true, tools: true, vision: true, streaming: true },
+      capabilityProfile: {
+        "params.temperature": { status: "unsupported", source: "discovery" },
+      },
+      source: "discovery",
+    }],
+  });
+  const snapshot = await store.load();
+  assert.equal(snapshot.accountModelDiscoveries?.["default/relay"]?.models[0]?.capabilityProfile?.["params.temperature"]?.status, "unsupported");
+  const profile = snapshot.models[0]?.entry.capabilityProfile as Record<string, { status?: string }> | undefined;
+  assert.equal(profile?.["params.temperature"]?.status, "unsupported");
+});
+
 test("normalizer preserves advanced JSON fields and creates stable defaults", () => {
   const normalized = normalizeCustomModelInput({
     slug: "custom-model",

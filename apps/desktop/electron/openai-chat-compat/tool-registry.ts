@@ -87,7 +87,10 @@ export function buildToolRegistry(request: Record<string, unknown>): ToolRegistr
     const chatName = toChatToolName(originalName);
     if (tool.type === "function") add({ originalType: "function", originalName, chatName, definition: functionDefinition(chatName, tool) });
     else if (tool.type === "custom") add({ originalType: "custom", originalName, chatName, definition: customDefinition(chatName, tool) });
-    else if (["tool_search", "web_search", "web_search_preview", "computer_use_preview", "local_shell"].includes(tool.type)) {
+    else if (["web_search", "web_search_preview"].includes(tool.type)) {
+      add({ originalType: "web_search", originalName, chatName, definition: functionDefinition(chatName, tool) });
+    }
+    else if (["tool_search", "computer_use_preview", "local_shell"].includes(tool.type)) {
       add({ originalType: "tool_search", originalName, chatName, definition: customDefinition(chatName, tool) });
     }
     else throw new CompatibilityError("INVALID_TOOL", `Unsupported tool type '${tool.type}'`);

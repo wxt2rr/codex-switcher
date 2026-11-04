@@ -1876,6 +1876,71 @@ test("environment Gateway converts Responses requests and Chat SSE responses thr
   }
 });
 
+test("environment Gateway detects Responses SSE when upstream omits Content-Type", async () => {
+  const upstreamBodies: Array<Record<string, unknown>> = [];
+  const upstream = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    upstreamBodies.push(JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>);
+    // Deliberately omit Content-Type. This is the response shape observed
+    // from the local ChatGPT subscription relay used by Anima.
+    response.end([
+      `event: response.created\ndata: ${JSON.stringify({ type: "response.created", response: { id: "resp-no-content-type", status: "in_progress" } })}\n\n`,
+      `event: response.output_text.delta\ndata: ${JSON.stringify({ type: "response.output_text.delta", response_id: "resp-no-content-type", delta: "hello from undetected SSE" })}\n\n`,
+      `event: response.completed\ndata: ${JSON.stringify({ type: "response.completed", response: { id: "resp-no-content-type", status: "completed", usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 } } })}\n\n`,
+      "data: [DONE]\n\n",
+    ].join(""));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const address = upstream.address(); assert(address && typeof address !== "string");
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-no-content-type-sse-"));
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+  const route = {
+    routeId: "route-no-content-type-sse", envName: "work", accountName: "responses", providerId: "responses",
+    exposedModelId: "no-content-type-model", upstreamModel: "responses-model", upstreamBaseUrl: `http://127.0.0.1:${address.port}/v1`,
+    originalBaseUrl: "default", protocol: "responses" as const, reasoningProfile: "auto" as const,
+    capabilities: { streaming: true }, enabled: true, createdAt: 1, updatedAt: 1,
+  };
+  const gateway = {
+    gatewayId: "gateway-no-content-type-sse", envName: "work", routeIds: [route.routeId], defaultRouteId: route.routeId,
+    routeGroups: { "no-content-type-model": { id: "no-content-type-model", exposedModelId: "no-content-type-model", routeIds: [route.routeId], strategy: "order" as const, sessionPolicy: "off" as const, fallbackEnabled: true, capabilities: { streaming: true } } },
+    enabled: true, createdAt: 1, updatedAt: 1,
+  };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  try {
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(route) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}/secret`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify({ upstreamApiKey: "sk-no-content-type", localRouteToken: "local-no-content-type" }),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway) })).status, 204);
+
+    const streaming = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/chat/completions`, {
+      method: "POST", headers: { authorization: "Bearer local-no-content-type", "content-type": "application/json" },
+      body: JSON.stringify({ model: "no-content-type-model", messages: [{ role: "user", content: "hello" }], stream: true }),
+    });
+    const streamingText = await streaming.text();
+    assert.equal(streaming.status, 200, streamingText);
+    assert.match(streaming.headers.get("content-type") ?? "", /text\/event-stream/);
+    assert.match(streamingText, /chat\.completion\.chunk/);
+    assert.match(streamingText, /hello from undetected SSE/);
+    assert.match(streamingText, /data: \[DONE\]/);
+
+    const nonStreaming = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/chat/completions`, {
+      method: "POST", headers: { authorization: "Bearer local-no-content-type", "content-type": "application/json" },
+      body: JSON.stringify({ model: "no-content-type-model", messages: [{ role: "user", content: "hello" }], stream: false }),
+    });
+    const nonStreamingBody = await nonStreaming.json() as { object: string; choices: Array<{ message: { content: string } }> };
+    assert.equal(nonStreaming.status, 200);
+    assert.equal(nonStreaming.headers.get("content-type"), "application/json; charset=utf-8");
+    assert.equal(nonStreamingBody.object, "chat.completion");
+    assert.equal(nonStreamingBody.choices[0]?.message.content, "hello from undetected SSE");
+    assert.equal(upstreamBodies.length, 2);
+  } finally {
+    await service.close();
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
+});
+
 test("environment Gateway bridges a non-streaming Chat request when Responses upstream requires SSE", async () => {
   const upstreamBodies: Array<Record<string, unknown>> = [];
   const upstream = createServer(async (request, response) => {
@@ -1922,7 +1987,10 @@ test("environment Gateway bridges a non-streaming Chat request when Responses up
 
     const response = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/chat/completions`, {
       method: "POST", headers: { authorization: "Bearer local-bridge", "content-type": "application/json" },
-      body: JSON.stringify({ model: "bridge-model", messages: [{ role: "user", content: "hello" }], stream: false }),
+      body: JSON.stringify({ model: "bridge-model", messages: [{ role: "user", content: [
+        { type: "text", text: "what is in this image?" },
+        { type: "image_url", image_url: { url: "data:image/png;base64,QUJD" } },
+      ] }], stream: false }),
     });
     assert.equal(response.status, 200, await response.clone().text());
     const body = await response.json() as { object: string; choices: Array<{ message: { content: string } }>; usage: { prompt_tokens: number; completion_tokens: number } };
@@ -1933,6 +2001,12 @@ test("environment Gateway bridges a non-streaming Chat request when Responses up
     assert.equal(upstreamBodies.length, 2);
     assert.equal(upstreamBodies[0]?.stream, false);
     assert.equal(upstreamBodies[1]?.stream, true);
+    for (const upstreamBody of upstreamBodies) {
+      assert.deepEqual((upstreamBody.input as Array<Record<string, unknown>>)?.[0]?.content, [
+        { type: "input_text", text: "what is in this image?" },
+        { type: "input_image", image_url: "data:image/png;base64,QUJD" },
+      ]);
+    }
   } finally {
     await service.close();
     await new Promise<void>((resolve) => upstream.close(() => resolve()));
@@ -2460,6 +2534,55 @@ test("native routes learn an unknown hosted-tool capability, retry once, and reu
     await firstService?.close().catch(() => undefined);
     await secondService?.close().catch(() => undefined);
     await rm(stateDir, { recursive: true, force: true });
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
+});
+
+test("native routes learn unsupported sampling parameters, repair the request, and reuse the observation", async () => {
+  const bodies: Array<Record<string, unknown>> = [];
+  const upstream = createServer(async (request, response) => {
+    let raw = "";
+    for await (const chunk of request) raw += Buffer.from(chunk).toString("utf8");
+    const body = JSON.parse(raw) as Record<string, unknown>;
+    bodies.push(body);
+    response.setHeader("content-type", "application/json");
+    if (typeof body.temperature === "number") {
+      response.statusCode = 400;
+      response.end(JSON.stringify({ error: { message: 'Unsupported parameter: "temperature"' } }));
+      return;
+    }
+    response.end(JSON.stringify({ id: "sampling-compatible", model: body.model, choices: [{ message: { role: "assistant", content: "ok" } }] }));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const address = upstream.address(); assert(address && typeof address !== "string");
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-sampling-capability-"));
+  const route = {
+    routeId: "route-sampling", envName: "work", accountName: "sampling-account",
+    upstreamBaseUrl: `http://127.0.0.1:${address.port}/v1`, originalBaseUrl: "default",
+    protocol: "chat_completions" as const, upstreamModel: "sampling-model", reasoningProfile: "auto" as const,
+    enabled: true, createdAt: Date.now(), updatedAt: Date.now(),
+  };
+  const send = async (service: Awaited<ReturnType<typeof startUsageRouterService>>) => fetch(`${service.origin}/routes/${route.routeId}/chat/completions`, {
+    method: "POST", headers: { authorization: "Bearer internal", "content-type": "application/json" },
+    body: JSON.stringify({ model: "sampling-model", messages: [{ role: "user", content: "hello" }], temperature: 0.2 }),
+  });
+  let service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+  try {
+    const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(route) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}/secret`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ authMode: "none", localRouteToken: "internal" }) })).status, 204);
+    const first = await send(service);
+    assert.equal(first.status, 200);
+    assert.equal((await first.json()).id, "sampling-compatible");
+    assert.equal(bodies.length, 2);
+    assert.equal(bodies[0]?.temperature, 0.2);
+    assert.equal(bodies[1]?.temperature, undefined);
+    const second = await send(service);
+    assert.equal(second.status, 200);
+    assert.equal(bodies.length, 3);
+    assert.equal(bodies[2]?.temperature, undefined);
+  } finally {
+    await service.close();
     await new Promise<void>((resolve) => upstream.close(() => resolve()));
   }
 });

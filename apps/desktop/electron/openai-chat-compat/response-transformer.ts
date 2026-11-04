@@ -46,9 +46,13 @@ export function transformChatResponse(payload: unknown, options: {
     output.push({ id: `rs_${randomUUID().replace(/-/g, "")}`, type: "reasoning",
       summary: [{ type: "summary_text", text: message.reasoning_content }] });
   }
-  if (typeof message.content === "string" && message.content) {
+  const assistantContent = normalizeAssistantContent(message.content);
+  if (assistantContent.text || assistantContent.media.length) {
     output.push({ id: `msg_${randomUUID().replace(/-/g, "")}`, type: "message", status: "completed", role: "assistant",
-      content: [{ type: "output_text", text: message.content, annotations: [] }] });
+      content: [
+        ...(assistantContent.text ? [{ type: "output_text", text: assistantContent.text, annotations: assistantContent.annotations }] : []),
+        ...assistantContent.media,
+      ] });
   }
   const rawToolCalls = Array.isArray(message.tool_calls)
     ? message.tool_calls
@@ -65,14 +69,16 @@ export function transformChatResponse(payload: unknown, options: {
     const id = typeof call.id === "string" ? call.id : `call_${randomUUID().replace(/-/g, "")}`;
     const entry = options.registry.byChatName.get(fn.name);
     const name = entry?.originalName ?? fn.name;
-    const args = normalizeToolArguments(fn.arguments, entry?.originalType === "custom" || entry?.originalType === "tool_search");
+    const args = normalizeToolArguments(fn.arguments, entry?.originalType === "custom" || entry?.originalType === "tool_search" || entry?.originalType === "web_search");
     // Some OpenAI-compatible providers return a tool name with an empty or
     // malformed arguments field.  Do not turn that upstream protocol defect
     // into a Responses function_call that Codex cannot parse.
     if (!args) { invalidToolCalls += 1; continue; }
-    output.push({ id: `fc_${randomUUID().replace(/-/g, "")}`, type: "function_call", status: "completed",
-      call_id: id, name, arguments: args });
-    calls.push({ id, type: "function", function: { name, arguments: args } });
+    const kind = entry?.originalType === "custom" ? "custom" : entry?.originalType === "tool_search" ? "tool_search" : entry?.originalType === "web_search" ? "hosted" : "function";
+    if (kind === "custom") output.push({ id: `ct_${randomUUID().replace(/-/g, "")}`, type: "custom_tool_call", status: "completed", call_id: id, name, input: customInputFromArguments(args) });
+    else if (kind === "tool_search") output.push({ id: `ts_${randomUUID().replace(/-/g, "")}`, type: "tool_search_call", status: "completed", call_id: id, name, input: parseObjectArguments(args) });
+    else output.push({ id: `fc_${randomUUID().replace(/-/g, "")}`, type: "function_call", status: "completed", call_id: id, name, arguments: args });
+    calls.push({ id, type: "function", kind, function: { name, arguments: args } });
   }
   const finishReason = typeof choice.finish_reason === "string" ? choice.finish_reason : "stop";
   if (invalidToolCalls > 0 && calls.length === 0) {
@@ -94,4 +100,40 @@ export function transformChatResponse(payload: unknown, options: {
     },
     calls,
   };
+}
+
+function normalizeAssistantContent(value: unknown): { text: string; annotations: unknown[]; media: Array<Record<string, unknown>> } {
+  if (typeof value === "string") return { text: value, annotations: [], media: [] };
+  if (!Array.isArray(value)) return { text: "", annotations: [], media: [] };
+  const textParts: string[] = [];
+  const annotations: unknown[] = [];
+  const media: Array<Record<string, unknown>> = [];
+  for (const raw of value) {
+    const part = record(raw);
+    if (!part) continue;
+    if (typeof part.text === "string") {
+      textParts.push(part.text);
+      if (Array.isArray(part.annotations)) annotations.push(...part.annotations);
+    } else if (part.type === "image_url" || part.type === "image" || part.type === "output_image") {
+      media.push({ ...part, type: "output_image" });
+    } else if (part.type === "file" || part.type === "document" || part.type === "output_file") {
+      media.push({ ...part, type: "output_file" });
+    }
+  }
+  return { text: textParts.join(""), annotations, media };
+}
+
+function customInputFromArguments(value: string): string {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && typeof (parsed as Record<string, unknown>).input === "string") return String((parsed as Record<string, unknown>).input);
+  } catch { /* keep the provider's free-form value */ }
+  return value;
+}
+
+function parseObjectArguments(value: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch { return {}; }
 }

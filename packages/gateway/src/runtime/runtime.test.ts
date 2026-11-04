@@ -5,6 +5,7 @@ import { GatewayFallbackError, GatewayRuntime } from "./runtime.js";
 import { PluginHost } from "../plugin/host.js";
 import { createPluginProviderAdapter } from "../plugin/provider-adapter.js";
 import { ProviderRegistry } from "../provider/registry.js";
+import { ToolExchangeHistory } from "../conversion/tool-exchange-history.js";
 
 test("gateway runtime dispatches across protocols and records usage", async () => {
   const runtime = new GatewayRuntime({
@@ -83,6 +84,23 @@ test("gateway runtime restores a previous Responses tool turn for a Chat route",
   ]);
 });
 
+test("gateway runtime carries namespace name mapping through response conversion", async () => {
+  const runtime = new GatewayRuntime({
+    candidates: [{ id: "chat-ns-route", providerId: "openai", credentialId: "key", modelId: "chat-ns", protocol: "chat_completions", capabilities: ["tools"], priority: 0, weight: 1, healthy: true }],
+    groups: {},
+  });
+  const dispatch = await runtime.dispatch({
+    environmentId: "env", agentId: "codex", protocol: "responses", model: "chat-ns", sessionId: "ns-session",
+    body: { model: "chat-ns", input: "lookup", tools: [{ type: "namespace", name: "crm", tools: [{ type: "function", name: "lookup", parameters: { type: "object" } }] }] },
+  });
+  assert.deepEqual(dispatch.upstreamBody.tools, [{ type: "function", function: { name: "crm__lookup", parameters: { type: "object" } } }]);
+  const completion = await runtime.complete({
+    dispatch,
+    upstreamBody: { id: "chat-ns-response", choices: [{ message: { role: "assistant", tool_calls: [{ id: "call-ns", type: "function", function: { name: "crm__lookup", arguments: "{}" } }] }, finish_reason: "tool_calls" }] },
+  });
+  assert.equal((completion.responseBody?.output as Array<Record<string, unknown>>)[0]?.name, "lookup");
+});
+
 test("gateway runtime keeps completed tool calls when a stream is cancelled", async () => {
   const runtime = new GatewayRuntime({
     candidates: [{ id: "chat-cancel-route", providerId: "openai", credentialId: "key", modelId: "chat-cancel", protocol: "chat_completions", capabilities: ["tools", "streaming"], priority: 0, weight: 1, healthy: true }],
@@ -101,6 +119,31 @@ test("gateway runtime keeps completed tool calls when a stream is cancelled", as
   });
   assert.equal((next.upstreamBody.messages as Array<Record<string, unknown>>)[0]?.role, "assistant");
   assert.equal((next.upstreamBody.messages as Array<Record<string, unknown>>)[1]?.tool_call_id, "call-cancel");
+});
+
+test("gateway stream history preserves interleaved media and tool outputs", async () => {
+  const history = new ToolExchangeHistory();
+  const runtime = new GatewayRuntime({
+    toolHistory: history,
+    candidates: [{ id: "rich-stream-route", providerId: "openai", credentialId: "key", modelId: "rich-stream", protocol: "chat_completions", capabilities: ["tools", "streaming"], priority: 0, weight: 1, healthy: true }],
+    groups: {},
+  });
+  const dispatch = await runtime.dispatch({
+    environmentId: "env", agentId: "codex", protocol: "responses", model: "rich-stream", sessionId: "rich-session",
+    body: { model: "rich-stream", stream: true, input: "lookup", tools: [{ type: "function", function: { name: "lookup", parameters: { type: "object" } } }] },
+  });
+  const stream = runtime.createResponseStream(dispatch);
+  await runtime.convertStreamChunk(stream, { id: "rich", choices: [{ delta: { content: "before" }, finish_reason: null }] });
+  await runtime.convertStreamChunk(stream, { id: "rich", choices: [{ delta: { tool_calls: [{ id: "call-rich", index: 0, function: { name: "lookup", arguments: "{}" } }] }, finish_reason: null }] });
+  await runtime.convertStreamChunk(stream, { id: "rich", choices: [{ delta: { content: "after" }, finish_reason: null }] });
+  await runtime.convertStreamChunk(stream, { id: "rich", choices: [{ delta: { content: [{ type: "image_url", image_url: { url: "https://example.test/image.png" } }] }, finish_reason: null }] });
+  await runtime.finalizeStream(stream, "tool_calls");
+  const snapshot = history.snapshot();
+  const items = snapshot.responseItems?.["rich-session"]?.[stream.id] ?? [];
+  assert.deepEqual(items.map((item) => (item as Record<string, unknown>).type), ["message", "function_call", "message"]);
+  assert.equal(JSON.stringify(items).includes("output_image"), true);
+  assert.equal(JSON.stringify(items).includes("before"), true);
+  assert.equal(JSON.stringify(items).includes("after"), true);
 });
 
 test("gateway runtime keeps tool calls when stream conversion fails", async () => {

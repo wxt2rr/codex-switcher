@@ -82,7 +82,7 @@ export class CapabilityRegistry {
 export const CAPABILITY_IDS: readonly CapabilityId[] = [
   "input.text", "input.image", "input.file", "output.streaming", "output.reasoning", "prompt_cache",
   "tools.function", "tools.parallel", "tools.strict_pairing", "tools.requires_name", "tools.result_media", "tools.custom", "tools.namespace",
-  "schema.ref_siblings", "params.max_completion_tokens",
+  "schema.ref_siblings", "params.max_completion_tokens", "params.temperature", "params.top_p", "params.top_k",
   "tools.hosted.web_search", "tools.hosted.code_interpreter", "tools.hosted.computer_use",
 ];
 

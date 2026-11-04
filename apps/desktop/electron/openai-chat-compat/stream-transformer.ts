@@ -13,7 +13,13 @@ export interface TransformChatStreamOptions {
   responseId?: string;
   signal?: AbortSignal;
   warning?: string;
-  onCompleted?: (result: { responseId: string; calls: ChatToolCall[]; usage?: ResponsesUsage }) => void | Promise<void>;
+  onCompleted?: (result: {
+    responseId: string;
+    calls: ChatToolCall[];
+    usage?: ResponsesUsage;
+    /** Complete Responses output items reconstructed from the stream. */
+    items: Array<Record<string, unknown>>;
+  }) => void | Promise<void>;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -47,7 +53,7 @@ export function transformChatStream(options: TransformChatStreamOptions): Readab
       const tools = new Map<number, ToolState>();
       let nextImplicitToolIndex = 0;
       let nextOutputIndex = 0;
-      let textState: { itemId: string; index: number; text: string } | undefined;
+      let textState: { itemId: string; index: number; text: string; media: Array<Record<string, unknown>> } | undefined;
       let reasoningState: { itemId: string; index: number; text: string } | undefined;
       let usage: ResponsesUsage | undefined;
       let completed = false;
@@ -60,7 +66,7 @@ export function transformChatStream(options: TransformChatStreamOptions): Readab
         output.sort((a, b) => a.index - b.index).map((entry) => entry.item), usage);
       const ensureText = () => {
         if (textState) return textState;
-        textState = { itemId: `msg_${randomUUID().replace(/-/g, "")}`, index: nextOutputIndex++, text: "" };
+        textState = { itemId: `msg_${randomUUID().replace(/-/g, "")}`, index: nextOutputIndex++, text: "", media: [] };
         const item = { id: textState.itemId, type: "message", status: "in_progress", role: "assistant", content: [] as unknown[] };
         output.push({ index: textState.index, item });
         emit("response.output_item.added", { response_id: responseId, output_index: textState.index, item });
@@ -82,8 +88,13 @@ export function transformChatStream(options: TransformChatStreamOptions): Readab
         if (tool.announced || !tool.id || !tool.name) return;
         tool.announced = true;
         tool.outputIndex = nextOutputIndex++;
-        const originalName = options.registry.byChatName.get(tool.name)?.originalName ?? tool.name;
-        const item = { id: tool.itemId, type: "function_call", status: "in_progress", arguments: argumentsText, call_id: tool.id, name: originalName };
+        const entry = options.registry.byChatName.get(tool.name);
+        const originalName = entry?.originalName ?? tool.name;
+        const item = entry?.originalType === "custom"
+          ? { id: tool.itemId, type: "custom_tool_call", status: "in_progress", input: customInputFromArguments(argumentsText), call_id: tool.id, name: originalName }
+          : entry?.originalType === "tool_search"
+            ? { id: tool.itemId, type: "tool_search_call", status: "in_progress", input: parseObjectArguments(argumentsText), call_id: tool.id, name: originalName }
+            : { id: tool.itemId, type: "function_call", status: "in_progress", arguments: argumentsText, call_id: tool.id, name: originalName };
         output.push({ index: tool.outputIndex, item });
         emit("response.output_item.added", { response_id: responseId, output_index: tool.outputIndex, item });
       };
@@ -106,6 +117,21 @@ export function transformChatStream(options: TransformChatStreamOptions): Readab
             const state = ensureText(); state.text += delta.content;
             emit("response.output_text.delta", { response_id: responseId, item_id: state.itemId,
               output_index: state.index, content_index: 0, delta: delta.content });
+          } else if (Array.isArray(delta.content)) {
+            const state = ensureText();
+            for (const rawPart of delta.content) {
+              const part = record(rawPart);
+              if (!part) continue;
+              if (typeof part.text === "string" && part.text) {
+                state.text += part.text;
+                emit("response.output_text.delta", { response_id: responseId, item_id: state.itemId,
+                  output_index: state.index, content_index: 0, delta: part.text });
+              } else if (part.type === "image_url" || part.type === "image" || part.type === "output_image") {
+                state.media.push({ ...part, type: "output_image" });
+              } else if (part.type === "file" || part.type === "document" || part.type === "output_file") {
+                state.media.push({ ...part, type: "output_file" });
+              }
+            }
           }
           const streamedToolCalls = Array.isArray(delta.tool_calls)
             ? delta.tool_calls
@@ -133,7 +159,7 @@ export function transformChatStream(options: TransformChatStreamOptions): Readab
       };
       const validCallCount = (): number => [...tools.values()].filter((state) => {
         const entry = state.name ? options.registry.byChatName.get(state.name) : undefined;
-        return Boolean(state.name && normalizeToolArguments(state.arguments, entry?.originalType === "custom" || entry?.originalType === "tool_search"));
+        return Boolean(state.name && normalizeToolArguments(state.arguments, entry?.originalType === "custom" || entry?.originalType === "tool_search" || entry?.originalType === "web_search"));
       }).length;
       const invalidToolCallMessage = (): string | undefined => {
         const hasToolIntent = sawToolCallIntent || tools.size > 0 || isToolCallFinishReason(finishReason);
@@ -147,20 +173,26 @@ export function transformChatStream(options: TransformChatStreamOptions): Readab
         const calls: ChatToolCall[] = [];
         for (const state of [...tools.values()].sort((a, b) => a.index - b.index)) {
           const entry = state.name ? options.registry.byChatName.get(state.name) : undefined;
-          const argumentsText = normalizeToolArguments(state.arguments, entry?.originalType === "custom" || entry?.originalType === "tool_search");
+          const argumentsText = normalizeToolArguments(state.arguments, entry?.originalType === "custom" || entry?.originalType === "tool_search" || entry?.originalType === "web_search");
           if (!argumentsText || !state.name) continue;
           state.id ??= `call_${randomUUID().replace(/-/g, "")}`;
           announceTool(state, argumentsText);
           const originalName = options.registry.byChatName.get(state.name)?.originalName ?? state.name;
-          const item = { id: state.itemId, type: "function_call", status: emitFinalEvents ? "completed" : "incomplete", arguments: argumentsText,
-            call_id: state.id, name: originalName };
+          const item = entry?.originalType === "custom"
+            ? { id: state.itemId, type: "custom_tool_call", status: emitFinalEvents ? "completed" : "incomplete", input: customInputFromArguments(argumentsText), call_id: state.id, name: originalName }
+            : entry?.originalType === "tool_search"
+              ? { id: state.itemId, type: "tool_search_call", status: emitFinalEvents ? "completed" : "incomplete", input: parseObjectArguments(argumentsText), call_id: state.id, name: originalName }
+              : { id: state.itemId, type: "function_call", status: emitFinalEvents ? "completed" : "incomplete", arguments: argumentsText, call_id: state.id, name: originalName };
           const outputEntry = output.find((value) => value.index === state.outputIndex); if (outputEntry) outputEntry.item = item;
           if (emitFinalEvents) {
-            emit("response.function_call_arguments.done", { response_id: responseId, item_id: state.itemId,
-              output_index: state.outputIndex, arguments: argumentsText });
+            const eventType = entry?.originalType === "custom"
+              ? "response.custom_tool_call_input.done"
+              : entry?.originalType === "tool_search" ? "response.tool_search_call.done" : "response.function_call_arguments.done";
+            emit(eventType, { response_id: responseId, item_id: state.itemId,
+              output_index: state.outputIndex, ...(entry?.originalType === "custom" ? { input: customInputFromArguments(argumentsText) } : entry?.originalType === "tool_search" ? { input: parseObjectArguments(argumentsText) } : { arguments: argumentsText }) });
             emit("response.output_item.done", { response_id: responseId, output_index: state.outputIndex, item });
           }
-          calls.push({ id: state.id, type: "function", function: { name: originalName, arguments: argumentsText } });
+          calls.push({ id: state.id, type: "function", ...(entry?.originalType === "custom" ? { kind: "custom" as const } : entry?.originalType === "tool_search" ? { kind: "tool_search" as const } : {}), function: { name: originalName, arguments: argumentsText } });
         }
         return calls;
       };
@@ -177,13 +209,17 @@ export function transformChatStream(options: TransformChatStreamOptions): Readab
           emit("response.output_item.done", { response_id: responseId, output_index: reasoningState.index, item: entry?.item });
         }
         if (textState) {
-          const item = { id: textState.itemId, type: "message", status: "completed", role: "assistant",
-            content: [{ type: "output_text", text: textState.text, annotations: [] }] };
+          const content: unknown[] = [];
+          if (textState.text) content.push({ type: "output_text", text: textState.text, annotations: [] });
+          content.push(...textState.media);
+          const item = { id: textState.itemId, type: "message", status: "completed", role: "assistant", content };
           const entry = output.find((value) => value.index === textState?.index); if (entry) entry.item = item;
-          emit("response.output_text.done", { response_id: responseId, item_id: textState.itemId,
-            output_index: textState.index, content_index: 0, text: textState.text });
-          emit("response.content_part.done", { response_id: responseId, item_id: textState.itemId,
-            output_index: textState.index, content_index: 0, part: item.content[0] });
+          if (textState.text) {
+            emit("response.output_text.done", { response_id: responseId, item_id: textState.itemId,
+              output_index: textState.index, content_index: 0, text: textState.text });
+            emit("response.content_part.done", { response_id: responseId, item_id: textState.itemId,
+              output_index: textState.index, content_index: 0, part: content[0] });
+          }
           emit("response.output_item.done", { response_id: responseId, output_index: textState.index, item });
         }
         const calls = collectCalls(true);
@@ -191,7 +227,14 @@ export function transformChatStream(options: TransformChatStreamOptions): Readab
         // next function_call_output request may arrive immediately after this
         // event, so a post-completed write creates a history race.
         try {
-          await options.onCompleted?.({ responseId, calls, usage });
+          await options.onCompleted?.({
+            responseId,
+            calls,
+            usage,
+            items: output
+              .sort((left, right) => left.index - right.index)
+              .map((entry) => entry.item),
+          });
           historyRecorded = true;
         } catch {
           // History persistence must not strand an otherwise valid upstream
@@ -232,10 +275,24 @@ export function transformChatStream(options: TransformChatStreamOptions): Readab
         await finish();
         controller.close();
       } catch (error) {
-        if (!historyRecorded && tools.size) {
+        // Persist every interrupted turn, not only tool turns.  A partial
+        // assistant message/reasoning item is still required to resume the
+        // Responses conversation without silently dropping the visible
+        // prefix on the next request.
+        if (!historyRecorded && (tools.size || output.length)) {
+          for (const entry of output) {
+            if (entry.item.status === "in_progress") entry.item = { ...entry.item, status: "incomplete" };
+          }
           const partialCalls = collectCalls(false);
           try {
-            await options.onCompleted?.({ responseId, calls: partialCalls, usage });
+            await options.onCompleted?.({
+              responseId,
+              calls: partialCalls,
+              usage,
+              items: output
+                .sort((left, right) => left.index - right.index)
+                .map((entry) => entry.item),
+            });
             historyRecorded = true;
           } catch {
             // Preserve the upstream failure; diagnostics are emitted by the
@@ -250,4 +307,19 @@ export function transformChatStream(options: TransformChatStreamOptions): Readab
       }
     },
   });
+}
+
+function customInputFromArguments(value: string): string {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && typeof (parsed as Record<string, unknown>).input === "string") return String((parsed as Record<string, unknown>).input);
+  } catch { /* keep the provider's free-form value */ }
+  return value;
+}
+
+function parseObjectArguments(value: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch { return {}; }
 }

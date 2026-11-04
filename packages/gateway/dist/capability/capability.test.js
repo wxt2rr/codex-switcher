@@ -1,10 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CapabilityRegistry, classifyCapabilityMismatch, capabilityKey, capabilityProfileFromModel, knownCapabilityProfile, filterUnsupportedHostedTools, planCapability, } from "../index.js";
+import { CapabilityRegistry, classifyCapabilityMismatch, capabilityKey, capabilityProfileFromModel, knownCapabilityProfile, filterUnsupportedHostedTools, filterUnsupportedParameters, planCapability, } from "../index.js";
 test("capability profiles preserve legacy tools while distinguishing hosted tools", () => {
     const profile = capabilityProfileFromModel({ tools: true, supports_search_tool: false }, "preset");
     assert.equal(profile["tools.function"]?.status, "supported");
     assert.equal(profile["tools.hosted.web_search"]?.status, "unsupported");
+});
+test("model sampling metadata maps temperature false to temperature and top_p", () => {
+    const profile = capabilityProfileFromModel({ temperature: false }, "discovery");
+    assert.equal(profile["params.temperature"]?.status, "unsupported");
+    assert.equal(profile["params.top_p"]?.status, "unsupported");
+});
+test("sampling mismatch classifier recognizes an unsupported temperature parameter", () => {
+    const mismatch = classifyCapabilityMismatch({
+        status: 400,
+        message: 'Unsupported parameter: "temperature"',
+        requestedCapabilities: ["params.temperature"],
+    });
+    assert.equal(mismatch?.capability, "params.temperature");
 });
 test("capability registry prefers credential observations and can be snapshotted", () => {
     const context = { providerId: "aliyun", endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1", protocol: "chat_completions", modelId: "kimi-k3", credentialId: "account" };
@@ -67,5 +80,36 @@ test("safe filtering handles every hosted tool and removes an unsatisfiable choi
     assert.equal(allHosted.body.tools, undefined);
     assert.equal(allHosted.body.tool_choice, undefined);
     assert.equal(allHosted.omitted.length, 1);
+});
+test("safe sampling filtering preserves unknown parameters and handles Gemini casing", () => {
+    const chat = filterUnsupportedParameters({ model: "m", temperature: 0.2, top_p: 0.9 }, {
+        "params.temperature": { status: "unsupported", source: "observed" },
+    }, "safe", "chat_completions");
+    assert.equal(chat.body.temperature, undefined);
+    assert.equal(chat.body.top_p, 0.9);
+    assert.equal(chat.omitted.length, 1);
+    const gemini = filterUnsupportedParameters({ model: "m", generationConfig: { temperature: 0.2, topP: 0.9, topK: 20 } }, {
+        "params.top_p": { status: "unsupported", source: "observed" },
+        "params.top_k": { status: "unsupported", source: "observed" },
+    }, "safe", "gemini");
+    assert.deepEqual(gemini.body.generationConfig, { temperature: 0.2 });
+    const geminiSnakeCase = filterUnsupportedParameters({ model: "m", generation_config: { temperature: 0.2, top_p: 0.9 } }, {
+        "params.temperature": { status: "unsupported", source: "observed" },
+    }, "safe", "gemini");
+    assert.deepEqual(geminiSnakeCase.body.generation_config, { top_p: 0.9 });
+});
+test("expired capability observations do not remain permanently unsupported", () => {
+    const expired = { status: "unsupported", source: "observed", expiresAt: Date.now() - 1 };
+    const hosted = filterUnsupportedHostedTools({ model: "m", tools: [{ type: "web_search_preview" }] }, {
+        "tools.hosted.web_search": expired,
+    }, "safe");
+    assert.equal(hosted.body.tools, undefined);
+    assert.equal(hosted.omitted[0]?.reason, "unknown");
+    assert.equal(planCapability({ capability: "tools.hosted.web_search", observation: expired }).status, "unknown");
+    const sampling = filterUnsupportedParameters({ model: "m", temperature: 0.2 }, {
+        "params.temperature": expired,
+    }, "safe", "chat_completions");
+    assert.equal(sampling.body.temperature, 0.2);
+    assert.equal(sampling.omitted.length, 0);
 });
 //# sourceMappingURL=capability.test.js.map

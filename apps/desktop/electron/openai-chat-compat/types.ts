@@ -15,6 +15,12 @@ export interface ChatToolCall {
   id: string;
   type: "function";
   function: { name: string; arguments: string };
+  /** Optional Responses-native kind retained by the shared gateway history bridge. */
+  kind?: "function" | "custom" | "tool_search" | "hosted";
+  raw?: Record<string, unknown>;
+  itemId?: string;
+  outputIndex?: number;
+  signature?: string;
 }
 
 export interface ChatMessage {
@@ -36,7 +42,7 @@ export interface ToolExchangeDiagnostics {
 }
 
 export interface ToolRegistryEntry {
-  originalType: "function" | "custom" | "namespace" | "tool_search";
+  originalType: "function" | "custom" | "namespace" | "tool_search" | "web_search";
   originalName: string;
   namespace?: string;
   chatName: string;

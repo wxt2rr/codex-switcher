@@ -145,8 +145,21 @@ export function normalizeCanonicalToolExchange(input) {
         while (cursor < messages.length && isToolResult(messages[cursor])) {
             const result = messages[cursor];
             const resultPart = result.parts.find((part) => part.type === "tool_result") ?? result.parts[0];
-            const id = resultPart ? callId(resultPart) : "";
-            const entry = id ? order.get(id) : undefined;
+            let id = resultPart ? callId(resultPart) : "";
+            let entry = id ? order.get(id) : undefined;
+            // Gemini function responses identify the call by function name while a
+            // number of providers add an opaque id to the preceding function call.
+            // Pair by the unique pending function name when the wire id is not
+            // present; otherwise a valid result would be downgraded as an orphan.
+            const resultName = resultPart && isObject(resultPart.value) && typeof resultPart.value.name === "string" ? resultPart.value.name : undefined;
+            if (!entry && resultName) {
+                const matches = calls.filter((call) => callName(call) === resultName);
+                if (matches.length === 1) {
+                    const matched = matches[0];
+                    id = callId(matched);
+                    entry = order.get(id);
+                }
+            }
             if (!entry) {
                 diagnostics.push({ code: "orphan_tool_result", callId: id || undefined, message: "Tool result did not match a pending call and was downgraded to user context." });
                 orphans.push(result);
@@ -156,7 +169,22 @@ export function normalizeCanonicalToolExchange(input) {
             }
             else {
                 answered.add(id);
-                validResults.push({ message: { ...result, name: result.name ?? callName(entry.part) }, position: entry.position });
+                const normalizedPart = resultPart && isObject(resultPart.value)
+                    ? {
+                        ...resultPart,
+                        // Preserve the provider's explicit call id when it was inferred
+                        // from Gemini's function name, and carry the matched function name
+                        // forward.  Gemini `functionResponse` only has a name (not a
+                        // call_id), while Responses/Chat require the name and id to remain
+                        // paired when the turn is replayed to another protocol.
+                        value: {
+                            ...resultPart.value,
+                            ...(id !== callId(resultPart) ? { call_id: id } : {}),
+                            ...(typeof resultPart.value.name === "string" ? {} : { name: callName(entry.part) }),
+                        },
+                    }
+                    : resultPart;
+                validResults.push({ message: { ...result, name: result.name ?? callName(entry.part), ...(normalizedPart ? { parts: result.parts.map((part) => part === resultPart ? normalizedPart : part) } : {}) }, position: entry.position });
             }
             cursor += 1;
         }

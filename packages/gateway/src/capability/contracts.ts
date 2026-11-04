@@ -17,6 +17,9 @@ export type CapabilityId =
   | "tools.namespace"
   | "schema.ref_siblings"
   | "params.max_completion_tokens"
+  | "params.temperature"
+  | "params.top_p"
+  | "params.top_k"
   | "tools.hosted.web_search"
   | "tools.hosted.code_interpreter"
   | "tools.hosted.computer_use";
@@ -145,11 +148,35 @@ export function capabilityProfileFromModel(value: Record<string, unknown>, sourc
     vision: value.vision === true ? true : value.vision === false ? false : undefined,
     streaming: value.streaming === true ? true : value.streaming === false ? false : undefined,
   }, source);
-  const explicit = value.capabilityProfile ?? value.capabilities;
-  Object.assign(result, normalizeCapabilityProfile(explicit, source));
+  const legacy = isRecord(value.capabilities) ? value.capabilities : undefined;
+  addSamplingCapability(result, "params.temperature", value.temperature ?? legacy?.temperature, source);
+  addSamplingCapability(result, "params.top_p", value.top_p ?? value.topP ?? legacy?.top_p ?? legacy?.topP, source);
+  addSamplingCapability(result, "params.top_k", value.top_k ?? value.topK ?? legacy?.top_k ?? legacy?.topK, source);
+  // A model catalog's `temperature: false` convention means the model
+  // refuses both temperature and top_p. Keep the two observations explicit
+  // so a provider can override either one when it reports finer detail.
+  if (result["params.temperature"]?.status === "unsupported" && !result["params.top_p"]) {
+    result["params.top_p"] = { ...result["params.temperature"] };
+  }
+  Object.assign(result, normalizeCapabilityProfile(value.capabilityProfile, source));
+  // Some plugin payloads put namespaced observations inside capabilities.
+  // Preserve those, but do not treat legacy booleans such as `tools: true` as
+  // capability ids.
+  if (legacy && Object.keys(legacy).some((key) => key.includes("."))) {
+    Object.assign(result, normalizeCapabilityProfile(legacy, source));
+  }
   const search = value.supports_search_tool ?? value.supportsSearchTool;
   if (typeof search === "boolean") result["tools.hosted.web_search"] = { status: search ? "supported" : "unsupported", source };
   return result;
+}
+
+function addSamplingCapability(
+  target: Record<string, CapabilityObservation>,
+  id: CapabilityId,
+  value: unknown,
+  source: CapabilitySource,
+): void {
+  if (typeof value === "boolean") target[id] = { status: value ? "supported" : "unsupported", source };
 }
 
 /** Conservative built-in rules for providers whose hosted-tool dialect is known. */
@@ -202,6 +229,21 @@ export function classifyCapabilityMismatch(input: {
   const evidence = (input.message || errorText(input.body) || "Upstream rejected capability").slice(0, 500);
   const hostedRequested = requested.filter((capability) => capability.startsWith("tools.hosted."));
   const explicit = [
+    ["params.temperature", [
+      /unsupported parameter[^a-z0-9]*(?:["'`]?temperature\b)/,
+      /(?:temperature\b).*(?:unsupported|not supported|deprecated)/,
+      /(?:unsupported|not supported|deprecated).*temperature\b/,
+    ]],
+    ["params.top_p", [
+      /unsupported parameter[^a-z0-9]*(?:["'`]?top[_ ]?p\b)/,
+      /(?:top[_ ]?p\b).*(?:unsupported|not supported|deprecated)/,
+      /(?:unsupported|not supported|deprecated).*top[_ ]?p\b/,
+    ]],
+    ["params.top_k", [
+      /unsupported parameter[^a-z0-9]*(?:["'`]?top[_ ]?k\b)/,
+      /(?:top[_ ]?k\b).*(?:unsupported|not supported|deprecated)/,
+      /(?:unsupported|not supported|deprecated).*top[_ ]?k\b/,
+    ]],
     ["tools.hosted.web_search", [/web[_ -]?search|search_options|hosted.*search|\$web_search|search tool/]],
     ["tools.hosted.code_interpreter", [/code[_ -]?interpreter|python tool|container tool/]],
     ["tools.hosted.computer_use", [/computer[_ -]?use|computer tool|mouse|keyboard/]],

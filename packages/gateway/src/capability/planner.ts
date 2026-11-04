@@ -1,5 +1,5 @@
-import type { CapabilityId, CapabilityObservation, CapabilityProfile, CapabilityStatus } from "./contracts.js";
-import type { JsonObject } from "../protocol.js";
+import { isCapabilityFresh, type CapabilityId, type CapabilityObservation, type CapabilityProfile, type CapabilityStatus } from "./contracts.js";
+import type { GatewayProtocol, JsonObject } from "../protocol.js";
 
 export type CapabilityAction = "native" | "fallback" | "omit" | "error" | "probe";
 export type CapabilityFallback = "allow" | "fallback" | "required";
@@ -16,6 +16,11 @@ export interface HostedToolFilterResult {
   omitted: Array<{ type: string; capability: CapabilityId; reason: string }>;
 }
 
+export interface UnsupportedParameterFilterResult {
+  body: JsonObject;
+  omitted: Array<{ field: string; capability: CapabilityId; reason: string }>;
+}
+
 /** Removes only hosted tools that the selected route cannot safely encode. */
 export function filterUnsupportedHostedTools(
   body: JsonObject,
@@ -30,8 +35,9 @@ export function filterUnsupportedHostedTools(
     const capability = hostedCapabilityForType(type);
     if (!capability) return true;
     const observation = profile?.[capability];
-    if (observation?.status === "supported") return true;
-    omitted.push({ type, capability, reason: observation?.status === "unsupported" ? "unsupported" : "unknown" });
+    if (observation?.status === "supported" && isCapabilityFresh(observation)) return true;
+    const unsupported = observation?.status === "unsupported" && isCapabilityFresh(observation);
+    omitted.push({ type, capability, reason: unsupported ? "unsupported" : "unknown" });
     return false;
   });
   if (!omitted.length) return { body, omitted };
@@ -53,13 +59,75 @@ export function filterUnsupportedHostedTools(
   return { body: next, omitted };
 }
 
+/**
+ * Removes only sampling parameters that the selected route explicitly marks
+ * unsupported. Unknown capabilities are preserved so a legacy provider keeps
+ * receiving the same request until it gives us concrete evidence.
+ */
+export function filterUnsupportedParameters(
+  body: JsonObject,
+  profile: CapabilityProfile | undefined,
+  policy: "safe" | "allow" = "allow",
+  protocol?: GatewayProtocol | string,
+): UnsupportedParameterFilterResult {
+  if (policy === "allow") return { body, omitted: [] };
+  const fields = parameterFieldsForProtocol(protocol);
+  const omitted: UnsupportedParameterFilterResult["omitted"] = [];
+  const next: JsonObject = { ...body };
+  let generationConfig: JsonObject | undefined;
+  let generationConfigKey: "generationConfig" | "generation_config" | undefined;
+  for (const field of fields) {
+    const observation = profile?.[field.capability];
+    if (observation?.status !== "unsupported" || !isCapabilityFresh(observation)) continue;
+    if (field.path === "generationConfig") {
+      const rawConfig = isRecord(next.generationConfig)
+        ? next.generationConfig
+        : isRecord(next.generation_config) ? next.generation_config : undefined;
+      if (!rawConfig) continue;
+      generationConfigKey ??= isRecord(next.generationConfig) ? "generationConfig" : "generation_config";
+      generationConfig ??= { ...rawConfig };
+      for (const key of field.keys) {
+        if (Object.prototype.hasOwnProperty.call(generationConfig, key)) {
+          delete generationConfig[key];
+          omitted.push({ field: key, capability: field.capability, reason: "unsupported" });
+        }
+      }
+    } else {
+      for (const key of field.keys) {
+        if (Object.prototype.hasOwnProperty.call(next, key)) {
+          delete next[key];
+          omitted.push({ field: key, capability: field.capability, reason: "unsupported" });
+        }
+      }
+    }
+  }
+  if (generationConfig && generationConfigKey) next[generationConfigKey] = generationConfig;
+  return omitted.length ? { body: next, omitted } : { body, omitted: [] };
+}
+
+function parameterFieldsForProtocol(protocol: GatewayProtocol | string | undefined): Array<{ capability: CapabilityId; keys: string[]; path?: "generationConfig" }> {
+  if (protocol === "gemini") {
+    return [
+      { capability: "params.temperature", keys: ["temperature"], path: "generationConfig" },
+      { capability: "params.top_p", keys: ["topP", "top_p"], path: "generationConfig" },
+      { capability: "params.top_k", keys: ["topK", "top_k"], path: "generationConfig" },
+    ];
+  }
+  const fields: Array<{ capability: CapabilityId; keys: string[] }> = [
+    { capability: "params.temperature", keys: ["temperature"] },
+    { capability: "params.top_p", keys: ["top_p"] },
+  ];
+  if (protocol === "chat_completions" || protocol === "anthropic") fields.push({ capability: "params.top_k", keys: ["top_k"] });
+  return fields;
+}
+
 export function planCapability(input: {
   capability: CapabilityId;
   observation?: CapabilityObservation;
   fallback?: CapabilityFallback;
   fallbackAvailable?: boolean;
 }): CapabilityPlan {
-  const status = input.observation?.status ?? "unknown";
+  const status = input.observation && isCapabilityFresh(input.observation) ? input.observation.status : "unknown";
   if (status === "supported") return { capability: input.capability, status, action: "native", reason: "Capability is supported by the selected route" };
   if (status === "unsupported") {
     if (input.fallback === "fallback" && input.fallbackAvailable) return { capability: input.capability, status, action: "fallback", reason: "Native capability is unavailable; fallback is configured" };

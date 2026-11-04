@@ -5,7 +5,18 @@ import { join } from "node:path";
 import type { HistoryPersistence, RouteHistorySnapshot } from "./history-store.js";
 
 function safeRouteId(routeId: string): string {
-  return routeId.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const normalized = routeId.replace(/[^a-zA-Z0-9_-]/g, "_");
+  // Keep the familiar filename for simple route ids, but add a deterministic
+  // suffix whenever sanitization changed the value. This prevents distinct
+  // conversation scopes such as `route/a` and `route:a` from colliding on
+  // disk while remaining backward-compatible with existing `route-a.json`.
+  if (normalized === routeId) return normalized;
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < routeId.length; index += 1) {
+    hash ^= routeId.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `${normalized}_${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
 export class FileHistoryPersistence implements HistoryPersistence {
@@ -42,9 +53,10 @@ export class FileHistoryPersistence implements HistoryPersistence {
     // Conversation-scoped snapshots share the route prefix. Remove them when
     // a route/account is deleted so stale call ids cannot be reused later.
     try {
-      const prefix = `${safeRouteId(routeId)}__conversation_`;
+      const sanitizedBase = routeId.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const prefixes = [`${sanitizedBase}__conversation_`, `${safeRouteId(routeId)}__conversation_`];
       const entries = await readdir(this.directory);
-      await Promise.all(entries.filter((entry) => entry.startsWith(prefix) && entry.endsWith(".json"))
+      await Promise.all(entries.filter((entry) => prefixes.some((prefix) => entry.startsWith(prefix)) && entry.endsWith(".json"))
         .map((entry) => rm(join(this.directory, entry), { force: true })));
     } catch {
       // Missing history directory is equivalent to an already-clean route.

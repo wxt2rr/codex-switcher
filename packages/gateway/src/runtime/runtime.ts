@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 
-import type { GatewayCapability, GatewayProtocol, JsonObject } from "../protocol.js";
+import type { GatewayCapability, GatewayProtocol, JsonObject, JsonValue } from "../protocol.js";
 import { decodeGatewayRequest } from "../protocol/codecs.js";
 import { convertGatewayRequest } from "../conversion/request-converter.js";
 import { convertGatewayResponse } from "../conversion/response-converter.js";
 import { convertStreamChunk, createResponseStreamState, failResponseStream, finalizeResponseStream, type ResponseStreamState } from "../conversion/stream-state.js";
 import { decodeUsage } from "../conversion/usage.js";
-import { ToolExchangeHistory } from "../conversion/tool-exchange-history.js";
+import { ToolExchangeHistory, buildStreamHistory, type StoredToolCall } from "../conversion/tool-exchange-history.js";
 import type { ConversionOptions, ConversionResult } from "../conversion/types.js";
 import type { GatewayRequestIR } from "../request/request-ir.js";
 import { createGatewayRequestContext } from "../request/request-ir.js";
@@ -298,6 +298,10 @@ export class GatewayRuntime {
         traceId: input.dispatch.traceId,
         originModelName: input.dispatch.upstreamModel,
         upstreamModelName: input.dispatch.request.context.logicalModelId,
+        ...(input.dispatch.conversion.metadata?.toolNameMap ? { toolNameMap: input.dispatch.conversion.metadata.toolNameMap } : {}),
+        ...(input.dispatch.conversion.metadata?.toolNamespaceMap ? { toolNamespaceMap: input.dispatch.conversion.metadata.toolNamespaceMap } : {}),
+        ...(input.dispatch.conversion.metadata?.toolKindMap ? { toolKindMap: input.dispatch.conversion.metadata.toolKindMap } : {}),
+        ...(input.dispatch.conversion.metadata?.toolChoiceMap ? { toolChoiceMap: input.dispatch.conversion.metadata.toolChoiceMap } : {}),
       },
     ) : undefined;
     if (input.upstreamBody && input.status !== "error" && input.status !== "cancelled") {
@@ -358,6 +362,10 @@ export class GatewayRuntime {
         traceId: dispatch.traceId,
         originModelName: dispatch.upstreamModel,
         upstreamModelName: dispatch.request.context.logicalModelId,
+        ...(dispatch.conversion.metadata?.toolNameMap ? { toolNameMap: dispatch.conversion.metadata.toolNameMap } : {}),
+        ...(dispatch.conversion.metadata?.toolNamespaceMap ? { toolNamespaceMap: dispatch.conversion.metadata.toolNamespaceMap } : {}),
+        ...(dispatch.conversion.metadata?.toolKindMap ? { toolKindMap: dispatch.conversion.metadata.toolKindMap } : {}),
+        ...(dispatch.conversion.metadata?.toolChoiceMap ? { toolChoiceMap: dispatch.conversion.metadata.toolChoiceMap } : {}),
       },
       options,
     );
@@ -395,21 +403,12 @@ export class GatewayRuntime {
   private recordStreamToolHistory(state: ResponseStreamState): void {
     const dispatch = this.streamDispatches.get(state);
     if (!dispatch) return;
-    const calls = new Map<string, { id: string; name: string; arguments: string }>();
-    for (const event of state.events) {
-      if (event.type !== "tool_call_delta") continue;
-      const current = calls.get(event.callId) ?? { id: event.callId, name: event.name ?? "tool", arguments: "" };
-      current.name ||= event.name ?? "tool";
-      current.arguments += event.argumentsDelta ?? "";
-      calls.set(event.callId, current);
-    }
-    // Preserve partial tool calls even when the upstream stream is interrupted.
-    // The next Responses turn can then be paired and repaired deterministically
-    // instead of being sent as an orphan result.
-    this.toolHistory.recordCalls(dispatch.request.context.sessionId, state.id, [...calls.values()].flatMap((call) => {
-      const argumentsText = safeToolArguments(call.arguments);
-      return argumentsText ? [{ ...call, arguments: argumentsText }] : [];
-    }));
+    const history = buildStreamHistory(state.events);
+    // Preserve partial tool calls and every assistant item even when the
+    // upstream stream is interrupted. The next Responses turn can then be
+    // paired deterministically without regrouping interleaved media.
+    this.toolHistory.recordCalls(dispatch.request.context.sessionId, state.id, history.calls);
+    this.toolHistory.recordItems(dispatch.request.context.sessionId, state.id, history.items);
   }
 
   private createMiddlewareContext(input: { requestId: string; traceId: string; input: GatewayDispatchInput; model: string }): GatewayMiddlewareContext {
@@ -461,8 +460,9 @@ function transportFailureDetails(error: unknown): { status: number | null; first
   return { status: null, firstByteStarted: false };
 }
 
-function safeToolArguments(value: string): string | undefined {
+function safeToolArguments(value: string, kind: StoredToolCall["kind"] = "function"): string | undefined {
   if (!value.trim()) return undefined;
+  if (kind === "custom") return value;
   try {
     const parsed = JSON.parse(value);
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? value : undefined;

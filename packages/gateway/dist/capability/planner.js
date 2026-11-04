@@ -1,3 +1,4 @@
+import { isCapabilityFresh } from "./contracts.js";
 /** Removes only hosted tools that the selected route cannot safely encode. */
 export function filterUnsupportedHostedTools(body, profile, policy = "allow") {
     if (policy === "allow" || !Array.isArray(body.tools))
@@ -11,9 +12,10 @@ export function filterUnsupportedHostedTools(body, profile, policy = "allow") {
         if (!capability)
             return true;
         const observation = profile?.[capability];
-        if (observation?.status === "supported")
+        if (observation?.status === "supported" && isCapabilityFresh(observation))
             return true;
-        omitted.push({ type, capability, reason: observation?.status === "unsupported" ? "unsupported" : "unknown" });
+        const unsupported = observation?.status === "unsupported" && isCapabilityFresh(observation);
+        omitted.push({ type, capability, reason: unsupported ? "unsupported" : "unknown" });
         return false;
     });
     if (!omitted.length)
@@ -39,8 +41,69 @@ export function filterUnsupportedHostedTools(body, profile, policy = "allow") {
         delete next.tool_choice;
     return { body: next, omitted };
 }
+/**
+ * Removes only sampling parameters that the selected route explicitly marks
+ * unsupported. Unknown capabilities are preserved so a legacy provider keeps
+ * receiving the same request until it gives us concrete evidence.
+ */
+export function filterUnsupportedParameters(body, profile, policy = "allow", protocol) {
+    if (policy === "allow")
+        return { body, omitted: [] };
+    const fields = parameterFieldsForProtocol(protocol);
+    const omitted = [];
+    const next = { ...body };
+    let generationConfig;
+    let generationConfigKey;
+    for (const field of fields) {
+        const observation = profile?.[field.capability];
+        if (observation?.status !== "unsupported" || !isCapabilityFresh(observation))
+            continue;
+        if (field.path === "generationConfig") {
+            const rawConfig = isRecord(next.generationConfig)
+                ? next.generationConfig
+                : isRecord(next.generation_config) ? next.generation_config : undefined;
+            if (!rawConfig)
+                continue;
+            generationConfigKey ??= isRecord(next.generationConfig) ? "generationConfig" : "generation_config";
+            generationConfig ??= { ...rawConfig };
+            for (const key of field.keys) {
+                if (Object.prototype.hasOwnProperty.call(generationConfig, key)) {
+                    delete generationConfig[key];
+                    omitted.push({ field: key, capability: field.capability, reason: "unsupported" });
+                }
+            }
+        }
+        else {
+            for (const key of field.keys) {
+                if (Object.prototype.hasOwnProperty.call(next, key)) {
+                    delete next[key];
+                    omitted.push({ field: key, capability: field.capability, reason: "unsupported" });
+                }
+            }
+        }
+    }
+    if (generationConfig && generationConfigKey)
+        next[generationConfigKey] = generationConfig;
+    return omitted.length ? { body: next, omitted } : { body, omitted: [] };
+}
+function parameterFieldsForProtocol(protocol) {
+    if (protocol === "gemini") {
+        return [
+            { capability: "params.temperature", keys: ["temperature"], path: "generationConfig" },
+            { capability: "params.top_p", keys: ["topP", "top_p"], path: "generationConfig" },
+            { capability: "params.top_k", keys: ["topK", "top_k"], path: "generationConfig" },
+        ];
+    }
+    const fields = [
+        { capability: "params.temperature", keys: ["temperature"] },
+        { capability: "params.top_p", keys: ["top_p"] },
+    ];
+    if (protocol === "chat_completions" || protocol === "anthropic")
+        fields.push({ capability: "params.top_k", keys: ["top_k"] });
+    return fields;
+}
 export function planCapability(input) {
-    const status = input.observation?.status ?? "unknown";
+    const status = input.observation && isCapabilityFresh(input.observation) ? input.observation.status : "unknown";
     if (status === "supported")
         return { capability: input.capability, status, action: "native", reason: "Capability is supported by the selected route" };
     if (status === "unsupported") {

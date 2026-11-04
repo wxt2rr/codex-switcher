@@ -4,11 +4,11 @@ import { createServer, type IncomingHttpHeaders, type IncomingMessage, type Serv
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 
-import type { ConversionDiagnostic, ConversionQuality } from "../../../packages/gateway/dist/conversion/index.js";
+import type { ConversionDiagnostic, ConversionMetadata, ConversionQuality } from "../../../packages/gateway/dist/conversion/index.js";
 import {
   classifyCapabilityMismatch,
   createCapabilityRegistry,
-  filterUnsupportedHostedTools,
+  filterUnsupportedRouteCapabilities,
   initializeGatewayCapabilityRuntime,
   knownCapabilityProfile,
   loadCapabilities,
@@ -34,7 +34,7 @@ import {
   type UsageRequestQuery,
 } from "./usage-routing-model.js";
 import { initializeModelRouteEngine, resolveModelRoute } from "./model-router.js";
-import { adaptProtocolRequest, adaptProtocolResponse, adaptProtocolSseChunk, applyProtocolCredentialHeaders, detectGatewayProtocol, extractProtocolModel } from "./protocol-adapters.js";
+import { applyProtocolCredentialHeaders, detectGatewayProtocol, extractProtocolModel } from "./protocol-adapters.js";
 import {
   classifyPoolFailure,
   cooldownForFailure,
@@ -60,8 +60,8 @@ import {
   convertGatewayResponseAtRuntime,
   convertGatewayResponseStreamAtRuntime,
   convertGatewayResponseStreamToJsonAtRuntime,
+  buildGatewayStreamHistoryAtRuntime,
   initializeGatewayConversionRuntime,
-  useLegacyProtocolConversion,
   type GatewayResponseStreamHooks,
 } from "./gateway-conversion-runtime.js";
 
@@ -731,6 +731,7 @@ function isStreamRequiredError(message: string | null): boolean {
 interface DesktopConversionTrace {
   quality: ConversionQuality;
   diagnostics: ConversionDiagnostic[];
+  metadata?: ConversionMetadata;
 }
 
 interface DesktopConvertedRequest extends DesktopConversionTrace {
@@ -741,6 +742,11 @@ interface ResponseHistoryCall {
   id: string;
   type: "function";
   function: { name: string; arguments: string };
+  kind?: "function" | "custom" | "tool_search" | "hosted";
+  raw?: Record<string, unknown>;
+  itemId?: string;
+  outputIndex?: number;
+  signature?: string;
 }
 
 function jsonObject(value: unknown): Record<string, unknown> | undefined {
@@ -762,12 +768,18 @@ function safeToolArguments(value: unknown): string {
 function responseToolCalls(body: Record<string, unknown>): ResponseHistoryCall[] {
   const response = jsonObject(body.response) ?? body;
   const output = Array.isArray(response.output) ? response.output : [];
-  return output.flatMap((raw) => {
+  return output.flatMap((raw): ResponseHistoryCall[] => {
     const item = jsonObject(raw);
-    if (!item || item.type !== "function_call") return [];
+    if (!item || typeof item.type !== "string") return [];
     const id = typeof item.call_id === "string" ? item.call_id : typeof item.id === "string" ? item.id : "";
-    const name = typeof item.name === "string" && item.name.trim() ? item.name : "unknown_tool";
-    return id ? [{ id, type: "function" as const, function: { name, arguments: safeToolArguments(item.arguments) } }] : [];
+    if (!id) return [];
+    const name = typeof item.name === "string" && item.name.trim() ? item.name : item.type;
+    const location = { ...(typeof item.id === "string" ? { itemId: item.id } : {}), ...(typeof item.output_index === "number" ? { outputIndex: item.output_index } : {}) };
+    if (item.type === "custom_tool_call") return [{ id, type: "function" as const, kind: "custom", raw: item, ...location, function: { name, arguments: typeof item.input === "string" ? item.input : JSON.stringify(item.input ?? "") } }];
+    if (item.type === "tool_search_call") return [{ id, type: "function" as const, kind: "tool_search", raw: item, ...location, function: { name, arguments: safeToolArguments(item.input ?? item.arguments) } }];
+    if (item.type.endsWith("_call") && item.type !== "function_call") return [{ id, type: "function" as const, kind: "hosted", raw: item, ...location, function: { name, arguments: JSON.stringify(item) } }];
+    if (item.type !== "function_call") return [];
+    return [{ id, type: "function" as const, kind: "function", raw: item, ...location, ...(typeof item.thought_signature === "string" ? { signature: item.thought_signature } : {}), function: { name, arguments: safeToolArguments(item.arguments) } }];
   });
 }
 
@@ -779,12 +791,147 @@ function streamToolCalls(state: import("../../../packages/gateway/dist/conversio
       id: event.callId,
       type: "function" as const,
       function: { name: event.name?.trim() || "unknown_tool", arguments: "" },
+      ...(event.kind ? { kind: event.kind } : {}),
+      ...(event.raw ? { raw: event.raw } : {}),
+      ...(event.itemId ? { itemId: event.itemId } : {}),
+      ...(event.outputIndex !== undefined ? { outputIndex: event.outputIndex } : {}),
+      ...(event.signature ? { signature: event.signature } : {}),
     };
     if (event.name?.trim()) current.function.name = event.name.trim();
-    current.function.arguments += event.argumentsDelta ?? "";
+    current.kind ??= event.kind;
+    current.raw ??= event.raw;
+    current.itemId ??= event.itemId;
+    current.outputIndex ??= event.outputIndex;
+    current.signature ??= event.signature;
+    current.function.arguments = event.argumentsFinal ? event.argumentsDelta ?? "" : current.function.arguments + (event.argumentsDelta ?? "");
     calls.set(event.callId, current);
   }
-  return [...calls.values()].map((call) => ({ ...call, function: { ...call.function, arguments: safeToolArguments(call.function.arguments) } }));
+  return [...calls.values()].flatMap((call) => {
+    const argumentsText = call.kind === "custom" && call.function.arguments.trim()
+      ? call.function.arguments
+      : safeToolArguments(call.function.arguments);
+    return argumentsText ? [{ ...call, function: { ...call.function, arguments: argumentsText } }] : [];
+  });
+}
+
+/** Reconstruct the complete Responses output from a converted stream. */
+function streamResponseItems(state: import("../../../packages/gateway/dist/conversion/index.js").ResponseStreamState): Array<Record<string, unknown>> {
+  const textParts: string[] = [];
+  const annotations: unknown[] = [];
+  const refusalParts: string[] = [];
+  const reasoningParts: string[] = [];
+  let textItemId: string | undefined;
+  let textOutputIndex: number | undefined;
+  let reasoningItemId: string | undefined;
+  let reasoningOutputIndex: number | undefined;
+  const mediaParts: Array<{ mediaType: "image" | "file"; media: Record<string, unknown>; itemId?: string; outputIndex?: number }> = [];
+  const calls = new Map<string, ResponseHistoryCall>();
+  const results: Array<{ id: string; output: unknown; isError?: boolean; kind?: string; itemId?: string; outputIndex?: number }> = [];
+  const order: Array<{ kind: "message" | "reasoning" | "call" | "result"; id?: string }> = [];
+  const seen = new Set<string>();
+  for (const event of state.events) {
+    if (event.type === "text_delta") {
+      if (event.text) textParts.push(event.text);
+      textItemId ??= event.itemId;
+      textOutputIndex ??= event.outputIndex;
+      if (event.annotations?.length) annotations.push(...event.annotations);
+      if (event.refusal) refusalParts.push(event.refusal);
+      if (!seen.has("message")) { seen.add("message"); order.push({ kind: "message" }); }
+      continue;
+    }
+    if (event.type === "reasoning_delta") {
+      if (event.text) reasoningParts.push(event.text);
+      reasoningItemId ??= event.itemId;
+      reasoningOutputIndex ??= event.outputIndex;
+      if (!seen.has("reasoning")) { seen.add("reasoning"); order.push({ kind: "reasoning" }); }
+      continue;
+    }
+    if (event.type === "media") {
+      mediaParts.push({ mediaType: event.mediaType, media: event.media, ...(event.itemId ? { itemId: event.itemId } : {}), ...(event.outputIndex !== undefined ? { outputIndex: event.outputIndex } : {}) });
+      const key = `media:${mediaParts.length - 1}`;
+      if (!seen.has(key)) { seen.add(key); order.push({ kind: "message", id: key }); }
+      continue;
+    }
+    if (event.type === "tool_result") {
+      const resultIndex = results.length;
+      results.push({ id: event.callId, output: event.output, ...(event.isError !== undefined ? { isError: event.isError } : {}), ...(event.kind ? { kind: event.kind } : {}), ...(event.itemId ? { itemId: event.itemId } : {}), ...(event.outputIndex !== undefined ? { outputIndex: event.outputIndex } : {}) });
+      order.push({ kind: "result", id: `${event.callId}:${resultIndex}` });
+      continue;
+    }
+    if (event.type !== "tool_call_delta") continue;
+    const current = calls.get(event.callId) ?? {
+      id: event.callId,
+      type: "function" as const,
+      function: { name: event.name?.trim() || "unknown_tool", arguments: "" },
+      ...(event.kind ? { kind: event.kind } : {}),
+      ...(event.raw ? { raw: event.raw } : {}),
+      ...(event.itemId ? { itemId: event.itemId } : {}),
+      ...(event.outputIndex !== undefined ? { outputIndex: event.outputIndex } : {}),
+      ...(event.signature ? { signature: event.signature } : {}),
+    };
+    if (event.name?.trim()) current.function.name = event.name.trim();
+    current.kind ??= event.kind;
+    current.raw ??= event.raw;
+    current.itemId ??= event.itemId;
+    current.outputIndex ??= event.outputIndex;
+    current.signature ??= event.signature;
+    current.function.arguments = event.argumentsFinal
+      ? event.argumentsDelta ?? ""
+      : current.function.arguments + (event.argumentsDelta ?? "");
+    calls.set(event.callId, current);
+    if (!seen.has(`call:${event.callId}`)) { seen.add(`call:${event.callId}`); order.push({ kind: "call", id: event.callId }); }
+  }
+  const callLocation = (call: ResponseHistoryCall): Record<string, unknown> => ({ ...(call.itemId ? { id: call.itemId } : {}), ...(call.outputIndex !== undefined ? { output_index: call.outputIndex } : {}), ...(call.signature ? { thought_signature: call.signature } : {}) });
+  const callItem = (call: ResponseHistoryCall): Record<string, unknown> => {
+    if (call.kind === "custom") return { type: "custom_tool_call", ...callLocation(call), call_id: call.id, name: call.function.name, input: call.function.arguments };
+    if (call.kind === "tool_search") return { ...(call.raw ?? {}), type: "tool_search_call", ...callLocation(call), call_id: call.id, name: call.function.name, input: call.function.arguments };
+    if (call.kind === "hosted" && call.raw) return { ...call.raw, ...callLocation(call), call_id: call.id };
+    return { type: "function_call", ...callLocation(call), call_id: call.id, name: call.function.name, arguments: call.function.arguments };
+  };
+  const result: Array<Record<string, unknown>> = [];
+  const emittedResultIndices = new Set<number>();
+  for (const entry of order) {
+    if (entry.kind === "reasoning" && reasoningParts.length) {
+      result.push({ type: "reasoning", ...(reasoningItemId ? { id: reasoningItemId } : {}), ...(reasoningOutputIndex !== undefined ? { output_index: reasoningOutputIndex } : {}), summary: [{ type: "summary_text", text: reasoningParts.join("") }] });
+    } else if (entry.kind === "message" && entry.id?.startsWith("media:") && mediaParts[Number(entry.id.slice("media:".length))]) {
+      const media = mediaParts[Number(entry.id.slice("media:".length))];
+        result.push({ type: "message", ...(media.itemId ? { id: media.itemId } : {}), ...(media.outputIndex !== undefined ? { output_index: media.outputIndex } : {}), role: "assistant", content: [{ ...media.media, type: media.mediaType === "image" ? "output_image" : "output_file" }] });
+    } else if (entry.kind === "message" && (textParts.length || refusalParts.length)) {
+      result.push({ type: "message", ...(textItemId ? { id: textItemId } : {}), ...(textOutputIndex !== undefined ? { output_index: textOutputIndex } : {}), role: "assistant", content: refusalParts.length
+        ? [{ type: "refusal", refusal: refusalParts.join("") }]
+        : [{ type: "output_text", text: textParts.join(""), annotations }] });
+    } else if (entry.kind === "call" && entry.id) {
+      const call = calls.get(entry.id);
+      if (call && call.function.arguments.trim()) result.push(callItem(call));
+    } else if (entry.kind === "result" && entry.id) {
+      const separator = entry.id.lastIndexOf(":");
+      const resultIndex = Number(entry.id.slice(separator + 1));
+      const item = results[resultIndex];
+      if (item) {
+        emittedResultIndices.add(resultIndex);
+        result.push({
+        type: item.kind === "custom" ? "custom_tool_call_output" : item.kind === "tool_search" ? "tool_search_call_output" : "function_call_output",
+        ...(item.itemId ? { id: item.itemId } : {}),
+        ...(item.outputIndex !== undefined ? { output_index: item.outputIndex } : {}),
+        call_id: item.id,
+        output: item.output,
+        ...(item.isError !== undefined ? { is_error: item.isError } : {}),
+        });
+      }
+    }
+  }
+  for (const [index, item] of results.entries()) {
+    if (emittedResultIndices.has(index)) continue;
+    result.push({
+      type: item.kind === "custom" ? "custom_tool_call_output" : item.kind === "tool_search" ? "tool_search_call_output" : "function_call_output",
+      ...(item.itemId ? { id: item.itemId } : {}),
+      ...(item.outputIndex !== undefined ? { output_index: item.outputIndex } : {}),
+      call_id: item.id,
+      output: item.output,
+      ...(item.isError !== undefined ? { is_error: item.isError } : {}),
+    });
+  }
+  return result;
 }
 
 async function recordResponseToolHistory(
@@ -796,8 +943,22 @@ async function recordResponseToolHistory(
   const response = jsonObject(body.response) ?? body;
   const responseId = typeof response.id === "string" ? response.id : typeof body.responseId === "string" ? body.responseId : undefined;
   const calls = responseToolCalls(body);
-  if (!responseId || !calls.length) return;
-  await history.recordResponse(scope, { responseId, createdAt: Date.now(), calls });
+  const items = Array.isArray(response.output)
+    ? response.output.flatMap((item) => jsonObject(item) ? [item] : [])
+    : [];
+  if (!responseId || (!calls.length && !items.length)) return;
+  const incompleteDetails = jsonObject(response.incomplete_details);
+  await history.recordResponse(scope, {
+    responseId,
+    createdAt: typeof response.created_at === "number" ? response.created_at * 1000 : Date.now(),
+    calls,
+    ...(items.length ? { items } : {}),
+    ...(jsonObject(response.metadata) ? { metadata: jsonObject(response.metadata) } : {}),
+    ...(jsonObject(response.usage) ? { usage: jsonObject(response.usage) } : {}),
+    ...(typeof response.status === "string" ? { status: response.status } : {}),
+    ...(typeof incompleteDetails?.reason === "string" ? { incompleteReason: incompleteDetails.reason } : {}),
+    ...(incompleteDetails ? { incompleteDetails } : {}),
+  });
 }
 
 async function enrichResponsesHistory(
@@ -831,6 +992,19 @@ function requestedCapabilityIds(body: Record<string, unknown> | undefined): Capa
   if (body?.stream === true) result.add("output.streaming");
   if (body?.reasoning !== undefined || body?.thinking !== undefined) result.add("output.reasoning");
   if (body?.parallel_tool_calls === true) result.add("tools.parallel");
+  if (body && Object.prototype.hasOwnProperty.call(body, "temperature")) result.add("params.temperature");
+  if (body && (Object.prototype.hasOwnProperty.call(body, "top_p") || Object.prototype.hasOwnProperty.call(body, "topP"))) result.add("params.top_p");
+  if (body && (Object.prototype.hasOwnProperty.call(body, "top_k") || Object.prototype.hasOwnProperty.call(body, "topK"))) result.add("params.top_k");
+  const generationConfig = body && typeof body.generationConfig === "object" && body.generationConfig !== null && !Array.isArray(body.generationConfig)
+    ? body.generationConfig as Record<string, unknown>
+    : body && typeof body.generation_config === "object" && body.generation_config !== null && !Array.isArray(body.generation_config)
+      ? body.generation_config as Record<string, unknown>
+      : undefined;
+  if (generationConfig) {
+    if (Object.prototype.hasOwnProperty.call(generationConfig, "temperature")) result.add("params.temperature");
+    if (Object.prototype.hasOwnProperty.call(generationConfig, "topP") || Object.prototype.hasOwnProperty.call(generationConfig, "top_p")) result.add("params.top_p");
+    if (Object.prototype.hasOwnProperty.call(generationConfig, "topK") || Object.prototype.hasOwnProperty.call(generationConfig, "top_k")) result.add("params.top_k");
+  }
   if (!Array.isArray(body?.tools)) return [...result];
   for (const raw of body.tools) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
@@ -876,7 +1050,11 @@ async function convertRequestForRoute(
     ? capabilityProfileForRoute(route, target, upstreamModel ?? originModel)
     : {};
   const hasCapabilityProfile = Object.keys(capabilityProfile).length > 0;
-  const converted = useLegacyProtocolConversion() ? undefined : await convertGatewayRequestAtRuntime(
+  // The shared Gateway converter is the canonical production path.  The old
+  // adapter is only used when the packaged shared runtime cannot be loaded;
+  // an environment toggle must not silently create a second protocol
+  // contract with different tool/history/stream semantics.
+  const converted = await convertGatewayRequestAtRuntime(
       source,
       target,
       body as unknown as import("../../../packages/gateway/dist/protocol.js").JsonObject,
@@ -892,21 +1070,10 @@ async function convertRequestForRoute(
       body: Buffer.from(JSON.stringify(converted.value)),
       quality: converted.quality,
       diagnostics: converted.diagnostics,
+      ...(converted.metadata ? { metadata: converted.metadata } : {}),
     };
   }
-  return {
-    body: Buffer.from(JSON.stringify(adaptProtocolRequest(source, target, body, upstreamModel, route?.instructionRole))),
-    quality: "fair",
-    diagnostics: [{
-      code: useLegacyProtocolConversion() ? "legacy_conversion_forced" : "conversion_runtime_unavailable",
-      level: "warning",
-      message: useLegacyProtocolConversion()
-        ? "The legacy compatibility adapter was explicitly enabled"
-        : "The shared gateway conversion runtime was unavailable; the legacy compatibility adapter was used",
-      source,
-      target,
-    }],
-  };
+  throw new Error(`Gateway conversion runtime unavailable for ${source}->${target}; refusing an unsafe legacy conversion`);
 }
 
 function retryAfterMs(response: Response): number | undefined {
@@ -1164,7 +1331,7 @@ async function proxyAccountPoolRequest(
     }
     if (candidateParsedBody) {
       const capabilityProfile = capabilityProfileForRoute(effectiveRoute, effectiveRoute.protocol, effectiveUpstreamModel, capabilityRegistry);
-      const filtered = filterUnsupportedHostedTools(candidateParsedBody as import("../../../packages/gateway/dist/protocol.js").JsonObject, capabilityProfile, Object.keys(capabilityProfile).length ? "safe" : "allow");
+      const filtered = filterUnsupportedRouteCapabilities(candidateParsedBody as import("../../../packages/gateway/dist/protocol.js").JsonObject, capabilityProfile, Object.keys(capabilityProfile).length ? "safe" : "allow", effectiveRoute.protocol);
       if (filtered.omitted.length) {
         candidateParsedBody = filtered.body as Record<string, unknown>;
         candidateBody = Buffer.from(JSON.stringify(candidateParsedBody));
@@ -1230,32 +1397,31 @@ async function proxyAccountPoolRequest(
       }, proxy.url);
     try {
       upstreamResponse = await executeCandidate();
-      // Learn a precise capability rejection and replay the same account once
-      // with only the incompatible Hosted Tool removed. This is deliberately
-      // local to the selected member: capability mismatches are not failover
-      // or cooldown signals.
-      if (!upstreamResponse.ok && capabilityRegistry && candidateParsedBody) {
-        const initialMessage = await extractSafeUpstreamResponseError(upstreamResponse, `Upstream returned HTTP ${upstreamResponse.status}`);
-        const initialMismatch = observeCapabilityMismatch(capabilityRegistry, persistCapabilityObservations, effectiveRoute, effectiveRoute.protocol, effectiveUpstreamModel, candidateParsedBody, upstreamResponse.status, initialMessage);
-        if (initialMismatch) {
-          const profile = capabilityProfileForRoute(effectiveRoute, effectiveRoute.protocol, effectiveUpstreamModel, capabilityRegistry);
-          const filtered = filterUnsupportedHostedTools(candidateParsedBody as import("../../../packages/gateway/dist/protocol.js").JsonObject, profile, "safe");
-          if (filtered.omitted.length) {
-            candidateParsedBody = filtered.body as Record<string, unknown>;
-            if (pool.protocol !== effectiveRoute.protocol) {
-              const converted = await convertRequestForRoute(pool.protocol, effectiveRoute.protocol, candidateParsedBody, effectiveUpstreamModel,
-                typeof parsedBody?.model === "string" ? parsedBody.model : undefined, effectiveRoute);
-              candidateBody = normalizeConvertedResponsesRequest(converted.body, effectiveRoute.protocol, forceResponsesStoreFalse) ?? converted.body;
-              conversionTrace = converted;
-              finalConversionQuality = converted.quality;
-              finalConversionDiagnostics = converted.diagnostics;
-            } else {
-              candidateBody = Buffer.from(JSON.stringify(candidateParsedBody));
-            }
-            await upstreamResponse.body?.cancel();
-            upstreamResponse = await executeCandidate();
-          }
+      // Learn precise capability rejections and replay the same account with
+      // only the incompatible fields removed. A provider may report one
+      // unsupported field at a time, so allow a bounded sequence of repairs.
+      // This remains local to the selected member: capability mismatches are
+      // never failover or cooldown signals.
+      for (let capabilityRetry = 0; capabilityRetry < 3 && !upstreamResponse.ok && capabilityRegistry && candidateParsedBody; capabilityRetry += 1) {
+        const errorPreview = await extractSafeUpstreamResponseError(upstreamResponse, `Upstream returned HTTP ${upstreamResponse.status}`);
+        const mismatch = observeCapabilityMismatch(capabilityRegistry, persistCapabilityObservations, effectiveRoute, effectiveRoute.protocol, effectiveUpstreamModel, candidateParsedBody, upstreamResponse.status, errorPreview);
+        if (!mismatch) break;
+        const profile = capabilityProfileForRoute(effectiveRoute, effectiveRoute.protocol, effectiveUpstreamModel, capabilityRegistry);
+        const filtered = filterUnsupportedRouteCapabilities(candidateParsedBody as import("../../../packages/gateway/dist/protocol.js").JsonObject, profile, "safe", effectiveRoute.protocol);
+        if (!filtered.omitted.length) break;
+        candidateParsedBody = filtered.body as Record<string, unknown>;
+        if (pool.protocol !== effectiveRoute.protocol) {
+          const converted = await convertRequestForRoute(pool.protocol, effectiveRoute.protocol, candidateParsedBody, effectiveUpstreamModel,
+            typeof parsedBody?.model === "string" ? parsedBody.model : undefined, effectiveRoute);
+          candidateBody = normalizeConvertedResponsesRequest(converted.body, effectiveRoute.protocol, forceResponsesStoreFalse) ?? converted.body;
+          conversionTrace = converted;
+          finalConversionQuality = converted.quality;
+          finalConversionDiagnostics = converted.diagnostics;
+        } else {
+          candidateBody = Buffer.from(JSON.stringify(candidateParsedBody));
         }
+        await upstreamResponse.body?.cancel();
+        upstreamResponse = await executeCandidate();
       }
       // Credential pools use the same protocol conversion rules as direct
       // Gateway routes. In particular, a Chat Completions pool member backed
@@ -1274,6 +1440,8 @@ async function proxyAccountPoolRequest(
               const bridged = await convertGatewayResponseStreamToJsonAtRuntime(upstreamResponse, effectiveRoute.protocol, pool.protocol, {
                 originModelName: typeof parsedBody?.model === "string" ? parsedBody.model : undefined,
                 upstreamModelName: effectiveUpstreamModel,
+                ...(conversionTrace?.metadata?.toolNameMap ? { toolNameMap: conversionTrace.metadata.toolNameMap } : {}),
+                ...(conversionTrace?.metadata?.toolChoiceMap ? { toolChoiceMap: conversionTrace.metadata.toolChoiceMap } : {}),
               });
               if (bridged) {
                 upstreamResponse = bridged;
@@ -1287,15 +1455,29 @@ async function proxyAccountPoolRequest(
         upstreamResponse = await convertUpstreamResponse(upstreamResponse, effectiveRoute.protocol, pool.protocol, {
           originModelName: typeof parsedBody?.model === "string" ? parsedBody.model : undefined,
           upstreamModelName: effectiveUpstreamModel,
+          ...(conversionTrace?.metadata?.toolNameMap ? { toolNameMap: conversionTrace.metadata.toolNameMap } : {}),
+          ...(conversionTrace?.metadata?.toolChoiceMap ? { toolChoiceMap: conversionTrace.metadata.toolChoiceMap } : {}),
         }, pool.protocol === "responses" && candidateHistoryScope
           ? {
             onFinalized: async (state) => {
-              const calls = streamToolCalls(state);
-              if (!calls.length) return;
-              await history.recordResponse(candidateHistoryScope!, { responseId: state.id, createdAt: Date.now(), calls });
+              const sharedHistory = await buildGatewayStreamHistoryAtRuntime(state.events);
+              const items = sharedHistory?.items ?? [];
+              const calls: ResponseHistoryCall[] = (sharedHistory?.calls ?? []).map((call) => ({
+                id: call.id,
+                type: "function" as const,
+                kind: call.kind,
+                raw: call.raw,
+                itemId: call.itemId,
+                outputIndex: call.outputIndex,
+                signature: call.signature,
+                function: { name: call.name, arguments: call.arguments },
+              }));
+              if (!calls.length && !items.length) return;
+              await history.recordResponse(candidateHistoryScope!, { responseId: state.id, createdAt: Date.now(), calls, ...(items.length ? { items } : {}), usage: state.usage ? { ...state.usage } : undefined });
             },
           }
-          : undefined);
+          : undefined,
+        candidateParsedBody?.stream !== true ? "json" : "stream");
       }
       if (pool.protocol === "responses" && candidateHistoryScope
         && !upstreamResponse.headers.get("content-type")?.includes("text/event-stream")) {
@@ -1548,7 +1730,7 @@ async function proxyRequest(
       }
       if (candidateParsedBody) {
         const capabilityProfile = capabilityProfileForRoute(candidate, candidate.protocol, candidate.upstreamModel ?? incomingModel, capabilityRegistry);
-        const filtered = filterUnsupportedHostedTools(candidateParsedBody as import("../../../packages/gateway/dist/protocol.js").JsonObject, capabilityProfile, Object.keys(capabilityProfile).length ? "safe" : "allow");
+        const filtered = filterUnsupportedRouteCapabilities(candidateParsedBody as import("../../../packages/gateway/dist/protocol.js").JsonObject, capabilityProfile, Object.keys(capabilityProfile).length ? "safe" : "allow", candidate.protocol);
         if (filtered.omitted.length) candidateBody = Buffer.from(JSON.stringify(filtered.body));
       }
     }
@@ -1605,21 +1787,20 @@ async function proxyRequest(
         }, proxy.url);
       let response = await sendCandidate();
       let responseAlreadyConverted = false;
-      // An unknown capability is learned from a precise tool-shape rejection,
-      // then the same request is retried once after safe tool removal.
-      if (!response.ok && capabilityRegistry && candidateBody) {
-        const initialMessage = await extractSafeUpstreamResponseError(response, `Upstream returned HTTP ${response.status}`);
-        const initialBody = parseRequestBody(candidateBody);
-        const initialMismatch = observeCapabilityMismatch(capabilityRegistry, persistCapabilityObservations, candidate, candidate.protocol, candidate.upstreamModel ?? incomingModel, initialBody, response.status, initialMessage);
-        if (initialMismatch && initialBody) {
-          const profile = capabilityProfileForRoute(candidate, candidate.protocol, candidate.upstreamModel ?? incomingModel, capabilityRegistry);
-          const filtered = filterUnsupportedHostedTools(initialBody as import("../../../packages/gateway/dist/protocol.js").JsonObject, profile, "safe");
-          if (filtered.omitted.length) {
-            await response.body?.cancel();
-            candidateBody = Buffer.from(JSON.stringify(filtered.body));
-            response = await sendCandidate();
-          }
-        }
+      // Providers can reject sampling fields one at a time. Learn each exact
+      // mismatch and repair the same route, but cap the loop to avoid turning
+      // an actually invalid request into an unbounded retry storm.
+      for (let capabilityRetry = 0; capabilityRetry < 3 && !response.ok && capabilityRegistry && candidateBody; capabilityRetry += 1) {
+        const errorPreview = await extractSafeUpstreamResponseError(response, `Upstream returned HTTP ${response.status}`);
+        const currentBody = parseRequestBody(candidateBody);
+        const mismatch = observeCapabilityMismatch(capabilityRegistry, persistCapabilityObservations, candidate, candidate.protocol, candidate.upstreamModel ?? incomingModel, currentBody, response.status, errorPreview);
+        if (!mismatch || !currentBody) break;
+        const profile = capabilityProfileForRoute(candidate, candidate.protocol, candidate.upstreamModel ?? incomingModel, capabilityRegistry);
+        const filtered = filterUnsupportedRouteCapabilities(currentBody as import("../../../packages/gateway/dist/protocol.js").JsonObject, profile, "safe", candidate.protocol);
+        if (!filtered.omitted.length) break;
+        await response.body?.cancel();
+        candidateBody = Buffer.from(JSON.stringify(filtered.body));
+        response = await sendCandidate();
       }
       // A number of Responses-compatible providers expose only the SSE
       // transport and reject a non-streaming request. Preserve the client's
@@ -1639,6 +1820,8 @@ async function proxyRequest(
               const bridged = await convertGatewayResponseStreamToJsonAtRuntime(response, candidate.protocol, incomingProtocol!, {
                 originModelName: incomingModel,
                 upstreamModelName: candidate.upstreamModel,
+                ...(conversionTrace?.metadata?.toolNameMap ? { toolNameMap: conversionTrace.metadata.toolNameMap } : {}),
+                ...(conversionTrace?.metadata?.toolChoiceMap ? { toolChoiceMap: conversionTrace.metadata.toolChoiceMap } : {}),
               });
               if (bridged) {
                 response = bridged;
@@ -1653,15 +1836,29 @@ async function proxyRequest(
         ? await convertUpstreamResponse(response, candidate.protocol, incomingProtocol, {
           originModelName: incomingModel,
           upstreamModelName: candidate.upstreamModel,
+          ...(conversionTrace?.metadata?.toolNameMap ? { toolNameMap: conversionTrace.metadata.toolNameMap } : {}),
+          ...(conversionTrace?.metadata?.toolChoiceMap ? { toolChoiceMap: conversionTrace.metadata.toolChoiceMap } : {}),
         }, incomingProtocol === "responses" && candidateHistoryScope
           ? {
             onFinalized: async (state) => {
-              const calls = streamToolCalls(state);
-              if (!calls.length) return;
-              await history?.recordResponse(candidateHistoryScope!, { responseId: state.id, createdAt: Date.now(), calls });
+              const sharedHistory = await buildGatewayStreamHistoryAtRuntime(state.events);
+              const items = sharedHistory?.items ?? [];
+              const calls: ResponseHistoryCall[] = (sharedHistory?.calls ?? []).map((call) => ({
+                id: call.id,
+                type: "function" as const,
+                kind: call.kind,
+                raw: call.raw,
+                itemId: call.itemId,
+                outputIndex: call.outputIndex,
+                signature: call.signature,
+                function: { name: call.name, arguments: call.arguments },
+              }));
+              if (!calls.length && !items.length) return;
+              await history?.recordResponse(candidateHistoryScope!, { responseId: state.id, createdAt: Date.now(), calls, ...(items.length ? { items } : {}), usage: state.usage ? { ...state.usage } : undefined });
             },
           }
-          : undefined)
+          : undefined,
+          incomingRequestBody?.stream !== true ? "json" : "stream")
         : response;
       if (incomingProtocol === "responses" && candidateHistoryScope
         && !convertedResponse.headers.get("content-type")?.includes("text/event-stream")) {
@@ -1852,31 +2049,41 @@ async function convertUpstreamResponse(
   response: Response,
   source: RouteProtocol,
   target: RouteProtocol,
-  metadata: { requestId?: string; originModelName?: string; upstreamModelName?: string } = {},
+  metadata: ConversionMetadata = {},
   hooks?: GatewayResponseStreamHooks,
+  responseMode: "stream" | "json" = "stream",
 ): Promise<Response> {
   // Never reinterpret an upstream error body as a successful protocol
   // response. Keeping the original status/body lets the client see the real
   // provider error and prevents an empty `chat.completion` from being
   // fabricated for malformed/unsupported requests.
   if (!response.ok) return response;
-  const contentType = response.headers.get("content-type") ?? "";
   if (!response.body) return response;
-  if (contentType.includes("text/event-stream")) {
-    const streamed = useLegacyProtocolConversion() ? undefined : await convertGatewayResponseStreamAtRuntime(response, source, target, metadata, { emitSequenceNumber: true }, hooks);
+  // A few OpenAI-compatible upstreams (including the ChatGPT subscription
+  // relay used by Anima) return a Responses SSE body without a Content-Type
+  // header.  Relying on the header alone silently bypasses conversion and
+  // leaks `response.output_text.delta` frames to a Chat Completions client,
+  // which then reports "Model returned no text and no tool calls".  Probe and
+  // rebuild the body once so the converter can make a protocol decision from
+  // the actual bytes while preserving streaming/back-pressure.
+  const detected = await probeUpstreamResponseBody(response);
+  response = detected.response;
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  const isEventStream = detected.kind === "sse" || contentType.includes("text/event-stream");
+  const isJson = detected.kind === "json" || contentType.includes("json");
+  if (isEventStream) {
+    const streamed = responseMode === "json"
+      ? await convertGatewayResponseStreamToJsonAtRuntime(response, source, target, metadata, hooks)
+      : await convertGatewayResponseStreamAtRuntime(response, source, target, metadata, { emitSequenceNumber: true }, hooks);
     if (streamed) return streamed;
-    const raw = await response.text();
-    const converted = adaptProtocolSseChunk(source, target, raw);
-    const headers = new Headers(response.headers);
-    headers.delete("content-length");
-    headers.delete("content-encoding");
-    return new Response(converted, { status: response.status, headers });
+    await response.body?.cancel();
+    return conversionRuntimeUnavailableResponse(source, target);
   }
-  if (!contentType.includes("json")) return response;
+  if (!isJson) return response;
   try {
     const body = JSON.parse(await response.text()) as unknown;
     if (!body || typeof body !== "object" || Array.isArray(body)) return response;
-    const convertedResult = useLegacyProtocolConversion() ? undefined : await convertGatewayResponseAtRuntime(
+    const convertedResult = await convertGatewayResponseAtRuntime(
         source,
         target,
         body as import("../../../packages/gateway/dist/protocol.js").JsonObject,
@@ -1888,14 +2095,68 @@ async function convertUpstreamResponse(
       headers.delete("content-encoding");
       return new Response(JSON.stringify(convertedResult.value), { status: response.status, statusText: response.statusText, headers });
     }
-    const converted = adaptProtocolResponse(source, target, body as Record<string, unknown>);
-    const headers = new Headers(response.headers);
-    headers.delete("content-length");
-    headers.delete("content-encoding");
-    return new Response(JSON.stringify(converted), { status: response.status, headers });
+    return conversionRuntimeUnavailableResponse(source, target);
   } catch {
     return response;
   }
+}
+
+type ProbedUpstreamBodyKind = "sse" | "json" | "unknown";
+
+/**
+ * Providers are not consistent about response headers.  In particular, some
+ * Responses relays omit `content-type` entirely even though they emit valid
+ * SSE frames.  Read only the first chunk and put it back in front of the
+ * original stream; this keeps the conversion path lossless and avoids
+ * buffering a potentially long model response in memory.
+ */
+async function probeUpstreamResponseBody(response: Response): Promise<{ response: Response; kind: ProbedUpstreamBodyKind }> {
+  if (!response.body) return { response, kind: "unknown" };
+  const reader = response.body.getReader();
+  const first = await reader.read();
+  const firstChunk = first.value ? new Uint8Array(first.value) : new Uint8Array();
+  const sample = new TextDecoder().decode(firstChunk).replace(/^\uFEFF/, "").trimStart();
+  const kind = detectUpstreamBodyKind(sample);
+  const rebuiltBody = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        if (firstChunk.byteLength) controller.enqueue(firstChunk);
+        if (first.done) {
+          controller.close();
+          return;
+        }
+        while (true) {
+          const next = await reader.read();
+          if (next.value) controller.enqueue(new Uint8Array(next.value));
+          if (next.done) break;
+        }
+        controller.close();
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+  });
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  headers.delete("content-encoding");
+  return {
+    response: new Response(rebuiltBody, { status: response.status, statusText: response.statusText, headers }),
+    kind,
+  };
+}
+
+function detectUpstreamBodyKind(sample: string): ProbedUpstreamBodyKind {
+  if (/^(?:event|data|id|retry)\s*:/.test(sample) || /^:\s?/.test(sample)) return "sse";
+  if (sample.startsWith("{") || sample.startsWith("[")) return "json";
+  return "unknown";
+}
+
+function conversionRuntimeUnavailableResponse(source: RouteProtocol, target: RouteProtocol): Response {
+  return new Response(JSON.stringify({ error: {
+    code: "conversion_runtime_unavailable",
+    type: "gateway_error",
+    message: `The shared gateway conversion runtime is unavailable for ${source}->${target}; restart or reinstall the packaged gateway resources`,
+  } }), { status: 502, headers: { "content-type": "application/json; charset=utf-8" } });
 }
 
 async function proxyCompatibilityRequest(
@@ -1926,19 +2187,20 @@ async function proxyCompatibilityRequest(
       headers, history,
       capabilityProfile: capabilityProfileForRoute(route, route.protocol, route.upstreamModel, capabilityRegistry),
     });
-    let result = await execute(requestBody);
-    if (!result.ok && capabilityRegistry) {
+    let retryBody = requestBody;
+    let result = await execute(retryBody);
+    for (let capabilityRetry = 0; capabilityRetry < 3 && !result.ok && capabilityRegistry; capabilityRetry += 1) {
       const errorPreview = await extractSafeUpstreamResponseError(result, `Upstream returned HTTP ${result.status}`);
-      const mismatch = observeCapabilityMismatch(capabilityRegistry, persistCapabilityObservations, route, route.protocol, route.upstreamModel, requestBody, result.status, errorPreview);
-      if (mismatch) {
-        const profile = capabilityProfileForRoute(route, route.protocol, route.upstreamModel, capabilityRegistry);
-        const filtered = filterUnsupportedHostedTools(requestBody as import("../../../packages/gateway/dist/protocol.js").JsonObject, profile, "safe");
-        if (filtered.omitted.length) {
-          await result.body?.cancel();
-          result = await execute(filtered.body as Record<string, unknown>);
-        }
-      }
+      const mismatch = observeCapabilityMismatch(capabilityRegistry, persistCapabilityObservations, route, route.protocol, route.upstreamModel, retryBody, result.status, errorPreview);
+      if (!mismatch) break;
+      const profile = capabilityProfileForRoute(route, route.protocol, route.upstreamModel, capabilityRegistry);
+      const filtered = filterUnsupportedRouteCapabilities(retryBody as import("../../../packages/gateway/dist/protocol.js").JsonObject, profile, "safe", route.protocol);
+      if (!filtered.omitted.length) break;
+      await result.body?.cancel();
+      retryBody = filtered.body as Record<string, unknown>;
+      result = await execute(retryBody);
     }
+    requestBody = retryBody;
     status = result.status;
     await relayResponse(result, response, tap);
   } catch (error) {
@@ -1985,12 +2247,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
   // a package artifact is unavailable.
   await initializeModelRouteEngine();
   const conversionRuntimeReady = await initializeGatewayConversionRuntime();
-  if (!conversionRuntimeReady) {
-    console.warn("[gateway-conversion] shared conversion runtime unavailable; legacy compatibility conversion will be used");
-  }
-  if (useLegacyProtocolConversion()) {
-    console.warn("[gateway-conversion] legacy compatibility conversion explicitly enabled by CODEX_SWITCHER_LEGACY_PROTOCOL_CONVERSION");
-  }
+  if (!conversionRuntimeReady) console.error("[gateway-conversion] shared conversion runtime unavailable; protocol conversion requests will fail closed");
   let pluginManager: RuntimePluginManager | undefined;
   try {
     const pluginRuntime = await loadGatewayPluginRuntime();
@@ -2162,7 +2419,9 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
     capabilityWriteQueue = capabilityWriteQueue.then(() => writePrivateJsonAtomically(capabilityStatePath, snapshot)).catch(() => undefined);
   };
   let eventLogQueue = Promise.resolve();
+  let acceptingPoolEvents = true;
   const recordPoolEvent = (event: Record<string, unknown>) => {
+    if (!acceptingPoolEvents) return eventLogQueue;
     eventLogQueue = eventLogQueue.then(async () => {
       const current = await stat(eventLogPath).catch(() => null);
       if (current && current.size >= 5 * 1024 * 1024) {
@@ -2172,6 +2431,17 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
       await appendFile(eventLogPath, `${JSON.stringify(event)}\n`, { encoding: "utf8", mode: 0o600 });
     }).catch(() => undefined);
     return eventLogQueue;
+  };
+  const drainEventLogQueue = async (): Promise<void> => {
+    // A request can enqueue telemetry in a microtask immediately before the
+    // server's close callback runs. Keep observing the tail until no new
+    // write was appended, so restarts and temporary-state cleanup cannot race
+    // an outstanding router-events.jsonl append.
+    while (true) {
+      const pending = eventLogQueue;
+      await pending;
+      if (pending === eventLogQueue) return;
+    }
   };
   let closePromise: Promise<void> | null = null;
   let closeService: () => Promise<void> = async () => undefined;
@@ -2923,11 +3193,12 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
         // the lifecycle promise cannot wait indefinitely during shutdown.
         server.closeIdleConnections();
         await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+        acceptingPoolEvents = false;
         await capabilityWriteQueue;
         // Pool requests enqueue telemetry writes after the response is sent.
         // Wait for that queue before callers remove a temporary state directory
         // (and before a production restart can race the next process).
-        await eventLogQueue;
+        await drainEventLogQueue();
         await store.close();
         await pluginManager?.close().catch(() => undefined);
         await closeUpstreamProxyAgents();

@@ -53,6 +53,21 @@ test("imports nested legacy and namespaced model capabilities", () => {
     assert.equal(model?.capabilities.vision, true);
     assert.equal(model?.capabilityProfile?.["tools.hosted.web_search"]?.status, "unsupported");
 });
+test("imports sampling capability metadata without losing explicit unsupported values", () => {
+    const result = importGatewayConfiguration({
+        providers: [{ id: "relay", responses: "https://relay.example/v1" }],
+        models: [{
+                id: "reasoning-model",
+                providerId: "relay",
+                temperature: false,
+                capabilities: { top_k: false },
+            }],
+    }, "default");
+    const model = result.gateway.models["relay/reasoning-model"];
+    assert.equal(model?.capabilityProfile?.["params.temperature"]?.status, "unsupported");
+    assert.equal(model?.capabilityProfile?.["params.top_p"]?.status, "unsupported");
+    assert.equal(model?.capabilityProfile?.["params.top_k"]?.status, "unsupported");
+});
 test("imports a gateway-shaped document while forcing manual mode and removing unsupported fields", () => {
     const result = importGatewayConfiguration({
         schemaVersion: 1,

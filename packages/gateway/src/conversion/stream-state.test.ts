@@ -11,7 +11,7 @@ test("stream state preserves chunk order, tool argument deltas and final usage",
   assert.equal(first.value[0]?.type, "response.created");
   assert.equal(JSON.stringify([...first.value, ...second.value]).includes("hel"), true);
   assert.equal(JSON.stringify([...first.value, ...second.value]).includes("lo"), true);
-  assert.equal(JSON.stringify([...first.value, ...second.value]).includes("function_call_arguments.delta"), false);
+  assert.equal(JSON.stringify([...first.value, ...second.value]).includes("function_call_arguments.delta"), true);
   assert.equal(JSON.stringify(final.value).includes("{\\\"q\\\":\\\"hi\\\"}"), true);
   assert.equal(final.value.some((event) => event.type === "response.completed"), true);
   assert.equal(first.value.some((event) => event.type === "response.output_item.added"), true);
@@ -66,6 +66,7 @@ test("stream state fails when tool_calls contains no valid call", async () => {
   assert.deepEqual((failed?.response as Record<string, unknown>)?.error, {
     code: "upstream_invalid_tool_call",
     message: "Upstream finished with 'tool_calls' but returned no valid tool call arguments; the provider likely emitted an empty or malformed tool call: read(arguments=empty)",
+    retryable: false,
   });
   assert.equal(result.value.some((event) => event.type === "response.completed"), false);
   assert.equal(state.ended, true);
@@ -146,6 +147,58 @@ test("stream decoder understands native Responses and Anthropic event envelopes"
   assert.equal(targetEnd.value.some((event) => event.type === "message_stop"), true);
 });
 
+test("stream conversion reports unknown provider events without fabricating output", async () => {
+  const state = createResponseStreamState("responses", "chat_completions", { requestId: "unknown-event" });
+  const result = await convertStreamChunk(state, { type: "response.future_event", response_id: "unknown-event", payload: { opaque: true } });
+  assert.deepEqual(result.value.filter((event) => Array.isArray(event.choices)), [
+    { id: "unknown-event", object: "chat.completion.chunk", choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }] },
+  ]);
+  assert.equal(result.diagnostics[0]?.code, "unknown_stream_event");
+});
+
+test("Responses streaming keeps incomplete detail metadata", async () => {
+  const state = createResponseStreamState("responses", "responses", { requestId: "incomplete-stream" });
+  const result = await convertStreamChunk(state, {
+    type: "response.incomplete",
+    response: { id: "incomplete-stream", status: "incomplete", incomplete_details: { reason: "max_output_tokens", limit: 64 } },
+  });
+  const terminal = result.value.find((event) => event.type === "response.incomplete") as JsonObject | undefined;
+  assert.deepEqual((terminal?.response as JsonObject)?.incomplete_details, { reason: "max_output_tokens", limit: 64 });
+});
+
+test("Responses stream preserves custom calls and rejects hosted calls on non-Responses targets", async () => {
+  const custom = createResponseStreamState("responses", "responses", { requestId: "custom-stream" });
+  await convertStreamChunk(custom, { type: "response.custom_tool_call_input.delta", call_id: "custom-1", name: "emit_text", delta: "plain" });
+  await convertStreamChunk(custom, { type: "response.custom_tool_call_input.done", call_id: "custom-1", name: "emit_text", input: "plain" });
+  const customEnd = await convertStreamChunk(custom, { type: "response.completed", response: { status: "completed" } });
+  assert.equal(customEnd.value.some((event) => event.type === "response.completed" && JSON.stringify(event).includes("custom_tool_call")), true);
+
+  const customDowngrade = createResponseStreamState("responses", "chat_completions", { requestId: "custom-downgrade" });
+  await convertStreamChunk(customDowngrade, { type: "response.custom_tool_call_input.delta", call_id: "custom-2", name: "emit_json", delta: "{\"ok\":true}" });
+  const customDowngradeEnd = await convertStreamChunk(customDowngrade, { type: "response.completed", response: { status: "completed" } });
+  assert.equal(customDowngradeEnd.value.some((event) => Array.isArray(event.choices) && JSON.stringify(event).includes("emit_json")), true);
+
+  const hosted = createResponseStreamState("responses", "chat_completions", { requestId: "hosted-stream" });
+  await convertStreamChunk(hosted, { type: "response.output_item.added", item: { type: "web_search_call", id: "search-1", status: "in_progress" } });
+  const hostedEnd = await convertStreamChunk(hosted, { type: "response.completed", response: { status: "completed" } });
+  assert.equal(hostedEnd.value.some((event) => (event.error as Record<string, unknown> | undefined)?.code === "unsupported_hosted_tool_response"), true);
+});
+
+test("Responses streaming preserves custom tool text and emits a complete item lifecycle", async () => {
+  const state = createResponseStreamState("responses", "chat_completions", { requestId: "custom-stream-wrapper" });
+  const delta = await convertStreamChunk(state, {
+    type: "response.custom_tool_call_input.delta",
+    call_id: "custom-3",
+    name: "emit_text",
+    delta: "plain text",
+  });
+  const end = await convertStreamChunk(state, { type: "response.completed", response: { status: "completed" } });
+  const serialized = JSON.stringify([...delta.value, ...end.value]);
+  assert.equal(serialized.includes('"name":"emit_text"'), true);
+  assert.equal(serialized.includes('"arguments":"{\\"input\\":\\"plain text\\"}"'), true);
+  assert.equal(end.value.some((event) => event.object === "chat.completion.chunk"), true);
+});
+
 test("stream conversion covers every protocol direction with native terminal chunks", async () => {
   const chunks = {
     responses: [{ type: "response.output_text.delta", delta: "hello" }, { type: "response.completed", response: { status: "completed", usage: { input_tokens: 1, output_tokens: 1 } } }],
@@ -160,4 +213,300 @@ test("stream conversion covers every protocol direction with native terminal chu
     for (const chunk of chunks[source]) results.push(await convertStreamChunk(state, chunk as unknown as JsonObject));
     assert.equal(results.some((result) => result.value.length > 0), true, `${source}->${target}`);
   }
+});
+
+test("stream conversion preserves media parts and thinking signatures", async () => {
+  const state = createResponseStreamState("gemini", "responses", { requestId: "rich-stream" });
+  const media = await convertStreamChunk(state, {
+    responseId: "gemini-rich",
+    candidates: [{ content: { parts: [
+      { text: "think", thought: true, thoughtSignature: "sig-g" },
+      { inlineData: { mimeType: "image/png", data: "abc" } },
+    ] } }],
+  });
+  assert.equal(JSON.stringify(media.value).includes("image/png"), true);
+  assert.equal(JSON.stringify(media.value).includes("sig-g"), true);
+  const end = await convertStreamChunk(state, { responseId: "gemini-rich", candidates: [{ finishReason: "STOP" }] });
+  assert.equal(end.value.some((event) => event.type === "response.completed"), true);
+});
+
+test("Responses stream closes output items in their original output-index order", async () => {
+  const state = createResponseStreamState("chat_completions", "responses", { requestId: "ordered-items" }, { emitSequenceNumber: true });
+  await convertStreamChunk(state, { id: "chat", choices: [{ delta: { content: "answer" }, finish_reason: null }] });
+  await convertStreamChunk(state, { id: "chat", choices: [{ delta: { reasoning_content: "plan" }, finish_reason: null }] });
+  const terminal = await convertStreamChunk(state, { id: "chat", choices: [{ delta: {}, finish_reason: "stop" }] });
+  const done = terminal.value.filter((event) => event.type === "response.output_item.done") as Array<Record<string, unknown>>;
+  assert.deepEqual(done.map((event) => event.output_index), [0, 1]);
+  const sequence = terminal.value.map((event) => Number(event.sequence_number)).filter(Number.isFinite);
+  assert.deepEqual(sequence, [...sequence].sort((a, b) => a - b));
+  const completed = terminal.value.find((event) => event.type === "response.completed") as Record<string, unknown> | undefined;
+  assert.ok(completed);
+  assert.deepEqual(((completed.response as Record<string, unknown>).output as Array<Record<string, unknown>>).map((item) => item.type), ["message", "reasoning"]);
+});
+
+test("Responses stream keeps multiple message and reasoning item boundaries", async () => {
+  const state = createResponseStreamState("responses", "responses", { requestId: "multi-items" });
+  await convertStreamChunk(state, { type: "response.output_text.delta", item_id: "msg-a", output_index: 0, delta: "first" });
+  await convertStreamChunk(state, { type: "response.reasoning_summary_text.delta", item_id: "rs-a", output_index: 1, delta: "plan" });
+  await convertStreamChunk(state, { type: "response.output_text.delta", item_id: "msg-b", output_index: 2, delta: "second" });
+  const terminal = await convertStreamChunk(state, { type: "response.completed", response: { id: "multi-items", status: "completed" } });
+  const completed = terminal.value.find((event) => event.type === "response.completed") as JsonObject | undefined;
+  assert.ok(completed);
+  const output = ((completed.response as JsonObject).output as JsonObject[]);
+  assert.deepEqual(output.map((item) => `${item.type}:${item.id}`), ["message:msg-a", "reasoning:rs-a", "message:msg-b"]);
+  const done = terminal.value.filter((event) => event.type === "response.output_item.done") as JsonObject[];
+  assert.deepEqual(done.map((event) => event.output_index), [0, 1, 2]);
+});
+
+test("Responses stream preserves multiple reasoning summary parts", async () => {
+  const state = createResponseStreamState("responses", "responses", { requestId: "multi-summary" });
+  await convertStreamChunk(state, { type: "response.reasoning_summary_text.delta", item_id: "rs-1", output_index: 0, summary_index: 0, delta: "first" });
+  // A Responses stream may expose a second summary segment with an explicit
+  // summary index; it must not be concatenated into part zero.
+  await convertStreamChunk(state, { type: "response.reasoning_summary_text.delta", item_id: "rs-1", output_index: 0, summary_index: 1, delta: "second" });
+  const terminal = await finalizeResponseStream(state, "stop");
+  const completed = terminal.value.find((event) => event.type === "response.completed") as JsonObject | undefined;
+  const reasoning = ((completed?.response as JsonObject)?.output as JsonObject[]).find((item) => item.type === "reasoning");
+  assert.deepEqual((reasoning?.summary as JsonObject[]).map((part) => part.text), ["first", "second"]);
+});
+
+test("Responses stream does not duplicate a native output_item.done payload", async () => {
+  const state = createResponseStreamState("responses", "chat_completions", { requestId: "native-done" });
+  await convertStreamChunk(state, { type: "response.output_item.added", output_index: 0, item: { id: "msg-1", type: "message", status: "in_progress", role: "assistant", content: [] } });
+  await convertStreamChunk(state, { type: "response.output_text.delta", item_id: "msg-1", output_index: 0, content_index: 0, delta: "hello" });
+  const done = await convertStreamChunk(state, { type: "response.output_item.done", output_index: 0, item: { id: "msg-1", type: "message", status: "completed", role: "assistant", content: [{ type: "output_text", text: "hello", annotations: [] }] } });
+  assert.equal(JSON.stringify(done.value).includes("hellohello"), false);
+});
+
+test("Responses stream does not duplicate media from output_item.done", async () => {
+  const state = createResponseStreamState("responses", "responses", { requestId: "native-media-done" });
+  await convertStreamChunk(state, { type: "response.output_item.added", output_index: 0, item: { id: "media-1", type: "message", status: "in_progress", role: "assistant", content: [] } });
+  const added = await convertStreamChunk(state, { type: "response.output_item.done", output_index: 0, item: { id: "media-1", type: "message", status: "completed", role: "assistant", content: [{ type: "output_image", image_url: "https://example.test/a.png" }] } });
+  assert.equal(added.value.filter((event) => event.type === "response.output_item.added").length, 1);
+  assert.equal(added.value.filter((event) => event.type === "response.output_item.done").length, 1);
+  const completed = await convertStreamChunk(state, { type: "response.completed", response: { status: "completed" } });
+  assert.equal(completed.value.filter((event) => event.type === "response.output_item.done").length, 0);
+});
+
+test("Responses stream does not duplicate output_text.done after deltas", async () => {
+  const state = createResponseStreamState("responses", "chat_completions", { requestId: "native-text-done" });
+  const delta = await convertStreamChunk(state, { type: "response.output_text.delta", item_id: "msg-1", output_index: 0, delta: "hello" });
+  const done = await convertStreamChunk(state, { type: "response.output_text.done", item_id: "msg-1", output_index: 0, text: "hello" });
+  const textChunks = [...delta.value, ...done.value].filter((event) => Array.isArray(event.choices) && JSON.stringify(event).includes('"content":"hello"'));
+  assert.equal(textChunks.length, 1);
+});
+
+test("Responses stream does not duplicate terminal text when relay identifies only done events", async () => {
+  const state = createResponseStreamState("responses", "chat_completions", { requestId: "unqualified-text-done" });
+  const chunks = [
+    { type: "response.output_text.delta", delta: "D" },
+    { type: "response.output_text.delta", delta: "UP" },
+    { type: "response.output_text.delta", delta: "TEST" },
+    { type: "response.output_text.done", item_id: "msg-upstream", output_index: 0, text: "DUPTEST" },
+    { type: "response.output_item.done", output_index: 0, item: {
+      id: "msg-upstream", type: "message", status: "completed", role: "assistant",
+      content: [{ type: "output_text", text: "DUPTEST", annotations: [] }],
+    } },
+  ] as JsonObject[];
+  const results = [];
+  for (const chunk of chunks) results.push(await convertStreamChunk(state, chunk));
+  const text = results.flatMap((result) => result.value)
+    .filter((event) => Array.isArray(event.choices))
+    .flatMap((event) => (event.choices as Array<Record<string, unknown>>).map((choice) => {
+      const delta = choice.delta as Record<string, unknown> | undefined;
+      return typeof delta?.content === "string" ? delta.content : "";
+    }))
+    .join("");
+  assert.equal(text, "DUPTEST");
+});
+
+test("Responses to Chat Completions does not replay output_item.done or response.completed text", async () => {
+  const state = createResponseStreamState("responses", "chat_completions", { requestId: "chat-terminal-replay" });
+  const chunks = [
+    { type: "response.output_text.delta", item_id: "msg-upstream", output_index: 0, delta: "hello" },
+    { type: "response.output_item.done", output_index: 0, item: {
+      id: "msg-upstream", type: "message", status: "completed", role: "assistant",
+      content: [{ type: "output_text", text: "hello", annotations: [] }],
+    } },
+    { type: "response.completed", response: {
+      id: "chat-terminal-replay", status: "completed", output: [{
+        id: "msg-upstream", type: "message", role: "assistant",
+        content: [{ type: "output_text", text: "hello", annotations: [] }],
+      }],
+    } },
+  ] as JsonObject[];
+  const results = [];
+  for (const chunk of chunks) results.push(await convertStreamChunk(state, chunk));
+  const text = results.flatMap((result) => result.value)
+    .filter((event) => Array.isArray(event.choices))
+    .flatMap((event) => (event.choices as Array<Record<string, unknown>>).map((choice) => {
+      const delta = choice.delta as Record<string, unknown> | undefined;
+      return typeof delta?.content === "string" ? delta.content : "";
+    }))
+    .join("");
+  assert.equal(text, "hello");
+  assert.equal(results.at(-1)?.value.some((event) => Array.isArray(event.choices) && (event.choices as Array<Record<string, unknown>>)[0]?.finish_reason === "stop"), true);
+});
+
+test("Responses stream retains function arguments first revealed by output_item.done", async () => {
+  const state = createResponseStreamState("responses", "responses", { requestId: "native-call-done" });
+  await convertStreamChunk(state, {
+    type: "response.output_item.added",
+    output_index: 0,
+    item: { id: "fc-1", type: "function_call", status: "in_progress", call_id: "call-1", name: "lookup", arguments: "" },
+  });
+  const done = await convertStreamChunk(state, {
+    type: "response.output_item.done",
+    output_index: 0,
+    item: { id: "fc-1", type: "function_call", status: "completed", call_id: "call-1", name: "lookup", arguments: "{\"q\":\"x\"}" },
+  });
+  assert.equal(JSON.stringify(done.value).includes('"delta":"{\\"q\\":\\"x\\"}"'), true);
+  const terminal = await finalizeResponseStream(state, "tool_calls");
+  assert.equal(JSON.stringify(terminal.value).includes('"arguments":"{\\"q\\":\\"x\\"}"'), true);
+});
+
+test("Responses refusal.done is not replayed after refusal deltas", async () => {
+  const state = createResponseStreamState("responses", "chat_completions", { requestId: "refusal-done" });
+  const delta = await convertStreamChunk(state, { type: "response.refusal.delta", item_id: "msg-1", output_index: 0, delta: "cannot" });
+  const done = await convertStreamChunk(state, { type: "response.refusal.done", item_id: "msg-1", output_index: 0, refusal: "cannot" });
+  assert.equal(delta.value.filter((event) => JSON.stringify(event).includes("cannot")).length, 1);
+  assert.equal(done.value.filter((event) => JSON.stringify(event).includes("cannot")).length, 0);
+});
+
+test("Anthropic redacted thinking stream is emitted as an opaque thinking block", async () => {
+  const state = createResponseStreamState("responses", "anthropic", { requestId: "redacted-stream" });
+  const result = await convertStreamChunk(state, {
+    type: "response.reasoning_summary_part.done",
+    item_id: "reasoning-1",
+    output_index: 0,
+    part: { type: "redacted_thinking", data: "opaque" },
+  });
+  // Responses' redacted payload is carried by the canonical encryptedContent
+  // field; Anthropic receives the documented redacted_thinking block.
+  assert.equal(JSON.stringify(result.value).includes("redacted_thinking"), true);
+});
+
+test("native Responses lifecycle keeps upstream item ids and output indexes", async () => {
+  const state = createResponseStreamState("responses", "responses", { requestId: "native-ids" });
+  await convertStreamChunk(state, { type: "response.output_item.added", output_index: 3, item: { id: "msg-upstream", type: "message", status: "in_progress", role: "assistant", content: [] } });
+  const delta = await convertStreamChunk(state, { type: "response.output_text.delta", item_id: "msg-upstream", output_index: 3, delta: "hello" });
+  assert.equal(delta.value.some((event) => event.type === "response.output_item.added" && typeof event.item === "object" && event.item !== null && !Array.isArray(event.item) && event.item.id === "msg-upstream" && event.output_index === 3), true);
+  const done = await convertStreamChunk(state, { type: "response.completed", response: { status: "completed" } });
+  assert.equal(done.value.some((event) => event.type === "response.output_item.done" && typeof event.item === "object" && event.item !== null && !Array.isArray(event.item) && event.item.id === "msg-upstream"), true);
+});
+
+test("Responses terminal envelope does not replay already streamed output", async () => {
+  const state = createResponseStreamState("responses", "responses", { requestId: "native-terminal-replay" });
+  await convertStreamChunk(state, { type: "response.output_text.delta", item_id: "msg-1", output_index: 0, delta: "hello" });
+  await convertStreamChunk(state, { type: "response.function_call_arguments.delta", item_id: "fc-1", output_index: 1, call_id: "call-1", name: "lookup", delta: "{}" });
+  await convertStreamChunk(state, { type: "response.function_call_arguments.done", item_id: "fc-1", output_index: 1, call_id: "call-1", name: "lookup", arguments: "{}" });
+  const terminal = await convertStreamChunk(state, {
+    type: "response.completed",
+    response: {
+      id: "native-terminal-replay", status: "completed", output: [
+        { type: "message", id: "msg-1", role: "assistant", content: [{ type: "output_text", text: "hello", annotations: [] }] },
+        { type: "function_call", id: "fc-1", call_id: "call-1", name: "lookup", arguments: "{}" },
+      ],
+    },
+  });
+  assert.equal(terminal.value.filter((event) => event.type === "response.output_text.delta").length, 0);
+  assert.equal(terminal.value.filter((event) => event.type === "response.function_call_arguments.delta").length, 0);
+  const completed = terminal.value.find((event) => event.type === "response.completed") as Record<string, unknown> | undefined;
+  assert.ok(completed);
+  assert.equal(JSON.stringify(completed).match(/hello/g)?.length, 1);
+});
+
+test("Responses stream emits refusal lifecycle events", async () => {
+  const state = createResponseStreamState("chat_completions", "responses", { requestId: "refusal-stream" });
+  const refusal = await convertStreamChunk(state, { id: "chat", choices: [{ delta: { refusal: "cannot" }, finish_reason: null }] });
+  assert.equal(refusal.value.some((event) => event.type === "response.refusal.delta"), true);
+  const end = await finalizeResponseStream(state, "stop");
+  assert.equal(end.value.some((event) => event.type === "response.refusal.done"), true);
+  assert.equal(end.value.some((event) => event.type === "response.completed"), true);
+});
+
+test("Anthropic stream joins tool input deltas to the content-block id", async () => {
+  const state = createResponseStreamState("anthropic", "responses", { requestId: "anthropic-tool-id" });
+  await convertStreamChunk(state, {
+    type: "content_block_start", index: 0,
+    content_block: { type: "tool_use", id: "tool-real", name: "lookup", input: {} },
+  });
+  await convertStreamChunk(state, {
+    type: "content_block_delta", index: 0,
+    delta: { type: "input_json_delta", partial_json: "{\"q\":\"x\"}" },
+  });
+  const terminal = await convertStreamChunk(state, {
+    type: "message_delta", delta: { stop_reason: "tool_use" },
+  });
+  const completed = terminal.value.find((event) => event.type === "response.completed") as Record<string, unknown> | undefined;
+  assert.ok(completed);
+  const call = ((completed.response as Record<string, unknown>).output as Array<Record<string, unknown>>).find((item) => item.type === "function_call");
+  assert.equal(call?.call_id, "tool-real");
+});
+
+test("Anthropic stream keeps message_start usage before message_delta usage", async () => {
+  const state = createResponseStreamState("anthropic", "responses", { requestId: "anthropic-usage" });
+  await convertStreamChunk(state, {
+    type: "message_start",
+    message: { id: "msg-1", type: "message", role: "assistant", usage: { input_tokens: 11, cache_read_input_tokens: 3 } },
+  });
+  const end = await convertStreamChunk(state, {
+    type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 5 },
+  });
+  const completed = end.value.find((event) => event.type === "response.completed") as Record<string, unknown> | undefined;
+  assert.ok(completed);
+  const usage = (completed.response as Record<string, unknown>).usage as Record<string, unknown>;
+  assert.equal(usage.input_tokens, 11);
+  assert.equal(usage.output_tokens, 5);
+  assert.equal(usage.input_tokens_details && (usage.input_tokens_details as Record<string, unknown>).cached_tokens, 3);
+});
+
+test("Responses annotation indexes advance from the previous annotation count", async () => {
+  const state = createResponseStreamState("chat_completions", "responses", { requestId: "annotation-index" });
+  const first = await convertStreamChunk(state, {
+    id: "chat", choices: [{ delta: { content: "a", annotations: [{ type: "url_citation", url: "https://a.test" }] }, finish_reason: null }],
+  });
+  const second = await convertStreamChunk(state, {
+    id: "chat", choices: [{ delta: { content: "b", annotations: [{ type: "url_citation", url: "https://b.test" }] }, finish_reason: null }],
+  });
+  const added = [...first.value, ...second.value].filter((event) => event.type === "response.output_text.annotation.added") as Array<Record<string, unknown>>;
+  assert.deepEqual(added.map((event) => event.annotation_index), [0, 1]);
+});
+
+test("Gemini stream forwards function-call thought signatures", async () => {
+  const state = createResponseStreamState("gemini", "gemini", { requestId: "gemini-signature-stream" });
+  await convertStreamChunk(state, {
+    responseId: "g", candidates: [{ content: { parts: [{ functionCall: { name: "lookup", args: { q: "x" } }, thoughtSignature: "sig-g" }] } }],
+  });
+  const events = await finalizeResponseStream(state, "STOP");
+  assert.equal(JSON.stringify(events.value).includes("sig-g"), true);
+});
+
+test("Anthropic signature-only thinking deltas survive streaming", async () => {
+  const state = createResponseStreamState("anthropic", "responses", { requestId: "anthropic-signature-only" });
+  await convertStreamChunk(state, {
+    type: "content_block_start", index: 0,
+    content_block: { type: "thinking", thinking: "plan" },
+  });
+  const signature = await convertStreamChunk(state, {
+    type: "content_block_delta", index: 0,
+    delta: { type: "signature_delta", signature: "sig-anthropic" },
+  });
+  assert.equal(signature.value.some((event) => event.type === "response.reasoning_summary_text.delta"), false);
+  const end = await convertStreamChunk(state, { type: "message_delta", delta: { stop_reason: "end_turn" } });
+  const completed = end.value.find((event) => event.type === "response.completed") as Record<string, unknown> | undefined;
+  assert.ok(completed);
+  assert.equal(JSON.stringify(completed).includes("sig-anthropic"), true);
+});
+
+test("Gemini streamed function-call signatures use the Part-level field", async () => {
+  const state = createResponseStreamState("gemini", "gemini", { requestId: "gemini-part-signature" });
+  await convertStreamChunk(state, {
+    responseId: "g", candidates: [{ content: { parts: [{ functionCall: { name: "lookup", args: { q: "x" } }, thoughtSignature: "sig-part" }] } }],
+  });
+  const end = await finalizeResponseStream(state, "STOP");
+  const serialized = JSON.stringify(end.value);
+  assert.equal(serialized.includes('"functionCall":{"name":"lookup","args":{"q":"x"}}'), true);
+  assert.equal(serialized.includes('"thoughtSignature":"sig-part"'), true);
+  assert.equal(serialized.includes('"functionCall":{"name":"lookup","args":{"q":"x"},"thoughtSignature"'), false);
 });

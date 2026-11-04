@@ -155,6 +155,9 @@ function normalizeModels(value, providerId) {
             tools: capabilities.tools,
             vision: capabilities.vision,
             streaming: capabilities.streaming,
+            temperature: item.temperature ?? capabilities.temperature,
+            top_p: item.top_p ?? item.topP ?? capabilities.top_p ?? capabilities.topP,
+            top_k: item.top_k ?? item.topK ?? capabilities.top_k ?? capabilities.topK,
         }, "discovery");
         return [{
                 id: item.id,

@@ -13,7 +13,7 @@ test("history persists atomically with private permissions and reloads live call
   const first = new ConversationHistoryStore({ persistence });
   await first.recordResponse("route-a", { responseId: "resp", createdAt: Date.now(), calls: [
     { id: "call", type: "function", function: { name: "read", arguments: "{}" } },
-  ] });
+  ], items: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "ok" }] }] });
   if (process.platform !== "win32") assert.equal((await stat(join(root, "route-a.json"))).mode & 0o777, 0o600);
   await assert.rejects(() => stat(join(root, "route-a.json.tmp")));
 
@@ -22,6 +22,7 @@ test("history persists atomically with private permissions and reloads live call
     { type: "function_call_output", call_id: "call", output: "ok" },
   ] });
   assert.equal(result.restoredCount, 1);
+  assert.equal((result.request.input as Array<Record<string, unknown>>)[0]?.type, "message");
 });
 
 test("expired persisted responses are not restored", async () => {
@@ -32,4 +33,13 @@ test("expired persisted responses are not restored", async () => {
   ] }] });
   const history = new ConversationHistoryStore({ persistence, ttlMs: 10, now: () => 100 });
   assert.equal((await history.enrichRequest("route-a", { input: [{ type: "function_call_output", call_id: "call", output: "ok" }] })).restoredCount, 0);
+});
+
+test("sanitized conversation route ids remain collision-safe on disk", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-history-collision-"));
+  const persistence = new FileHistoryPersistence(root);
+  await persistence.save({ routeId: "route/a", responses: [{ responseId: "slash", createdAt: Date.now(), calls: [] }] });
+  await persistence.save({ routeId: "route:a", responses: [{ responseId: "colon", createdAt: Date.now(), calls: [] }] });
+  assert.equal((await persistence.load("route/a"))?.responses[0]?.responseId, "slash");
+  assert.equal((await persistence.load("route:a"))?.responses[0]?.responseId, "colon");
 });
