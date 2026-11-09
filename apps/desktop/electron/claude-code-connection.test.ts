@@ -29,12 +29,16 @@ test("Claude Code source IDs are stable and secret previews are masked", () => {
 });
 
 test("Claude Code config paths honor CLAUDE_CONFIG_DIR and default to ~/.claude", () => {
-  assert.equal(resolveClaudeCodeConfigDir("/Users/demo", {}), "/Users/demo/.claude");
-  assert.equal(resolveClaudeCodeSettingsPath("/Users/demo", {}), "/Users/demo/.claude/settings.json");
-  assert.equal(resolveClaudeCodeCredentialsPath("/Users/demo", {}), "/Users/demo/.claude/.credentials.json");
-  assert.equal(resolveClaudeCodeConfigDir("/Users/demo", { CLAUDE_CONFIG_DIR: "/Volumes/work/claude" }), "/Volumes/work/claude");
-  assert.equal(resolveClaudeCodeSettingsPath("/Users/demo", { CLAUDE_CONFIG_DIR: "~/profiles/claude" }), "/Users/demo/profiles/claude/settings.json");
-  assert.equal(resolveClaudeCodeConfigDir("/Users/demo", { CLAUDE_CONFIG_DIR: "profiles/claude" }), "/Users/demo/profiles/claude");
+  const homeDir = process.platform === "win32" ? "C:\\Users\\demo" : "/Users/demo";
+  const absoluteConfigDir = process.platform === "win32" ? "D:\\Volumes\\work\\claude" : "/Volumes/work/claude";
+  const defaultConfigDir = join(homeDir, ".claude");
+  const profileConfigDir = join(homeDir, "profiles", "claude");
+  assert.equal(resolveClaudeCodeConfigDir(homeDir, {}), defaultConfigDir);
+  assert.equal(resolveClaudeCodeSettingsPath(homeDir, {}), join(defaultConfigDir, "settings.json"));
+  assert.equal(resolveClaudeCodeCredentialsPath(homeDir, {}), join(defaultConfigDir, ".credentials.json"));
+  assert.equal(resolveClaudeCodeConfigDir(homeDir, { CLAUDE_CONFIG_DIR: absoluteConfigDir }), absoluteConfigDir);
+  assert.equal(resolveClaudeCodeSettingsPath(homeDir, { CLAUDE_CONFIG_DIR: "~/profiles/claude" }), join(profileConfigDir, "settings.json"));
+  assert.equal(resolveClaudeCodeConfigDir(homeDir, { CLAUDE_CONFIG_DIR: "profiles/claude" }), profileConfigDir);
 });
 
 test("Claude Code detects OAuth and auth-token conflicts without exposing secrets", () => {

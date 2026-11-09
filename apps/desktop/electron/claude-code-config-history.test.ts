@@ -25,8 +25,10 @@ test("Claude Code config history stores restricted snapshots and returns redacte
   const entries = await listClaudeCodeConfigHistoryEntries(stateDir);
   assert.equal(entries.length, 1);
   assert.equal(entries[0]?.content, content);
-  assert.equal((await stat(join(stateDir, "history", "agent-files", "claude-code"))).mode & 0o777, 0o700);
-  assert.equal((await stat(join(stateDir, "history", "agent-files", "claude-code", `${entry.id}.json`))).mode & 0o777, 0o600);
+  if (process.platform !== "win32") {
+    assert.equal((await stat(join(stateDir, "history", "agent-files", "claude-code"))).mode & 0o777, 0o700);
+    assert.equal((await stat(join(stateDir, "history", "agent-files", "claude-code", `${entry.id}.json`))).mode & 0o777, 0o600);
+  }
   const preview = toClaudeCodeConfigHistoryPreview(entry);
   assert.match(preview.contentPreview, /ANTHROPIC_API_KEY/);
   assert.doesNotMatch(preview.contentPreview, /secret-api-key/);
