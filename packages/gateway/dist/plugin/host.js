@@ -70,7 +70,7 @@ export function validatePluginManifest(value) {
         return false;
     if (!Array.isArray(value.permissions) || value.permissions.some((permission) => !["provider", "middleware", "agent", "usage", "network", "filesystem", "secrets"].includes(String(permission))))
         return false;
-    if (value.kind !== undefined && (!Array.isArray(value.kind) || value.kind.length === 0 || value.kind.some((kind) => kind !== "provider" && kind !== "middleware")))
+    if (value.kind !== undefined && (!Array.isArray(value.kind) || value.kind.length === 0 || value.kind.some((kind) => kind !== "provider" && kind !== "middleware" && kind !== "agent")))
         return false;
     if (value.description !== undefined && typeof value.description !== "string")
         return false;

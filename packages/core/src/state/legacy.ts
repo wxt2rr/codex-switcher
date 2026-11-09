@@ -7,6 +7,9 @@ import {
   type AccountState,
   type AuthDataRecord,
   type AuthMode,
+  type EnvironmentModelIdentityMode,
+  type EnvironmentRemoteControlSettings,
+  normalizeEnvironmentModelIdentityMode,
   type OpenAIBaseUrlMode,
   type PreferredAuthMethod,
   type SwitcherState,
@@ -86,6 +89,19 @@ export interface UpdateLegacyEnvOptions {
   envName: string;
   nextEnvName: string;
   homePath: string;
+  modelIdentityMode?: EnvironmentModelIdentityMode;
+}
+
+export interface SetLegacyEnvModelIdentityModeOptions {
+  stateDir: string;
+  envName: string;
+  modelIdentityMode: EnvironmentModelIdentityMode;
+}
+
+export interface SetLegacyEnvRemoteAccountOptions {
+  stateDir: string;
+  envName: string;
+  accountName?: string;
 }
 
 interface LegacyRuntimeRecord {
@@ -113,6 +129,8 @@ interface LegacyRuntimeRecord {
 
 interface LegacyEnvMetaRecord {
   homePath?: string;
+  modelIdentityMode?: EnvironmentModelIdentityMode;
+  remoteAccountName?: string;
 }
 
 export async function readLegacyState(
@@ -372,8 +390,33 @@ export async function updateLegacyEnv(options: UpdateLegacyEnvOptions): Promise<
     );
   }
 
+  const currentMeta = await readLegacyEnvMeta(options.stateDir, options.nextEnvName);
   await writeLegacyEnvMeta(options.stateDir, options.nextEnvName, {
     homePath: options.homePath,
+    modelIdentityMode: options.modelIdentityMode
+      ?? currentMeta.modelIdentityMode,
+    remoteAccountName: currentMeta.remoteAccountName,
+  });
+}
+
+export async function setLegacyEnvModelIdentityMode(
+  options: SetLegacyEnvModelIdentityModeOptions,
+): Promise<void> {
+  const current = await readLegacyEnvMeta(options.stateDir, options.envName);
+  await writeLegacyEnvMeta(options.stateDir, options.envName, {
+    ...current,
+    modelIdentityMode: normalizeEnvironmentModelIdentityMode(options.modelIdentityMode),
+  });
+}
+
+export async function setLegacyEnvRemoteAccount(
+  options: SetLegacyEnvRemoteAccountOptions,
+): Promise<void> {
+  const current = await readLegacyEnvMeta(options.stateDir, options.envName);
+  const accountName = options.accountName?.trim();
+  await writeLegacyEnvMeta(options.stateDir, options.envName, {
+    ...current,
+    ...(accountName ? { remoteAccountName: accountName } : { remoteAccountName: undefined }),
   });
 }
 
@@ -398,6 +441,7 @@ async function readLegacyEnvState(
   );
 
   const gateway = await readLegacyGateway(options.stateDir, envName);
+  const meta = await readLegacyEnvMeta(options.stateDir, envName);
   return {
     name: envName,
     path:
@@ -406,6 +450,12 @@ async function readLegacyEnvState(
         ? options.defaultHome
         : join(options.envsDir, envName, "home")),
     accounts,
+    ...(meta.modelIdentityMode
+      ? { modelIdentityMode: normalizeEnvironmentModelIdentityMode(meta.modelIdentityMode) }
+      : {}),
+    ...(meta.remoteAccountName
+      ? { remoteControl: { accountName: meta.remoteAccountName } satisfies EnvironmentRemoteControlSettings }
+      : {}),
     ...(gateway ? { gateway } : {}),
   };
 }
@@ -456,7 +506,11 @@ async function readLegacyAccountState(
         independentModelProviderId: runtimeRecord.independent_model_provider_id || "custom",
         independentModelApiKey: runtimeRecord.independent_model_api_key || undefined,
         independentModelBaseUrl: runtimeRecord.independent_model_base_url || undefined,
-        apiProtocol: runtimeRecord.api_protocol === "chat_completions" ? "chat_completions" : "responses",
+        apiProtocol: runtimeRecord.api_protocol === "chat_completions"
+          ? "chat_completions"
+          : runtimeRecord.api_protocol === "anthropic"
+            ? "anthropic"
+            : "responses",
         compatibilityRouteEnabled: runtimeRecord.compatibility_route_enabled === true,
         compatibilityRouteBaseUrl: runtimeRecord.compatibility_route_base_url || undefined,
         compatibilityRouteToken: runtimeRecord.compatibility_route_token || undefined,
@@ -607,9 +661,15 @@ async function readLegacyEnvMeta(
   try {
     const raw = await readFile(getEnvMetaPath(stateDir, envName), "utf8");
     const parsed = JSON.parse(raw) as LegacyEnvMetaRecord;
-    return typeof parsed.homePath === "string" && parsed.homePath
-      ? { homePath: parsed.homePath }
-      : {};
+    return {
+      ...(typeof parsed.homePath === "string" && parsed.homePath ? { homePath: parsed.homePath } : {}),
+      ...(parsed.modelIdentityMode !== undefined
+        ? { modelIdentityMode: normalizeEnvironmentModelIdentityMode(parsed.modelIdentityMode) }
+        : {}),
+      ...(typeof parsed.remoteAccountName === "string" && parsed.remoteAccountName.trim()
+        ? { remoteAccountName: parsed.remoteAccountName.trim() }
+        : {}),
+    };
   } catch {
     return {};
   }

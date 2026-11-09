@@ -13,6 +13,8 @@ export interface CoreRuntime {
   createLegacyEnv: typeof import("../../../packages/core/dist/state/legacy.js").createLegacyEnv;
   readLegacyState: typeof import("../../../packages/core/dist/state/legacy.js").readLegacyState;
   updateLegacyEnv: typeof import("../../../packages/core/dist/state/legacy.js").updateLegacyEnv;
+  setLegacyEnvModelIdentityMode: typeof import("../../../packages/core/dist/state/legacy.js").setLegacyEnvModelIdentityMode;
+  setLegacyEnvRemoteAccount: typeof import("../../../packages/core/dist/state/legacy.js").setLegacyEnvRemoteAccount;
   writeLegacyPointers: typeof import("../../../packages/core/dist/state/legacy.js").writeLegacyPointers;
   writeLegacyRuntime: typeof import("../../../packages/core/dist/state/legacy.js").writeLegacyRuntime;
   writeLegacyGateway: typeof import("../../../packages/core/dist/state/legacy.js").writeLegacyGateway;
@@ -121,6 +123,8 @@ export async function loadCoreRuntime(): Promise<CoreRuntime> {
     createLegacyEnv: legacyModule.createLegacyEnv,
     readLegacyState: legacyModule.readLegacyState,
     updateLegacyEnv: legacyModule.updateLegacyEnv,
+    setLegacyEnvModelIdentityMode: legacyModule.setLegacyEnvModelIdentityMode,
+    setLegacyEnvRemoteAccount: legacyModule.setLegacyEnvRemoteAccount,
     writeLegacyPointers: legacyModule.writeLegacyPointers,
     writeLegacyRuntime: legacyModule.writeLegacyRuntime,
     writeLegacyGateway: legacyModule.writeLegacyGateway,

@@ -176,6 +176,62 @@ test("electron bridge resolves a legacy OpenAI account to its gateway upstream i
   });
 });
 
+test("electron bridge preview resolves unified model routes by upstream id", () => {
+  assert.equal(
+    __testUtils.resolvePreviewModelIdForTest("gpt-6.1-sol", "custom-openai:aicode.ckt.cn:gpt-6.1-sol"),
+    "gpt-6.1-sol",
+  );
+  assert.equal(__testUtils.resolvePreviewModelIdForTest(undefined, "custom-model"), "custom-model");
+  const binding = __testUtils.selectGatewayRouteBindingForModelForTest([
+    {
+      providerId: "custom-openai:aicode.ckt.cn",
+      modelId: "catalog-model:gpt-6.1-sol",
+      upstreamModel: "gpt-6.1-sol",
+      exposedModelId: "gpt-6.1-sol",
+      accountNames: ["ckt-aicode"],
+    },
+  ], "ckt-aicode", "custom-openai:aicode.ckt.cn:gpt-6.1-sol", "gpt-6.1-sol", "custom-openai:aicode.ckt.cn");
+  assert.equal(binding?.exposedModelId, "gpt-6.1-sol");
+});
+
+test("Claude Code account credential parsing prefers Anthropic AUTH_TOKEN", () => {
+  assert.equal(
+    __testUtils.extractProviderAccessTokenForTest({
+      ANTHROPIC_AUTH_TOKEN: "auth-token",
+      ANTHROPIC_API_KEY: "api-key",
+      OPENAI_API_KEY: "legacy-key",
+      tokens: { access_token: "token-access" },
+    }),
+    "auth-token",
+  );
+  assert.equal(
+    __testUtils.extractProviderAccessTokenForTest({ ANTHROPIC_API_KEY: "api-key", OPENAI_API_KEY: "legacy-key" }),
+    "api-key",
+  );
+  assert.equal(
+    __testUtils.extractProviderAccessTokenForTest({ tokens: { access_token: "token-access" } }),
+    "token-access",
+  );
+  assert.equal(
+    __testUtils.extractProviderAccessTokenForTest({ tokens: { ANTHROPIC_AUTH_TOKEN: "nested-auth-token" } }),
+    "nested-auth-token",
+  );
+});
+
+test("Claude Code only forces the Auto Mode compatibility switch for gateways and non-official endpoints", () => {
+  const base = {
+    id: "account:prod:key",
+    kind: "account" as const,
+    environmentName: "prod",
+    displayName: "prod · key",
+    state: "ready" as const,
+    models: [],
+  };
+  assert.equal(__testUtils.shouldDisableClaudeAutoModeServerForTest({ ...base, baseUrl: "https://api.anthropic.com/v1" }), false);
+  assert.equal(__testUtils.shouldDisableClaudeAutoModeServerForTest({ ...base, baseUrl: "https://proxy.example.com/anthropic" }), true);
+  assert.equal(__testUtils.shouldDisableClaudeAutoModeServerForTest({ ...base, kind: "environment_gateway", baseUrl: "http://127.0.0.1:17832/v1" }), true);
+});
+
 test("electron bridge plans post-switch follow-up actions by target", () => {
   assert.deepEqual(__testUtils.buildPostSwitchActions("app"), [
     {

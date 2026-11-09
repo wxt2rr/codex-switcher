@@ -288,6 +288,17 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       return { kind: "token-refresh", content: "log output" };
     },
     getEnvironmentRouteStatuses: async () => [],
+    getEnvironmentRoutePreviews: async () => [],
+    setEnvironmentModelIdentityMode: async (envName, mode) => ({
+      envName,
+      mode,
+      gatewayEnabled: false,
+      gatewayStatus: "stopped",
+      generatedAt: Date.now(),
+      models: [],
+      providerCount: 0,
+      warnings: [],
+    }),
     toggleEnvironmentRoute: async (envName, enabled) => ({ envName, enabled, routedAccounts: enabled ? 1 : 0, port: enabled ? 17832 : null }),
     toggleEnvironmentGateway: async (envName, enabled) => ({
       envName,
@@ -311,6 +322,22 @@ test("desktop bridge forwards calls to injected electron api", async () => {
       localAgentModelsUrl: enabled ? "http://127.0.0.1:17832/gateways/preview/v1/models" : undefined,
       localAgentAccessToken: enabled ? "preview-local-agent-token" : undefined,
     }),
+    getEnvironmentRemoteStatuses: async () => [],
+    setEnvironmentRemoteAccount: async (envName, accountName) => ({
+      envName,
+      status: accountName ? "needs_pairing" : "needs_account",
+      ...(accountName ? { remoteAccountName: accountName } : {}),
+      modelServiceLabel: "官方账号",
+    }),
+    listClaudeCodeSources: async () => [],
+    getClaudeCodeConnection: async () => ({ connected: false, configPath: "~/.claude/settings.json" }),
+    connectClaudeCode: async () => ({ connected: false, configPath: "~/.claude/settings.json" }),
+    reapplyClaudeCode: async () => ({ connected: false, configPath: "~/.claude/settings.json" }),
+    disconnectClaudeCode: async () => ({ connected: false, configPath: "~/.claude/settings.json" }),
+    diagnoseClaudeCode: async () => ({ connected: false, configPath: "~/.claude/settings.json", sources: [] }),
+    listClaudeCodeConfigHistory: async () => "[]\n",
+    restoreClaudeCodeConfigHistory: async () => ({ message: "ok" }),
+    deleteClaudeCodeConfigHistory: async () => ({ message: "ok" }),
     toggleAccountCompatibility: async (input) => {
       calls.push(`toggleAccountCompatibility:${input.envName}:${input.accountName}:${input.enabled}`);
       return { envName: input.envName, accountName: input.accountName, enabled: input.enabled, state: input.enabled ? "ready" : "disabled" };

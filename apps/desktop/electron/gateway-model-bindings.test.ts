@@ -109,6 +109,49 @@ test("model page bindings compile into an environment-scoped route group", () =>
   assert.equal(Object.values(result.routeGroups).some((candidate) => candidate.exposedModelId === "other-env-model"), false);
 });
 
+test("unified mode merges provider-qualified and bundled model identities safely", () => {
+  const env = { ...environment(), modelIdentityMode: "unified" as const };
+  const catalog: ModelCatalogSnapshot = {
+    ...snapshot(),
+    models: [{
+      id: "model-ckt-shared",
+      entry: {
+        slug: "custom:aicode.ckt.cn:shared-model",
+        upstream_model_id: "shared-model",
+        display_name: "Shared Model",
+        provider_id: "custom:aicode.ckt.cn",
+        provider_display_name: "ckt-aicode",
+        input_modalities: ["text", "image"],
+        tools: true,
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }, ...snapshot().models],
+    accountBindings: {
+      ...snapshot().accountBindings,
+      "wangxt/alpha": ["model-shared", "model-ckt-shared"],
+    },
+    accountBindingOptions: {
+      ...snapshot().accountBindingOptions,
+      "wangxt/alpha": {
+        ...snapshot().accountBindingOptions?.["wangxt/alpha"],
+        "model-ckt-shared": { upstreamModelId: "shared-model", priority: 2, weight: 1 },
+      },
+    },
+  };
+  const result = applyModelCatalogBindings(env, buildLegacyGatewayEnvironmentState(env), catalog, [{
+    slug: "shared-model",
+    display_name: "Shared Model",
+    input_modalities: ["text"],
+  }]);
+  const groups = Object.values(result.routeGroups).filter((group) => group.exposedModelId === "shared-model");
+  assert.equal(groups.some((group) => group.id.startsWith("unified-route-group:")), true);
+  const primary = groups.find((group) => group.id.startsWith("unified-route-group:"));
+  assert.equal(primary?.members.length, 2);
+  assert.equal(primary?.capabilities?.vision, false);
+  assert.equal(Object.values(result.routeGroups).some((group) => group.exposedModelId === "custom:aicode.ckt.cn:shared-model"), true);
+});
+
 test("discovered catalog models use upstream_model_id on the provider wire", () => {
   const env = environment();
   const catalog: ModelCatalogSnapshot = {

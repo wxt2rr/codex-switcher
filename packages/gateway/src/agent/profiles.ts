@@ -9,6 +9,8 @@ interface ProfileInput {
   modelPath?: string;
   baseUrlPath?: string;
   tokenPath?: string;
+  clearPaths?: readonly string[];
+  managedModelPaths?: readonly string[];
   reasoningPath?: string;
   fallbackModelPath?: string;
   subAgentModelPath?: string;
@@ -25,6 +27,8 @@ function profile(input: ProfileInput): AgentAdapterProfile {
     modelPath: input.modelPath ?? "model",
     baseUrlPath: input.baseUrlPath ?? "base_url",
     tokenPath: input.tokenPath ?? "api_key",
+    ...(input.clearPaths ? { clearPaths: input.clearPaths } : {}),
+    ...(input.managedModelPaths ? { managedModelPaths: input.managedModelPaths } : {}),
     ...(input.reasoningPath ? { reasoningPath: input.reasoningPath } : {}),
     ...(input.fallbackModelPath ? { fallbackModelPath: input.fallbackModelPath } : {}),
     ...(input.subAgentModelPath ? { subAgentModelPath: input.subAgentModelPath } : {}),
@@ -34,7 +38,39 @@ function profile(input: ProfileInput): AgentAdapterProfile {
 }
 
 export const BUILT_IN_AGENT_PROFILES: readonly AgentAdapterProfile[] = [
-  profile({ id: "claude", displayName: "Claude Code", configPath: ".claude/settings.json", protocol: "anthropic", baseUrlPath: "env.ANTHROPIC_BASE_URL", tokenPath: "env.ANTHROPIC_API_KEY", aliases: ["claude-code"] }),
+  profile({
+    id: "claude",
+    displayName: "Claude Code",
+    configPath: ".claude/settings.json",
+    protocol: "anthropic",
+    modelPath: "env.ANTHROPIC_MODEL",
+    baseUrlPath: "env.ANTHROPIC_BASE_URL",
+    tokenPath: "env.ANTHROPIC_API_KEY",
+    managedModelPaths: [
+      "env.ANTHROPIC_DEFAULT_OPUS_MODEL",
+      "env.ANTHROPIC_DEFAULT_SONNET_MODEL",
+      "env.ANTHROPIC_DEFAULT_HAIKU_MODEL",
+      "env.ANTHROPIC_DEFAULT_FABLE_MODEL",
+      "env.ANTHROPIC_SMALL_FAST_MODEL",
+      "env.CLAUDE_CODE_SUBAGENT_MODEL",
+    ],
+    clearPaths: [
+      "env.ANTHROPIC_AUTH_TOKEN",
+      "env.CLAUDE_CODE_OAUTH_TOKEN",
+      "env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+      "env.CCR_OAUTH_TOKEN_FILE",
+      "env.ANTHROPIC_FEDERATION_RULE_ID",
+      "env.ANTHROPIC_ORGANIZATION_ID",
+      "apiKeyHelper",
+      "env.CLAUDE_CODE_USE_BEDROCK",
+      "env.CLAUDE_CODE_USE_VERTEX",
+      "env.CLAUDE_CODE_USE_FOUNDRY",
+      "env.CLAUDE_CODE_USE_ANTHROPIC_AWS",
+      "env.CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
+      "env.CLAUDE_CODE_USE_MANTLE",
+    ],
+    aliases: ["claude-code"],
+  }),
   profile({ id: "claude-desktop", displayName: "Claude Desktop", configPath: ".config/Claude/claude_desktop_config.json", protocol: "anthropic", baseUrlPath: "env.ANTHROPIC_BASE_URL", tokenPath: "env.ANTHROPIC_API_KEY" }),
   profile({ id: "codex", displayName: "Codex", configPath: ".codex/config.toml", format: "toml", protocol: "responses", baseUrlPath: "openai_base_url", tokenPath: "OPENAI_API_KEY", reasoningPath: "model_reasoning_effort" }),
   profile({ id: "gemini", displayName: "Gemini CLI", configPath: ".gemini/settings.json", protocol: "gemini", baseUrlPath: "baseUrl", tokenPath: "apiKey", aliases: ["gemini-cli"] }),

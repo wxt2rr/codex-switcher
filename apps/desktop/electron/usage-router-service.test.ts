@@ -65,6 +65,24 @@ test("router diagnostics extract useful errors while redacting credentials", () 
   });
 });
 
+test("gateway diagnostics are explicitly enabled through the admin API", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-gateway-diagnostics-api-"));
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+  const headers = { authorization: "Bearer secret", "content-type": "application/json" };
+  const initial = await (await fetch(`${service.origin}/admin/diagnostics`, { headers })).json() as { enabled: boolean; logPath: string };
+  assert.equal(initial.enabled, false);
+  assert.match(initial.logPath, /gateway-diagnostics\.jsonl$/);
+  const enabled = await (await fetch(`${service.origin}/admin/diagnostics`, {
+    method: "PUT", headers,
+    body: JSON.stringify({ enabled: true, level: "full", maxRequests: 2, ttlMs: 60_000, captureResponseBody: true }),
+  })).json() as { enabled: boolean; level: string; maxRequests: number; remainingRequests: number };
+  assert.deepEqual({ enabled: enabled.enabled, level: enabled.level, maxRequests: enabled.maxRequests, remainingRequests: enabled.remainingRequests }, { enabled: true, level: "full", maxRequests: 2, remainingRequests: 2 });
+  const disabled = await (await fetch(`${service.origin}/admin/diagnostics`, { method: "DELETE", headers })).json() as { enabled: boolean; remainingRequests: number };
+  assert.equal(disabled.enabled, false);
+  assert.equal(disabled.remainingRequests, 0);
+  await service.close();
+});
+
 test("account pool keeps session affinity and fails over once before relaying output", async () => {
   let requestsA = 0;
   let requestsB = 0;
@@ -639,16 +657,26 @@ test("environment gateway persists, selects an account route, and survives route
     method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway),
   })).status, 204);
   assert.deepEqual(await (await fetch(`${first.origin}/admin/gateways`, { headers: adminHeaders })).json(), [gateway]);
+  assert.equal((await fetch(`${first.origin}/admin/diagnostics`, {
+    method: "PUT", headers: adminHeaders,
+    body: JSON.stringify({ enabled: true, level: "full", maxRequests: 1, ttlMs: 60_000 }),
+  })).status, 200);
 
   const call = async (origin: string) => fetch(`${origin}/gateways/${gateway.gatewayId}/responses`, {
     method: "POST",
-    headers: { authorization: "Bearer local-route", "x-codex-account": "login", "content-type": "application/json" },
+    headers: { authorization: "Bearer local-route", "x-codex-account": "login", "x-request-id": "trace-gateway-diagnostic", "content-type": "application/json" },
     body: JSON.stringify({ model: "gpt-shared", input: "hello" }),
   });
   const routed = await call(first.origin);
   assert.equal(routed.status, 200);
   assert.equal((await routed.json()).id, "gateway-response-1");
   assert.equal(upstreamModel, "gpt-upstream");
+  const diagnosticRecords = await (await fetch(`${first.origin}/admin/diagnostics/records?limit=1`, { headers: adminHeaders })).json() as Array<{ request: { traceId: string }; ingressBody?: { value?: { model?: string } }; transformedBodies: Array<{ body?: { value?: { model?: string } } }>; upstreamResponses: Array<{ usage: { inputTokens: number } | null }>; finalResponse?: { usage: { inputTokens: number } | null } }>;
+  assert.equal(diagnosticRecords[0]?.request.traceId, "trace-gateway-diagnostic");
+  assert.equal(diagnosticRecords[0]?.ingressBody?.value?.model, "gpt-shared");
+  assert.equal(diagnosticRecords[0]?.transformedBodies[0]?.body?.value?.model, "gpt-upstream");
+  assert.equal(diagnosticRecords[0]?.upstreamResponses[0]?.usage?.inputTokens, 1);
+  assert.equal(diagnosticRecords[0]?.finalResponse?.usage?.inputTokens, 1);
   await new Promise((resolve) => setTimeout(resolve, 20));
   const trace = await (await fetch(`${first.origin}/admin/trace?envName=work&gatewayId=${gateway.gatewayId}&event=gateway_route_selected&limit=10`, { headers: adminHeaders })).json() as Array<{ event: string; routeId?: string; requestedModel?: string; reason?: string }>;
   assert.equal(trace[0]?.event, "gateway_route_selected");
@@ -804,13 +832,15 @@ test("environment Gateway asks the main-process admission hook for one subscript
   }
 });
 
-test("local Agent surface exposes authenticated models and v1 protocol aliases without changing the Codex gateway", async () => {
+test("local Agent surface accepts Bearer and Anthropic x-api-key credentials without changing the Codex gateway", async () => {
   let receivedPath = "";
   let receivedAuthorization = "";
+  let receivedApiKey = "";
   let receivedStore: unknown;
   const upstream = createServer(async (request, response) => {
     receivedPath = request.url ?? "";
     receivedAuthorization = String(request.headers.authorization ?? "");
+    receivedApiKey = String(request.headers["x-api-key"] ?? "");
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     try {
@@ -846,15 +876,19 @@ test("local Agent surface exposes authenticated models and v1 protocol aliases w
       assert.equal(models.status, 200);
       assert.deepEqual((await models.json()).data.map((item: { id: string }) => item.id), ["gpt-local", "gpt-shared"]);
 
+      const anthropicModels = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/v1/models`, { headers: { "x-api-key": "agent-token" } });
+      assert.equal(anthropicModels.status, 200);
+
       const response = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/v1/responses`, {
         method: "POST",
-        headers: { authorization: "Bearer agent-token", "content-type": "application/json" },
+        headers: { "x-api-key": "agent-token", "content-type": "application/json" },
         body: JSON.stringify({ model: "gpt-local", input: "hello", store: true }),
       });
       assert.equal(response.status, 200);
       assert.equal((await response.json()).id, "local-agent-response");
       assert.equal(receivedPath, "/v1/responses");
       assert.equal(receivedAuthorization, "");
+      assert.equal(receivedApiKey, "");
       assert.equal(receivedStore, false);
 
       const internal = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/responses`, {

@@ -35,10 +35,10 @@ function providerLabel(providerId: string, providerCatalog: ProviderCatalogItem[
 
 function discoveryStatusLabel(status: string, zh: boolean): string {
   if (status === "available") return zh ? "可用" : "Available";
-  if (status === "stale") return zh ? "结果已过期" : "Stale";
+  if (status === "stale") return zh ? "上次可用" : "Previously available";
   if (status === "discovering") return zh ? "正在发现" : "Discovering";
   if (status === "failed") return zh ? "发现失败" : "Discovery failed";
-  if (status === "unavailable") return zh ? "暂不可用" : "Unavailable";
+  if (status === "unavailable") return zh ? "服务商已移除" : "No longer advertised";
   return status;
 }
 
@@ -334,6 +334,7 @@ export function ModelsPage({
           {visibleModels.length ? visibleModels.map((model) => {
           const providerKey = typeof model.entry.provider_model_key === "string" ? model.entry.provider_model_key : undefined;
           const discoveryInfo = providerKey ? discoveryByModelKey.get(providerKey) : undefined;
+          const staleDiscovery = discoveryInfo?.status === "stale" || discoveryInfo?.status === "unavailable";
           const fallbackUpstreamModel = providerKey?.includes(":") ? providerKey.slice(providerKey.indexOf(":") + 1) : undefined;
           const providerId = String(model.entry.provider_id ?? discoveryInfo?.providerId ?? "custom");
           const sourceAccountLabels = (discoveryInfo?.accountKeys ?? []).map((key) => accountLabel(key, accountsByKey));
@@ -374,6 +375,7 @@ export function ModelsPage({
                   <ModelTestButton
                     bridge={bridge}
                     language={language}
+                    disabledReason={staleDiscovery ? (zh ? "模型发现结果已过期，请先刷新发现" : "Discovery is stale; refresh models before testing") : undefined}
                     request={testAccount ? {
                       envName: testAccount.envName,
                       accountName: testAccount.name,

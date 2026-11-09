@@ -70,6 +70,148 @@ test("target-home writer installs auth.json and managed config for apikey accoun
   }
 });
 
+test("target-home keeps official auth for remote control while routing models through an API key account", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-remote-"));
+  const homePath = join(root, "home");
+  const state: SwitcherState = {
+    schemaVersion: DEFAULT_SCHEMA_VERSION,
+    generatedAt: "2026-11-08T10:00:00.000Z",
+    targets: {
+      cli: { env: "default", account: "api" },
+      app: { env: "default", account: "api" },
+    },
+    envs: {
+      default: {
+        name: "default",
+        path: homePath,
+        remoteControl: { accountName: "plus" },
+        accounts: {
+          api: {
+            name: "api",
+            authMode: "apikey",
+            runtime: {
+              preferredAuthMethod: "apikey",
+              openaiBaseUrlMode: "custom",
+              openaiBaseUrl: "https://api.example.test/v1",
+            },
+            authData: { OPENAI_API_KEY: "sk-model" },
+          },
+          plus: {
+            name: "plus",
+            authMode: "auth",
+            runtime: { preferredAuthMethod: "chatgpt", openaiBaseUrlMode: "default" },
+            authData: { access_token: "official-token", account_id: "acct-1" },
+          },
+        },
+      },
+    },
+    tasks: { recent: [] },
+  };
+
+  try {
+    await applyTargetHomeState({ state, target: "cli" });
+    const auth = JSON.parse(await readFile(join(homePath, "auth.json"), "utf8")) as Record<string, string>;
+    assert.equal(auth.access_token, "official-token");
+    assert.equal(auth.OPENAI_API_KEY, undefined);
+    const config = await readFile(join(homePath, "config.toml"), "utf8");
+    assert.match(config, /base_url = "https:\/\/api\.example\.test\/v1"/);
+    assert.match(config, /env_key = "OPENAI_API_KEY"/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("target-home keeps remote auth for an official API-key account without a custom endpoint", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-remote-openai-key-"));
+  const homePath = join(root, "home");
+  const state: SwitcherState = {
+    schemaVersion: DEFAULT_SCHEMA_VERSION,
+    generatedAt: "2026-11-08T10:00:00.000Z",
+    targets: {
+      cli: { env: "default", account: "api" },
+      app: { env: "default", account: "api" },
+    },
+    envs: {
+      default: {
+        name: "default",
+        path: homePath,
+        remoteControl: { accountName: "plus" },
+        accounts: {
+          api: {
+            name: "api",
+            authMode: "apikey",
+            runtime: { preferredAuthMethod: "apikey", openaiBaseUrlMode: "default" },
+            authData: { OPENAI_API_KEY: "sk-model" },
+          },
+          plus: {
+            name: "plus",
+            authMode: "auth",
+            runtime: { preferredAuthMethod: "chatgpt", openaiBaseUrlMode: "default" },
+            authData: { access_token: "official-token", account_id: "acct-1" },
+          },
+        },
+      },
+    },
+    tasks: { recent: [] },
+  };
+
+  try {
+    await applyTargetHomeState({ state, target: "app" });
+    const auth = JSON.parse(await readFile(join(homePath, "auth.json"), "utf8")) as Record<string, string>;
+    assert.equal(auth.access_token, "official-token");
+    assert.equal(auth.OPENAI_API_KEY, undefined);
+    const config = await readFile(join(homePath, "config.toml"), "utf8");
+    assert.match(config, /preferred_auth_method = "apikey"/);
+    assert.doesNotMatch(config, /requires_openai_auth = true/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("target-home rejects two direct AUTH identities but permits the gateway split", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-remote-auth-conflict-"));
+  const homePath = join(root, "home");
+  const state: SwitcherState = {
+    schemaVersion: DEFAULT_SCHEMA_VERSION,
+    generatedAt: "2026-11-08T10:00:00.000Z",
+    targets: { cli: { env: "default", account: "other" }, app: { env: "default", account: "other" } },
+    envs: {
+      default: {
+        name: "default",
+        path: homePath,
+        remoteControl: { accountName: "plus" },
+        accounts: {
+          other: {
+            name: "other",
+            authMode: "auth",
+            runtime: { preferredAuthMethod: "chatgpt", openaiBaseUrlMode: "default" },
+            authData: { access_token: "other-token" },
+          },
+          plus: {
+            name: "plus",
+            authMode: "auth",
+            runtime: { preferredAuthMethod: "chatgpt", openaiBaseUrlMode: "default" },
+            authData: { access_token: "official-token" },
+          },
+        },
+      },
+    },
+    tasks: { recent: [] },
+  };
+
+  try {
+    await assert.rejects(
+      () => applyTargetHomeState({ state, target: "app" }),
+      /uses 'plus' for remote control/,
+    );
+    await applyTargetHomeState({ state, target: "app", gatewayBaseUrl: "http://127.0.0.1:17832/gateways/default" });
+    const auth = JSON.parse(await readFile(join(homePath, "auth.json"), "utf8")) as Record<string, string>;
+    assert.equal(auth.access_token, "official-token");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("target-home writer prefers the environment gateway over an account route", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-gateway-"));
   const homePath = join(root, "home");
@@ -532,8 +674,76 @@ test("target-home writer keeps ChatGPT auth upstream-only for local gateway prov
     assert.match(config, /model_provider = "codex_switcher_router"/);
     assert.match(config, /base_url = "http:\/\/127\.0\.0\.1:17832\/gateways\/gateway-test"/);
     assert.match(config, /wire_api = "responses"/);
+    assert.match(config, /experimental_bearer_token = "codex-switcher-placeholder"/);
     assert.match(config, /requires_openai_auth = false/);
     assert.doesNotMatch(config, /requires_openai_auth = true/);
+    assert.doesNotMatch(config, /env_key = "OPENAI_API_KEY"/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("target-home writer uses the remote AUTH mode for an API-key model account behind a gateway", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-gateway-remote-auth-mode-"));
+  const homePath = join(root, "home");
+  const state: SwitcherState = {
+    schemaVersion: DEFAULT_SCHEMA_VERSION,
+    generatedAt: "2026-11-09T10:00:00.000Z",
+    targets: { cli: { env: "test", account: "model" }, app: { env: "test", account: "model" } },
+    envs: {
+      test: {
+        name: "test",
+        path: homePath,
+        remoteControl: { accountName: "remote" },
+        accounts: {
+          model: {
+            name: "model",
+            authMode: "apikey",
+            runtime: {
+              preferredAuthMethod: "apikey",
+              openaiBaseUrlMode: "custom",
+              openaiBaseUrl: "https://model.example/v1",
+              apiProtocol: "responses",
+            },
+            authData: { OPENAI_API_KEY: "model-api-key" },
+          },
+          remote: {
+            name: "remote",
+            authMode: "auth",
+            runtime: {
+              preferredAuthMethod: "chatgpt",
+              openaiBaseUrlMode: "default",
+            },
+            authData: {
+              tokens: { access_token: "remote-access-token" },
+              OPENAI_API_KEY: null,
+            },
+          },
+        },
+      },
+    },
+    tasks: { recent: [] },
+  };
+
+  try {
+    await applyTargetHomeState({
+      state,
+      target: "cli",
+      gatewayBaseUrl: "http://127.0.0.1:17832/gateways/gateway-test",
+    });
+
+    const auth = JSON.parse(await readFile(join(homePath, "auth.json"), "utf8")) as {
+      tokens?: { access_token?: string };
+    };
+    assert.equal(auth.tokens?.access_token, "remote-access-token");
+
+    const config = await readFile(join(homePath, "config.toml"), "utf8");
+    assert.match(config, /preferred_auth_method = "chatgpt"/);
+    assert.match(config, /model_provider = "codex_switcher_router"/);
+    assert.match(config, /base_url = "http:\/\/127\.0\.0\.1:17832\/gateways\/gateway-test"/);
+    assert.match(config, /wire_api = "responses"/);
+    assert.match(config, /requires_openai_auth = false/);
+    assert.match(config, /experimental_bearer_token = "codex-switcher-placeholder"/);
     assert.doesNotMatch(config, /env_key = "OPENAI_API_KEY"/);
   } finally {
     await rm(root, { recursive: true, force: true });

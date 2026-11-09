@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type { GatewayCapabilityProfile } from "../../../packages/core/dist/gateway/model.js";
 
 export type ModelCatalogEntry = Record<string, unknown> & {
@@ -89,6 +89,13 @@ export interface SaveCustomModelInput {
   entry: Record<string, unknown>;
 }
 
+export interface ModelCatalogMigrationResult {
+  changed: boolean;
+  migratedModels: number;
+  mergedModels: number;
+  backupPath?: string;
+}
+
 export interface ModelCatalogStore {
   load(): Promise<ModelCatalogSnapshot>;
   saveModel(input: SaveCustomModelInput): Promise<CustomModelRecord>;
@@ -97,6 +104,7 @@ export interface ModelCatalogStore {
     accountKey: string,
     modelIds: string[],
     optionsByModel?: Record<string, ModelBindingOptions>,
+    preserveHistoricalBindings?: boolean,
   ): Promise<ModelCatalogSnapshot>;
   setAccountBindingsFromCatalog(input: {
     accountKey: string;
@@ -104,6 +112,7 @@ export interface ModelCatalogStore {
     providerId: string;
     providerDisplayName?: string;
     protocol: string;
+    preserveHistoricalBindings?: boolean;
   }): Promise<ModelCatalogSnapshot>;
   setModelBindings(
     modelId: string,
@@ -112,6 +121,9 @@ export interface ModelCatalogStore {
   ): Promise<ModelCatalogSnapshot>;
   saveAccountModelDiscovery(input: SaveAccountModelDiscoveryInput): Promise<ModelCatalogSnapshot>;
   removeAccountModelDiscovery(accountKey: string): Promise<ModelCatalogSnapshot>;
+  reconcileLegacyProviderIdentities(
+    providerRemap: Readonly<Record<string, string>>,
+  ): Promise<ModelCatalogMigrationResult>;
 }
 
 const EMPTY_SNAPSHOT: ModelCatalogSnapshot = { version: 1, models: [], accountBindings: {} };
@@ -156,19 +168,25 @@ export function createModelCatalogStore(path: string): ModelCatalogStore {
       snapshot.accountBindingOptions = removeModelBindingOptions(snapshot.accountBindingOptions, id);
       await writeSnapshot(path, snapshot);
     },
-    async setAccountBindings(accountKey, modelIds, optionsByModel) {
+    async setAccountBindings(accountKey, modelIds, optionsByModel, preserveHistoricalBindings = false) {
       const snapshot = await readSnapshot(path);
       const knownIds = new Set(snapshot.models.map((model) => model.id));
       const uniqueIds = [...new Set(modelIds)];
       const missing = uniqueIds.find((id) => !knownIds.has(id));
       if (missing) throw new Error(`Model '${missing}' not found`);
       assertAccountModelsAvailable(snapshot, accountKey, uniqueIds);
-      if (uniqueIds.length === 0) delete snapshot.accountBindings[accountKey];
-      else snapshot.accountBindings[accountKey] = uniqueIds;
+      const nextIds = preserveHistoricalBindings
+        ? [...new Set([...uniqueIds, ...historicalAccountBindingIds(snapshot, accountKey, uniqueIds)])]
+        : uniqueIds;
+      if (nextIds.length === 0) delete snapshot.accountBindings[accountKey];
+      else snapshot.accountBindings[accountKey] = nextIds;
       if (optionsByModel !== undefined) {
         const nextOptions = Object.fromEntries(
-          uniqueIds
-            .map((modelId) => [modelId, normalizeModelBindingOptions(optionsByModel[modelId])] as const)
+          nextIds
+            .map((modelId) => [
+              modelId,
+              normalizeModelBindingOptions(optionsByModel[modelId] ?? snapshot.accountBindingOptions?.[accountKey]?.[modelId]),
+            ] as const)
             .filter(([, options]) => Object.keys(options).length),
         );
         if (Object.keys(nextOptions).length) {
@@ -181,7 +199,7 @@ export function createModelCatalogStore(path: string): ModelCatalogStore {
         snapshot.accountBindingOptions = retainModelBindingOptions(
           snapshot.accountBindingOptions,
           accountKey,
-          new Set(uniqueIds),
+          new Set(nextIds),
         );
       }
       await writeSnapshot(path, snapshot);
@@ -316,7 +334,247 @@ export function createModelCatalogStore(path: string): ModelCatalogStore {
       await writeSnapshot(path, snapshot);
       return snapshot;
     },
+    async reconcileLegacyProviderIdentities(providerRemap) {
+      const snapshot = await readSnapshot(path);
+      const remap = new Map(
+        Object.entries(providerRemap)
+          .map(([legacyProviderId, canonicalProviderId]) => [legacyProviderId.trim(), canonicalProviderId.trim()] as const)
+          .filter(([legacyProviderId, canonicalProviderId]) => (
+            isLegacyGatewayProviderIdentity(legacyProviderId)
+              && Boolean(canonicalProviderId)
+              && canonicalProviderId !== legacyProviderId
+          )),
+      );
+      if (!remap.size) return { changed: false, migratedModels: 0, mergedModels: 0 };
+
+      const now = new Date().toISOString();
+      const backupSnapshot = structuredClone(snapshot);
+      const modelByProviderKey = new Map<string, CustomModelRecord>();
+      for (const model of snapshot.models) {
+        const providerModelKey = readString(model.entry.provider_model_key);
+        if (providerModelKey) modelByProviderKey.set(providerModelKey, model);
+      }
+      const modelIdRemap = new Map<string, string>();
+      let migratedModels = 0;
+      let mergedModels = 0;
+
+      for (const model of [...snapshot.models]) {
+        const legacyProviderId = resolveLegacyProviderId(model.entry);
+        const canonicalProviderId = legacyProviderId ? remap.get(legacyProviderId) : undefined;
+        if (!legacyProviderId || !canonicalProviderId) continue;
+        const upstreamModelId = resolveCatalogUpstreamModelId(model.entry).trim();
+        if (!upstreamModelId) continue;
+        const canonicalProviderModelKey = `${canonicalProviderId}:${upstreamModelId}`;
+        const target = modelByProviderKey.get(canonicalProviderModelKey)
+          ?? snapshot.models.find((candidate) => (
+            candidate.id !== model.id
+              && readString(candidate.entry.provider_id) === canonicalProviderId
+              && resolveCatalogUpstreamModelId(candidate.entry) === upstreamModelId
+          ));
+        if (target && target.id !== model.id) {
+          target.entry = mergeMigratedModelEntries(target.entry, model.entry, canonicalProviderId, canonicalProviderModelKey);
+          target.updatedAt = now;
+          modelIdRemap.set(model.id, target.id);
+          modelByProviderKey.set(canonicalProviderModelKey, target);
+          mergedModels += 1;
+        } else {
+          const nextSlug = uniqueProviderModelSlug(
+            snapshot.models.filter((candidate) => candidate.id !== model.id),
+            canonicalProviderId,
+            upstreamModelId,
+            canonicalProviderModelKey,
+          );
+          model.entry = normalizeCustomModelInput({
+            ...model.entry,
+            slug: nextSlug,
+            provider_id: canonicalProviderId,
+            provider_model_key: canonicalProviderModelKey,
+            upstream_model_id: upstreamModelId,
+          });
+          model.updatedAt = now;
+          modelByProviderKey.set(canonicalProviderModelKey, model);
+        }
+        migratedModels += 1;
+      }
+
+      if (!migratedModels) return { changed: false, migratedModels: 0, mergedModels: 0 };
+
+      snapshot.models = snapshot.models.filter((model) => !modelIdRemap.has(model.id));
+      mergeAccountBindingReferences(snapshot, modelIdRemap);
+      reconcileModelDiscoveryProviderIdentities(snapshot, remap);
+      const backupPath = await writeCatalogMigrationBackup(path, backupSnapshot, now);
+      await writeSnapshot(path, snapshot);
+      return { changed: true, migratedModels, mergedModels, backupPath };
+    },
   };
+}
+
+function isLegacyGatewayProviderIdentity(value: string): boolean {
+  return /^custom-openai:(?:127\.0\.0\.1|localhost)-\d+:gateways-[^:]+$/i.test(value.trim());
+}
+
+function resolveLegacyProviderId(entry: ModelCatalogEntry): string | undefined {
+  const providerId = readString(entry.provider_id);
+  if (providerId && isLegacyGatewayProviderIdentity(providerId)) return providerId;
+  for (const value of [entry.provider_model_key, entry.slug]) {
+    const candidate = readString(value)?.match(/^(custom-openai:(?:127\.0\.0\.1|localhost)-\d+:gateways-[^:]+):/i)?.[1];
+    if (candidate) return candidate;
+  }
+  return undefined;
+}
+
+function mergeMigratedModelEntries(
+  target: ModelCatalogEntry,
+  source: ModelCatalogEntry,
+  providerId: string,
+  providerModelKey: string,
+): ModelCatalogEntry {
+  const targetProtocols = Array.isArray(target.supported_protocols)
+    ? target.supported_protocols.filter((value): value is string => typeof value === "string")
+    : [];
+  const sourceProtocols = Array.isArray(source.supported_protocols)
+    ? source.supported_protocols.filter((value): value is string => typeof value === "string")
+    : [];
+  const targetProfile = isRecord(target.capabilityProfile) ? target.capabilityProfile : {};
+  const sourceProfile = isRecord(source.capabilityProfile) ? source.capabilityProfile : {};
+  return normalizeCustomModelInput({
+    ...source,
+    ...target,
+    provider_id: providerId,
+    provider_model_key: providerModelKey,
+    upstream_model_id: resolveCatalogUpstreamModelId(target) || resolveCatalogUpstreamModelId(source),
+    supported_protocols: [...new Set([...sourceProtocols, ...targetProtocols])],
+    ...(Object.keys({ ...sourceProfile, ...targetProfile }).length
+      ? { capabilityProfile: { ...sourceProfile, ...targetProfile } }
+      : {}),
+  });
+}
+
+function mergeAccountBindingReferences(
+  snapshot: ModelCatalogSnapshot,
+  modelIdRemap: ReadonlyMap<string, string>,
+): void {
+  for (const [accountKey, modelIds] of Object.entries(snapshot.accountBindings)) {
+    const nextIds = [...new Set(modelIds.map((modelId) => modelIdRemap.get(modelId) ?? modelId))];
+    if (nextIds.length) snapshot.accountBindings[accountKey] = nextIds;
+    else delete snapshot.accountBindings[accountKey];
+  }
+
+  if (!snapshot.accountBindingOptions) return;
+  for (const [accountKey, options] of Object.entries(snapshot.accountBindingOptions)) {
+    const nextOptions: Record<string, ModelBindingOptions> = {};
+    for (const [modelId, rawOptions] of Object.entries(options)) {
+      const nextId = modelIdRemap.get(modelId) ?? modelId;
+      nextOptions[nextId] = {
+        ...(nextOptions[nextId] ?? {}),
+        ...normalizeModelBindingOptions(rawOptions),
+      };
+    }
+    if (Object.keys(nextOptions).length) snapshot.accountBindingOptions[accountKey] = nextOptions;
+    else delete snapshot.accountBindingOptions[accountKey];
+  }
+  if (Object.keys(snapshot.accountBindingOptions).length === 0) delete snapshot.accountBindingOptions;
+}
+
+function reconcileModelDiscoveryProviderIdentities(
+  snapshot: ModelCatalogSnapshot,
+  remap: ReadonlyMap<string, string>,
+): void {
+  for (const discovery of Object.values(snapshot.accountModelDiscoveries ?? {})) {
+    const nextModels: AccountDiscoveredModel[] = [];
+    const indexByKey = new Map<string, number>();
+    for (const model of discovery.models) {
+      const legacyProviderId = [...remap.keys()].find((candidate) => (
+        model.providerId === candidate || model.providerModelKey.startsWith(`${candidate}:`)
+      ));
+      const canonicalProviderId = legacyProviderId ? remap.get(legacyProviderId) : undefined;
+      if (!canonicalProviderId) {
+        indexByKey.set(model.providerModelKey, nextModels.length);
+        nextModels.push(model);
+        continue;
+      }
+      const providerModelKey = `${canonicalProviderId}:${model.upstreamModelId}`;
+      const migrated: AccountDiscoveredModel = {
+        ...model,
+        providerId: canonicalProviderId,
+        providerModelKey,
+      };
+      const existingIndex = indexByKey.get(providerModelKey);
+      if (existingIndex === undefined) {
+        indexByKey.set(providerModelKey, nextModels.length);
+        nextModels.push(migrated);
+      } else {
+        nextModels[existingIndex] = mergeDiscoveredModels(nextModels[existingIndex]!, migrated);
+      }
+    }
+    const canonicalSnapshotProviderId = remap.get(discovery.providerId);
+    discovery.providerId = canonicalSnapshotProviderId ?? discovery.providerId;
+    discovery.models = dedupeDiscoveredModels(nextModels);
+  }
+}
+
+function mergeDiscoveredModels(
+  left: AccountDiscoveredModel,
+  right: AccountDiscoveredModel,
+): AccountDiscoveredModel {
+  const firstSeenAt = left.firstSeenAt <= right.firstSeenAt ? left.firstSeenAt : right.firstSeenAt;
+  const lastSeenAt = left.lastSeenAt >= right.lastSeenAt ? left.lastSeenAt : right.lastSeenAt;
+  return {
+    ...left,
+    ...right,
+    providerModelKey: right.providerModelKey,
+    providerId: right.providerId,
+    providerDisplayName: right.providerDisplayName ?? left.providerDisplayName,
+    protocols: [...new Set([...left.protocols, ...right.protocols])],
+    capabilities: {
+      ...left.capabilities,
+      ...right.capabilities,
+      reasoning: left.capabilities.reasoning || right.capabilities.reasoning,
+      tools: left.capabilities.tools || right.capabilities.tools,
+      ...(left.capabilities.parallelToolCalls || right.capabilities.parallelToolCalls ? { parallelToolCalls: true } : {}),
+      vision: right.capabilities.vision ?? left.capabilities.vision,
+      streaming: left.capabilities.streaming || right.capabilities.streaming,
+    },
+    ...(left.capabilityProfile || right.capabilityProfile
+      ? { capabilityProfile: { ...(left.capabilityProfile ?? {}), ...(right.capabilityProfile ?? {}) } }
+      : {}),
+    contextWindow: Math.max(left.contextWindow ?? 0, right.contextWindow ?? 0) || undefined,
+    status: left.status === "available" || right.status === "available" ? "available" : right.status,
+    firstSeenAt,
+    lastSeenAt,
+    ...(right.lastError ?? left.lastError ? { lastError: right.lastError ?? left.lastError } : {}),
+  };
+}
+
+async function writeCatalogMigrationBackup(
+  catalogPath: string,
+  snapshot: ModelCatalogSnapshot,
+  timestamp: string,
+): Promise<string> {
+  const historyDir = join(dirname(catalogPath), "history", "model-catalog");
+  await mkdir(historyDir, { recursive: true });
+  const safeTimestamp = timestamp.replaceAll(/[:.]/g, "-");
+  const backupPath = join(historyDir, `legacy-provider-migration-${safeTimestamp}-${randomUUID()}.json`);
+  const sanitized = stripSensitiveCatalogFields(snapshot);
+  await writeFile(backupPath, `${JSON.stringify(sanitized, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  await chmod(backupPath, 0o600);
+  return backupPath;
+}
+
+function stripSensitiveCatalogFields(value: unknown, key?: string): unknown {
+  if (key && /(?:api[_-]?key|authorization|credential|password|secret|token)/i.test(key)) return undefined;
+  if (Array.isArray(value)) return value.map((item) => stripSensitiveCatalogFields(item)).filter((item) => item !== undefined);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([childKey, childValue]) => [childKey, stripSensitiveCatalogFields(childValue, childKey)] as const)
+      .filter(([, childValue]) => childValue !== undefined),
+  );
+}
+
+function readString(value: unknown): string | undefined {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text || undefined;
 }
 
 /**
@@ -471,7 +729,18 @@ export function projectAccountBindingsFromCatalog(
     }
   }
 
-  if (selectedIds.length) snapshot.accountBindings[input.accountKey] = [...new Set(selectedIds)];
+  const historicalIds = input.preserveHistoricalBindings
+    ? historicalAccountBindingIds(snapshot, input.accountKey, selectedIds)
+    : [];
+  const finalSelectedIds = [...new Set([...selectedIds, ...historicalIds])];
+  if (historicalIds.length && snapshot.accountBindingOptions?.[input.accountKey]) {
+    const existingOptions = snapshot.accountBindingOptions[input.accountKey];
+    for (const modelId of historicalIds) {
+      const options = existingOptions?.[modelId];
+      if (options) nextOptions[modelId] = options;
+    }
+  }
+  if (finalSelectedIds.length) snapshot.accountBindings[input.accountKey] = finalSelectedIds;
   else delete snapshot.accountBindings[input.accountKey];
   if (Object.keys(nextOptions).length) {
     snapshot.accountBindingOptions ??= {};
@@ -855,6 +1124,32 @@ export function allowsManualProviderRebinding(
   if (discovery.state === "failed") return true;
   return discovery.state === "ready"
     && discovery.models.length === 0;
+}
+
+/**
+ * Existing provider-keyed bindings that are no longer part of a successful
+ * discovery are hidden from the account picker, but remain recoverable until
+ * the user removes them explicitly from Model management.
+ */
+function historicalAccountBindingIds(
+  snapshot: ModelCatalogSnapshot,
+  accountKey: string,
+  selectedIds: readonly string[],
+): string[] {
+  const discovery = snapshot.accountModelDiscoveries?.[accountKey];
+  if (!discovery || !["ready", "stale", "failed"].includes(discovery.state)) return [];
+  const selected = new Set(selectedIds);
+  const modelsById = new Map(snapshot.models.map((model) => [model.id, model]));
+  return (snapshot.accountBindings[accountKey] ?? []).filter((modelId) => {
+    if (selected.has(modelId)) return false;
+    const model = modelsById.get(modelId);
+    const providerModelKey = typeof model?.entry.provider_model_key === "string"
+      ? model.entry.provider_model_key.trim()
+      : "";
+    if (!providerModelKey) return false;
+    const discovered = discovery.models.find((candidate) => candidate.providerModelKey === providerModelKey);
+    return discovered?.status !== "available";
+  });
 }
 
 /**

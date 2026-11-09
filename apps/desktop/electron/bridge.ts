@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { existsSync } from "node:fs";
-import { access, appendFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { access, appendFile, chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { getUiLanguage, setUiLanguage, type UiLanguage } from "./ui-language.js";
 import {
@@ -22,6 +22,12 @@ import {
   type EnvFileHistoryEntry,
   type EnvFileHistorySource,
 } from "./env-file-history.js";
+import {
+  appendClaudeCodeConfigHistoryEntry,
+  deleteClaudeCodeConfigHistoryEntries,
+  listClaudeCodeConfigHistoryEntries,
+  toClaudeCodeConfigHistoryPreview,
+} from "./claude-code-config-history.js";
 import { syncCodexProviderHistory, type CodexHistorySyncResult } from "./codex-history-sync.js";
 import {
   inspectCodexConversation,
@@ -35,6 +41,33 @@ import type {
   GatewayRouteGroupDefinition,
   GatewayProtocol,
 } from "../../../packages/core/dist/gateway/model.js";
+import type {
+  ClaudeCodeAuthorizationInspection,
+  ClaudeCodeConnectionState,
+  ClaudeCodeModelOption,
+  EnvironmentModelIdentityMode,
+  EnvironmentRemoteStatus,
+  EnvironmentRoutePreview,
+  EnvironmentRoutePreviewModel,
+  EnvironmentRoutePreviewRoute,
+} from "../src/desktop-model.js";
+import {
+  claudeCodeAccountSourceId,
+  claudeCodeConfigPathChanged,
+  claudeCodeEnvironmentSourceId,
+  clearClaudeCodeConnection,
+  inspectClaudeCodeAuthorizationContent,
+  maskClaudeCodeSecret,
+  readClaudeCodeConnection,
+  resolveClaudeCodeCredentialsPath,
+  resolveClaudeCodeConfigDir,
+  resolveClaudeCodeSettingsPath,
+  stripClaudeAiOauthCredentials,
+  stripClaudeCodeAuthorizationSettings,
+  writeClaudeCodeConnection,
+  type ClaudeCodeConnectionRecord,
+  type ClaudeCodeSourceSummary,
+} from "./claude-code-connection.js";
 import {
   gatewayCredentialSupportsProtocol,
   gatewayProviderSupportsProtocol,
@@ -112,6 +145,7 @@ import {
   filterModelCatalogBindings,
   normalizeCustomModelInput,
   projectAccountBindingsFromCatalog,
+  resolveModelBinding,
   resolveModelCatalogProviderId,
   type AccountDiscoveredModel,
   type ModelBindingOptions,
@@ -687,6 +721,304 @@ export async function getEnvironmentRouteStatuses() {
   return getUsageRouterManager().getEnvironmentStatuses(Object.keys(state.envs).sort());
 }
 
+/**
+ * Returns a redacted view of the compiled gateway document and the runtime
+ * routes. This deliberately reads the persisted/compiled state instead of
+ * reconstructing a preview in React, so the panel is an operational diagnostic
+ * and never leaks credentials or presents a route that the gateway cannot use.
+ */
+export async function getEnvironmentRoutePreviews(): Promise<EnvironmentRoutePreview[]> {
+  // The status endpoint owns the runtime reconciliation. Keeping this read
+  // side-effect free is important because the renderer polls both endpoints
+  // together and a preview request must never trigger a second gateway rebuild
+  // or wake Codex App's config watcher.
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const manager = getUsageRouterManager();
+  const statuses = await manager.getEnvironmentStatuses(Object.keys(state.envs).sort());
+  const gateways = await manager.listPersistedEnvironmentGateways().catch(() => []);
+  const routes = await manager.listPersistedRoutes().catch(() => []);
+  const now = Date.now();
+
+  return Object.values(state.envs).sort((left, right) => left.name.localeCompare(right.name)).map((environment) => {
+    const status = statuses.find((item) => item.envName === environment.name);
+    const runtimeGateway = gateways.find((item) => item.envName === environment.name && item.enabled);
+    const gateway = environment.gateway;
+    const gatewayEnabled = Boolean(status?.gatewayEnabled || runtimeGateway || gateway?.mode === "gateway");
+    const gatewayRunning = Boolean(status?.gatewayEnabled && status.enabled);
+    // Only routes materialized by the running gateway are meaningful in this
+    // operational map. Bound accounts that have no runtime route are omitted;
+    // keeping the preview scoped to materialized routes also lets every
+    // environment explain its own gateway instead of accidentally hiding all
+    // non-current environments behind the single global App target.
+    const environmentRoutes = routes.filter((route) => route.envName === environment.name && route.enabled);
+    const warnings: string[] = [];
+    if (!gatewayEnabled) warnings.push("Gateway mode is disabled; direct account routing is active.");
+    if (environment.modelIdentityMode === "unified" && !gatewayEnabled) {
+      warnings.push("Unified model identity is stored but only takes effect when Gateway mode is enabled.");
+    }
+    const models: EnvironmentRoutePreviewModel[] = Object.values(gateway?.routeGroups ?? {})
+      .filter((group) => !group.id.startsWith("compat-route-group:"))
+      .map((group) => {
+        const groupRoutes = environmentRoutes.filter((route) => route.routeGroupId === group.id);
+        const previewRoutes: EnvironmentRoutePreviewRoute[] = groupRoutes.map((route) => {
+          const credential = gateway ? Object.values(gateway.credentials).find((candidate) => (
+            candidate.providerId === route.providerId
+            && (candidate.displayName === route.accountName
+              || candidate.secretRef === `account:${encodeURIComponent(environment.name)}:${encodeURIComponent(route.accountName)}`)
+          )) : undefined;
+          const provider = route.providerId ? gateway?.providers[route.providerId] : undefined;
+          const routeModelId = gateway && route.providerId
+            ? Object.values(gateway.models).find((model) => model.providerId === route.providerId && model.upstreamModelId === (route.upstreamModel ?? ""))?.id
+            : undefined;
+          const groupMember = group.members.find((member) => member.modelId === routeModelId);
+          const credentialStatus = credential?.status;
+          const routeStatus: EnvironmentRoutePreviewRoute["status"] = !route.enabled || credentialStatus === "disabled"
+            ? "disabled"
+            : credentialStatus === "cooldown" ? "cooldown"
+              : gatewayRunning ? "healthy" : "unknown";
+          return {
+            routeId: route.routeId,
+            accountName: route.accountName,
+            providerId: route.providerId ?? "unknown",
+            providerDisplayName: provider?.displayName ?? route.providerId ?? "unknown",
+            upstreamModelId: route.upstreamModel ?? "",
+            protocol: route.protocol,
+            status: routeStatus,
+            capabilities: {
+              tools: route.capabilities?.tools === true,
+              vision: route.capabilities?.vision === true,
+              streaming: route.capabilities?.streaming !== false,
+              reasoning: route.capabilities?.reasoning === true,
+            },
+            priority: groupMember?.priority ?? 0,
+            weight: groupMember?.weight ?? 1,
+            isDefault: runtimeGateway?.defaultRouteId === route.routeId || gateway?.defaultRouteGroupId === group.id,
+          };
+        });
+        const capabilities = intersectPreviewCapabilities(previewRoutes.map((route) => route.capabilities));
+        if (!previewRoutes.length) warnings.push(`Model '${group.exposedModelId}' has no materialized runtime route.`);
+        return {
+          exposedModelId: group.exposedModelId,
+          displayName: group.displayName,
+          routes: previewRoutes,
+          capabilities,
+          strategy: group.strategy,
+          sessionPolicy: group.sessionPolicy,
+          fallbackEnabled: group.fallbackEnabled,
+        };
+      })
+      .filter((model) => model.routes.length > 0);
+    return {
+      envName: environment.name,
+      gatewayEnabled,
+      gatewayStatus: gatewayRunning ? "running" : gatewayEnabled ? "configured" : "stopped",
+      mode: normalizeEnvironmentModelIdentityModeForPreview(environment.modelIdentityMode),
+      ...((runtimeGateway?.gatewayId ?? gateway?.gatewayId) ? { gatewayId: runtimeGateway?.gatewayId ?? gateway?.gatewayId } : {}),
+      ...(status?.localGatewayBaseUrl ? { baseUrl: status.localGatewayBaseUrl } : {}),
+      generatedAt: now,
+      models,
+      providerCount: Object.keys(gateway?.providers ?? {}).length,
+      warnings,
+    };
+  });
+}
+
+/**
+ * Remote control uses the official ChatGPT identity stored in an environment,
+ * while the model service follows the currently selected account. Keep the
+ * two signals together on the environment card so switching an API key never
+ * looks like a remote logout.
+ */
+export async function getEnvironmentRemoteStatuses(): Promise<EnvironmentRemoteStatus[]> {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const routeStatuses = await getUsageRouterManager()
+    .getEnvironmentStatuses(Object.keys(state.envs).sort())
+    .catch(() => []);
+
+  return Object.values(state.envs)
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((environment) => buildEnvironmentRemoteStatus(state, environment.name, routeStatuses));
+}
+
+export async function setEnvironmentRemoteAccount(
+  envName: string,
+  accountName?: string,
+): Promise<EnvironmentRemoteStatus> {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const environment = state.envs[envName];
+  if (!environment) throw new Error(`Environment '${envName}' not found`);
+
+  const normalized = accountName?.trim();
+  if (normalized) {
+    const account = environment.accounts[normalized];
+    if (!account || account.authMode !== "auth" || !account.authData) {
+      throw new Error("手机远程需要已登录的官方账号");
+    }
+
+    // A direct CODEX_HOME has one official ChatGPT identity. An environment
+    // gateway is different: it hydrates each model credential inside the
+    // gateway while the home keeps the selected remote account's auth.json.
+    // API-key accounts are also independent because their key is delivered
+    // through the model provider environment key.
+    if (environment.gateway?.mode !== "gateway") {
+      for (const target of ["cli", "app"] as const) {
+        const pointer = state.targets[target];
+        if (pointer.env !== envName) continue;
+        const selected = environment.accounts[pointer.account];
+        if (selected?.authMode === "auth" && pointer.account !== normalized) {
+          throw new Error("同一环境的订阅账号与手机远程账号必须一致，请拆分环境");
+        }
+      }
+    }
+  }
+
+  await runtime.setLegacyEnvRemoteAccount({
+    stateDir: getStateDir(),
+    envName,
+    ...(normalized ? { accountName: normalized } : {}),
+  });
+  const nextState = await runtime.readLegacyState(getLegacyOptions());
+  await reapplyEnvironmentTargetHomes(runtime, nextState, envName, "switch-cli");
+  const routeStatuses = await getUsageRouterManager()
+    .getEnvironmentStatuses(Object.keys(nextState.envs).sort())
+    .catch(() => []);
+  return buildEnvironmentRemoteStatus(nextState, envName, routeStatuses);
+}
+
+function buildEnvironmentRemoteStatus(
+  state: Awaited<ReturnType<CoreRuntime["readLegacyState"]>>,
+  envName: string,
+  routeStatuses: Array<{ envName: string; gatewayEnabled?: boolean }>,
+): EnvironmentRemoteStatus {
+  const environment = state.envs[envName];
+  if (!environment) throw new Error(`Environment '${envName}' not found`);
+  const remoteAccountName = environment.remoteControl?.accountName;
+  const remoteAccount = remoteAccountName ? environment.accounts[remoteAccountName] : undefined;
+  const hasOfficialAccount = Object.values(environment.accounts).some((account) => (
+    account.authMode === "auth" && Boolean(account.authData)
+  ));
+  // Official pairing happens in ChatGPT desktop settings and cannot be
+  // verified by Switcher. A valid account therefore means pairing is still
+  // required; never present it as an active mobile connection here.
+  const status: EnvironmentRemoteStatus["status"] = remoteAccountName
+    ? remoteAccount?.authMode === "auth" && remoteAccount.authData
+      ? "needs_pairing"
+      : "needs_login"
+    : hasOfficialAccount ? "needs_account" : "unavailable";
+
+  const target = state.targets.app.env === envName
+    ? state.targets.app
+    : state.targets.cli.env === envName
+      ? state.targets.cli
+      : undefined;
+  const modelAccountName = target?.account && environment.accounts[target.account]
+    ? target.account
+    : Object.keys(environment.accounts)[0];
+  const modelAccount = modelAccountName ? environment.accounts[modelAccountName] : undefined;
+  const gateway = routeStatuses.find((item) => item.envName === envName)?.gatewayEnabled
+    || environment.gateway?.mode === "gateway";
+  const modelServiceLabel = gateway
+    ? "Switcher 网关"
+    : modelAccount?.authMode === "apikey" || modelAccount?.runtime.preferredAuthMethod === "apikey"
+      ? `API Key${formatProviderSuffix(modelAccount.runtime.providerId ?? modelAccount.runtime.openaiBaseUrl)}`
+      : modelAccount
+        ? "官方账号"
+        : "未配置";
+
+  return {
+    envName,
+    status,
+    ...(remoteAccountName ? { remoteAccountName } : {}),
+    ...(remoteAccount ? { remoteAccountEmail: readAccountEmail(remoteAccount.authData) } : {}),
+    modelServiceLabel,
+    ...(modelAccountName ? { modelAccountName } : {}),
+  };
+}
+
+function readAccountEmail(value: Record<string, unknown> | undefined): string | undefined {
+  if (!value) return undefined;
+  for (const key of ["email", "email_address", "user_email"]) {
+    if (typeof value[key] === "string" && value[key].trim()) return value[key].trim();
+  }
+  return undefined;
+}
+
+function formatProviderSuffix(value: string | undefined): string {
+  if (!value) return "";
+  if (value.startsWith("http://") || value.startsWith("https://")) {
+    try {
+      return ` · ${new URL(value).host}`;
+    } catch {
+      return "";
+    }
+  }
+  return ` · ${value}`;
+}
+
+export async function setEnvironmentModelIdentityMode(
+  envName: string,
+  mode: EnvironmentModelIdentityMode,
+): Promise<EnvironmentRoutePreview> {
+  if (mode !== "account" && mode !== "unified") throw new Error(`Unsupported model identity mode '${String(mode)}'`);
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const environment = state.envs[envName];
+  if (!environment) throw new Error(`Environment '${envName}' not found`);
+  await runtime.setLegacyEnvModelIdentityMode({ stateDir: getStateDir(), envName, modelIdentityMode: mode });
+
+  const activeGateway = (await getUsageRouterManager().listPersistedEnvironmentGateways()).find((item) => item.envName === envName && item.enabled);
+  if (activeGateway) {
+    const latest = await runtime.readLegacyState(getLegacyOptions());
+    const latestEnvironment = latest.envs[envName];
+    if (!latestEnvironment) throw new Error(`Environment '${envName}' disappeared while changing model identity mode`);
+    const generated = await buildEnvironmentGatewayState(runtime, latestEnvironment);
+    const accounts = await getEnvironmentGatewayRouteAccounts(latest, envName, generated);
+    const updateBaseUrl = createEnvironmentRouteBaseUrlUpdater(runtime, envName);
+    const result = await getUsageRouterManager().enableEnvironmentGateway(
+      envName,
+      accounts,
+      updateBaseUrl,
+      generated.routeGroups,
+      buildGatewayRouteBindings(latestEnvironment, generated),
+      generated.routeRules ?? [],
+      generated.defaultRouteGroupId,
+    );
+    const nextGateway = {
+      ...generated,
+      mode: "gateway" as const,
+      gatewayId: result.gatewayId ?? generated.gatewayId,
+      catalogVersion: generated.catalogVersion + 1,
+    };
+    await runtime.writeLegacyGateway({ stateDir: getStateDir(), envName, gateway: nextGateway });
+    await synchronizeEnvironmentGatewayModelCatalog({
+      homePath: latestEnvironment.path,
+      gateway: nextGateway,
+      modelCatalog: await getModelCatalogStore().load(),
+      environmentName: envName,
+      diagnosticLogPath: resolveLogPath("switcher"),
+      loadBundledCatalog: async () => (await loadBundledCatalogForCurrentInstall()) ?? { models: [] },
+    });
+  }
+  return (await getEnvironmentRoutePreviews()).find((preview) => preview.envName === envName)!;
+}
+
+function normalizeEnvironmentModelIdentityModeForPreview(value: unknown): EnvironmentModelIdentityMode {
+  return value === "unified" ? "unified" : "account";
+}
+
+function intersectPreviewCapabilities(values: EnvironmentRoutePreviewRoute["capabilities"][]): EnvironmentRoutePreviewRoute["capabilities"] {
+  if (!values.length) return { tools: false, vision: false, streaming: false, reasoning: false };
+  return {
+    tools: values.every((value) => value.tools),
+    vision: values.every((value) => value.vision),
+    streaming: values.every((value) => value.streaming),
+    reasoning: values.every((value) => value.reasoning),
+  };
+}
+
 function getEnvironmentRouteAccounts(
   state: Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>,
   envName: string,
@@ -695,9 +1027,17 @@ function getEnvironmentRouteAccounts(
   const env = state.envs[envName];
   if (!env) throw new Error(`Environment '${envName}' not found`);
   return Object.entries(env.accounts).map(([accountName, account]) => {
-    const providerId = account.runtime.providerId ?? (account.authMode === "auth" ? "chatgpt" : "openai");
-    const credential = gateway && Object.values(gateway.credentials).find((candidate) => candidate.providerId === providerId
-      && (candidate.displayName === accountName || candidate.secretRef === `account:${encodeURIComponent(envName)}:${encodeURIComponent(accountName)}`));
+    const secretRef = createAccountSecretRef(envName, accountName);
+    const credential = (gateway && Object.values(gateway.credentials).find((candidate) => candidate.secretRef === secretRef))
+      ?? (gateway && Object.values(gateway.credentials).find((candidate) => (
+        (candidate.displayName === accountName || candidate.displayName === account.name)
+      )));
+    // Prefer the compiled credential's provider identity. This is important
+    // after Gateway mode rewrites the account runtime Base URL to localhost:
+    // the runtime no longer contains the upstream provider name, while the
+    // credential is already bound to the provider used by the gateway.
+    const providerId = credential?.providerId
+      ?? resolveRuntimeProviderId(account);
     const proxyUrl = credential?.proxyUrl ?? gateway?.providers[providerId]?.proxyUrl;
     return {
       envName,
@@ -711,7 +1051,11 @@ function getEnvironmentRouteAccounts(
       authAccountId: extractAccountIdFromAuthData(account.authData),
       protocol: account.authMode === "auth"
         ? "responses" as const
-        : account.runtime.apiProtocol === "chat_completions" ? "chat_completions" as const : "responses" as const,
+        : account.runtime.apiProtocol === "chat_completions"
+          ? "chat_completions" as const
+          : account.runtime.apiProtocol === "anthropic"
+            ? "anthropic" as const
+            : "responses" as const,
       upstreamModel: account.runtime.compatibilityUpstreamModel,
       baseUrl: account.runtime.openaiBaseUrlMode === "custom" && account.runtime.openaiBaseUrl
         ? account.runtime.openaiBaseUrl
@@ -739,14 +1083,35 @@ async function getEnvironmentGatewayRouteAccounts(
   const routes = await getUsageRouterManager().listPersistedRoutes().catch(() => []);
   return accounts.map((account) => {
     if (!isLocalRouterBaseUrl(account.baseUrl)) return account;
+    const providerEndpoint = resolveGatewayProviderEndpoint(gateway, account.providerId, account.protocol);
     const candidates = routes.filter((route) => (
       route.envName === envName
       && route.accountName === account.accountName
       && route.enabled
     ));
     const route = candidates.find((candidate) => !candidate.exposedModelId) ?? candidates[0];
-    return route ? { ...account, baseUrl: resolveRouteDisplayBaseUrl(route) } : account;
+    // Prefer the compiled provider endpoint. The route record is retained as
+    // a legacy fallback, but old states can contain api.openai.com here even
+    // when discovery has already restored a custom OpenAI-compatible provider.
+    return providerEndpoint
+      ? { ...account, baseUrl: providerEndpoint }
+      : route ? { ...account, baseUrl: resolveRouteDisplayBaseUrl(route) } : account;
   });
+}
+
+function resolveGatewayProviderEndpoint(
+  gateway: GatewayEnvironmentState,
+  providerId: string,
+  protocol: "responses" | "chat_completions" | "anthropic" | "gemini",
+): string | undefined {
+  const provider = gateway.providers[providerId];
+  if (!provider) return undefined;
+  switch (protocol) {
+    case "chat_completions": return provider.endpoints.chatCompletions ?? provider.endpoints.responses;
+    case "anthropic": return provider.endpoints.anthropicMessages;
+    case "gemini": return provider.endpoints.gemini;
+    default: return provider.endpoints.responses;
+  }
 }
 
 function sanitizeProviderRequestHeaders(value: unknown): Record<string, string> | undefined {
@@ -831,9 +1196,11 @@ function buildGatewayRouteBindings(
   const result: GatewayRouteBinding[] = [];
   const protocolForAccount = (accountName: string): RouteProtocol => {
     const account = environment.accounts[accountName];
-    return account?.authMode === "auth" || account?.runtime?.apiProtocol !== "chat_completions"
-      ? "responses"
-      : "chat_completions";
+    if (account?.authMode === "auth") return "responses";
+    const configured = account?.runtime?.apiProtocol;
+    return configured === "chat_completions" || configured === "anthropic" || configured === "gemini"
+      ? configured
+      : "responses";
   };
   const protocolForBinding = (
     model: GatewayEnvironmentState["models"][string],
@@ -913,6 +1280,9 @@ function buildGatewayRouteBindings(
   };
 
   for (const group of Object.values(gateway.routeGroups)) {
+    // Compatibility aliases are nested references to the primary unified
+    // group; materializing them again would overwrite the same route record.
+    if (group.id.startsWith("compat-route-group:")) continue;
     for (const member of group.members) addBinding(group, member);
   }
   // A catalog model can be used directly even if it has not been placed in a
@@ -1176,6 +1546,7 @@ async function applyEnvironmentRouteToActiveTarget(
     await runtime.applyTargetHomeState({
       state,
       target,
+      authProjection: resolveTargetHomeAuthProjection(state, target),
       ...(gatewayBaseUrl ? { gatewayBaseUrl } : {}),
     });
   } catch (error) {
@@ -1363,6 +1734,7 @@ async function restoreEnabledRoutes(): Promise<void> {
       await synchronizeEnvironmentGatewayModelCatalog({
         homePath: environment.path,
         gateway,
+        modelCatalog: await getModelCatalogStore().load(),
         environmentName: environment.name,
         diagnosticLogPath: resolveLogPath("switcher"),
         loadBundledCatalog: bundledCatalog ? async () => bundledCatalog : undefined,
@@ -1434,6 +1806,7 @@ export async function toggleEnvironmentGateway(envName: string, enabled: boolean
     await runtime.writeLegacyGateway({ stateDir: getStateDir(), envName, gateway });
     const nextState = await runtime.readLegacyState(getLegacyOptions());
     await reapplyEnvironmentTargetHomes(runtime, nextState, envName, "enable-environment-gateway");
+    await reapplyConnectedClaudeCodeForEnvironment(envName);
     return result;
   } catch (error) {
     await manager.disableEnvironmentGateway(envName, updateBaseUrl).catch(() => undefined);
@@ -1447,14 +1820,114 @@ async function buildEnvironmentGatewayState(
   environment: Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>["envs"][string],
   snapshotOverride?: ModelCatalogSnapshot,
 ): Promise<GatewayEnvironmentState> {
+  const snapshot = snapshotOverride ?? await getModelCatalogStore().load();
+  const accountProviderMetadata = await collectGatewayAccountProviderMetadata(
+    environment,
+    snapshot,
+  );
   const base = synchronizeGatewayAccountMetadata(
     environment,
     environment.gateway ?? runtime.buildLegacyGatewayEnvironmentState(environment),
-    { rebindRoutes: true },
+    { rebindRoutes: true, accountProviderMetadata },
   );
-  const snapshot = snapshotOverride ?? await getModelCatalogStore().load();
   const bundledModels = await loadGatewayBundledModels(environment, snapshot);
   return applyModelCatalogBindings(environment, base, snapshot, bundledModels);
+}
+
+/**
+ * Recover upstream identity for accounts whose runtime has been rewritten to
+ * a local Gateway URL.  Discovery snapshots provide a stable provider id;
+ * persisted route records provide the authoritative endpoint for old gateway
+ * documents that were compiled before provider identity was introduced.
+ */
+async function collectGatewayAccountProviderMetadata(
+  environment: { name: string; accounts: Record<string, unknown> },
+  snapshot: ModelCatalogSnapshot,
+): Promise<Record<string, { providerId?: string; upstreamBaseUrl?: string }>> {
+  const metadata: Record<string, { providerId?: string; upstreamBaseUrl?: string }> = {};
+  for (const accountName of Object.keys(environment.accounts)) {
+    const discovery = snapshot.accountModelDiscoveries?.[accountModelBindingKey(environment.name, accountName)];
+    if (discovery?.providerId) {
+      metadata[accountName] = {
+        providerId: discovery.providerId,
+        ...(deriveCustomProviderBaseUrl(discovery.providerId)
+          ? { upstreamBaseUrl: deriveCustomProviderBaseUrl(discovery.providerId) }
+          : {}),
+      };
+    }
+  }
+
+  const routes = await getUsageRouterManager().listPersistedRoutes().catch(() => []);
+  for (const route of routes) {
+    if (route.envName !== environment.name || !route.enabled) continue;
+    const current = metadata[route.accountName] ?? {};
+    // Prefer a direct account route over a model-specific materialized route;
+    // either is valid when the former does not exist (legacy gateway state).
+    const isDirect = !route.exposedModelId;
+    // A legacy route may carry the generic api.openai.com endpoint even
+    // though discovery has already identified a custom upstream. Preserve the
+    // discovered endpoint in that case; a route is allowed to replace it only
+    // when it carries the same provider identity.
+    const sameProvider = Boolean(current.providerId && route.providerId && current.providerId === route.providerId);
+    if (current.upstreamBaseUrl && (!isDirect || !sameProvider)) continue;
+    metadata[route.accountName] = {
+      ...current,
+      ...(route.providerId ? { providerId: current.providerId ?? route.providerId } : {}),
+      ...(route.upstreamBaseUrl ? { upstreamBaseUrl: route.upstreamBaseUrl } : {}),
+    };
+  }
+  return metadata;
+}
+
+/**
+ * Provider ids for OpenAI-compatible origins include the normalized host. A
+ * provider id is intentionally safe to persist in model catalogs, so it does
+ * not retain credentials or query strings. Recover the conventional `/v1`
+ * endpoint as a migration fallback when an old route lost its upstream URL.
+ * New route records still win when they contain a non-local endpoint.
+ */
+function deriveCustomProviderBaseUrl(providerId: string): string | undefined {
+  const match = providerId.trim().match(/^custom-openai:([^:]+)$/i);
+  if (!match?.[1] || !/^[A-Za-z0-9.-]+(?:-\d+)?$/.test(match[1])) return undefined;
+  const port = match[1].match(/^(.*)-(\d{2,5})$/);
+  const host = port?.[1] || match[1];
+  return `https://${host}${port?.[2] ? `:${port[2]}` : ""}/v1`;
+}
+
+/**
+ * Finds the materialized route for a catalog model preview.
+ *
+ * In account identity mode the exposed id is the catalog slug. In unified
+ * mode the same binding is exposed as its upstream model id, so matching only
+ * the slug produces a false 422 even though the gateway route is valid.
+ * Prefer the strongest identity match and fall back to the account/upstream
+ * pair for legacy route records that do not retain the logical model id.
+ */
+function selectGatewayRouteBindingForModel(
+  bindings: readonly GatewayRouteBinding[],
+  accountName: string,
+  modelSlug: string,
+  upstreamModel: string,
+  providerId?: string,
+): GatewayRouteBinding | undefined {
+  const normalizedAccount = accountName.trim();
+  const normalizedSlug = modelSlug.trim();
+  const normalizedUpstream = upstreamModel.trim();
+  if (!normalizedAccount || !normalizedUpstream) return undefined;
+  const exposedIds = new Set([normalizedSlug, normalizedUpstream].filter(Boolean));
+  const accountAndUpstream = (binding: GatewayRouteBinding): boolean => (
+    binding.accountNames.includes(normalizedAccount)
+      && binding.upstreamModel.trim() === normalizedUpstream
+  );
+  const providerAndIdentity = bindings.find((binding) => (
+    accountAndUpstream(binding)
+      && (!providerId || binding.providerId === providerId)
+      && exposedIds.has(binding.exposedModelId.trim())
+  ));
+  if (providerAndIdentity) return providerAndIdentity;
+  const identity = bindings.find((binding) => accountAndUpstream(binding) && exposedIds.has(binding.exposedModelId.trim()));
+  if (identity) return identity;
+  return bindings.find(accountAndUpstream);
 }
 
 async function buildModelRequestPreview(
@@ -1486,17 +1959,21 @@ async function buildModelRequestPreview(
     providerId: catalogIdentity.providerId,
     ...(catalogIdentity.providerDisplayName ? { providerDisplayName: catalogIdentity.providerDisplayName } : {}),
     protocol,
+    preserveHistoricalBindings: true,
   });
   const targetModelId = projected.accountBindings[accountKey]?.[0];
   const targetModel = targetModelId ? projected.models.find((model) => model.id === targetModelId) : undefined;
   if (!targetModel) throw new Error(`Model '${input.model}' could not be bound to account '${input.envName}/${input.accountName}'`);
 
   const gateway = await buildEnvironmentGatewayState(runtime, environment, projected);
-  const binding = buildGatewayRouteBindings(environment, gateway).find((candidate) => (
-    candidate.accountNames.includes(input.accountName)
-      && candidate.exposedModelId === targetModel.entry.slug
-      && candidate.upstreamModel.trim()
-  ));
+  const targetBinding = resolveModelBinding(projected, targetModel, accountKey);
+  const binding = selectGatewayRouteBindingForModel(
+    buildGatewayRouteBindings(environment, gateway),
+    input.accountName,
+    targetModel.entry.slug,
+    targetBinding.upstreamModelId,
+    catalogIdentity.providerId,
+  );
   if (!binding) throw new Error(`Gateway route for '${targetModel.entry.slug}' is not compatible with account '${input.envName}/${input.accountName}'`);
 
   const routes = await getUsageRouterManager().listPersistedRoutes().catch(() => []);
@@ -1509,12 +1986,11 @@ async function buildModelRequestPreview(
   // the selected account's matching model route as the upstream source in
   // that case; the saved gateway compiler treats both records as equivalent
   // sources for the provider endpoint and credential.
-  const baseRoute = accountRoutes.find((route) => !route.exposedModelId)
-    ?? accountRoutes.find((route) => (
-      route.exposedModelId === targetModel.entry.slug
-        && route.providerId === binding.providerId
-        && route.upstreamModel === binding.upstreamModel
-    ))
+  const baseRoute = accountRoutes.find((route) => (
+    route.exposedModelId === binding.exposedModelId
+      && route.upstreamModel === binding.upstreamModel
+  ))
+    ?? accountRoutes.find((route) => !route.exposedModelId)
     ?? accountRoutes[0];
   if (!baseRoute) throw new Error(`Gateway route for account '${input.envName}/${input.accountName}' is missing`);
 
@@ -1551,7 +2027,11 @@ async function buildModelRequestPreview(
   return {
     envName: input.envName,
     accountName: input.accountName,
-    model: targetModel.entry.slug,
+    // Unified Gateway mode exposes the upstream/logical model id while the
+    // catalog keeps the provider-qualified slug. Preview requests must use
+    // the route's actual exposed identity or the local Gateway returns a
+    // misleading MODEL_NOT_FOUND before reaching the provider.
+    model: resolvePreviewModelId(binding.exposedModelId, targetModel.entry.slug),
     prompt: input.prompt,
     route,
     upstreamApiKey: accountRoute.apiKey,
@@ -1559,6 +2039,10 @@ async function buildModelRequestPreview(
     accountId: accountRoute.authAccountId,
     hydrateRouteSecret: accountRoute.providerAuthMethod === "none" || Boolean(accountRoute.apiKey?.trim()),
   };
+}
+
+function resolvePreviewModelId(exposedModelId: string | undefined, catalogSlug: string): string {
+  return exposedModelId?.trim() || catalogSlug.trim();
 }
 
 /**
@@ -1644,7 +2128,460 @@ async function reapplyEnvironmentTargetHomes(
 }
 
 export async function toggleEnvironmentLocalAgentAccess(envName: string, enabled: boolean) {
-  return getUsageRouterManager().setEnvironmentLocalAgentAccess(envName, enabled);
+  const result = await getUsageRouterManager().setEnvironmentLocalAgentAccess(envName, enabled);
+  if (enabled) await reapplyConnectedClaudeCodeForEnvironment(envName);
+  return result;
+}
+
+const CLAUDE_CODE_BINDING_ID = "global";
+
+/**
+ * A gateway restart can rotate its local URL/token. Keep a connected global
+ * Claude profile aligned when the environment is brought back, while leaving
+ * a disabled source untouched so the user can choose a different profile.
+ */
+async function reapplyConnectedClaudeCodeForEnvironment(envName: string): Promise<void> {
+  const record = await readClaudeCodeConnection(getStateDir());
+  if (!record || record.kind !== "environment_gateway" || record.environmentName !== envName) return;
+  await reapplyClaudeCode().catch(() => undefined);
+}
+
+export async function inspectClaudeCodeAuthorization(): Promise<ClaudeCodeAuthorizationInspection> {
+  const environment = { ...process.env };
+  const homeDir = homedir();
+  const settingsPath = resolveClaudeCodeSettingsPath(homeDir, environment);
+  const credentialsPath = resolveClaudeCodeCredentialsPath(homeDir, environment);
+  return inspectClaudeCodeAuthorizationContent({
+    homeDir,
+    environment,
+    processEnvironment: environment,
+    settingsContent: await readOptionalClaudeCodeFile(settingsPath),
+    credentialsContent: await readOptionalClaudeCodeFile(credentialsPath),
+  });
+}
+
+async function cleanupClaudeCodeAuthorizationConflicts(inspection: ClaudeCodeAuthorizationInspection): Promise<void> {
+  if (!inspection.hasConflict) return;
+  if (!inspection.canCleanup) {
+    const sources = inspection.conflicts.filter((conflict) => !conflict.removable).map((conflict) => conflict.description).join(" ");
+    throw new Error(`${sources || "Claude Code inherits an external authorization source from the current shell."} Unset it there before connecting in API-key mode.`);
+  }
+  const stateDir = getStateDir();
+  const settingsConflict = inspection.conflicts.some((conflict) => conflict.source === "settings" && conflict.removable);
+  if (settingsConflict) {
+    const content = await readOptionalClaudeCodeFile(inspection.settingsPath);
+    if (content) {
+      await appendClaudeCodeConfigHistoryEntry({ stateDir, configPath: inspection.settingsPath, source: "authorization_cleanup", content });
+      await writeClaudeCodeConfig(inspection.settingsPath, stripClaudeCodeAuthorizationSettings(content));
+    }
+  }
+  const oauthConflict = inspection.conflicts.some((conflict) => conflict.kind === "claude_ai_oauth");
+  if (oauthConflict) {
+    const content = await readOptionalClaudeCodeFile(inspection.credentialsPath);
+    if (content) {
+      await appendClaudeCodeConfigHistoryEntry({ stateDir, configPath: inspection.credentialsPath, source: "authorization_cleanup", content });
+      const next = stripClaudeAiOauthCredentials(content);
+      if (next) await writeClaudeCodeConfig(inspection.credentialsPath, next);
+      else await rm(inspection.credentialsPath, { force: true });
+    }
+  }
+}
+
+/**
+ * Resolves the existing Environment and Account records that Claude Code can
+ * consume. The renderer receives metadata only; credential material stays in
+ * the Electron process and is used only while applying the global binding.
+ */
+export async function listClaudeCodeSources(): Promise<ClaudeCodeSourceSummary[]> {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const envNames = Object.keys(state.envs).sort();
+  const statuses = await getUsageRouterManager().getEnvironmentStatuses(envNames);
+  const previews = await getEnvironmentRoutePreviews();
+  const sources: ClaudeCodeSourceSummary[] = [];
+
+  for (const environment of Object.values(state.envs).sort((left, right) => left.name.localeCompare(right.name))) {
+    const status = statuses.find((item) => item.envName === environment.name);
+    const preview = previews.find((item) => item.envName === environment.name);
+    const gatewayEnabled = status?.gatewayEnabled === true;
+    const localAgentAccessEnabled = status?.localAgentAccessEnabled === true;
+    const models = (preview?.models ?? []).map((model): ClaudeCodeModelOption => ({ id: model.exposedModelId, displayName: model.displayName }));
+    const sourceState = !gatewayEnabled
+      ? "needs_gateway" as const
+      : !localAgentAccessEnabled
+        ? "needs_local_agent" as const
+        : status?.localAgentBaseUrl && status.localAgentAccessToken
+          ? "ready" as const
+          : "unavailable" as const;
+    sources.push({
+      id: claudeCodeEnvironmentSourceId(environment.name),
+      kind: "environment_gateway",
+      environmentName: environment.name,
+      displayName: `${environment.name} · 环境网关`,
+      state: sourceState,
+      ...(sourceState === "needs_gateway" ? { reason: "环境网关未开启" } : {}),
+      ...(sourceState === "needs_local_agent" ? { reason: "本机 Agent 接入未开启" } : {}),
+      ...(status?.localAgentBaseUrl ? { baseUrl: status.localAgentBaseUrl } : {}),
+      ...(status?.localAgentAccessToken ? { apiKeyPreview: maskClaudeCodeSecret(status.localAgentAccessToken) } : {}),
+      models,
+      gatewayEnabled,
+      localAgentAccessEnabled,
+    });
+
+    let gateway: GatewayEnvironmentState;
+    try {
+      gateway = await buildEnvironmentGatewayState(runtime, environment);
+    } catch {
+      continue;
+    }
+    for (const [accountName, account] of Object.entries(environment.accounts)) {
+      const source = resolveClaudeCodeAccountSource(environment.name, accountName, account, gateway);
+      if (source) sources.push(source);
+    }
+  }
+  return sources;
+}
+
+export async function getClaudeCodeConnection(): Promise<ClaudeCodeConnectionState> {
+  const record = await readClaudeCodeConnection(getStateDir());
+  const configPath = resolveClaudeCodeSettingsPath(homedir());
+  const authorization = await inspectClaudeCodeAuthorization();
+  if (!record) return { connected: false, configPath, authorization };
+  const sources = await listClaudeCodeSources();
+  const source = sources.find((item) => item.id === record.sourceId);
+  const configPathChanged = claudeCodeConfigPathChanged(record.configPath, configPath);
+  const adapter = await createClaudeCodeAgentAdapter(isAbsolute(record.configPath) ? record.configPath : undefined);
+  const drift = await adapter.adapter.check(CLAUDE_CODE_BINDING_ID).catch(() => ({ state: "unwired" as const }));
+  return {
+    connected: Boolean(source) && !configPathChanged,
+    configPath,
+    authorization,
+    ...(configPathChanged ? { configPathChanged: true } : {}),
+    ...(source ? { source } : {}),
+    record: {
+      version: 1,
+      sourceId: record.sourceId,
+      kind: record.kind,
+      environmentName: record.environmentName,
+      ...(record.accountName ? { accountName: record.accountName } : {}),
+      ...(record.gatewayId ? { gatewayId: record.gatewayId } : {}),
+      ...(record.modelId ? { modelId: record.modelId } : {}),
+      configPath: record.configPath,
+      snapshotBindingId: record.snapshotBindingId,
+      connectedAt: record.connectedAt,
+    },
+    // A source disappearing (for example when its environment gateway is
+    // disabled) is a wiring problem even if the file itself still matches the
+    // last snapshot. This keeps the UI from reporting a false clean state.
+    drift: source && !configPathChanged ? drift.state : "unwired",
+    restartRequired: true,
+  };
+}
+
+export async function connectClaudeCode(input: { sourceId: string; modelId?: string; cleanupAuthorization?: boolean }): Promise<ClaudeCodeConnectionState> {
+  const sources = await listClaudeCodeSources();
+  const source = sources.find((item) => item.id === input.sourceId);
+  if (!source) throw new Error(`Claude Code source '${input.sourceId}' was not found`);
+  if (source.state !== "ready") throw new Error(source.reason ?? `Claude Code source '${input.sourceId}' is not ready`);
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const secret = await resolveClaudeCodeSourceSecret(source, state);
+  if (!secret) throw new Error(`Claude Code source '${input.sourceId}' has no usable API key`);
+  const authorization = await inspectClaudeCodeAuthorization();
+  if (authorization.hasConflict && !input.cleanupAuthorization) {
+    throw new Error("Claude Code authorization conflict detected; confirm backup and cleanup before connecting in API-key mode.");
+  }
+  const modelId = input.modelId?.trim() || source.models[0]?.id;
+  const status = source.kind === "environment_gateway"
+    ? (await getUsageRouterManager().getEnvironmentStatuses([source.environmentName]))[0]
+    : undefined;
+  const agent = await createClaudeCodeAgentAdapter();
+  await ensureClaudeCodeConfigHistorySeeded();
+  if (input.cleanupAuthorization) await cleanupClaudeCodeAuthorizationConflicts(authorization);
+  const configPath = resolveClaudeCodeSettingsPath(homedir());
+  const beforeConfig = await readClaudeCodeConfigContent(configPath);
+  const managedValues = shouldDisableClaudeAutoModeServer(source)
+    ? { "env.CLAUDE_CODE_AUTO_MODE_SERVER": "0" }
+    : undefined;
+  if (shouldBackupClaudeCodeConfig(beforeConfig, source.baseUrl ?? "", secret, modelId, managedValues)) {
+    await appendClaudeCodeConfigHistoryEntry({
+      stateDir: getStateDir(),
+      configPath,
+      source: "connect",
+      content: beforeConfig,
+    });
+  }
+  await agent.adapter.apply({
+    bindingId: CLAUDE_CODE_BINDING_ID,
+    agentId: agent.profile.id,
+    gatewayBaseUrl: source.baseUrl ?? "",
+    gatewayTokenRef: secret,
+    protocol: "anthropic",
+    exposedModelId: modelId ?? "",
+    ...(source.kind === "environment_gateway" && status?.gatewayId ? { routeGroupId: status.gatewayId } : {}),
+    ...(managedValues ? { managedValues } : {}),
+    enabled: true,
+    updatedAt: Date.now(),
+  });
+  const record: ClaudeCodeConnectionRecord = {
+    version: 1,
+    sourceId: source.id,
+    kind: source.kind,
+    environmentName: source.environmentName,
+    ...(source.accountName ? { accountName: source.accountName } : {}),
+    ...(status?.gatewayId ? { gatewayId: status.gatewayId } : {}),
+    ...(modelId ? { modelId } : {}),
+    configPath,
+    snapshotBindingId: CLAUDE_CODE_BINDING_ID,
+    connectedAt: Date.now(),
+  };
+  await writeClaudeCodeConnection(getStateDir(), record);
+  return getClaudeCodeConnection();
+}
+
+export async function disconnectClaudeCode(): Promise<ClaudeCodeConnectionState> {
+  const record = await readClaudeCodeConnection(getStateDir());
+  const configPath = record?.configPath && isAbsolute(record.configPath)
+    ? record.configPath
+    : resolveClaudeCodeSettingsPath(homedir());
+  const agent = await createClaudeCodeAgentAdapter(configPath);
+  if (record) {
+    await appendClaudeCodeConfigHistoryEntry({
+      stateDir: getStateDir(),
+      configPath,
+      source: "disconnect",
+      content: await readClaudeCodeConfigContent(configPath),
+    });
+  }
+  await agent.adapter.restore(CLAUDE_CODE_BINDING_ID);
+  await clearClaudeCodeConnection(getStateDir());
+  return getClaudeCodeConnection();
+}
+
+export async function diagnoseClaudeCode(): Promise<ClaudeCodeConnectionState & { sources: ClaudeCodeSourceSummary[] }> {
+  return { ...(await getClaudeCodeConnection()), sources: await listClaudeCodeSources() };
+}
+
+/** Re-apply the last selected source after a gateway restart or external edit. */
+export async function reapplyClaudeCode(): Promise<ClaudeCodeConnectionState> {
+  const record = await readClaudeCodeConnection(getStateDir());
+  if (!record) throw new Error("Claude Code is not connected");
+  return connectClaudeCode({ sourceId: record.sourceId, ...(record.modelId ? { modelId: record.modelId } : {}) });
+}
+
+export async function listClaudeCodeConfigHistory(): Promise<string> {
+  await ensureClaudeCodeConfigHistorySeeded();
+  const entries = await listClaudeCodeConfigHistoryEntries(getStateDir());
+  return `${JSON.stringify(entries.map(toClaudeCodeConfigHistoryPreview), null, 2)}\n`;
+}
+
+export async function restoreClaudeCodeConfigHistory(entryId: string): Promise<DesktopActionResult> {
+  const entries = await listClaudeCodeConfigHistoryEntries(getStateDir());
+  const entry = entries.find((item) => item.id === entryId);
+  if (!entry) throw new Error(`Claude Code history entry '${entryId}' not found`);
+
+  const activeConfigDir = resolveClaudeCodeConfigDir(homedir());
+  const configPath = resolve(entry.configPath);
+  if (!isManagedClaudeCodeHistoryPath(configPath, activeConfigDir)) {
+    throw new Error(`Claude Code history belongs to ${entry.configPath}; the active CLAUDE_CONFIG_DIR does not match this managed file.`);
+  }
+  const before = await readClaudeCodeConfigContent(configPath);
+  if (before !== entry.content) {
+    await appendClaudeCodeConfigHistoryEntry({
+      stateDir: getStateDir(),
+      configPath,
+      source: "restore",
+      content: before,
+    });
+    if (entry.content) await writeClaudeCodeConfig(configPath, entry.content);
+    else await rm(configPath, { force: true });
+    // A historical file may belong to a previous source or to the pre-connect
+    // configuration. Do not leave the UI claiming that the current binding is
+    // active after restoring an arbitrary snapshot.
+    await clearClaudeCodeConnection(getStateDir());
+  }
+
+  return {
+    message: "Restored Claude Code configuration",
+    output: configPath,
+  };
+}
+
+function isManagedClaudeCodeHistoryPath(configPath: string, activeConfigDir: string): boolean {
+  const root = resolve(activeConfigDir);
+  return configPath === resolve(join(root, "settings.json")) || configPath === resolve(join(root, ".credentials.json"));
+}
+
+export async function deleteClaudeCodeConfigHistory(entryIds: string[]): Promise<DesktopActionResult> {
+  const deleted = await deleteClaudeCodeConfigHistoryEntries(getStateDir(), entryIds);
+  return {
+    message: `Deleted ${deleted} Claude Code history entries`,
+    output: `${deleted}\n`,
+  };
+}
+
+async function readClaudeCodeConfigContent(configPath: string): Promise<string> {
+  try {
+    return await readFile(configPath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
+    throw error;
+  }
+}
+
+async function readOptionalClaudeCodeFile(configPath: string): Promise<string | undefined> {
+  try {
+    return await readFile(configPath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+async function writeClaudeCodeConfig(configPath: string, content: string): Promise<void> {
+  await mkdir(dirname(configPath), { recursive: true });
+  const temporaryPath = `${configPath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporaryPath, content, { encoding: "utf8", mode: 0o600 });
+    await chmod(temporaryPath, 0o600).catch(() => undefined);
+    await rename(temporaryPath, configPath);
+  } finally {
+    await rm(temporaryPath, { force: true }).catch(() => undefined);
+  }
+  await chmod(configPath, 0o600).catch(() => undefined);
+}
+
+function shouldBackupClaudeCodeConfig(
+  content: string,
+  baseUrl: string,
+  apiKey: string,
+  modelId?: string,
+  managedValues?: Readonly<Record<string, string>>,
+): boolean {
+  if (!content) return true;
+  try {
+    const parsed = JSON.parse(content) as { env?: Record<string, unknown> };
+    const env = parsed.env ?? {};
+    if (env.ANTHROPIC_BASE_URL !== baseUrl
+      || env.ANTHROPIC_API_KEY !== apiKey
+      || (modelId ? env.ANTHROPIC_MODEL !== modelId : false)
+      || typeof env.ANTHROPIC_AUTH_TOKEN === "string") return true;
+    for (const [path, expected] of Object.entries(managedValues ?? {})) {
+      const value = path.split(".").filter(Boolean).reduce<unknown>((current, key) => (
+        current && typeof current === "object" ? (current as Record<string, unknown>)[key] : undefined
+      ), parsed);
+      if (value !== expected) return true;
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+function shouldDisableClaudeAutoModeServer(source: ClaudeCodeSourceSummary): boolean {
+  if (source.kind === "environment_gateway") return true;
+  if (!source.baseUrl) return false;
+  try {
+    return new URL(source.baseUrl).hostname.toLowerCase() !== "api.anthropic.com";
+  } catch {
+    // An invalid/custom endpoint will fail the real request later; keep the
+    // Claude Code client on the gateway-compatible path instead of enabling
+    // an official-only server check by accident.
+    return true;
+  }
+}
+
+async function ensureClaudeCodeConfigHistorySeeded(): Promise<void> {
+  const stateDir = getStateDir();
+  const existing = await listClaudeCodeConfigHistoryEntries(stateDir);
+  if (existing.length) return;
+
+  const snapshotPath = join(stateDir, "claude-code-agent", "agents", "global.json");
+  try {
+    const snapshot = JSON.parse(await readFile(snapshotPath, "utf8")) as { configPath?: unknown; originalContent?: unknown };
+    if (typeof snapshot.originalContent !== "string") return;
+    await appendClaudeCodeConfigHistoryEntry({
+      stateDir,
+      configPath: typeof snapshot.configPath === "string"
+        ? resolve(homedir(), snapshot.configPath)
+        : resolveClaudeCodeSettingsPath(homedir()),
+      source: "migration",
+      content: snapshot.originalContent,
+    });
+  } catch {
+    // No legacy Agent snapshot exists yet; the first managed connection will create one.
+  }
+}
+
+async function createClaudeCodeAgentAdapter(configPathOverride?: string) {
+  const runtime = await loadGatewayAgentRuntime();
+  const profile = runtime.BUILT_IN_AGENT_PROFILES.find((item) => item.id === "claude");
+  if (!profile) throw new Error("Claude Code Agent adapter is unavailable");
+  const effectiveConfigPath = configPathOverride && isAbsolute(configPathOverride)
+    ? configPathOverride
+    : resolveClaudeCodeSettingsPath(homedir());
+  const configDir = dirname(effectiveConfigPath);
+  const fs = runtime.createNodeAgentFileSystem(configDir, { additionalRoots: [getStateDir()] });
+  // The adapter is rooted at the effective Claude config directory, so its
+  // relative settings path must be settings.json rather than ~/.claude/... .
+  const adapter = runtime.createAgentAdapter({ ...profile, configPath: basename(effectiveConfigPath) }, {
+    fs,
+    stateDir: join(getStateDir(), "claude-code-agent"),
+  });
+  return { runtime, profile, adapter };
+}
+
+async function resolveClaudeCodeSourceSecret(
+  source: ClaudeCodeSourceSummary,
+  state: Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>,
+): Promise<string | undefined> {
+  if (source.kind === "environment_gateway") {
+    const status = (await getUsageRouterManager().getEnvironmentStatuses([source.environmentName]))[0];
+    return status?.localAgentAccessToken?.trim() || undefined;
+  }
+  const account = source.accountName ? state.envs[source.environmentName]?.accounts[source.accountName] : undefined;
+  return account ? extractProviderAccessTokenFromAuthData(account.authData) || undefined : undefined;
+}
+
+function resolveClaudeCodeAccountSource(
+  environmentName: string,
+  accountName: string,
+  account: {
+    name: string;
+    authMode: string;
+    authData?: Record<string, unknown>;
+    runtime: { providerAuthMethod?: string; model?: string; compatibilityUpstreamModel?: string };
+  },
+  gateway: GatewayEnvironmentState,
+): ClaudeCodeSourceSummary | undefined {
+  if (account.authMode !== "apikey" && account.runtime.providerAuthMethod !== "api_key") return undefined;
+  const secret = extractProviderAccessTokenFromAuthData(account.authData);
+  if (!secret) return undefined;
+  const secretRef = createAccountSecretRef(environmentName, accountName);
+  const credential = Object.values(gateway.credentials).find((item) => item.secretRef === secretRef && item.status !== "disabled");
+  if (!credential || !credential.supportedProtocols.includes("anthropic")) return undefined;
+  const provider = gateway.providers[credential.providerId];
+  const baseUrl = provider?.endpoints.anthropicMessages;
+  if (!provider || !baseUrl || !gatewayProviderSupportsProtocol(provider, "anthropic")) return undefined;
+  const models = Object.values(gateway.models)
+    .filter((model) => model.enabled && model.providerId === provider.id && model.protocols.includes("anthropic"))
+    .map((model): ClaudeCodeModelOption => ({ id: model.upstreamModelId, displayName: model.displayName }));
+  const configuredModel = account.runtime.model?.trim() || account.runtime.compatibilityUpstreamModel?.trim();
+  const modelOptions = models.length || !configuredModel
+    ? models
+    : [{ id: configuredModel, displayName: configuredModel }];
+  return {
+    id: claudeCodeAccountSourceId(environmentName, accountName),
+    kind: "account",
+    environmentName,
+    accountName,
+    displayName: `${environmentName} · ${account.name}`,
+    providerDisplayName: provider.displayName,
+    state: "ready",
+    baseUrl,
+    apiKeyPreview: maskClaudeCodeSecret(secret),
+    models: modelOptions,
+  };
 }
 
 export async function listAccountPools() {
@@ -1806,6 +2743,7 @@ export async function discoverGatewayAdminModels(input: { envName: string; provi
   await synchronizeEnvironmentGatewayModelCatalog({
     homePath: environment.path,
     gateway: nextGateway,
+    modelCatalog: await getModelCatalogStore().load(),
     environmentName: input.envName,
     diagnosticLogPath: resolveLogPath("switcher"),
     loadBundledCatalog: bundledCatalog ? async () => bundledCatalog : undefined,
@@ -2387,6 +3325,7 @@ export async function switchAccount(
   const runtime = await loadCoreRuntime();
   const state = await runtime.readLegacyState(getLegacyOptions());
   const selected = state.envs[envName]?.accounts[accountName];
+  assertDirectRemoteIdentityCompatibility(state, envName, accountName);
   let currentAppWindowCount: number | undefined;
   if (strategy === "multi-window") {
     currentAppWindowCount = await readDesiredAppWindowCount(envName);
@@ -3065,7 +4004,7 @@ export async function nativeLogin(request: {
   baseUrl?: string;
   credentialPayload?: string;
   sub2apiPayload?: string;
-  apiProtocol?: "responses" | "chat_completions";
+  apiProtocol?: "responses" | "chat_completions" | "anthropic";
   compatibilityEnabled?: boolean;
   upstreamModel?: string;
   reasoningProfile?: "auto" | "standard" | "reasoning_content" | "think_tags";
@@ -3097,7 +4036,7 @@ export interface ProviderCredentialImportRequest {
   accountId?: string;
   expiresAt?: number;
   baseUrl?: string;
-  apiProtocol?: "responses" | "chat_completions";
+  apiProtocol?: "responses" | "chat_completions" | "anthropic";
   requestHeaders?: Record<string, string>;
 }
 
@@ -3138,7 +4077,11 @@ export async function importProviderCredential(
     ?? definition?.endpoints[0];
   const baseUrl = request.baseUrl?.trim() || endpoint?.baseUrl;
   const apiProtocol = request.apiProtocol
-    ?? (endpoint?.protocol === "chat_completions" ? "chat_completions" : "responses");
+    ?? (endpoint?.protocol === "chat_completions"
+      ? "chat_completions"
+      : endpoint?.protocol === "anthropic"
+        ? "anthropic"
+        : "responses");
   const authJson: Record<string, unknown> = {
     provider_id: providerId,
     provider_auth_method: authMethod,
@@ -3449,10 +4392,154 @@ function getModelCatalogStore() {
   return createModelCatalogStore(join(getStateDir(), "custom-model-catalogs.json"));
 }
 
+async function reconcileLegacyModelCatalog(store = getModelCatalogStore()): Promise<void> {
+  let remap: Record<string, string>;
+  try {
+    const snapshot = await store.load();
+    remap = await buildLegacyModelProviderRemap(snapshot);
+  } catch {
+    // Catalog self-healing is best effort. A provider discovery/list request
+    // must remain usable even when an old Gateway document is unavailable.
+    return;
+  }
+  if (!Object.keys(remap).length) return;
+  try {
+    const result = await store.reconcileLegacyProviderIdentities(remap);
+    if (!result.changed) return;
+    await appendFile(resolveLogPath("switcher"), `${JSON.stringify({
+      at: new Date().toISOString(),
+      event: "model_catalog_migration",
+      migratedModels: result.migratedModels,
+      mergedModels: result.mergedModels,
+      backupPath: result.backupPath,
+    })}\n`, "utf8").catch(() => undefined);
+  } catch {
+    // Keep the catalog readable if a migration cannot be persisted. The next
+    // list/discovery pass will retry after the source state is available.
+  }
+}
+
+async function buildLegacyModelProviderRemap(
+  snapshot: ModelCatalogSnapshot,
+): Promise<Record<string, string>> {
+  const grouped = new Map<string, ModelCatalogEntry[]>();
+  for (const model of snapshot.models) {
+    const legacyProviderId = resolveLegacyGatewayProviderId(model.entry);
+    if (!legacyProviderId) continue;
+    const models = grouped.get(legacyProviderId) ?? [];
+    models.push(model.entry);
+    grouped.set(legacyProviderId, models);
+  }
+  if (!grouped.size) return {};
+
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const gateways = new Map<string, GatewayEnvironmentState>();
+  for (const environment of Object.values(state.envs)) {
+    if (environment.gateway?.gatewayId) gateways.set(environment.gateway.gatewayId, environment.gateway);
+  }
+  const discoveryCandidatesByUpstream = new Map<string, Set<string>>();
+  for (const discovery of Object.values(snapshot.accountModelDiscoveries ?? {})) {
+    for (const model of discovery.models) {
+      if (isLegacyGatewayProviderId(model.providerId)) continue;
+      const candidates = discoveryCandidatesByUpstream.get(model.upstreamModelId) ?? new Set<string>();
+      candidates.add(model.providerId);
+      discoveryCandidatesByUpstream.set(model.upstreamModelId, candidates);
+    }
+  }
+
+  const remap: Record<string, string> = {};
+  for (const [legacyProviderId, entries] of grouped) {
+    const gatewayId = parseLegacyGatewayId(legacyProviderId);
+    const gateway = gatewayId ? gateways.get(gatewayId) : undefined;
+    const candidates = new Set<string>();
+    let uniquelyResolved = true;
+    for (const entry of entries) {
+      const upstreamModelId = resolveCatalogEntryUpstreamModelId(entry);
+      if (!upstreamModelId) {
+        uniquelyResolved = false;
+        break;
+      }
+      const gatewayCandidates = gateway
+        ? new Set(
+            Object.values(gateway.models)
+              .filter((model) => model.upstreamModelId === upstreamModelId && model.enabled !== false)
+              .map((model) => resolveGatewayModelCatalogProviderId(gateway, model))
+              .filter((providerId): providerId is string => Boolean(providerId)),
+          )
+        : new Set<string>();
+      // A disabled/removed Gateway may no longer have a persisted environment
+      // document. A canonical discovery snapshot is still safe evidence when
+      // it is the only provider identity advertising this upstream model.
+      const modelCandidates = gatewayCandidates.size
+        ? gatewayCandidates
+        : discoveryCandidatesByUpstream.get(upstreamModelId) ?? new Set<string>();
+      if (modelCandidates.size !== 1) {
+        uniquelyResolved = false;
+        break;
+      }
+      candidates.add([...modelCandidates][0]!);
+    }
+    if (uniquelyResolved && candidates.size === 1) remap[legacyProviderId] = [...candidates][0]!;
+  }
+  return remap;
+}
+
+function resolveLegacyGatewayProviderId(entry: ModelCatalogEntry): string | undefined {
+  const providerId = typeof entry.provider_id === "string" ? entry.provider_id.trim() : "";
+  if (isLegacyGatewayProviderId(providerId)) return providerId;
+  for (const value of [entry.provider_model_key, entry.slug]) {
+    if (typeof value !== "string") continue;
+    const match = value.trim().match(/^(custom-openai:(?:127\.0\.0\.1|localhost)-\d+:gateways-[^:]+):/i);
+    if (match?.[1]) return match[1];
+  }
+  return undefined;
+}
+
+function isLegacyGatewayProviderId(value: string): boolean {
+  return /^custom-openai:(?:127\.0\.0\.1|localhost)-\d+:gateways-[^:]+$/i.test(value.trim());
+}
+
+function parseLegacyGatewayId(providerId: string): string | undefined {
+  return providerId.match(/^custom-openai:(?:127\.0\.0\.1|localhost)-\d+:gateways-(.+)$/i)?.[1];
+}
+
+function resolveCatalogEntryUpstreamModelId(entry: ModelCatalogEntry): string {
+  const configured = typeof entry.upstream_model_id === "string" ? entry.upstream_model_id.trim() : "";
+  if (configured) return configured;
+  const providerId = typeof entry.provider_id === "string" ? entry.provider_id.trim() : "";
+  const providerModelKey = typeof entry.provider_model_key === "string" ? entry.provider_model_key.trim() : "";
+  if (providerId && providerModelKey.startsWith(`${providerId}:`)) return providerModelKey.slice(providerId.length + 1).trim();
+  if (providerId && entry.slug.startsWith(`${providerId}:`)) return entry.slug.slice(providerId.length + 1).trim();
+  return entry.slug.trim();
+}
+
+function resolveGatewayModelCatalogProviderId(
+  gateway: GatewayEnvironmentState,
+  model: GatewayEnvironmentState["models"][string],
+): string | undefined {
+  const provider = gateway.providers[model.providerId];
+  if (!provider) return undefined;
+  const endpoint = model.protocols.map((protocol) => (
+    protocol === "chat_completions" ? provider.endpoints.chatCompletions
+      : protocol === "anthropic" ? provider.endpoints.anthropicMessages
+        : protocol === "gemini" ? provider.endpoints.gemini
+          : provider.endpoints.responses
+  )).find((value): value is string => Boolean(value?.trim()))
+    ?? provider.endpoints.responses
+    ?? provider.endpoints.chatCompletions
+    ?? provider.endpoints.anthropicMessages
+    ?? provider.endpoints.gemini;
+  if (!endpoint || isLocalRouterBaseUrl(endpoint)) return undefined;
+  const runtimeProviderId = provider.kind === "openai" ? "openai" : provider.id;
+  return resolveModelCatalogProviderId(runtimeProviderId, endpoint);
+}
+
 export async function listCustomModels() {
   const store = getModelCatalogStore();
   await ensureProviderDefaultModels(store);
   await ensureBundledModelCatalog(store);
+  await reconcileLegacyModelCatalog(store);
   return filterModelCatalogBindings(
     await store.load(),
     await loadKnownAccountKeys(),
@@ -3471,8 +4558,18 @@ export async function discoverAccountModels(envName: string, accountName: string
   const account = environment?.accounts[accountName];
   if (!environment || !account) throw new Error(`Account '${envName}/${accountName}' not found`);
 
-  const baseGateway = environment.gateway ?? await buildEnvironmentGatewayState(runtime, environment);
-  const providerId = resolveRuntimeProviderId(account);
+  // Recompile the gateway view before discovery as well.  A legacy persisted
+  // document can still bind this account to the generic OpenAI provider while
+  // the account runtime points at the local Gateway ingress.
+  const store = getModelCatalogStore();
+  const catalogSnapshot = await store.load();
+  const baseGateway = await buildEnvironmentGatewayState(runtime, environment, catalogSnapshot);
+  const compiledCredential = Object.values(baseGateway.credentials).find((credential) => (
+    credential.secretRef === createAccountSecretRef(envName, accountName)
+  ));
+  const providerId = compiledCredential?.providerId ?? resolveRuntimeProviderId(account, {
+    fallbackProviderId: catalogSnapshot.accountModelDiscoveries?.[accountModelBindingKey(envName, accountName)]?.providerId,
+  });
   const catalogIdentity = resolveCatalogProviderIdentity(environment, accountName, account, baseGateway);
   const catalogProviderId = catalogIdentity.providerId;
   const providerDisplayName = catalogIdentity.providerDisplayName;
@@ -3487,7 +4584,6 @@ export async function discoverAccountModels(envName: string, accountName: string
     gatewayProviderMismatch: persistedGatewayProviderId !== undefined && persistedGatewayProviderId !== providerId,
   };
   let appRefresh: ModelCatalogAppRefreshRequirement = { required: false, runningWindows: 0 };
-  const store = getModelCatalogStore();
   await withAppTargetLifecycleLock(() => store.saveAccountModelDiscovery({
     accountKey,
     providerId: catalogProviderId,
@@ -3535,6 +4631,7 @@ export async function discoverAccountModels(envName: string, accountName: string
         models,
         discoveredAt: new Date().toISOString(),
       });
+      await reconcileLegacyModelCatalog(store);
       // Keep the final discovery write and its projected gateway catalog in
       // the same critical section as App launch and binding mutations.
       // Discovery can add the model that the user is about to bind. If the
@@ -3753,7 +4850,7 @@ export async function setAccountModelBindings(accountKey: string, modelIds: stri
       // qualified alias so the same bundled model cannot collide with the
       // official model slug in the gateway catalog.
       if (hasBundledSelection && account.authMode === "auth") {
-        return store.setAccountBindings(accountKey, modelIds);
+        return store.setAccountBindings(accountKey, modelIds, undefined, true);
       }
       const catalogIdentity = resolveCatalogProviderIdentity(environment!, accountName, account);
       return store.setAccountBindingsFromCatalog({
@@ -3762,9 +4859,10 @@ export async function setAccountModelBindings(accountKey: string, modelIds: stri
         providerId: catalogIdentity.providerId,
         ...(catalogIdentity.providerDisplayName ? { providerDisplayName: catalogIdentity.providerDisplayName } : {}),
         protocol: account.authMode === "auth" ? "responses" : account.runtime.apiProtocol ?? "responses",
+        preserveHistoricalBindings: true,
       });
     }
-    return store.setAccountBindings(accountKey, modelIds);
+    return store.setAccountBindings(accountKey, modelIds, undefined, true);
   }, accountKey);
   return {
     snapshot: filterModelCatalogBindings(snapshot, await loadKnownAccountKeys()),
@@ -3921,6 +5019,7 @@ async function resynchronizeActiveEnvironmentGatewaysUnlocked(
       await synchronizeEnvironmentGatewayModelCatalog({
         homePath: environment.path,
         gateway,
+        modelCatalog: await getModelCatalogStore().load(),
         environmentName: environment.name,
         diagnosticLogPath: resolveLogPath("switcher"),
         loadBundledCatalog: bundledCatalog ? async () => bundledCatalog : undefined,
@@ -4202,6 +5301,13 @@ async function openCommandInPreferredTerminalOnce(
   const repoRoot = getRepoRoot();
   const codexHome = await resolveCliTargetHome();
   const codexBin = await requireCodexCliPath();
+  const launchRuntime = await loadCoreRuntime();
+  const launchState = await launchRuntime.readLegacyState(getLegacyOptions());
+  const launchPointer = launchState.targets.cli;
+  const launchAccount = launchState.envs[launchPointer.env]?.accounts[launchPointer.account];
+  const apiKeySourcePath = launchAccount?.authData && readAuthStringField(launchAccount.authData, "OPENAI_API_KEY")
+    ? join(getStateDir(), "env-accounts", launchPointer.env, launchPointer.account, "auth.json")
+    : undefined;
   const launchDirectory = strategy === "current-window"
     ? undefined
     : await resolveCliWorkingDirectory(workingDirectory);
@@ -4234,6 +5340,7 @@ async function openCommandInPreferredTerminalOnce(
     launchMode: strategy,
     args: codexArgs,
     terminalId: terminalSettings.selectedId,
+    apiKeySourcePath,
   });
   await appendTerminalLaunchDebug(launchId, "plan", {
     platform: plan.platform,
@@ -4347,6 +5454,7 @@ function buildCliTerminalLaunchPlan(input: {
   launchMode?: "current-window" | "new-window";
   args?: string[];
   terminalId?: CliTerminalId;
+  apiKeySourcePath?: string;
 }): CliTerminalLaunchPlan {
   const platform = detectPlatformLocal(input.platform);
   const codexArgs = input.args ?? [];
@@ -4361,6 +5469,7 @@ function buildCliTerminalLaunchPlan(input: {
       env: input.env,
       args: codexArgs,
       terminalId: input.terminalId,
+      apiKeySourcePath: input.apiKeySourcePath,
     });
   }
 
@@ -4370,6 +5479,7 @@ function buildCliTerminalLaunchPlan(input: {
     codexHome: input.codexHome,
     codexBin: input.codexBin,
     args: codexArgs,
+    apiKeySourcePath: input.apiKeySourcePath,
   });
 
   if (platform === "macos") {
@@ -4420,6 +5530,7 @@ function buildWindowsCliTerminalLaunchPlan(input: {
   env?: NodeJS.ProcessEnv;
   args: string[];
   terminalId?: CliTerminalId;
+  apiKeySourcePath?: string;
 }): CliTerminalLaunchPlan {
   const launcher = input.terminalId ?? (input.env?.CODEX_SWITCHER_WINDOWS_CLI_LAUNCHER || "powershell").toLowerCase();
   const cmdCommand = buildWindowsCmdLaunchCommand(input);
@@ -4492,19 +5603,20 @@ function buildUnixCliLaunchCommand(input: {
   codexHome: string;
   codexBin: string;
   args: string[];
+  apiKeySourcePath?: string;
 }): string {
   const parts = [
     input.workingDirectory ? `cd ${quoteShellArg(input.workingDirectory)}` : "",
     `export CODEX_HOME=${quoteShellArg(input.codexHome)}`,
-    buildUnixApiKeyExport(input.codexHome),
+    buildUnixApiKeyExport(input.codexHome, input.apiKeySourcePath),
     [quoteShellArg(input.codexBin), ...input.args.map(quoteShellArg)].join(" "),
   ].filter(Boolean);
   return parts.join(" && ");
 }
 
-function buildUnixApiKeyExport(codexHome: string): string {
+function buildUnixApiKeyExport(codexHome: string, apiKeySourcePath?: string): string {
   const script = 'const fs=require("node:fs");const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8")).OPENAI_API_KEY||"";process.stdout.write(String(value));';
-  const command = ["node", "-e", quoteShellArg(script), quoteShellArg(join(codexHome, "auth.json"))].join(" ");
+  const command = ["node", "-e", quoteShellArg(script), quoteShellArg(apiKeySourcePath ?? join(codexHome, "auth.json"))].join(" ");
   return `export OPENAI_API_KEY="$(${command})"`;
 }
 
@@ -4514,11 +5626,13 @@ function buildWindowsCmdLaunchCommand(input: {
   codexHome: string;
   codexBin: string;
   args: string[];
+  apiKeySourcePath?: string;
 }): string {
+  const authPath = input.apiKeySourcePath ?? join(input.codexHome, "auth.json");
   return [
     `cd /d "${escapeCmdDoubleQuoted(input.workingDirectory ?? input.repoRoot)}"`,
     `set "CODEX_HOME=${escapeCmdDoubleQuoted(input.codexHome)}"`,
-    `for /f "usebackq delims=" %A in (\`powershell.exe -NoProfile -Command "(Get-Content -Raw '${escapePowerShellSingleQuoted(join(input.codexHome, "auth.json"))}' | ConvertFrom-Json).OPENAI_API_KEY"\`) do set "OPENAI_API_KEY=%A"`,
+    `for /f "usebackq delims=" %A in (\`powershell.exe -NoProfile -Command "(Get-Content -Raw '${escapePowerShellSingleQuoted(authPath)}' | ConvertFrom-Json).OPENAI_API_KEY"\`) do set "OPENAI_API_KEY=%A"`,
     [quoteCmdArg(input.codexBin), ...input.args.map(quoteCmdArg)].join(" "),
   ].join(" && ");
 }
@@ -4529,7 +5643,9 @@ function buildWindowsPowerShellLaunchCommand(input: {
   codexHome: string;
   codexBin: string;
   args: string[];
+  apiKeySourcePath?: string;
 }): string {
+  const authPath = input.apiKeySourcePath ?? join(input.codexHome, "auth.json");
   const invocation = [
     `& '${escapePowerShellSingleQuoted(input.codexBin)}'`,
     ...input.args.map((arg) => `'${escapePowerShellSingleQuoted(arg)}'`),
@@ -4537,7 +5653,7 @@ function buildWindowsPowerShellLaunchCommand(input: {
   return [
     `Set-Location '${escapePowerShellSingleQuoted(input.workingDirectory ?? input.repoRoot)}'`,
     `$env:CODEX_HOME='${escapePowerShellSingleQuoted(input.codexHome)}'`,
-    `$env:OPENAI_API_KEY=(Get-Content -Raw '${escapePowerShellSingleQuoted(join(input.codexHome, "auth.json"))}' | ConvertFrom-Json).OPENAI_API_KEY`,
+    `$env:OPENAI_API_KEY=(Get-Content -Raw '${escapePowerShellSingleQuoted(authPath)}' | ConvertFrom-Json).OPENAI_API_KEY`,
     invocation,
   ].join("; ");
 }
@@ -4556,8 +5672,9 @@ async function applyTargetHomeStateWithHistory(
   state: Awaited<ReturnType<CoreRuntime["readLegacyState"]>>,
   target: "cli" | "app",
   source: EnvFileHistorySource,
+  authProjection?: "selected" | "preserve" | "clear",
 ): Promise<void> {
-  await withAppTargetLifecycleLock(() => applyTargetHomeStateWithHistoryUnlocked(runtime, state, target, source));
+  await withAppTargetLifecycleLock(() => applyTargetHomeStateWithHistoryUnlocked(runtime, state, target, source, authProjection));
 }
 
 async function applyTargetHomeStateWithHistoryUnlocked(
@@ -4565,6 +5682,7 @@ async function applyTargetHomeStateWithHistoryUnlocked(
   state: Awaited<ReturnType<CoreRuntime["readLegacyState"]>>,
   target: "cli" | "app",
   source: EnvFileHistorySource,
+  authProjection?: "selected" | "preserve" | "clear",
 ): Promise<void> {
   const envName = state.targets[target].env;
   const env = state.envs[envName];
@@ -4581,6 +5699,7 @@ async function applyTargetHomeStateWithHistoryUnlocked(
     await runtime.applyTargetHomeState({
       state,
       target,
+      authProjection: authProjection ?? resolveTargetHomeAuthProjection(state, target),
       ...(gatewayBaseUrl ? { gatewayBaseUrl } : {}),
     });
     await synchronizeTargetModelCatalog(runtime, state, target, env.path);
@@ -4590,6 +5709,38 @@ async function applyTargetHomeStateWithHistoryUnlocked(
   }
   const after = await readEnvFileSnapshot(env.path);
   await recordEnvFileDiffHistory(envName, before, after, source);
+}
+
+function resolveTargetHomeAuthProjection(
+  state: Awaited<ReturnType<CoreRuntime["readLegacyState"]>>,
+  target: "cli" | "app",
+): "selected" | "preserve" {
+  const pointer = state.targets[target];
+  const account = state.envs[pointer.env]?.accounts[pointer.account];
+  // Official ChatGPT accounts are the model identity and must be projected.
+  // API-key/provider accounts only change model routing; keep the existing
+  // official auth cache available for remote connections.
+  return account?.authMode === "auth" ? "selected" : "preserve";
+}
+
+/**
+ * A direct Codex home cannot represent two AUTH identities: auth.json is both
+ * the model login cache and the identity the desktop host uses for remote
+ * control. API-key accounts and gateway routes do not have that limitation.
+ */
+function assertDirectRemoteIdentityCompatibility(
+  state: Awaited<ReturnType<CoreRuntime["readLegacyState"]>>,
+  envName: string,
+  accountName: string,
+): void {
+  const environment = state.envs[envName];
+  const selected = environment?.accounts[accountName];
+  const remoteAccountName = environment?.remoteControl?.accountName;
+  if (!environment || !selected || !remoteAccountName) return;
+  if (environment.gateway?.mode === "gateway") return;
+  if (selected.authMode === "auth" && selected.name !== remoteAccountName) {
+    throw new Error("同一环境的订阅账号与手机远程账号必须一致，请拆分环境");
+  }
 }
 
 async function synchronizeTargetModelCatalog(
@@ -4621,6 +5772,7 @@ async function synchronizeTargetModelCatalog(
     await synchronizeEnvironmentGatewayModelCatalog({
       homePath,
       gateway,
+      modelCatalog: await getModelCatalogStore().load(),
       environmentName: env.name,
       diagnosticLogPath: resolveLogPath("switcher"),
       loadBundledCatalog,
@@ -4869,6 +6021,7 @@ async function nativeAuthLogin(request: {
   if (!env) {
     throw new Error(`Env '${request.envName}' not found`);
   }
+  assertDirectRemoteIdentityCompatibility(state, request.envName, request.account);
 
   await mkdir(env.path, { recursive: true });
   const codexBin = await requireCodexCliPath();
@@ -4892,6 +6045,7 @@ async function nativeAuthLogin(request: {
     },
     authJsonContent: authRaw,
     target: request.target,
+    authProjection: "selected",
   });
   await discoverAccountModels(request.envName, request.account);
 
@@ -4909,7 +6063,7 @@ async function nativeApiKeyLogin(request: {
   apiKey?: string;
   baseUrlMode?: "default" | "custom";
   baseUrl?: string;
-  apiProtocol?: "responses" | "chat_completions";
+  apiProtocol?: "responses" | "chat_completions" | "anthropic";
   compatibilityEnabled?: boolean;
   upstreamModel?: string;
   reasoningProfile?: "auto" | "standard" | "reasoning_content" | "think_tags";
@@ -4944,6 +6098,17 @@ async function nativeApiKeyLogin(request: {
     ? existingCompatibilityRoute?.originalBaseUrl ?? requestedBaseUrl
     : requestedBaseUrl);
   const hasCustomBaseUrl = providerBaseUrl !== undefined || request.baseUrlMode === "custom";
+  const isOfficialApiKeyLogin = !hasCustomBaseUrl && (!providerId || providerId === "openai");
+  // Keep the environment's explicitly selected ChatGPT identity in auth.json
+  // when this API-key account is also used for model calls. The key itself is
+  // injected through OPENAI_API_KEY for direct launches, or hydrated by the
+  // environment gateway; projecting it into auth.json would log the desktop
+  // host out of the account used for remote control.
+  const authProjection = env.remoteControl?.accountName
+    ? "preserve" as const
+    : isOfficialApiKeyLogin
+      ? "selected" as const
+      : "preserve" as const;
   if (existing?.runtime.compatibilityRouteEnabled === true || existingCompatibilityRoute) {
     await disableAccountCompatibility(request.envName, request.account);
   }
@@ -4967,6 +6132,7 @@ async function nativeApiKeyLogin(request: {
     },
     authJsonContent: `${JSON.stringify({ OPENAI_API_KEY: request.apiKey.trim() }, null, 2)}\n`,
     target: request.target,
+    authProjection,
   });
 
   await ensureProviderDefaultModels(getModelCatalogStore(), providerId);
@@ -5045,7 +6211,7 @@ async function saveAccountArtifacts(options: {
     preferredAuthMethod: "chatgpt" | "apikey";
     openaiBaseUrlMode: "default" | "custom";
     openaiBaseUrl?: string;
-    apiProtocol?: "responses" | "chat_completions";
+    apiProtocol?: "responses" | "chat_completions" | "anthropic";
     compatibilityRouteEnabled?: boolean;
     compatibilityUpstreamModel?: string;
     compatibilityReasoningProfile?: "auto" | "standard" | "reasoning_content" | "think_tags";
@@ -5055,6 +6221,7 @@ async function saveAccountArtifacts(options: {
   };
   authJsonContent: string;
   target: "cli" | "app" | "both" | "none";
+  authProjection?: "selected" | "preserve" | "clear";
 }): Promise<void> {
   const runtime = await loadCoreRuntime();
   let state = await runtime.readLegacyState(getLegacyOptions());
@@ -5091,7 +6258,13 @@ async function saveAccountArtifacts(options: {
       env: next.targets[target].env,
       account: next.targets[target].account,
     });
-    await applyTargetHomeStateWithHistory(runtime, next, target, target === "cli" ? "switch-cli" : "switch-app");
+    await applyTargetHomeStateWithHistory(
+      runtime,
+      next,
+      target,
+      target === "cli" ? "switch-cli" : "switch-app",
+      options.authProjection,
+    );
     state = next;
   }
 
@@ -5721,6 +6894,10 @@ export const __testUtils = {
   resolveLogPath,
   deriveAuthIdentityKey,
   resolveCatalogProviderIdentityForTest: resolveCatalogProviderIdentity,
+  resolvePreviewModelIdForTest: resolvePreviewModelId,
+  selectGatewayRouteBindingForModelForTest: selectGatewayRouteBindingForModel,
+  extractProviderAccessTokenForTest: extractProviderAccessTokenFromAuthData,
+  shouldDisableClaudeAutoModeServerForTest: shouldDisableClaudeAutoModeServer,
   saveAccountArtifactsForTest: saveAccountArtifacts,
   parseExternalCodexCredentials,
   buildCodexChatGptAuthJson,
@@ -5835,6 +7012,16 @@ async function removeAccountDirect(
     recursive: true,
     force: true,
   });
+
+  // Keep the legacy environment metadata in sync with the canonical state.
+  // Otherwise deleting the selected remote account would make the next read
+  // resurrect a dangling remoteControl.accountName from env-meta.
+  if (state.envs[input.envName]?.remoteControl?.accountName === input.accountName) {
+    await runtime.setLegacyEnvRemoteAccount({
+      stateDir: getStateDir(),
+      envName: input.envName,
+    });
+  }
 
   await syncEnvironmentRouteIfEnabled(input.envName);
 
@@ -6060,16 +7247,26 @@ function extractAccessTokenFromAuthData(authData: Record<string, unknown> | unde
 }
 
 function extractProviderAccessTokenFromAuthData(authData: Record<string, unknown> | undefined): string {
-  const direct = readAuthStringField(authData, "OPENAI_API_KEY")
+  // Claude Code accepts both Anthropic's bearer-style AUTH_TOKEN and its
+  // x-api-key API key. Prefer the native Anthropic fields before legacy
+  // provider fields so imported/manual account files do not silently select a
+  // stale OpenAI-compatible token.
+  const direct = readAuthStringField(authData, "ANTHROPIC_AUTH_TOKEN")
+    ?? readAuthStringField(authData, "ANTHROPIC_API_KEY")
+    ?? readAuthStringField(authData, "OPENAI_API_KEY")
     ?? readAuthStringField(authData, "access_token");
   if (direct) return direct;
   const rawTokens = authData?.tokens;
   if (!rawTokens) return "";
   try {
     const parsed = typeof rawTokens === "string"
-      ? JSON.parse(rawTokens) as { access_token?: string }
-      : rawTokens as { access_token?: string };
-    return parsed.access_token?.trim() || "";
+      ? JSON.parse(rawTokens) as Record<string, unknown>
+      : rawTokens as Record<string, unknown>;
+    return readAuthStringField(parsed, "ANTHROPIC_AUTH_TOKEN")
+      ?? readAuthStringField(parsed, "ANTHROPIC_API_KEY")
+      ?? readAuthStringField(parsed, "OPENAI_API_KEY")
+      ?? readAuthStringField(parsed, "access_token")
+      ?? "";
   } catch {
     return "";
   }
@@ -6991,6 +8188,7 @@ async function launchAppTargetUnlocked(
           await runtime.applyTargetHomeState({
             state: projectionState,
             target: "app",
+            authProjection: resolveTargetHomeAuthProjection(projectionState, "app"),
             ...(gatewayBaseUrl ? { gatewayBaseUrl } : {}),
             localRouterAuthMode: "static",
           });

@@ -10,6 +10,7 @@ import {
   isModelAvailableForAccount,
   normalizeCustomModelInput,
   type ModelCatalogEntry,
+  type ModelCatalogSnapshot,
   type ModelCatalogStore,
 } from "./model-catalog-store.js";
 import { resolveProviderModelPreset } from "./provider-model-presets.js";
@@ -216,13 +217,14 @@ export async function synchronizeAccountModelCatalog(options: {
 export async function synchronizeEnvironmentGatewayModelCatalog(options: {
   homePath: string;
   gateway: GatewayEnvironmentState;
+  modelCatalog?: ModelCatalogSnapshot;
   loadBundledCatalog?: () => Promise<BundledModelCatalog>;
   diagnosticLogPath?: string;
   environmentName?: string;
 }): Promise<{ enabled: boolean; catalogPath?: string }> {
   const configPath = join(options.homePath, "config.toml");
   const catalogPath = join(options.homePath, "model-catalogs", "codex-switcher-gateway-models.json");
-  const gatewayEntries = buildGatewayModelCatalog(options.gateway);
+  const gatewayEntries = buildGatewayModelCatalog(options.gateway, options.modelCatalog);
   if (gatewayEntries.length === 0) {
     await removeModelCatalogConfig(configPath);
     await rm(catalogPath, { force: true });
@@ -234,11 +236,18 @@ export async function synchronizeEnvironmentGatewayModelCatalog(options: {
   const bundledModels = bundled.models.map(normalizeCodexCatalogEntry);
   const bundledSlugs = new Set(bundledModels.map((model) => model.slug));
   const collisions = gatewayEntries.filter((entry) => bundledSlugs.has(entry.slug));
-  if (collisions.length) {
+  const unifiedIdentity = Object.keys(options.gateway.routeGroups).some((id) => id.startsWith("unified-route-group:"));
+  if (collisions.length && !unifiedIdentity) {
     throw new Error(`Gateway model catalog conflicts with bundled models: ${collisions.map((entry) => entry.slug).join(", ")}`);
   }
+  // In unified mode the bundled Codex catalog already owns the logical model
+  // slug. The gateway route group supplies the provider/account members; do
+  // not write a second catalog entry that would make Codex show duplicates.
+  const filteredGatewayEntries = unifiedIdentity
+    ? gatewayEntries.filter((entry) => !bundledSlugs.has(entry.slug))
+    : gatewayEntries;
   try {
-    await atomicWriteJson(catalogPath, { models: [...bundledModels, ...gatewayEntries] });
+    await atomicWriteJson(catalogPath, { models: [...bundledModels, ...filteredGatewayEntries] });
     await setModelCatalogConfig(configPath, catalogPath);
   } catch (error) {
     await appendCatalogDiagnostic(options.diagnosticLogPath, {
@@ -251,7 +260,7 @@ export async function synchronizeEnvironmentGatewayModelCatalog(options: {
     });
     throw error;
   }
-  await appendCatalogDiagnostic(options.diagnosticLogPath, { environmentName: options.environmentName, mode: "gateway", status: "synchronized", catalogPath, modelCount: bundledModels.length + gatewayEntries.length, gatewayModelCount: gatewayEntries.length });
+  await appendCatalogDiagnostic(options.diagnosticLogPath, { environmentName: options.environmentName, mode: "gateway", status: "synchronized", catalogPath, modelCount: bundledModels.length + filteredGatewayEntries.length, gatewayModelCount: filteredGatewayEntries.length, deduplicatedGatewayModelCount: gatewayEntries.length - filteredGatewayEntries.length });
   return { enabled: true, catalogPath };
 }
 

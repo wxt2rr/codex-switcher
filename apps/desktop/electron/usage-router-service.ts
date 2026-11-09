@@ -55,6 +55,7 @@ import { handleChatCompatibilityRequest } from "./openai-chat-compat/compatibili
 import { loadGatewayPluginRuntime } from "./core-runtime.js";
 import { resolvePluginDataFallbackDir, resolveProviderPluginDataDir } from "./provider-plugin-runtime.js";
 import { closeUpstreamProxyAgents, fetchWithOptionalProxy, normalizeUpstreamProxyUrl, resolveUpstreamProxy, type UpstreamProxySource } from "./upstream-proxy.js";
+import { GatewayDiagnosticsController, type GatewayDiagnosticCapture, type GatewayDiagnosticsLevel } from "./gateway-diagnostics.js";
 import {
   convertGatewayRequestAtRuntime,
   convertGatewayResponseAtRuntime,
@@ -688,6 +689,10 @@ class UsageTap {
     }
   }
 
+  body(): Buffer {
+    return Buffer.from(this.text, "utf8");
+  }
+
   errorSummary(status: number): string | null {
     return this.streamError ?? (status >= 400 ? extractSafeErrorMessage(this.text, `Upstream returned HTTP ${status}`) : null);
   }
@@ -1244,6 +1249,7 @@ async function proxyAccountPoolRequest(
   persistCapabilityObservations?: () => void,
   forceResponsesStoreFalse = false,
   gatewayResetAdmission?: { url: string; token: string },
+  diagnostics?: GatewayDiagnosticCapture,
 ): Promise<void> {
   const startedAt = Date.now();
   const body = bodyOverride ?? (request.method === "GET" || request.method === "HEAD" ? Buffer.alloc(0) : await readRequestBodyBuffer(request));
@@ -1346,6 +1352,12 @@ async function proxyAccountPoolRequest(
       finalConversionQuality = converted.quality;
       finalConversionDiagnostics = converted.diagnostics;
     }
+    diagnostics?.recordTransformedBody(candidateBody, `upstream_attempt_${attempt + 1}`, {
+      accountName: member.accountName,
+      routeId: effectiveRoute.routeId,
+      upstreamModel: effectiveUpstreamModel ?? null,
+      upstreamProtocol: effectiveRoute.protocol,
+    });
     const upstreamSuffix = pool.protocol !== effectiveRoute.protocol
       ? mapGatewaySuffix(routeSuffix, pool.protocol, effectiveRoute.protocol, effectiveUpstreamModel)
       : routeSuffix;
@@ -1397,6 +1409,12 @@ async function proxyAccountPoolRequest(
       }, proxy.url);
     try {
       upstreamResponse = await executeCandidate();
+      diagnostics?.recordUpstreamResponse(upstreamResponse, `upstream_attempt_${attempt + 1}`, {
+        accountName: member.accountName,
+        routeId: effectiveRoute.routeId,
+        upstreamModel: effectiveUpstreamModel ?? null,
+        upstreamProtocol: effectiveRoute.protocol,
+      });
       // Learn precise capability rejections and replay the same account with
       // only the incompatible fields removed. A provider may report one
       // unsupported field at a time, so allow a bounded sequence of repairs.
@@ -1422,6 +1440,12 @@ async function proxyAccountPoolRequest(
         }
         await upstreamResponse.body?.cancel();
         upstreamResponse = await executeCandidate();
+        diagnostics?.recordUpstreamResponse(upstreamResponse, `upstream_attempt_${attempt + 1}_capability_retry_${capabilityRetry + 1}`, {
+          accountName: member.accountName,
+          routeId: effectiveRoute.routeId,
+          upstreamModel: effectiveUpstreamModel ?? null,
+          upstreamProtocol: effectiveRoute.protocol,
+        });
       }
       // Credential pools use the same protocol conversion rules as direct
       // Gateway routes. In particular, a Chat Completions pool member backed
@@ -1436,6 +1460,12 @@ async function proxyAccountPoolRequest(
             candidateBody = streamingBody;
             candidateParsedBody = parseRequestBody(candidateBody) ?? candidateParsedBody;
             upstreamResponse = await executeCandidate();
+            diagnostics?.recordUpstreamResponse(upstreamResponse, `upstream_attempt_${attempt + 1}_stream_retry`, {
+              accountName: member.accountName,
+              routeId: effectiveRoute.routeId,
+              upstreamModel: effectiveUpstreamModel ?? null,
+              upstreamProtocol: effectiveRoute.protocol,
+            });
             if (upstreamResponse.ok && upstreamResponse.headers.get("content-type")?.includes("text/event-stream")) {
               const bridged = await convertGatewayResponseStreamToJsonAtRuntime(upstreamResponse, effectiveRoute.protocol, pool.protocol, {
                 originModelName: typeof parsedBody?.model === "string" ? parsedBody.model : undefined,
@@ -1584,6 +1614,7 @@ async function proxyAccountPoolRequest(
     try {
       await relayResponse(upstreamResponse, response, { push(chunk) { didRelayBytes = true; tap.push(chunk); } });
       finalUsage = tap.finish(); finalResponseId = tap.responseId(); finalStatus = upstreamResponse.status;
+      diagnostics?.recordFinalResponse({ status: upstreamResponse.status, headers: upstreamResponse.headers, body: tap.body(), usage: finalUsage, errorMessage: tap.errorSummary(upstreamResponse.status) });
       finalTimeToFirstTokenMs = tap.timeToFirstTokenMs(startedAt);
       finalRetryAfterMs = retryAfterMs(upstreamResponse) ?? null;
       finalErrorMessage = tap.errorSummary(upstreamResponse.status);
@@ -1669,6 +1700,7 @@ async function proxyRequest(
   history?: ConversationHistoryStore,
   historyScopeId?: string,
   forceResponsesStoreFalse = false,
+  diagnostics?: GatewayDiagnosticCapture,
 ): Promise<void> {
   const startedAt = Date.now();
   const candidates = [route, ...fallbackRoutes.filter((candidate) => candidate.routeId !== route.routeId)];
@@ -1744,6 +1776,12 @@ async function proxyRequest(
         conversionTrace = converted;
       }
     }
+    diagnostics?.recordTransformedBody(candidateBody, `upstream_attempt_${index + 1}`, {
+      accountName: candidate.accountName,
+      routeId: candidate.routeId,
+      upstreamModel: candidate.upstreamModel ?? null,
+      upstreamProtocol: candidate.protocol,
+    });
     const hasBody = candidateBody ? candidateBody.length > 0 : !bodyWasBuffered && request.method !== "GET" && request.method !== "HEAD";
     const estimatedTokens = candidateBody?.length ? Math.max(1, Math.ceil(candidateBody.length / 4)) : 1;
     const attemptStartedAt = Date.now();
@@ -1786,6 +1824,12 @@ async function proxyRequest(
           ...(hasBody ? { duplex: "half" } as RequestInit : {}),
         }, proxy.url);
       let response = await sendCandidate();
+      diagnostics?.recordUpstreamResponse(response, `upstream_attempt_${index + 1}`, {
+        accountName: candidate.accountName,
+        routeId: candidate.routeId,
+        upstreamModel: candidate.upstreamModel ?? null,
+        upstreamProtocol: candidate.protocol,
+      });
       let responseAlreadyConverted = false;
       // Providers can reject sampling fields one at a time. Learn each exact
       // mismatch and repair the same route, but cap the loop to avoid turning
@@ -1801,6 +1845,12 @@ async function proxyRequest(
         await response.body?.cancel();
         candidateBody = Buffer.from(JSON.stringify(filtered.body));
         response = await sendCandidate();
+        diagnostics?.recordUpstreamResponse(response, `upstream_attempt_${index + 1}_capability_retry_${capabilityRetry + 1}`, {
+          accountName: candidate.accountName,
+          routeId: candidate.routeId,
+          upstreamModel: candidate.upstreamModel ?? null,
+          upstreamProtocol: candidate.protocol,
+        });
       }
       // A number of Responses-compatible providers expose only the SSE
       // transport and reject a non-streaming request. Preserve the client's
@@ -1816,6 +1866,12 @@ async function proxyRequest(
             await response.body?.cancel();
             candidateBody = streamingBody;
             response = await sendCandidate();
+            diagnostics?.recordUpstreamResponse(response, `upstream_attempt_${index + 1}_stream_retry`, {
+              accountName: candidate.accountName,
+              routeId: candidate.routeId,
+              upstreamModel: candidate.upstreamModel ?? null,
+              upstreamProtocol: candidate.protocol,
+            });
             if (response.ok && response.headers.get("content-type")?.includes("text/event-stream")) {
               const bridged = await convertGatewayResponseStreamToJsonAtRuntime(response, candidate.protocol, incomingProtocol!, {
                 originModelName: incomingModel,
@@ -2011,6 +2067,7 @@ async function proxyRequest(
   const completedAt = Date.now();
   const usage = tap.finish();
   const finalErrorMessage = tap.errorSummary(upstreamResponse.status);
+  diagnostics?.recordFinalResponse({ status: upstreamResponse.status, headers: upstreamResponse.headers, body: tap.body(), usage, errorMessage: finalErrorMessage });
   await store.recordUsage({
     requestId: randomUUID(), routeId: selectedRoute.routeId, startedAt, completedAt,
     envName: selectedRoute.envName, accountName: selectedRoute.accountName, upstreamBaseUrl: selectedRoute.upstreamBaseUrl,
@@ -2405,6 +2462,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
   }
   const portStatePath = join(options.stateDir, "router-port.json");
   const eventLogPath = join(options.stateDir, "router-events.jsonl");
+  const diagnostics = new GatewayDiagnosticsController(join(options.stateDir, "gateway-diagnostics.jsonl"));
   const capabilityStatePath = join(options.stateDir, "capability-observations.json");
   const capabilityRegistry = capabilityRuntimeReady ? createCapabilityRegistry() : undefined;
   try {
@@ -2525,6 +2583,34 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           }
           events.sort((left, right) => Number(right.at ?? 0) - Number(left.at ?? 0));
           return sendJson(response, 200, events.slice(0, limit));
+        }
+        if (url.pathname === "/admin/diagnostics" && request.method === "GET") {
+          return sendJson(response, 200, diagnostics.status());
+        }
+        if (url.pathname === "/admin/diagnostics" && request.method === "PUT") {
+          const payload = await readJson(request) as Record<string, unknown>;
+          const level = payload.level === undefined ? undefined : payload.level === "full" ? "full" as GatewayDiagnosticsLevel : payload.level === "summary" ? "summary" as GatewayDiagnosticsLevel : null;
+          if (level === null) return sendJson(response, 400, { error: "Diagnostics level must be 'summary' or 'full'" });
+          const enabled = payload.enabled === undefined ? undefined : payload.enabled === true;
+          if (payload.enabled !== undefined && typeof payload.enabled !== "boolean") return sendJson(response, 400, { error: "Diagnostics enabled must be boolean" });
+          if (payload.captureResponseBody !== undefined && typeof payload.captureResponseBody !== "boolean") return sendJson(response, 400, { error: "captureResponseBody must be boolean" });
+          const result = diagnostics.configure({
+            ...(enabled !== undefined ? { enabled } : {}),
+            ...(level ? { level } : {}),
+            ...(typeof payload.maxRequests === "number" ? { maxRequests: payload.maxRequests } : {}),
+            ...(typeof payload.ttlMs === "number" ? { ttlMs: payload.ttlMs } : {}),
+            ...(payload.captureResponseBody !== undefined ? { captureResponseBody: payload.captureResponseBody as boolean } : {}),
+            ...(typeof payload.maxBodyBytes === "number" ? { maxBodyBytes: payload.maxBodyBytes } : {}),
+          });
+          return sendJson(response, 200, result);
+        }
+        if (url.pathname === "/admin/diagnostics" && request.method === "DELETE") {
+          return sendJson(response, 200, diagnostics.disable());
+        }
+        if (url.pathname === "/admin/diagnostics/records" && request.method === "GET") {
+          const requestId = url.searchParams.get("requestId") || undefined;
+          const limit = Number(url.searchParams.get("limit"));
+          return sendJson(response, 200, await diagnostics.records({ requestId, limit: Number.isFinite(limit) ? limit : undefined }));
         }
         if (url.pathname === "/admin/capabilities" && request.method === "GET") {
           return sendJson(response, 200, capabilityRegistry ? capabilityObservationEntries(capabilityRegistry) : []);
@@ -2760,7 +2846,16 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
             });
           }
           const accessToken = gatewayAccessTokens.get(gatewayId);
-          if (!accessToken || !authorizeRouteToken(request.headers.authorization, accessToken)) {
+          // Claude Code and the Anthropic SDK send ANTHROPIC_API_KEY as the
+          // standard `x-api-key` header, while Codex/OpenAI clients use a
+          // Bearer Authorization header. The local ingress accepts either
+          // form, but never lets the ingress credential reach the upstream.
+          const localAgentTokenHeaders = [
+            request.headers.authorization,
+            typeof request.headers["x-api-key"] === "string" ? request.headers["x-api-key"] : undefined,
+            typeof request.headers["api-key"] === "string" ? request.headers["api-key"] : undefined,
+          ];
+          if (!accessToken || !localAgentTokenHeaders.some((header) => authorizeRouteToken(header, accessToken))) {
             response.setHeader("www-authenticate", "Bearer");
             return sendJson(response, 401, {
               error: "Local Agent access token is required",
@@ -2772,6 +2867,8 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           // no-auth provider plugins where no replacement Authorization header
           // is added later in the proxy pipeline.
           delete request.headers.authorization;
+          delete request.headers["x-api-key"];
+          delete request.headers["api-key"];
         }
         const gatewayRouteSuffix = /^v1(?:\/|$)/i.test(rawGatewayRouteSuffix)
           ? rawGatewayRouteSuffix.replace(/^v1\/?/i, "") || "responses"
@@ -2837,6 +2934,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
         if (requestMethod !== "GET" && requestMethod !== "HEAD") {
           bodyOverride = await readRequestBodyBuffer(request);
         }
+        const ingressBody = bodyOverride;
         let parsedGatewayBody = bodyOverride?.length ? parseRequestBody(bodyOverride) : undefined;
         let middlewareModel: string | undefined;
         const gatewayMiddleware = pluginManager?.middlewareRegistry;
@@ -2934,6 +3032,24 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           return sendJson(response, routeResult.code === "NO_ROUTE" ? 503 : 404, { error: routeResult.message, code: routeResult.code });
         }
         const route = routeResult.route;
+        const diagnosticCapture = diagnostics.begin({
+          requestId: gatewayRequestId,
+          traceId: request.headers["x-request-id"]?.toString().trim() || gatewayRequestId,
+          gatewayId,
+          envName: gateway.envName,
+          method: requestMethod,
+          path: url.pathname,
+          ingressProtocol: gatewayProtocol,
+          requestedModel: requestedModel ?? null,
+          routeId: route.routeId,
+          accountName: route.accountName,
+          providerId: route.providerId ?? null,
+          upstreamModel: route.upstreamModel ?? null,
+          upstreamProtocol: route.protocol,
+          upstreamBaseUrl: route.upstreamBaseUrl,
+          requestHeaders: request.headers,
+        });
+        diagnosticCapture?.recordIngressBody(ingressBody);
         const gatewayUsageContext: UsageTelemetryContext = {
           logicalModel: requestedModel ?? null,
           agentId: request.headers["x-codex-agent"]?.toString().trim() || null,
@@ -2942,6 +3058,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           routeRuleId: routeResult.routeRuleId ?? null,
         };
         if (!consumeGatewayQuota(gateway, bodyOverride?.length ? Math.max(1, Math.ceil(bodyOverride.length / 4)) : 1)) {
+          await diagnosticCapture?.finish({ outcome: "gateway_quota_rejected" });
           return sendJson(response, 429, { error: "Gateway quota exceeded", code: "GATEWAY_QUOTA_EXCEEDED" });
         }
         void recordPoolEvent({
@@ -2986,7 +3103,8 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
             selectedGatewayRoutes
               .map((candidate) => [candidate.accountName, candidate.protocol] as const),
           );
-          return await proxyAccountPoolRequest(
+          try {
+            return await proxyAccountPoolRequest(
             request,
             response,
             pool,
@@ -3010,8 +3128,12 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
             capabilityRegistry,
             persistCapabilityObservations,
             localAgentSurface,
-            gatewayResetAdmission,
-          );
+              gatewayResetAdmission,
+              diagnosticCapture,
+            );
+          } finally {
+            await diagnosticCapture?.finish({ selectedRouteId: route.routeId, selectedRouteAccount: route.accountName });
+          }
         }
         const legacyFallbackRoutes = gateway.routeGroups
           ? (Object.values(gateway.routeGroups).find((group) => group.routeIds.includes(route.routeId))?.routeIds
@@ -3049,7 +3171,8 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
             cooldownUntil: gatewayHealth.get(gatewayRouteMetricKey(gateway, candidate.routeId))?.cooldownUntil ?? null,
           });
         };
-        return await proxyRequest(
+        try {
+          return await proxyRequest(
           request,
           response,
           route,
@@ -3071,8 +3194,12 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           persistCapabilityObservations,
           history,
           gateway.gatewayId,
-          localAgentSurface,
-        );
+            localAgentSurface,
+            diagnosticCapture,
+          );
+        } finally {
+          await diagnosticCapture?.finish({ selectedRouteId: route.routeId, selectedRouteAccount: route.accountName });
+        }
       }
       const poolMatch = url.pathname.match(/^\/pools\/([^/]+)\/?(.*)$/);
       if (poolMatch) {

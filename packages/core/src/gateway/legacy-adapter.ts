@@ -99,7 +99,13 @@ function buildLegacyProvider(
   return {
     id: providerId,
     displayName: providerId,
-    kind: account.authMode === "auth" ? "chatgpt" : "openai",
+    kind: account.authMode === "auth"
+      ? "chatgpt"
+      : providerId === "anthropic" || providerId === "custom-anthropic"
+        ? "anthropic"
+        : providerId === "gemini" || providerId === "gemini-subscription"
+          ? "gemini"
+          : "openai",
     endpoints:
       protocol === "chat_completions"
         ? { chatCompletions: baseUrl }
@@ -172,6 +178,11 @@ function resolveLegacyBaseUrl(account: AccountState): string {
     account.runtime.openaiBaseUrl?.trim()
   ) {
     return account.runtime.openaiBaseUrl.trim();
+  }
+
+  const providerId = account.runtime.providerId?.trim().toLowerCase();
+  if (providerId === "anthropic" || providerId === "custom-anthropic") {
+    return "https://api.anthropic.com";
   }
 
   return account.authMode === "auth"

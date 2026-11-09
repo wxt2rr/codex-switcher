@@ -14,7 +14,13 @@ export type TargetName = "cli" | "app";
 export type AuthMode = "auth" | "apikey" | "provider-profile";
 export type PreferredAuthMethod = "chatgpt" | "apikey";
 export type OpenAIBaseUrlMode = "default" | "custom";
-export type AccountApiProtocol = "responses" | "chat_completions";
+/**
+ * Wire protocol used by an API-key account. Anthropic Messages is kept in the
+ * same account runtime so Claude Code can consume the account directly while
+ * the existing Codex Responses/Chat Completions paths remain unchanged.
+ */
+export type AccountApiProtocol = "responses" | "chat_completions" | "anthropic";
+export type EnvironmentModelIdentityMode = "account" | "unified";
 export type ProviderCredentialAuthMethod = "api_key" | "oauth" | "subscription" | "plugin" | "none";
 export type ReasoningProfile = "auto" | "standard" | "reasoning_content" | "think_tags";
 export type LongConversationStrategy = "safe" | "continuity";
@@ -65,11 +71,24 @@ export interface AccountState {
   authData?: AuthDataRecord;
 }
 
+/** Official ChatGPT identity used by Codex App remote control. This is
+ * intentionally separate from the account currently used for model calls. */
+export interface EnvironmentRemoteControlSettings {
+  accountName?: string;
+}
+
 export interface EnvState {
   name: string;
   path: string;
   accounts: Record<string, AccountState>;
+  /** Controls the Codex-facing model identity while retaining internal routes. */
+  modelIdentityMode?: EnvironmentModelIdentityMode;
+  remoteControl?: EnvironmentRemoteControlSettings;
   gateway?: GatewayEnvironmentState;
+}
+
+export function normalizeEnvironmentModelIdentityMode(value: unknown): EnvironmentModelIdentityMode {
+  return value === "unified" ? "unified" : "account";
 }
 
 export interface TaskSummary {
@@ -237,6 +256,33 @@ function validateEnvState(name: string, value: unknown): EnvState {
     ),
   };
 
+  // Keep the persisted shape of legacy environments stable. The business
+  // layer treats an omitted value as `account`, but migration must not rewrite
+  // every existing environment just because a new optional preference exists.
+  if (value.modelIdentityMode !== undefined) {
+    envState.modelIdentityMode = normalizeEnvironmentModelIdentityMode(value.modelIdentityMode);
+  }
+
+  if (value.remoteControl !== undefined) {
+    if (!isRecord(value.remoteControl)) {
+      throw createStoreError(
+        "INVALID_STATE",
+        `Env '${name}' remoteControl must be an object`,
+      );
+    }
+    if (value.remoteControl.accountName !== undefined
+      && (typeof value.remoteControl.accountName !== "string"
+        || !value.remoteControl.accountName.trim())) {
+      throw createStoreError(
+        "INVALID_STATE",
+        `Env '${name}' remoteControl.accountName must be a non-empty string`,
+      );
+    }
+    envState.remoteControl = value.remoteControl.accountName
+      ? { accountName: value.remoteControl.accountName.trim() }
+      : {};
+  }
+
   if (value.gateway !== undefined) {
     if (!isGatewayEnvironmentState(value.gateway)) {
       throw createStoreError(
@@ -364,7 +410,7 @@ function validateRuntimeSettings(
 }
 
 function isAccountApiProtocol(value: unknown): value is AccountApiProtocol {
-  return value === "responses" || value === "chat_completions";
+  return value === "responses" || value === "chat_completions" || value === "anthropic";
 }
 
 function isReasoningProfile(value: unknown): value is ReasoningProfile {

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute as nativeIsAbsolute, posix, relative, resolve, sep as nativeSep, win32 } from "node:path";
 import { applyEdits, modify } from "jsonc-parser";
 import { parseDocument } from "yaml";
@@ -98,8 +98,9 @@ export function createNodeAgentFileSystem(root: string, options: NodeAgentFileSy
       await mkdir(dirname(absolute), { recursive: true });
       const temporary = `${absolute}.${process.pid}.${randomUUID()}.tmp`;
       try {
-        await writeFile(temporary, content, "utf8");
+        await writeFile(temporary, content, { encoding: "utf8", mode: 0o600 });
         await rename(temporary, absolute);
+        if (process.platform !== "win32") await chmod(absolute, 0o600);
       } finally {
         await rm(temporary, { force: true }).catch(() => undefined);
       }
@@ -201,6 +202,41 @@ function setJsonValue(content: string | null, path: string, value: string): stri
     setPath(json, path, value);
     return `${JSON.stringify(json, null, 2)}\n`;
   }
+}
+
+function removeTextValue(content: string | null, path: string, format: AgentAdapterProfile["format"]): string {
+  if (format === "json" || format === "jsonc") {
+    const original = content?.trim() ? content : "{}";
+    try {
+      const edits = modify(original, path.split(".").filter(Boolean), undefined, {
+        formattingOptions: { insertSpaces: true, tabSize: 2, eol: original.includes("\r\n") ? "\r\n" : "\n" },
+      });
+      const updated = applyEdits(original, edits);
+      return `${updated.replace(/[ \t]+$/gm, "").replace(/\s*$/, "")}\n`;
+    } catch {
+      const json = parseJson(content);
+      deletePath(json, path);
+      return `${JSON.stringify(json, null, 2)}\n`;
+    }
+  }
+  if (format === "env") {
+    const key = path.split(".").at(-1) ?? path;
+    const matcher = new RegExp(`^\\s*(?:export\\s+)?${escapeRegExp(key)}\\s*=`);
+    return `${(content ?? "").split(/\r?\n/).filter((line) => !matcher.test(line)).join("\n").replace(/\s*$/, "")}\n`;
+  }
+  return content ?? "";
+}
+
+function deletePath(target: Record<string, unknown>, path: string): void {
+  const parts = path.split(".").filter(Boolean);
+  if (!parts.length) return;
+  let current: Record<string, unknown> = target;
+  for (const part of parts.slice(0, -1)) {
+    const next = current[part];
+    if (!isRecord(next)) return;
+    current = next;
+  }
+  delete current[parts[parts.length - 1]!];
 }
 
 function setYamlValue(content: string | null, path: string, value: string): string {
@@ -328,11 +364,20 @@ export function createAgentAdapter(profile: AgentAdapterProfile, options: AgentA
         ? previousSnapshot.originalContent
         : currentContent;
       let expectedContent = setTextValue(currentContent, profile.baseUrlPath, binding.gatewayBaseUrl, profile.format);
-      expectedContent = setTextValue(expectedContent, profile.modelPath, binding.exposedModelId, profile.format);
-      expectedContent = setTextValue(expectedContent, profile.tokenPath, binding.gatewayTokenRef, profile.format);
+      for (const path of profile.clearPaths ?? []) expectedContent = removeTextValue(expectedContent, path, profile.format);
+      if (binding.exposedModelId.trim()) {
+        expectedContent = setTextValue(expectedContent, profile.modelPath, binding.exposedModelId, profile.format);
+        for (const path of profile.managedModelPaths ?? []) {
+          expectedContent = setTextValue(expectedContent, path, binding.exposedModelId, profile.format);
+        }
+      }
+      if (binding.gatewayTokenRef.trim()) expectedContent = setTextValue(expectedContent, profile.tokenPath, binding.gatewayTokenRef, profile.format);
       if (profile.reasoningPath && binding.reasoningProfile) expectedContent = setTextValue(expectedContent, profile.reasoningPath, binding.reasoningProfile, profile.format);
       if (profile.fallbackModelPath && binding.fallbackModelId) expectedContent = setTextValue(expectedContent, profile.fallbackModelPath, binding.fallbackModelId, profile.format);
       if (profile.subAgentModelPath && binding.subAgentModelId) expectedContent = setTextValue(expectedContent, profile.subAgentModelPath, binding.subAgentModelId, profile.format);
+      for (const [path, value] of Object.entries(binding.managedValues ?? {})) {
+        if (path.trim() && typeof value === "string") expectedContent = setTextValue(expectedContent, path, value, profile.format);
+      }
       await options.fs.write(profile.configPath, expectedContent);
       const snapshot: AgentConfigSnapshot = {
         bindingId: binding.bindingId,

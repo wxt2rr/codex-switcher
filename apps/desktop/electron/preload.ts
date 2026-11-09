@@ -81,7 +81,7 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     baseUrl?: string;
     credentialPayload?: string;
     sub2apiPayload?: string;
-    apiProtocol?: "responses" | "chat_completions";
+    apiProtocol?: "responses" | "chat_completions" | "anthropic";
     compatibilityEnabled?: boolean;
     upstreamModel?: string;
     reasoningProfile?: "auto" | "standard" | "reasoning_content" | "think_tags";
@@ -100,7 +100,7 @@ contextBridge.exposeInMainWorld("codexDesktop", {
     accountId?: string;
     expiresAt?: number;
     baseUrl?: string;
-    apiProtocol?: "responses" | "chat_completions";
+    apiProtocol?: "responses" | "chat_completions" | "anthropic";
     requestHeaders?: Record<string, string>;
   }) => ipcRenderer.invoke("desktop:importProviderCredential", request),
   refreshProviderCredential: (envName: string, account: string) =>
@@ -195,12 +195,27 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   readSwitcherLog: () => ipcRenderer.invoke("desktop:readSwitcherLog"),
   readTokenRefreshLog: () => ipcRenderer.invoke("desktop:readTokenRefreshLog"),
   getEnvironmentRouteStatuses: () => ipcRenderer.invoke("desktop:getEnvironmentRouteStatuses"),
+  getEnvironmentRoutePreviews: () => ipcRenderer.invoke("desktop:getEnvironmentRoutePreviews"),
+  setEnvironmentModelIdentityMode: (envName: string, mode: "account" | "unified") =>
+    ipcRenderer.invoke("desktop:setEnvironmentModelIdentityMode", envName, mode),
   toggleEnvironmentRoute: (envName: string, enabled: boolean) =>
     ipcRenderer.invoke("desktop:toggleEnvironmentRoute", envName, enabled),
   toggleEnvironmentGateway: (envName: string, enabled: boolean) =>
     ipcRenderer.invoke("desktop:toggleEnvironmentGateway", envName, enabled),
   toggleEnvironmentLocalAgentAccess: (envName: string, enabled: boolean) =>
     ipcRenderer.invoke("desktop:toggleEnvironmentLocalAgentAccess", envName, enabled),
+  getEnvironmentRemoteStatuses: () => ipcRenderer.invoke("desktop:getEnvironmentRemoteStatuses"),
+  setEnvironmentRemoteAccount: (envName: string, accountName?: string) =>
+    ipcRenderer.invoke("desktop:setEnvironmentRemoteAccount", envName, accountName),
+  listClaudeCodeSources: () => ipcRenderer.invoke("desktop:listClaudeCodeSources"),
+  getClaudeCodeConnection: () => ipcRenderer.invoke("desktop:getClaudeCodeConnection"),
+  connectClaudeCode: (input: { sourceId: string; modelId?: string; cleanupAuthorization?: boolean }) => ipcRenderer.invoke("desktop:connectClaudeCode", input),
+  reapplyClaudeCode: () => ipcRenderer.invoke("desktop:reapplyClaudeCode"),
+  disconnectClaudeCode: () => ipcRenderer.invoke("desktop:disconnectClaudeCode"),
+  diagnoseClaudeCode: () => ipcRenderer.invoke("desktop:diagnoseClaudeCode"),
+  listClaudeCodeConfigHistory: () => ipcRenderer.invoke("desktop:listClaudeCodeConfigHistory"),
+  restoreClaudeCodeConfigHistory: (entryId: string) => ipcRenderer.invoke("desktop:restoreClaudeCodeConfigHistory", entryId),
+  deleteClaudeCodeConfigHistory: (entryIds: string[]) => ipcRenderer.invoke("desktop:deleteClaudeCodeConfigHistory", entryIds),
   listAccountPools: () => ipcRenderer.invoke("desktop:listAccountPools"),
   saveAccountPool: (input: unknown) => ipcRenderer.invoke("desktop:saveAccountPool", input),
   toggleAccountCompatibility: (input: {

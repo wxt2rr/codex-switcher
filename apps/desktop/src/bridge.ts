@@ -45,6 +45,14 @@ export interface DesktopEnvFileHistoryEntry {
   content: string;
 }
 
+export interface ClaudeCodeConfigHistoryEntry {
+  id: string;
+  configPath: string;
+  source: "connect" | "disconnect" | "restore" | "migration" | "authorization_cleanup";
+  createdAt: string;
+  contentPreview: string;
+}
+
 export interface CodexHistorySyncResult {
   envName: string;
   providerId: string;
@@ -123,7 +131,7 @@ export interface DesktopNativeLoginRequest {
   baseUrl?: string;
   credentialPayload?: string;
   sub2apiPayload?: string;
-  apiProtocol?: "responses" | "chat_completions";
+  apiProtocol?: "responses" | "chat_completions" | "anthropic";
   compatibilityEnabled?: boolean;
   upstreamModel?: string;
   reasoningProfile?: "auto" | "standard" | "reasoning_content" | "think_tags";
@@ -143,7 +151,7 @@ export interface ProviderCredentialImportRequest {
   accountId?: string;
   expiresAt?: number;
   baseUrl?: string;
-  apiProtocol?: "responses" | "chat_completions";
+  apiProtocol?: "responses" | "chat_completions" | "anthropic";
   requestHeaders?: Record<string, string>;
 }
 
@@ -298,6 +306,7 @@ export interface ProviderPluginSnapshot {
   trust?: string;
   settingsSchema?: unknown;
   middleware?: { hooks: string[]; priority: number };
+  agent?: { id: string; displayName: string };
   provider?: {
     id: string;
     displayName: string;
@@ -526,6 +535,11 @@ export interface SetProviderBindingRequest {
 export interface CreateSkillProviderRequest { name: string; targetPath: string; }
 
 import type {
+  ClaudeCodeConnectionState,
+  ClaudeCodeSourceSummary,
+  EnvironmentModelIdentityMode,
+  EnvironmentRemoteStatus,
+  EnvironmentRoutePreview,
   EnvironmentRouteStatus,
   UsageFilter,
   UsagePricingProfile,
@@ -648,9 +662,22 @@ export interface DesktopElectronApi {
   readSwitcherLog(): Promise<DesktopLogResult>;
   readTokenRefreshLog(): Promise<DesktopLogResult>;
   getEnvironmentRouteStatuses(): Promise<EnvironmentRouteStatus[]>;
+  getEnvironmentRoutePreviews(): Promise<EnvironmentRoutePreview[]>;
+  setEnvironmentModelIdentityMode(envName: string, mode: EnvironmentModelIdentityMode): Promise<EnvironmentRoutePreview>;
   toggleEnvironmentRoute(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
   toggleEnvironmentGateway(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
   toggleEnvironmentLocalAgentAccess(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
+  getEnvironmentRemoteStatuses(): Promise<EnvironmentRemoteStatus[]>;
+  setEnvironmentRemoteAccount(envName: string, accountName?: string): Promise<EnvironmentRemoteStatus>;
+  listClaudeCodeSources(): Promise<ClaudeCodeSourceSummary[]>;
+  getClaudeCodeConnection(): Promise<ClaudeCodeConnectionState>;
+  connectClaudeCode(input: { sourceId: string; modelId?: string; cleanupAuthorization?: boolean }): Promise<ClaudeCodeConnectionState>;
+  reapplyClaudeCode(): Promise<ClaudeCodeConnectionState>;
+  disconnectClaudeCode(): Promise<ClaudeCodeConnectionState>;
+  diagnoseClaudeCode(): Promise<ClaudeCodeConnectionState & { sources: ClaudeCodeSourceSummary[] }>;
+  listClaudeCodeConfigHistory(): Promise<string>;
+  restoreClaudeCodeConfigHistory(entryId: string): Promise<DesktopActionResult>;
+  deleteClaudeCodeConfigHistory(entryIds: string[]): Promise<DesktopActionResult>;
   listAccountPools(): Promise<AccountPoolStatus[]>;
   saveAccountPool(input: AccountPoolInput): Promise<AccountPoolStatus | null>;
   toggleAccountCompatibility(input: AccountCompatibilityRequest): Promise<AccountCompatibilityStatus>;
@@ -798,9 +825,22 @@ export interface DesktopBridge {
   readSwitcherLog(): Promise<DesktopLogResult>;
   readTokenRefreshLog(): Promise<DesktopLogResult>;
   getEnvironmentRouteStatuses(): Promise<EnvironmentRouteStatus[]>;
+  getEnvironmentRoutePreviews(): Promise<EnvironmentRoutePreview[]>;
+  setEnvironmentModelIdentityMode(envName: string, mode: EnvironmentModelIdentityMode): Promise<EnvironmentRoutePreview>;
   toggleEnvironmentRoute(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
   toggleEnvironmentGateway(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
   toggleEnvironmentLocalAgentAccess(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
+  getEnvironmentRemoteStatuses(): Promise<EnvironmentRemoteStatus[]>;
+  setEnvironmentRemoteAccount(envName: string, accountName?: string): Promise<EnvironmentRemoteStatus>;
+  listClaudeCodeSources(): Promise<ClaudeCodeSourceSummary[]>;
+  getClaudeCodeConnection(): Promise<ClaudeCodeConnectionState>;
+  connectClaudeCode(input: { sourceId: string; modelId?: string; cleanupAuthorization?: boolean }): Promise<ClaudeCodeConnectionState>;
+  reapplyClaudeCode(): Promise<ClaudeCodeConnectionState>;
+  disconnectClaudeCode(): Promise<ClaudeCodeConnectionState>;
+  diagnoseClaudeCode(): Promise<ClaudeCodeConnectionState & { sources: ClaudeCodeSourceSummary[] }>;
+  listClaudeCodeConfigHistory(): Promise<string>;
+  restoreClaudeCodeConfigHistory(entryId: string): Promise<DesktopActionResult>;
+  deleteClaudeCodeConfigHistory(entryIds: string[]): Promise<DesktopActionResult>;
   listAccountPools(): Promise<AccountPoolStatus[]>;
   saveAccountPool(input: AccountPoolInput): Promise<AccountPoolStatus | null>;
   toggleAccountCompatibility(input: AccountCompatibilityRequest): Promise<AccountCompatibilityStatus>;
@@ -944,9 +984,22 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       readSwitcherLog: unavailable,
       readTokenRefreshLog: unavailable,
       getEnvironmentRouteStatuses: unavailable,
+      getEnvironmentRoutePreviews: unavailable,
+      setEnvironmentModelIdentityMode: unavailable,
       toggleEnvironmentRoute: unavailable,
       toggleEnvironmentGateway: unavailable,
       toggleEnvironmentLocalAgentAccess: unavailable,
+      getEnvironmentRemoteStatuses: unavailable,
+      setEnvironmentRemoteAccount: unavailable,
+      listClaudeCodeSources: unavailable,
+      getClaudeCodeConnection: unavailable,
+      connectClaudeCode: unavailable,
+      reapplyClaudeCode: unavailable,
+      disconnectClaudeCode: unavailable,
+      diagnoseClaudeCode: unavailable,
+      listClaudeCodeConfigHistory: unavailable,
+      restoreClaudeCodeConfigHistory: unavailable,
+      deleteClaudeCodeConfigHistory: unavailable,
       listAccountPools: unavailable,
       saveAccountPool: unavailable,
       toggleAccountCompatibility: unavailable,
@@ -1229,6 +1282,17 @@ function createBrowserPreviewBridge(): DesktopBridge {
       { envName: "default", enabled: false, routedAccounts: 0, port: null },
       { envName: "wangxt", enabled: true, routedAccounts: 2, port: 17832 },
     ],
+    getEnvironmentRoutePreviews: async () => [],
+    setEnvironmentModelIdentityMode: async (envName, mode) => ({
+      envName,
+      mode,
+      gatewayEnabled: false,
+      gatewayStatus: "stopped",
+      generatedAt: Date.now(),
+      models: [],
+      providerCount: 0,
+      warnings: ["Gateway mode is required for automatic routing preview."],
+    }),
     toggleEnvironmentRoute: async (envName, enabled) => ({
       envName, enabled, routedAccounts: enabled ? 2 : 0, port: enabled ? 17832 : null,
     }),
@@ -1254,6 +1318,37 @@ function createBrowserPreviewBridge(): DesktopBridge {
       localAgentModelsUrl: enabled ? "http://127.0.0.1:17832/gateways/preview/v1/models" : undefined,
       localAgentAccessToken: enabled ? "preview-local-agent-token" : undefined,
     }),
+    getEnvironmentRemoteStatuses: async () => [{
+      envName: "default",
+      status: "needs_account",
+      modelServiceLabel: "官方账号",
+    }],
+    setEnvironmentRemoteAccount: async (envName, accountName) => ({
+      envName,
+      status: accountName ? "needs_pairing" : "needs_account",
+      ...(accountName ? { remoteAccountName: accountName } : {}),
+      modelServiceLabel: "官方账号",
+    }),
+    listClaudeCodeSources: async () => [{
+      id: "environment:wangxt",
+      kind: "environment_gateway",
+      environmentName: "wangxt",
+      displayName: "wangxt · 环境网关",
+      state: "ready",
+      baseUrl: "http://127.0.0.1:17832/gateways/preview/v1",
+      apiKeyPreview: "prev••••oken",
+      models: [{ id: "preview-model", displayName: "Preview model" }],
+      gatewayEnabled: true,
+      localAgentAccessEnabled: true,
+    }],
+    getClaudeCodeConnection: async () => ({ connected: false, configPath: "~/.claude/settings.json" }),
+    connectClaudeCode: async () => ({ connected: true, configPath: "~/.claude/settings.json", restartRequired: true }),
+    reapplyClaudeCode: async () => ({ connected: true, configPath: "~/.claude/settings.json", restartRequired: true }),
+    disconnectClaudeCode: async () => ({ connected: false, configPath: "~/.claude/settings.json", restartRequired: true }),
+    diagnoseClaudeCode: async () => ({ connected: false, configPath: "~/.claude/settings.json", sources: [] }),
+    listClaudeCodeConfigHistory: async () => "[]\n",
+    restoreClaudeCodeConfigHistory: () => browserPreviewAction(),
+    deleteClaudeCodeConfigHistory: () => browserPreviewAction(),
     listAccountPools: async () => [],
     saveAccountPool: async () => null,
     toggleAccountCompatibility: async (input) => ({ envName: input.envName, accountName: input.accountName,

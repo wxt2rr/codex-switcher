@@ -81,6 +81,39 @@ test("state store defaults legacy account protocol settings to native responses"
   }
 });
 
+test("state store preserves Anthropic Messages account protocol", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-core-anthropic-protocol-"));
+  try {
+    const store = createStateStore({ rootDir: root });
+    const state: SwitcherState = {
+      ...sampleState,
+      envs: {
+        ...sampleState.envs,
+        default: {
+          ...sampleState.envs.default,
+          accounts: {
+            claude: {
+              name: "claude",
+              authMode: "apikey",
+              runtime: {
+                preferredAuthMethod: "apikey",
+                openaiBaseUrlMode: "custom",
+                openaiBaseUrl: "https://api.anthropic.com",
+                providerId: "anthropic",
+                apiProtocol: "anthropic",
+              },
+            },
+          },
+        },
+      },
+    };
+    await store.save(state);
+    assert.equal((await store.load()).envs.default.accounts.claude?.runtime.apiProtocol, "anthropic");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("state store preserves an environment gateway configuration without secrets", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-core-gateway-"));
   const state: SwitcherState = {
@@ -180,6 +213,23 @@ test("legacy gateway adapter projects accounts without copying secrets", () => {
           compatibilityInstructionRole: "auto",
         },
       },
+      claude: {
+        name: "claude",
+        authMode: "apikey",
+        authData: { OPENAI_API_KEY: "must-not-be-copied" },
+        runtime: {
+          preferredAuthMethod: "apikey",
+          openaiBaseUrlMode: "custom",
+          openaiBaseUrl: "https://api.anthropic.com",
+          providerId: "anthropic",
+          model: "claude-sonnet-4-5",
+          apiProtocol: "anthropic",
+          compatibilityRouteEnabled: false,
+          compatibilityReasoningProfile: "auto",
+          compatibilityLongConversationStrategy: "safe",
+          compatibilityInstructionRole: "auto",
+        },
+      },
     },
   });
 
@@ -190,6 +240,10 @@ test("legacy gateway adapter projects accounts without copying secrets", () => {
   assert.equal(gateway.credentials["credential:work%20env:api"]?.kind, "api_key");
   assert.equal(gateway.models["chatgpt/gpt-5"]?.upstreamModelId, "gpt-5");
   assert.equal(gateway.models["deepseek/deepseek-chat"]?.upstreamModelId, "deepseek-chat");
+  assert.equal(gateway.providers.anthropic?.kind, "anthropic");
+  assert.equal(gateway.providers.anthropic?.endpoints.anthropicMessages, "https://api.anthropic.com");
+  assert.equal(gateway.credentials["credential:work%20env:claude"]?.supportedProtocols[0], "anthropic");
+  assert.equal(gateway.models["anthropic/claude-sonnet-4-5"]?.protocols[0], "anthropic");
   assert.deepEqual(gateway.routeGroups["route-group:work%20env:gpt-5"]?.members.map((member) => member.credentialSelector.credentialIds?.[0]), [
     "credential:work%20env:subscription",
   ]);

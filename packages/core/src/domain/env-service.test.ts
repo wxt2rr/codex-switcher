@@ -57,6 +57,7 @@ test("env service lists envs with current target markers", () => {
       isCurrentCli: true,
       isCurrentApp: true,
       accountCount: 2,
+      modelIdentityMode: "account",
     },
   ]);
 });

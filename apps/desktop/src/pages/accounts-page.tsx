@@ -40,7 +40,7 @@ import {
   SidePanel,
 } from "../components/admin-primitives";
 import { Field, Input, Select, Textarea } from "../components/form-primitives";
-import type { AccountRequestHealth, AccountSummary, OverviewPayload } from "../desktop-model";
+import type { AccountRequestHealth, AccountSummary, EnvironmentRouteStatus, OverviewPayload } from "../desktop-model";
 import type { ResetCardPendingAction, ResetCardSettings, ResetCardSnapshot } from "../reset-card-model";
 import { providerIconUrls } from "../components/provider-icon";
 import { AccountModelExposurePanel } from "../components/account-model-exposure-panel";
@@ -167,7 +167,7 @@ function readDefaultAccountEnvironment(): string {
 }
 
 export interface AccountProtocolSettings {
-  apiProtocol: "responses" | "chat_completions";
+  apiProtocol: "responses" | "chat_completions" | "anthropic";
   compatibilityEnabled: boolean;
   upstreamModel?: string;
   reasoningProfile: "auto" | "standard" | "reasoning_content" | "think_tags";
@@ -178,6 +178,7 @@ export interface AccountProtocolSettings {
 
 export function AccountsPage({
   overview,
+  environmentRouteStatuses,
   language,
   providerCatalog,
   accountWizardRequest,
@@ -240,9 +241,10 @@ export function AccountsPage({
   onError,
 }: {
   overview: OverviewPayload;
+  environmentRouteStatuses: EnvironmentRouteStatus[];
   language: UiLanguage;
   providerCatalog: ProviderCatalogItem[];
-  accountWizardRequest?: { providerId?: string; requestId: number };
+  accountWizardRequest?: { providerId?: string; envName?: string; requestId: number };
   onAccountWizardRequestHandled?: () => void;
   authMetricsLoading: boolean;
   authRefreshIntervalSeconds: number;
@@ -281,7 +283,7 @@ export function AccountsPage({
   ) => void;
   onListAccountProjects: (account: AccountSummary) => Promise<CodexProject[]>;
   onPickDirectory: () => Promise<string>;
-  onPrimeAccount: (account?: AccountSummary) => void;
+  onPrimeAccount: (account?: AccountSummary, preferredEnvName?: string) => void;
   onLogin: (settings: AccountProtocolSettings) => Promise<boolean>;
   onRelogin: () => Promise<boolean>;
   onLogout: () => void;
@@ -319,7 +321,7 @@ export function AccountsPage({
   const [providerCredentialAuthMethodDraft, setProviderCredentialAuthMethodDraft] = useState<NonNullable<ProviderCredentialImportRequest["authMethod"]>>("api_key");
   const [providerRefreshTokenDraft, setProviderRefreshTokenDraft] = useState("");
   const [providerHeadersDraft, setProviderHeadersDraft] = useState("");
-  const [apiProtocolDraft, setApiProtocolDraft] = useState<"responses" | "chat_completions">("responses");
+  const [apiProtocolDraft, setApiProtocolDraft] = useState<"responses" | "chat_completions" | "anthropic">("responses");
   const [compatibilityEnabled, setCompatibilityEnabled] = useState(false);
   const [compatibilityStatus, setCompatibilityStatus] = useState<AccountCompatibilityStatus | null>(null);
   const [compatibilityModel, setCompatibilityModel] = useState("");
@@ -455,7 +457,7 @@ export function AccountsPage({
 
   useEffect(() => {
     if (!accountWizardRequest) return;
-    onPrimeAccount(undefined);
+    onPrimeAccount(undefined, accountWizardRequest.envName);
     if (accountWizardRequest.providerId) onAccountProviderDraftChange(accountWizardRequest.providerId);
     setLoginDrawerOpen(true);
     onAccountWizardRequestHandled?.();
@@ -488,9 +490,11 @@ export function AccountsPage({
       if (accountModeDraft !== "apikey") {
         onAccountModeDraftChange("apikey");
       }
-      const presetProtocol = selectedProvider?.protocols.includes("chat_completions") && !selectedProvider.protocols.includes("responses")
-        ? "chat_completions"
-        : "responses";
+      const presetProtocol = selectedProvider?.protocols.includes("anthropic") && !selectedProvider.protocols.includes("responses")
+        ? "anthropic"
+        : selectedProvider?.protocols.includes("chat_completions") && !selectedProvider.protocols.includes("responses")
+          ? "chat_completions"
+          : "responses";
       if (apiProtocolDraft !== presetProtocol) {
         setApiProtocolDraft(presetProtocol);
       }
@@ -740,7 +744,7 @@ export function AccountsPage({
               <Button
                 className="ml-auto h-8 rounded-lg bg-neutral-950 px-3.5 text-[13px] font-semibold text-white shadow-none hover:bg-neutral-800"
                 onClick={() => {
-                  onPrimeAccount(undefined);
+                onPrimeAccount(undefined, envFilter !== "all" ? envFilter : undefined);
                   setLoginDrawerOpen(true);
                 }}
                 disabled={busy}
@@ -778,6 +782,7 @@ export function AccountsPage({
               loadingLabel={loadingLabel}
               isWindowsDesktop={/win/i.test(globalThis.navigator?.platform ?? "")}
               onPrimeAccount={onPrimeAccount}
+              environmentRouteStatuses={environmentRouteStatuses}
               onSwitchAccount={onSwitchAccount}
               onListAccountProjects={onListAccountProjects}
               onPickDirectory={onPickDirectory}
@@ -968,6 +973,7 @@ export function AccountsPage({
                 openOnHover={false} items={[
                   { value: "responses", label: "Responses (native)" },
                   { value: "chat_completions", label: "Chat Completions (compatibility)" },
+                  { value: "anthropic", label: "Anthropic Messages" },
                 ]} />
             </Field>
           ) : null}
@@ -1272,6 +1278,7 @@ function AccountListCard({
   loadingLabel,
   isWindowsDesktop,
   onPrimeAccount,
+  environmentRouteStatuses,
   onSwitchAccount,
   onListAccountProjects,
   onPickDirectory,
@@ -1302,6 +1309,7 @@ function AccountListCard({
   loadingLabel: string;
   isWindowsDesktop: boolean;
   onPrimeAccount: (account?: AccountSummary) => void;
+  environmentRouteStatuses: EnvironmentRouteStatus[];
   onSwitchAccount: (
     target: "cli" | "app",
     account: AccountSummary,
@@ -1363,6 +1371,7 @@ function AccountListCard({
           ? "デフォルト環境"
           : "Default env"
       : account.envName;
+  const gatewayEnabled = environmentRouteStatuses.some((status) => status.envName === account.envName && status.gatewayEnabled);
 
   return (
     <ListCard
@@ -1395,6 +1404,7 @@ function AccountListCard({
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             <SoftBadge tone={isAuth ? "brand" : "neutral"} label={formatAccountAuthLabel(account.authMode)} />
             <SoftBadge tone="neutral" label={envLabel} />
+            {gatewayEnabled ? <SoftBadge tone="brand" label={language === "zh" ? "网关" : language === "ja" ? "ゲートウェイ" : "Gateway"} /> : null}
             {activeRouteLabels.length > 0 ? (
               <span
                 className="inline-flex min-w-0 items-center truncate text-[11px] font-medium text-primary"
@@ -1475,7 +1485,7 @@ function AccountListCard({
       </div>
 
       <div className="responsive-actions min-h-full border-l border-black/[0.05] pl-4">
-        <CardTargetButton
+        {!gatewayEnabled ? <CardTargetButton
           active={account.isCurrentCli}
           disabled={busy}
           icon={<TerminalSquare className="size-4" />}
@@ -1527,8 +1537,8 @@ function AccountListCard({
           onPickDirectory={onPickDirectory}
           homeLabel={language === "zh" ? "用户主目录" : language === "ja" ? "ホームディレクトリ" : "Home directory"}
           pickDirectoryLabel={language === "zh" ? "选择其他文件夹…" : language === "ja" ? "別のフォルダを選択…" : "Choose another folder…"}
-        />
-        <CardTargetButton
+        /> : null}
+        {!gatewayEnabled ? <CardTargetButton
           active={account.isCurrentApp}
           disabled={busy}
           icon={<Monitor className="size-4" />}
@@ -1560,7 +1570,7 @@ function AccountListCard({
             onPrimeAccount(account);
             onSwitchAccount("app", account, strategy);
           }}
-        />
+        /> : null}
         <button
           type="button"
           className="motion-interactive-color responsive-action flex h-9 min-w-[74px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[#fafafa] px-3 text-[13px] font-medium text-foreground ring-1 ring-black/[0.05] hover:bg-[#f3f4f6] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"

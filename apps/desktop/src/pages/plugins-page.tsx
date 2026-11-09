@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
   CircleAlert,
+  Code2,
   Download,
   AlertTriangle,
   FileCode2,
@@ -10,6 +11,7 @@ import {
   RefreshCw,
   RotateCcw,
   ShieldCheck,
+  Settings2,
   Trash2,
   XCircle,
 } from "lucide-react";
@@ -17,6 +19,7 @@ import {
 import { ConfirmDialog, ProgressDialog, SidePanel } from "../components/admin-primitives";
 import { ListCard, ListLoadingState, ListPageFrame, ListPageHeader, ListStack, SoftBadge } from "../components/account-list-primitives";
 import { Field, Input, Select } from "../components/form-primitives";
+import { ClaudeCodeConnectionPanel } from "../components/claude-code-connection-panel";
 import { Button } from "../components/ui/button";
 import type { DesktopBridge, ProviderPluginDiagnostic, ProviderPluginInstallRequest, ProviderPluginMarketEntry, ProviderPluginSnapshot } from "../bridge";
 import type { UiLanguage } from "../i18n";
@@ -65,6 +68,7 @@ export function PluginsPage({
   const [gitRef, setGitRef] = useState("");
   const [manifestJson, setManifestJson] = useState("");
   const [marketUrl, setMarketUrl] = useState("");
+  const [claudeCodeOpen, setClaudeCodeOpen] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -102,6 +106,10 @@ export function PluginsPage({
   const filteredMarket = useMemo(() => market.filter((plugin) =>
     !normalizedQuery || `${plugin.id} ${plugin.name} ${plugin.description ?? ""}`.toLowerCase().includes(normalizedQuery)),
   [market, normalizedQuery]);
+  const installedById = useMemo(
+    () => new Map(installed.map((plugin) => [plugin.id, plugin])),
+    [installed],
+  );
   const latestMarketById = useMemo(() => {
     const result = new Map<string, ProviderPluginMarketEntry>();
     for (const entry of market) {
@@ -245,7 +253,7 @@ export function PluginsPage({
           {filteredInstalled.length ? filteredInstalled.map((plugin) => (
             <InstalledPluginCard key={plugin.id} plugin={plugin} zh={zh} busy={busyId === plugin.id}
               update={latestMarketById.get(plugin.id) && comparePluginVersions(latestMarketById.get(plugin.id)!.version, plugin.version) > 0 ? latestMarketById.get(plugin.id) : undefined}
-              onToggle={() => void togglePlugin(plugin)} onSelect={() => setSelected(plugin)} onRollback={() => setPendingAction({ kind: "rollback", plugin })} onRemove={() => setPendingAction({ kind: "remove", plugin })} onUpdate={(entry) => setPendingInstall(entry)} />
+              onToggle={() => void togglePlugin(plugin)} onSelect={() => setSelected(plugin)} onConfigure={hasPluginConfiguration(plugin) ? () => plugin.id === "claude-code" ? setClaudeCodeOpen(true) : setSelected(plugin) : undefined} onRollback={() => setPendingAction({ kind: "rollback", plugin })} onRemove={() => setPendingAction({ kind: "remove", plugin })} onUpdate={(entry) => setPendingInstall(entry)} />
           )) : <div className="col-span-full"><EmptyState label={zh ? "还没有安装插件" : "No plugins installed"} /></div>}
           </div>
         </ListStack>
@@ -253,7 +261,7 @@ export function PluginsPage({
         <ListStack>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
           {filteredMarket.length ? filteredMarket.map((plugin) => (
-            <MarketPluginCard key={`${plugin.id}@${plugin.version}`} plugin={plugin} zh={zh} busy={busyId === plugin.id} onInstall={() => setPendingInstall(plugin)} onSelect={() => setSelected({ ...plugin, active: false, permissions: plugin.permissions, kind: plugin.kind })} />
+            <MarketPluginCard key={`${plugin.id}@${plugin.version}`} plugin={plugin} installed={installedById.get(plugin.id)} zh={zh} busy={busyId === plugin.id} onInstall={() => setPendingInstall(plugin)} onSelect={() => setSelected({ ...plugin, active: false, permissions: plugin.permissions, kind: plugin.kind })} />
           )) : <div className="col-span-full"><EmptyState label={zh ? "市场为空，请先刷新索引" : "The market is empty; refresh an index first"} /></div>}
           </div>
         </ListStack>
@@ -262,6 +270,8 @@ export function PluginsPage({
       <SidePanel open={Boolean(selected)} title={selected ? `${zh ? "插件详情 · " : "Plugin details · "}${selected.name}` : ""} description={zh ? "查看能力、权限、信任状态和运行端点。插件的账号与模型仍由账号/模型页面统一管理。" : "Review capabilities, permissions, trust, and endpoints. Accounts and model exposure remain managed by Accounts and Models."} onClose={() => setSelected(undefined)} closeLabel={zh ? "关闭" : "Close"}>
         {selected ? <PluginDetails bridge={bridge} plugin={selected} zh={zh} onToggle={() => void togglePlugin(selected)} onRollback={() => setPendingAction({ kind: "rollback", plugin: selected })} onRemove={() => setPendingAction({ kind: "remove", plugin: selected })} onSuccess={onSuccess} onError={onError} /> : null}
       </SidePanel>
+
+      <ClaudeCodeConnectionPanel bridge={bridge} language={language} open={claudeCodeOpen} onClose={() => setClaudeCodeOpen(false)} onSuccess={onSuccess} onError={onError} />
 
       <SidePanel open={localOpen} title={zh ? "安装插件" : "Install plugin"} description={zh ? "安装前会校验 Manifest、路径安全、校验和与签名；本地插件默认标记为本地信任。" : "Manifest, path safety, checksum, and signatures are verified before activation; local plugins are marked local trust by default."} onClose={() => setLocalOpen(false)} closeLabel={zh ? "关闭" : "Close"}>
         <div className="grid gap-4">
@@ -288,7 +298,7 @@ export function PluginsPage({
         onSuccess={onSuccess}
       />
 
-      <ConfirmDialog open={Boolean(pendingInstall)} title={pendingInstall ? (zh ? `安装 ${pendingInstall.name}？` : `Install ${pendingInstall.name}?`) : ""} description={zh ? "插件将在隔离进程中运行。请确认来源、信任级别和权限后再安装。" : "The plugin will run in an isolated process. Review its source, trust level, and permissions before installing."} impact={pendingInstall ? <PermissionSummary plugin={pendingInstall} zh={zh} /> : null} confirmLabel={zh ? "确认安装" : "Install"} cancelLabel={zh ? "取消" : "Cancel"} tone="default" onConfirm={() => pendingInstall && void installMarketPlugin(pendingInstall)} onCancel={() => setPendingInstall(undefined)} />
+      <ConfirmDialog open={Boolean(pendingInstall)} title={pendingInstall ? getMarketPluginState(pendingInstall, installedById.get(pendingInstall.id)) === "upgrade" ? (zh ? `升级 ${pendingInstall.name}？` : `Upgrade ${pendingInstall.name}?`) : (zh ? `安装 ${pendingInstall.name}？` : `Install ${pendingInstall.name}?`) : ""} description={zh ? "插件将在隔离进程中运行。请确认来源、信任级别和权限后再安装。" : "The plugin will run in an isolated process. Review its source, trust level, and permissions before installing."} impact={pendingInstall ? <PermissionSummary plugin={pendingInstall} zh={zh} /> : null} confirmLabel={pendingInstall && getMarketPluginState(pendingInstall, installedById.get(pendingInstall.id)) === "upgrade" ? (zh ? "确认升级" : "Upgrade") : (zh ? "确认安装" : "Install")} cancelLabel={zh ? "取消" : "Cancel"} tone="default" onConfirm={() => pendingInstall && void installMarketPlugin(pendingInstall)} onCancel={() => setPendingInstall(undefined)} />
       <ConfirmDialog open={Boolean(pendingAction)} title={pendingAction ? (pendingAction.kind === "remove" ? (zh ? `卸载 ${pendingAction.plugin.name}？` : `Remove ${pendingAction.plugin.name}?`) : (zh ? `回滚 ${pendingAction.plugin.name}？` : `Roll back ${pendingAction.plugin.name}?`)) : ""} description={pendingAction?.kind === "remove" ? (zh ? "卸载会停止插件并删除已安装版本，但不会删除账号凭据。" : "Removing stops the plugin and deletes installed versions; account credentials are not deleted.") : (zh ? "回滚会切换到上一个已验证版本。" : "Rollback switches to the last verified version.")} confirmLabel={pendingAction?.kind === "remove" ? (zh ? "卸载" : "Remove") : (zh ? "回滚" : "Roll back")} cancelLabel={zh ? "取消" : "Cancel"} onConfirm={() => void confirmAction()} onCancel={() => setPendingAction(undefined)} />
     </ListPageFrame>
   );
@@ -383,7 +393,7 @@ function pluginInstallProgressPercent(step: number): number {
   return Math.min(90, Math.max(10, Math.round(((completedStep + 1) / pluginInstallSteps.length) * 90)));
 }
 
-function InstalledPluginCard({ plugin, update, zh, busy, onToggle, onSelect, onRollback, onRemove, onUpdate }: { plugin: ProviderPluginSnapshot; update?: ProviderPluginMarketEntry; zh: boolean; busy: boolean; onToggle: () => void; onSelect: () => void; onRollback: () => void; onRemove: () => void; onUpdate: (entry: ProviderPluginMarketEntry) => void }) {
+function InstalledPluginCard({ plugin, update, zh, busy, onToggle, onSelect, onConfigure, onRollback, onRemove, onUpdate }: { plugin: ProviderPluginSnapshot; update?: ProviderPluginMarketEntry; zh: boolean; busy: boolean; onToggle: () => void; onSelect: () => void; onConfigure?: () => void; onRollback: () => void; onRemove: () => void; onUpdate: (entry: ProviderPluginMarketEntry) => void }) {
   return <ListCard className="group flex min-h-[208px] cursor-pointer flex-col gap-3 p-4 transition-[border-color,box-shadow] hover:border-primary/30 hover:shadow-md" onClick={onSelect}>
     <div className="flex min-w-0 items-start gap-3">
       <PluginIcon plugin={plugin} />
@@ -396,11 +406,13 @@ function InstalledPluginCard({ plugin, update, zh, busy, onToggle, onSelect, onR
     <div className="flex flex-wrap gap-1.5">
       {plugin.kind?.includes("provider") || plugin.permissions.includes("provider") ? <SoftBadge label="Provider" /> : null}
       {plugin.kind?.includes("middleware") || plugin.permissions.includes("middleware") ? <SoftBadge label="Middleware" /> : null}
+      {plugin.kind?.includes("agent") || plugin.permissions.includes("agent") ? <SoftBadge label="Agent" tone="brand" /> : null}
       {plugin.error ? <SoftBadge label={zh ? "启动失败" : "Activation failed"} tone="warn" /> : null}
     </div>
     <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-black/[0.06] pt-3 dark:border-white/[0.07]" onClick={(event) => event.stopPropagation()}>
       <Button size="sm" variant="ghost" onClick={onSelect}>{zh ? "详情" : "Details"}</Button>
       <div className="flex flex-wrap items-center justify-end gap-1.5">
+        {onConfigure ? <Button size="sm" variant="outline" onClick={onConfigure}>{plugin.id === "claude-code" ? <Code2 className="size-3.5" /> : <Settings2 className="size-3.5" />}{zh ? "配置" : "Configure"}</Button> : null}
         {update?.source ? <Button size="sm" variant="outline" onClick={() => onUpdate(update)} disabled={busy}><Download className="size-3.5" />{zh ? "更新" : "Update"}</Button> : null}
         <Button size="sm" variant={plugin.active ? "outline" : "default"} onClick={onToggle} disabled={busy}>{plugin.active ? <><CheckCircle2 className="size-3.5 text-primary" />{zh ? "运行中" : "Active"}</> : <><XCircle className="size-3.5" />{zh ? "已停用" : "Inactive"}</>}</Button>
         <Button size="sm" variant="ghost" className="px-2 text-muted-foreground" title={zh ? "回滚" : "Rollback"} aria-label={zh ? "回滚" : "Rollback"} onClick={onRollback}><RotateCcw className="size-3.5" /></Button>
@@ -410,12 +422,14 @@ function InstalledPluginCard({ plugin, update, zh, busy, onToggle, onSelect, onR
   </ListCard>;
 }
 
-function MarketPluginCard({ plugin, zh, busy, onInstall, onSelect }: { plugin: ProviderPluginMarketEntry; zh: boolean; busy: boolean; onInstall: () => void; onSelect: () => void }) {
+function MarketPluginCard({ plugin, installed, zh, busy, onInstall, onSelect }: { plugin: ProviderPluginMarketEntry; installed?: ProviderPluginSnapshot; zh: boolean; busy: boolean; onInstall: () => void; onSelect: () => void }) {
+  const state = getMarketPluginState(plugin, installed);
+  const canInstall = state !== "installed" && Boolean(plugin.source);
   return <ListCard className="flex min-h-[190px] cursor-pointer flex-col gap-3 p-4 transition-[border-color,box-shadow] hover:border-primary/30 hover:shadow-md" onClick={onSelect}>
-    <div className="flex min-w-0 items-start gap-3"><div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent text-muted-foreground dark:bg-[#202733]"><PackageCheck className="size-4" /></div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-[14px] font-semibold text-neutral-900 dark:text-white">{plugin.name}</h3><SoftBadge label={`v${plugin.version}`} /><SoftBadge label={trustLabel(plugin.trust, zh)} tone={plugin.trust === "official" || plugin.trust === "verified" ? "success" : "neutral"} /></div><div className="mt-1 truncate font-mono text-[12px] text-muted-foreground">{plugin.id}</div></div></div>
+    <div className="flex min-w-0 items-start gap-3"><div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent text-muted-foreground dark:bg-[#202733]"><PackageCheck className="size-4" /></div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-[14px] font-semibold text-neutral-900 dark:text-white">{plugin.name}</h3><SoftBadge label={`v${plugin.version}`} /><SoftBadge label={trustLabel(plugin.trust, zh)} tone={plugin.trust === "official" || plugin.trust === "verified" ? "success" : "neutral"} />{state !== "install" ? <SoftBadge label={state === "upgrade" ? (zh ? "可升级" : "Upgrade available") : (zh ? "已安装" : "Installed")} tone={state === "upgrade" ? "warn" : "success"} /> : null}</div><div className="mt-1 truncate font-mono text-[12px] text-muted-foreground">{plugin.id}</div></div></div>
     <p className="line-clamp-2 text-[13px] leading-5 text-muted-foreground">{plugin.description ?? (zh ? "暂无插件描述" : "No description")}</p>
     <div className="flex flex-wrap gap-1.5">{plugin.permissions.map((permission) => <SoftBadge key={permission} label={permission} />)}</div>
-    <div className="mt-auto flex items-center justify-between gap-2 border-t border-black/[0.06] pt-3 dark:border-white/[0.07]" onClick={(event) => event.stopPropagation()}><Button size="sm" variant="ghost" onClick={onSelect}>{zh ? "详情" : "Details"}</Button><Button size="sm" onClick={onInstall} disabled={busy || !plugin.source}><Download className="size-3.5" />{zh ? "安装" : "Install"}</Button></div>
+    <div className="mt-auto flex items-center justify-between gap-2 border-t border-black/[0.06] pt-3 dark:border-white/[0.07]" onClick={(event) => event.stopPropagation()}><Button size="sm" variant="ghost" onClick={onSelect}>{zh ? "详情" : "Details"}</Button><Button size="sm" variant={state === "upgrade" ? "default" : "outline"} onClick={onInstall} disabled={busy || !canInstall}>{state === "installed" ? <CheckCircle2 className="size-3.5 text-primary" /> : <Download className="size-3.5" />}{state === "upgrade" ? (zh ? "升级" : "Upgrade") : state === "installed" ? (zh ? "已安装" : "Installed") : (zh ? "安装" : "Install")}</Button></div>
   </ListCard>;
 }
 
@@ -438,7 +452,7 @@ function PluginDetails({ bridge, plugin, zh, onToggle, onRollback, onRemove, onS
       onSuccess(zh ? "插件设置已保存" : "Plugin settings saved");
     } catch (error) { onError(error); } finally { setSaving(false); }
   }
-  return <div className="grid gap-4"><div className="flex items-center gap-3 rounded-xl border border-black/[0.05] bg-muted p-3 dark:border-white/[0.06] dark:bg-[#1a2029]"><PluginIcon plugin={plugin} /><div className="min-w-0"><div className="text-sm font-semibold text-neutral-900 dark:text-white">{plugin.name}</div><div className="font-mono text-[12px] text-muted-foreground">{plugin.id}@{plugin.version}</div></div></div><PermissionSummary plugin={plugin} zh={zh} /><div className="grid gap-2 rounded-xl bg-muted p-3 text-[13px] text-muted-foreground dark:bg-[#1a2029] dark:text-muted-foreground/60"><DetailRow label={zh ? "状态" : "Status"} value={plugin.active ? (zh ? "运行中" : "Active") : (zh ? "已停用" : "Inactive")} /><DetailRow label={zh ? "Provider" : "Provider"} value={plugin.provider?.displayName ?? "—"} /><DetailRow label="Middleware" value={plugin.middleware ? `${plugin.middleware.hooks.join(", ")} · priority ${plugin.middleware.priority}` : "—"} /><DetailRow label={zh ? "错误" : "Error"} value={plugin.error ?? "—"} /></div><div className="grid gap-2 rounded-xl border border-black/[0.05] bg-white p-3 dark:border-white/[0.06] dark:bg-[#141a22]"><div className="flex items-center gap-2 text-[13px] font-semibold text-neutral-800 dark:text-white"><AlertTriangle className="size-3.5 text-warm-600" />{zh ? "运行诊断" : "Runtime diagnostics"}</div>{diagnostics.length ? <div className="max-h-44 space-y-2 overflow-auto">{diagnostics.slice(0, 12).map((entry, index) => <div key={`${entry.at}-${index}`} className="rounded-lg bg-muted px-2.5 py-2 text-[12px] dark:bg-[#1a2029]"><div className="flex items-center justify-between gap-2"><span className={cn("font-medium", entry.level === "error" ? "text-destructive" : "text-muted-foreground")}>{entry.phase}</span><time className="text-muted-foreground">{new Date(entry.at).toLocaleString()}</time></div><div className="mt-1 break-words text-muted-foreground dark:text-muted-foreground/60">{entry.message}</div></div>)}</div> : <div className="text-[12px] text-muted-foreground">{zh ? "暂无诊断记录" : "No diagnostics recorded"}</div>}</div>{schema ? <div className="grid gap-3 rounded-xl border border-black/[0.05] bg-white p-3 dark:border-white/[0.06] dark:bg-[#141a22]"><div><div className="text-[13px] font-semibold text-neutral-800 dark:text-white">{zh ? "插件设置" : "Plugin settings"}</div><div className="mt-1 text-[12px] text-muted-foreground">{zh ? "设置按插件隔离保存；密钥字段加密存储且不会回显。" : "Settings are isolated per plugin; secret fields are encrypted and never echoed."}</div></div>{Object.entries(schema.properties).map(([key, property]) => <Field key={key} label={property.title} hint={property.description}>{property.type === "boolean" ? <label className="flex h-9 items-center gap-2 text-[13px] text-muted-foreground"><input type="checkbox" checked={settings[key] === true} onChange={(event) => setSettings((current) => ({ ...current, [key]: event.target.checked }))} />{zh ? "启用" : "Enabled"}</label> : property.type === "select" ? <Select value={String(settings[key] ?? property.default ?? "")} onValueChange={(value) => setSettings((current) => ({ ...current, [key]: value }))} items={(property.options ?? []).map((option) => ({ value: option.value, label: option.label }))} /> : <Input type={property.secret ? "password" : property.type === "number" || property.type === "integer" ? "number" : "text"} value={String(settings[key] ?? "")} onChange={(event) => setSettings((current) => ({ ...current, [key]: property.type === "number" || property.type === "integer" ? Number(event.target.value) : event.target.value }))} placeholder={property.secret ? (zh ? "留空保持已保存的密钥" : "Leave empty to keep the saved secret") : undefined} />}</Field>)}<div className="flex justify-end"><Button onClick={() => void saveSettings()} disabled={saving}>{saving ? (zh ? "保存中…" : "Saving…") : (zh ? "保存设置" : "Save settings")}</Button></div></div> : null}{plugin.provider?.endpoints.length ? <div><div className="mb-2 text-[13px] font-semibold text-muted-foreground">{zh ? "服务端点" : "Endpoints"}</div><div className="grid gap-2">{plugin.provider.endpoints.map((endpoint) => <div key={`${endpoint.protocol}-${endpoint.baseUrl}`} className="rounded-lg bg-muted px-3 py-2 text-[12px] text-muted-foreground dark:bg-[#1a2029]"><span className="font-medium text-slate-700 dark:text-slate-200">{endpoint.protocol}</span><span className="ml-2 break-all">{endpoint.baseUrl}{endpoint.modelsPath}</span></div>)}</div></div> : null}{plugin.provider?.managementUrl ? <div className="flex items-center justify-between gap-3 rounded-lg bg-primary/10 px-3 py-2 text-[12px] text-primary dark:bg-primary/20 dark:text-primary"><span>{zh ? "账号管理控制台" : "Account management console"}</span><a className="font-medium underline underline-offset-2" href={plugin.provider.managementUrl} target="_blank" rel="noreferrer">{zh ? "打开控制台" : "Open console"}</a></div> : null}<div className="flex flex-wrap gap-2"><Button onClick={onToggle}>{plugin.active ? (zh ? "停用插件" : "Deactivate") : (zh ? "启用插件" : "Activate")}</Button><Button variant="outline" onClick={onRollback}><RotateCcw className="mr-1.5 size-3.5" />{zh ? "回滚" : "Rollback"}</Button><Button variant="destructive" onClick={onRemove}><Trash2 className="mr-1.5 size-3.5" />{zh ? "卸载" : "Remove"}</Button></div></div>;
+  return <div className="grid gap-4"><div className="flex items-center gap-3 rounded-xl border border-black/[0.05] bg-muted p-3 dark:border-white/[0.06] dark:bg-[#1a2029]"><PluginIcon plugin={plugin} /><div className="min-w-0"><div className="text-sm font-semibold text-neutral-900 dark:text-white">{plugin.name}</div><div className="font-mono text-[12px] text-muted-foreground">{plugin.id}@{plugin.version}</div></div></div><PermissionSummary plugin={plugin} zh={zh} /><div className="grid gap-2 rounded-xl bg-muted p-3 text-[13px] text-muted-foreground dark:bg-[#1a2029] dark:text-muted-foreground/60"><DetailRow label={zh ? "状态" : "Status"} value={plugin.active ? (zh ? "运行中" : "Active") : (zh ? "已停用" : "Inactive")} /><DetailRow label={zh ? "Provider" : "Provider"} value={plugin.provider?.displayName ?? "—"} /><DetailRow label={zh ? "Agent" : "Agent"} value={plugin.agent?.displayName ?? "—"} /><DetailRow label="Middleware" value={plugin.middleware ? `${plugin.middleware.hooks.join(", ")} · priority ${plugin.middleware.priority}` : "—"} /><DetailRow label={zh ? "错误" : "Error"} value={plugin.error ?? "—"} /></div><div className="grid gap-2 rounded-xl border border-black/[0.05] bg-white p-3 dark:border-white/[0.06] dark:bg-[#141a22]"><div className="flex items-center gap-2 text-[13px] font-semibold text-neutral-800 dark:text-white"><AlertTriangle className="size-3.5 text-warm-600" />{zh ? "运行诊断" : "Runtime diagnostics"}</div>{diagnostics.length ? <div className="max-h-44 space-y-2 overflow-auto">{diagnostics.slice(0, 12).map((entry, index) => <div key={`${entry.at}-${index}`} className="rounded-lg bg-muted px-2.5 py-2 text-[12px] dark:bg-[#1a2029]"><div className="flex items-center justify-between gap-2"><span className={cn("font-medium", entry.level === "error" ? "text-destructive" : "text-muted-foreground")}>{entry.phase}</span><time className="text-muted-foreground">{new Date(entry.at).toLocaleString()}</time></div><div className="mt-1 break-words text-muted-foreground dark:text-muted-foreground/60">{entry.message}</div></div>)}</div> : <div className="text-[12px] text-muted-foreground">{zh ? "暂无诊断记录" : "No diagnostics recorded"}</div>}</div>{schema ? <div className="grid gap-3 rounded-xl border border-black/[0.05] bg-white p-3 dark:border-white/[0.06] dark:bg-[#141a22]"><div><div className="text-[13px] font-semibold text-neutral-800 dark:text-white">{zh ? "插件设置" : "Plugin settings"}</div><div className="mt-1 text-[12px] text-muted-foreground">{zh ? "设置按插件隔离保存；密钥字段加密存储且不会回显。" : "Settings are isolated per plugin; secret fields are encrypted and never echoed."}</div></div>{Object.entries(schema.properties).map(([key, property]) => <Field key={key} label={property.title} hint={property.description}>{property.type === "boolean" ? <label className="flex h-9 items-center gap-2 text-[13px] text-muted-foreground"><input type="checkbox" checked={settings[key] === true} onChange={(event) => setSettings((current) => ({ ...current, [key]: event.target.checked }))} />{zh ? "启用" : "Enabled"}</label> : property.type === "select" ? <Select value={String(settings[key] ?? property.default ?? "")} onValueChange={(value) => setSettings((current) => ({ ...current, [key]: value }))} items={(property.options ?? []).map((option) => ({ value: option.value, label: option.label }))} /> : <Input type={property.secret ? "password" : property.type === "number" || property.type === "integer" ? "number" : "text"} value={String(settings[key] ?? "")} onChange={(event) => setSettings((current) => ({ ...current, [key]: property.type === "number" || property.type === "integer" ? Number(event.target.value) : event.target.value }))} placeholder={property.secret ? (zh ? "留空保持已保存的密钥" : "Leave empty to keep the saved secret") : undefined} />}</Field>)}<div className="flex justify-end"><Button onClick={() => void saveSettings()} disabled={saving}>{saving ? (zh ? "保存中…" : "Saving…") : (zh ? "保存设置" : "Save settings")}</Button></div></div> : null}{plugin.provider?.endpoints.length ? <div><div className="mb-2 text-[13px] font-semibold text-muted-foreground">{zh ? "服务端点" : "Endpoints"}</div><div className="grid gap-2">{plugin.provider.endpoints.map((endpoint) => <div key={`${endpoint.protocol}-${endpoint.baseUrl}`} className="rounded-lg bg-muted px-3 py-2 text-[12px] text-muted-foreground dark:bg-[#1a2029]"><span className="font-medium text-slate-700 dark:text-slate-200">{endpoint.protocol}</span><span className="ml-2 break-all">{endpoint.baseUrl}{endpoint.modelsPath}</span></div>)}</div></div> : null}{plugin.provider?.managementUrl ? <div className="flex items-center justify-between gap-3 rounded-lg bg-primary/10 px-3 py-2 text-[12px] text-primary dark:bg-primary/20 dark:text-primary"><span>{zh ? "账号管理控制台" : "Account management console"}</span><a className="font-medium underline underline-offset-2" href={plugin.provider.managementUrl} target="_blank" rel="noreferrer">{zh ? "打开控制台" : "Open console"}</a></div> : null}<div className="flex flex-wrap gap-2"><Button onClick={onToggle}>{plugin.active ? (zh ? "停用插件" : "Deactivate") : (zh ? "启用插件" : "Activate")}</Button><Button variant="outline" onClick={onRollback}><RotateCcw className="mr-1.5 size-3.5" />{zh ? "回滚" : "Rollback"}</Button><Button variant="destructive" onClick={onRemove}><Trash2 className="mr-1.5 size-3.5" />{zh ? "卸载" : "Remove"}</Button></div></div>;
 }
 
 type PluginSettingProperty = { type: "string" | "number" | "integer" | "boolean" | "select"; title: string; description?: string; secret?: boolean; default?: string | number | boolean; options?: Array<{ label: string; value: string }> };
@@ -448,6 +462,10 @@ function pluginSettingsSchema(value: unknown): { properties: Record<string, Plug
   if (!properties || typeof properties !== "object" || Array.isArray(properties)) return undefined;
   const normalized = Object.fromEntries(Object.entries(properties).filter(([, item]) => item && typeof item === "object" && typeof (item as { type?: unknown }).type === "string" && typeof (item as { title?: unknown }).title === "string")) as Record<string, PluginSettingProperty>;
   return Object.keys(normalized).length ? { properties: normalized } : undefined;
+}
+
+function hasPluginConfiguration(plugin: Pick<ProviderPluginSnapshot, "id" | "settingsSchema">): boolean {
+  return plugin.id === "claude-code" || Boolean(pluginSettingsSchema(plugin.settingsSchema));
 }
 
 function PermissionSummary({ plugin, zh }: { plugin: Pick<ProviderPluginSnapshot, "permissions" | "trust" | "kind">; zh: boolean }) {
@@ -461,6 +479,13 @@ function PluginIcon({ plugin }: { plugin: Pick<ProviderPluginSnapshot, "icon" | 
 function DetailRow({ label, value }: { label: string; value: string }) { return <div className="flex items-start justify-between gap-4"><span>{label}</span><span className="max-w-[280px] break-words text-right font-medium text-slate-700 dark:text-slate-200">{value}</span></div>; }
 function EmptyState({ label }: { label: string }) { return <div className="rounded-[14px] border border-dashed border-black/[0.08] bg-white px-5 py-12 text-center text-[13px] text-muted-foreground dark:border-white/[0.08] dark:bg-[#141a22]">{label}</div>; }
 function trustLabel(value: string | undefined, zh: boolean) { if (value === "official") return zh ? "官方" : "Official"; if (value === "verified") return zh ? "已验证" : "Verified"; if (value === "community") return zh ? "社区" : "Community"; return zh ? "本地" : "Local"; }
+
+type MarketPluginState = "install" | "installed" | "upgrade";
+
+function getMarketPluginState(plugin: Pick<ProviderPluginMarketEntry, "version">, installed?: Pick<ProviderPluginSnapshot, "version">): MarketPluginState {
+  if (!installed) return "install";
+  return comparePluginVersions(plugin.version, installed.version) > 0 ? "upgrade" : "installed";
+}
 
 function comparePluginVersions(left: string, right: string): number {
   const normalize = (value: string) => value.trim().replace(/^v/i, "").split(/[+-]/, 1)[0].split(".").map((part) => Number.parseInt(part, 10)).map((part) => Number.isFinite(part) ? part : 0);

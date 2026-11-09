@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownToLine, CheckCircle2, CircleAlert, Copy, Ellipsis, FolderPlus, LoaderCircle, Network, RadioTower, Search, Shuffle, RotateCcw, Trash2, Wrench } from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
+import { ArrowDownToLine, CheckCircle2, ChevronDown, CircleAlert, Copy, Ellipsis, FolderPlus, LoaderCircle, Monitor, Network, RadioTower, Search, Shuffle, RotateCcw, TerminalSquare, Trash2, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useAdaptiveMenuLayout } from "../components/adaptive-menu-placement";
@@ -24,9 +25,10 @@ import {
 } from "../components/account-list-primitives";
 import { ConfirmDialog, ProgressDialog, SidePanel } from "../components/admin-primitives";
 import { Field, Input, Select, Textarea } from "../components/form-primitives";
-import type { EnvironmentRouteStatus, EnvSummary, OverviewPayload } from "../desktop-model";
+import type { EnvironmentModelIdentityMode, EnvironmentRemoteStatus, EnvironmentRoutePreview, EnvironmentRouteStatus, EnvSummary, OverviewPayload } from "../desktop-model";
 import { getDesktopCopy } from "../desktop-copy";
 import { getTranslations, type UiLanguage } from "../i18n";
+import { ProviderIcon } from "../components/provider-icon";
 
 function pageTitle(language: UiLanguage) {
   if (language === "zh") return "环境管理";
@@ -298,6 +300,274 @@ function EnvironmentActionMenu({
   );
 }
 
+type RouteMapEdge = {
+  key: string;
+  from: string;
+  to: string;
+  kind: "gateway-model" | "model-provider";
+  d: string;
+};
+
+function RoutePreviewPanel({ preview, language }: { preview?: EnvironmentRoutePreview; language: UiLanguage }) {
+  const detailsId = useId();
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const gatewayRef = useRef<HTMLDivElement>(null);
+  const gatewayAddressRef = useRef<HTMLDivElement>(null);
+  const modelStackRef = useRef<HTMLDivElement>(null);
+  const modelRefs = useRef<Record<string, HTMLElement | null>>({});
+  const providerRefs = useRef<Record<string, HTMLElement | null>>({});
+  const centeredLayoutKeyRef = useRef<string | undefined>(undefined);
+  const [edgeLayout, setEdgeLayout] = useState<{ width: number; height: number; edges: RouteMapEdge[] }>({ width: 0, height: 0, edges: [] });
+  const [gatewayAddressOverflow, setGatewayAddressOverflow] = useState(false);
+  const [gatewayAddressShift, setGatewayAddressShift] = useState(0);
+  const [selectedNodeKey, setSelectedNodeKey] = useState<string>();
+  const [expanded, setExpanded] = useState(false);
+
+  const providerNodes = useMemo(() => {
+    if (!preview) return [];
+    const providers = new Map<string, { providerId: string; displayName: string }>();
+    preview.models.forEach((model) => {
+      model.routes.forEach((route) => {
+        const providerId = route.providerId || "unknown";
+        const existing = providers.get(providerId);
+        if (!existing) {
+          providers.set(providerId, {
+            providerId,
+            displayName: route.providerDisplayName || providerId,
+          });
+        }
+      });
+    });
+    // Preserve the first-seen route order from the compiled route groups. This
+    // keeps the visual provider order aligned with the configured fallback
+    // order instead of re-sorting the graph alphabetically.
+    return Array.from(providers.values());
+  }, [preview]);
+
+  useEffect(() => {
+    if (!preview) return undefined;
+    const canvas = canvasRef.current;
+    const gateway = gatewayRef.current;
+    if (!canvas || !gateway) return undefined;
+
+    let frame = 0;
+    const updateEdges = () => {
+      frame = 0;
+      const canvasRect = canvas.getBoundingClientRect();
+      const gatewayRect = gateway.getBoundingClientRect();
+      if (!canvasRect.width || !canvasRect.height || !gatewayRect.width) return;
+      const startX = gatewayRect.right - canvasRect.left;
+      const startY = gatewayRect.top + gatewayRect.height / 2 - canvasRect.top;
+      const curvePath = (fromX: number, fromY: number, toX: number, toY: number) => {
+        // Keep the control points inside the horizontal gap. A fixed minimum
+        // curve makes the model→provider links fold back on themselves when
+        // compact columns leave only a few pixels between cards.
+        const distance = Math.abs(toX - fromX);
+        const curve = Math.min(180, distance * 0.42, Math.max(2, distance / 2 - 2));
+        return `M ${fromX.toFixed(1)} ${fromY.toFixed(1)} C ${(fromX + curve).toFixed(1)} ${fromY.toFixed(1)}, ${(toX - curve).toFixed(1)} ${toY.toFixed(1)}, ${toX.toFixed(1)} ${toY.toFixed(1)}`;
+      };
+      const edges = preview.models.flatMap((model) => {
+        const node = modelRefs.current[model.exposedModelId];
+        if (!node) return [];
+        const nodeRect = node.getBoundingClientRect();
+        const modelX = nodeRect.left - canvasRect.left;
+        const modelY = nodeRect.top + nodeRect.height / 2 - canvasRect.top;
+        const modelKey = `model:${model.exposedModelId}`;
+        const modelEdges: RouteMapEdge[] = [{
+          key: `gateway->${modelKey}`,
+          from: "gateway",
+          to: modelKey,
+          kind: "gateway-model",
+          d: curvePath(startX, startY, modelX, modelY),
+        }];
+        if (preview.mode !== "unified") return modelEdges;
+        const providerIds = new Set(model.routes.map((route) => route.providerId || "unknown"));
+        providerIds.forEach((providerId) => {
+          const providerNode = providerRefs.current[providerId];
+          if (!providerNode) return;
+          const providerRect = providerNode.getBoundingClientRect();
+          const providerX = providerRect.left - canvasRect.left;
+          const providerY = providerRect.top + providerRect.height / 2 - canvasRect.top;
+          const providerKey = `provider:${providerId}`;
+          modelEdges.push({
+            key: `${modelKey}->${providerKey}`,
+            from: modelKey,
+            to: providerKey,
+            kind: "model-provider",
+            d: curvePath(nodeRect.right - canvasRect.left, modelY, providerX, providerY),
+          });
+        });
+        return modelEdges;
+      });
+      const address = gatewayAddressRef.current;
+      if (address) {
+        const shift = Math.min(0, address.clientWidth - address.scrollWidth);
+        const overflowing = shift < 0;
+        setGatewayAddressOverflow((current) => current === overflowing ? current : overflowing);
+        setGatewayAddressShift((current) => current === shift ? current : shift);
+      }
+      setEdgeLayout((current) => {
+        const next = { width: canvasRect.width, height: canvasRect.height, edges };
+        return current.width === next.width && current.height === next.height && current.edges.length === next.edges.length && current.edges.every((edge, index) => edge.key === next.edges[index]?.key && edge.d === next.edges[index]?.d)
+          ? current
+          : next;
+      });
+    };
+    const scheduleUpdate = () => {
+      if (!frame) frame = window.requestAnimationFrame(updateEdges);
+    };
+    const modelStack = modelStackRef.current;
+    const layoutKey = `${preview.envName}:${preview.mode}`;
+    if (modelStack && centeredLayoutKeyRef.current !== layoutKey && modelStack.scrollHeight > modelStack.clientHeight) {
+      modelStack.scrollTop = Math.max(0, (modelStack.scrollHeight - modelStack.clientHeight) / 2);
+      centeredLayoutKeyRef.current = layoutKey;
+    }
+    scheduleUpdate();
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(scheduleUpdate);
+    observer?.observe(canvas);
+    observer?.observe(gateway);
+    if (gatewayAddressRef.current) observer?.observe(gatewayAddressRef.current);
+    preview.models.forEach((model) => {
+      const node = modelRefs.current[model.exposedModelId];
+      if (node) observer?.observe(node);
+    });
+    providerNodes.forEach((provider) => {
+      const node = providerRefs.current[provider.providerId];
+      if (node) observer?.observe(node);
+    });
+    modelStack?.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      modelStack?.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+    };
+  }, [preview?.generatedAt, preview?.models, preview?.mode, providerNodes]);
+
+  useEffect(() => {
+    setSelectedNodeKey(undefined);
+  }, [preview?.envName, preview?.mode]);
+
+  const highlightedNodeKeys = useMemo(() => {
+    const keys = new Set<string>();
+    if (!preview || !selectedNodeKey) return keys;
+    keys.add(selectedNodeKey);
+    if (selectedNodeKey === "gateway") {
+      preview.models.forEach((model) => keys.add(`model:${model.exposedModelId}`));
+    } else if (selectedNodeKey.startsWith("model:")) {
+      const modelId = selectedNodeKey.slice("model:".length);
+      const model = preview.models.find((candidate) => candidate.exposedModelId === modelId);
+      model?.routes.forEach((route) => keys.add(`provider:${route.providerId || "unknown"}`));
+    }
+    return keys;
+  }, [preview, selectedNodeKey]);
+  if (!preview) return null;
+  const isUnifiedMode = preview.mode === "unified";
+  const isScrollable = preview.models.length > 5 || providerNodes.length > 5;
+  const healthyCount = preview.models.reduce((total, model) => total + model.routes.filter((route) => route.status === "healthy").length, 0);
+  const routeCount = preview.models.reduce((total, model) => total + model.routes.length, 0);
+  const providerCount = providerNodes.length;
+  const gatewayAddress = preview.baseUrl ?? "127.0.0.1";
+  return (
+    <div className="route-map-shell" data-expanded={expanded}>
+      <div className="route-map-header">
+        <div>
+          <div className="flex items-center gap-2 text-[12px] font-semibold text-neutral-900">
+            <span className="route-map-title-mark" aria-hidden="true" />
+            {language === "zh" ? "路由关系图" : language === "ja" ? "ルートマップ" : "Route map"}
+          </div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">
+            {preview.gatewayStatus === "running"
+              ? (language === "zh" ? "当前展示已编译并运行中的真实路由" : "Compiled routes currently running in the gateway")
+              : (language === "zh" ? "网关开启后展示实际运行路由" : "Actual routes appear when Gateway mode is enabled")}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <SoftBadge tone={preview.gatewayStatus === "running" ? "success" : preview.gatewayStatus === "configured" ? "warn" : "neutral"} label={preview.gatewayStatus === "running" ? (language === "zh" ? "运行中" : "Running") : preview.gatewayStatus === "configured" ? (language === "zh" ? "已配置" : "Configured") : (language === "zh" ? "直连" : "Direct")} className="h-5 px-2 text-[10px]" />
+          <button
+            type="button"
+            className="route-map-toggle"
+            aria-expanded={expanded}
+            aria-controls={detailsId}
+            onClick={() => setExpanded((current) => !current)}
+          >
+            {language === "zh" ? "路由详情" : language === "ja" ? "ルート詳細" : "Route details"}
+            <ChevronDown className={cn("route-map-chevron", expanded && "is-expanded")} aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+      <div id={detailsId} className="route-map-details" data-expanded={expanded} aria-hidden={!expanded}>
+        <div className="route-map-details-inner">
+          {preview.warnings.length ? <div className="mt-3 space-y-1 text-[11px] text-warm-700">{preview.warnings.slice(0, 3).map((warning) => <div key={warning}>· {warning}</div>)}</div> : null}
+          <div ref={canvasRef} className={cn("route-map-canvas mt-4", isUnifiedMode ? "is-unified" : "is-account", isScrollable && "is-scrollable")}>
+            <svg className="route-map-edges" viewBox={`0 0 ${Math.max(1, edgeLayout.width)} ${Math.max(1, edgeLayout.height)}`} preserveAspectRatio="none" aria-hidden="true">
+              {edgeLayout.edges.map((edge) => <path key={edge.key} className={cn(`route-map-edge-${edge.kind}`, selectedNodeKey && edge.from === selectedNodeKey && "is-active", selectedNodeKey && edge.from !== selectedNodeKey && "is-dimmed")} d={edge.d} />)}
+            </svg>
+            <section className="route-map-core" aria-label={language === "zh" ? "Switcher 网关" : "Switcher gateway"}>
+              <div
+                ref={gatewayRef}
+                className={cn("route-map-gateway-node", selectedNodeKey === "gateway" && "is-selected", highlightedNodeKeys.has("gateway") && selectedNodeKey !== "gateway" && "is-active-downstream", selectedNodeKey && !highlightedNodeKeys.has("gateway") && "is-dimmed")}
+                role="button"
+                tabIndex={0}
+                aria-pressed={selectedNodeKey === "gateway"}
+                aria-label={language === "zh" ? "选择 Switcher 网关以高亮下游路由" : "Select the Switcher gateway to highlight downstream routes"}
+                onClick={() => setSelectedNodeKey((current) => current === "gateway" ? undefined : "gateway")}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setSelectedNodeKey((current) => current === "gateway" ? undefined : "gateway");
+                  }
+                }}
+              >
+                <div className="route-map-gateway-icon"><img src="./logo.png" alt="" draggable={false} /></div>
+                <div className="mt-2 text-[12px] font-semibold text-neutral-950">Switcher Gateway</div>
+                <div ref={gatewayAddressRef} className={cn("route-map-gateway-address mt-0.5", gatewayAddressOverflow && "is-overflowing")} title={gatewayAddress}>
+                  <span className="route-map-gateway-address-track" style={{ "--route-map-address-shift": `${gatewayAddressShift}px` } as CSSProperties}>{gatewayAddress}</span>
+                </div>
+                <div className="mt-2 flex flex-wrap justify-center gap-1"><SoftBadge tone={preview.mode === "unified" ? "brand" : "neutral"} label={preview.mode === "unified" ? (language === "zh" ? "统一路由" : "Unified") : (language === "zh" ? "按服务商" : "By provider")} className="h-5 px-1.5 text-[10px]" /></div>
+              </div>
+            </section>
+
+            <section className="route-map-flow" aria-label={isUnifiedMode ? (language === "zh" ? "统一逻辑模型和服务商路由" : "Unified logical models and provider routes") : (language === "zh" ? "按服务商区分的模型" : "Provider-qualified models")}>
+              <div ref={modelStackRef} className={cn("route-map-columns", isUnifiedMode && "is-unified", isScrollable && "is-scrollable")}>
+                <div className="route-map-column route-map-model-column">
+                  <div className="route-map-column-label">{isUnifiedMode ? (language === "zh" ? "模型" : "Models") : (language === "zh" ? "服务商模型" : "Provider models")}</div>
+                  <div className="route-map-model-rail">
+                    {preview.models.length ? <div className="route-map-model-stack">
+                      {preview.models.map((model) => {
+                        const primaryRoute = model.routes[0];
+                        const nodeKey = `model:${model.exposedModelId}`;
+                        return <article ref={(node) => { modelRefs.current[model.exposedModelId] = node; }} key={model.exposedModelId} className={cn("route-map-model-node", isUnifiedMode ? "is-unified" : "is-account", selectedNodeKey === nodeKey && "is-selected", highlightedNodeKeys.has(nodeKey) && selectedNodeKey !== nodeKey && "is-active-downstream", selectedNodeKey && !highlightedNodeKeys.has(nodeKey) && "is-dimmed")} role="button" tabIndex={0} aria-pressed={selectedNodeKey === nodeKey} aria-label={language === "zh" ? `选择模型 ${model.displayName}` : `Select model ${model.displayName}`} onClick={() => setSelectedNodeKey((current) => current === nodeKey ? undefined : nodeKey)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedNodeKey((current) => current === nodeKey ? undefined : nodeKey); } }}>
+                          <ProviderIcon providerId={primaryRoute?.providerId} displayName={primaryRoute?.providerDisplayName} size={18} className="route-map-model-provider-icon" />
+                          <div className="route-map-model-name truncate">{model.displayName}</div>
+                        </article>;
+                      })}
+                    </div> : <div className="route-map-empty-node">{language === "zh" ? "暂无已编译模型路由" : "No compiled model routes"}</div>}
+                  </div>
+                </div>
+                {isUnifiedMode ? <div className="route-map-column route-map-provider-column">
+                  <div className="route-map-column-label">{language === "zh" ? "支持的服务商" : "Providers"}</div>
+                  <div className="route-map-provider-stack">
+                    {providerNodes.length ? providerNodes.map((provider) => {
+                      const nodeKey = `provider:${provider.providerId}`;
+                      return <article ref={(node) => { providerRefs.current[provider.providerId] = node; }} key={provider.providerId} className={cn("route-map-provider-node", selectedNodeKey === nodeKey && "is-selected", highlightedNodeKeys.has(nodeKey) && selectedNodeKey !== nodeKey && "is-active-downstream", selectedNodeKey && !highlightedNodeKeys.has(nodeKey) && "is-dimmed")} role="button" tabIndex={0} aria-pressed={selectedNodeKey === nodeKey} aria-label={language === "zh" ? `选择服务商 ${provider.displayName}` : `Select provider ${provider.displayName}`} onClick={() => setSelectedNodeKey((current) => current === nodeKey ? undefined : nodeKey)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedNodeKey((current) => current === nodeKey ? undefined : nodeKey); } }}>
+                        <ProviderIcon providerId={provider.providerId} displayName={provider.displayName} size={18} />
+                        <span className="route-map-provider-name truncate">{provider.displayName}</span>
+                      </article>;
+                    }) : <div className="route-map-empty-node">{language === "zh" ? "暂无服务商路由" : "No providers"}</div>}
+                  </div>
+                </div> : null}
+              </div>
+            </section>
+          </div>
+          <div className="route-map-summary mt-4"><span>{language === "zh" ? `${preview.models.length} 个模型` : `${preview.models.length} models`}</span><span>{language === "zh" ? `${providerCount} 个服务商` : `${providerCount} providers`}</span><span>{language === "zh" ? `${healthyCount}/${routeCount} 条路由可用` : `${healthyCount}/${routeCount} routes ready`}</span><span>{language === "zh" ? "会话保持 · 故障切换" : "Session affinity · failover"}</span></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function EnvCard({
   env,
   language,
@@ -310,12 +580,18 @@ function EnvCard({
   onRepairConversation,
   onDelete,
   routeStatus,
+  remoteStatus,
   canRoute,
   onToggleGateway,
   onToggleLocalAgentAccess,
+  onLaunchCli,
+  onLaunchApp,
   onCopyLocalAgentValue,
   poolStatus,
   onOpenPool,
+  routePreview,
+  onSetModelIdentityMode,
+  onOpenRemote,
 }: {
   env: EnvSummary;
   language: UiLanguage;
@@ -328,12 +604,18 @@ function EnvCard({
   onRepairConversation: () => void;
   onDelete: () => void;
   routeStatus?: EnvironmentRouteStatus;
+  remoteStatus?: EnvironmentRemoteStatus;
   canRoute: boolean;
   onToggleGateway: () => void;
   onToggleLocalAgentAccess: () => void;
+  onLaunchCli: () => void;
+  onLaunchApp: () => void;
   onCopyLocalAgentValue: (value: string, label: string) => void;
   poolStatus?: AccountPoolStatus;
   onOpenPool: () => void;
+  routePreview?: EnvironmentRoutePreview;
+  onSetModelIdentityMode: (mode: EnvironmentModelIdentityMode) => void;
+  onOpenRemote: () => void;
 }) {
   const runtime = getRouteRuntimeSummary(routeStatus, language);
   const isGatewayEnabled = Boolean(routeStatus?.gatewayEnabled);
@@ -343,6 +625,14 @@ function EnvCard({
     env.isCurrentCli ? "CLI" : null,
     env.isCurrentApp ? "App" : null,
   ].filter((value): value is string => Boolean(value));
+  // The card summarizes whether this environment has a remote account bound.
+  // Pairing and sign-in details stay in the remote side panel where they can be
+  // acted on, so the card only needs the two stable states users scan for.
+  const remoteBound = Boolean(remoteStatus?.remoteAccountName);
+  const remoteLabel = remoteBound
+    ? language === "zh" ? "已绑定" : language === "ja" ? "バインド済み" : "Bound"
+    : language === "zh" ? "待绑定" : language === "ja" ? "未バインド" : "Not bound";
+  const remoteTone = remoteBound ? "success" : "warn";
 
   return (
     <ListCard className="environment-card flex flex-col gap-4 p-5">
@@ -369,10 +659,39 @@ function EnvCard({
             </span>
             <span className="text-muted-foreground">{language === "zh" ? `${accountCount} 个账号` : language === "ja" ? `${accountCount} アカウント` : `${accountCount} accounts`}</span>
           </div>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+            <span className="mr-1 text-muted-foreground">{language === "zh" ? "模型标识" : language === "ja" ? "モデル識別" : "Model identity"}</span>
+            {(["account", "unified"] as const).map((mode) => <button key={mode} type="button" className={cn("rounded-md px-2 py-1 font-medium transition-colors", env.modelIdentityMode === mode ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-black/[0.04] hover:text-neutral-800")} onClick={() => onSetModelIdentityMode(mode)} disabled={busy} aria-pressed={env.modelIdentityMode === mode}>{mode === "account" ? (language === "zh" ? "按服务商区分" : "By provider") : (language === "zh" ? "统一自动路由" : "Unified routing")}</button>)}
+          </div>
           {runtime.detail ? <div className="mt-1 font-mono text-[12px] text-muted-foreground">{runtime.detail}</div> : null}
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-black/[0.06] bg-[#fbfbfc] px-3 py-2 text-left transition-colors hover:border-primary/30 hover:bg-primary/[0.035]"
+              onClick={onOpenRemote}
+              disabled={busy}
+            >
+              <span className="text-[11px] text-muted-foreground">{language === "zh" ? "手机远程" : language === "ja" ? "スマホ遠隔" : "Phone remote"}</span>
+              <SoftBadge tone={remoteTone} label={remoteLabel} className="h-5 px-1.5 text-[10px]" />
+            </button>
+            <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-black/[0.06] bg-[#fbfbfc] px-3 py-2">
+              <span className="text-[11px] text-muted-foreground">{language === "zh" ? "模型服务" : language === "ja" ? "モデルサービス" : "Model service"}</span>
+              <span className="truncate text-[11px] font-medium text-neutral-700" title={remoteStatus?.modelServiceLabel}>{remoteStatus?.modelServiceLabel ?? "—"}</span>
+            </div>
+          </div>
         </div>
 
         <div className="environment-card-actions flex flex-wrap items-center gap-2 xl:justify-end">
+          <>
+            <Button size="sm" variant="outline" onClick={onLaunchCli} disabled={busy || !canRoute || (isGatewayEnabled && !gatewayIsRunning)}>
+              <TerminalSquare className="size-4" />
+              {language === "zh" ? "启动 CLI" : language === "ja" ? "CLI を起動" : "Launch CLI"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={onLaunchApp} disabled={busy || !canRoute || (isGatewayEnabled && !gatewayIsRunning)}>
+              <Monitor className="size-4" />
+              {language === "zh" ? "启动 App" : language === "ja" ? "App を起動" : "Launch App"}
+            </Button>
+          </>
           <Button
             size="sm"
             variant="outline"
@@ -396,10 +715,10 @@ function EnvCard({
             onClick={onToggleLocalAgentAccess}
             disabled={busy || !isGatewayEnabled}
             aria-pressed={Boolean(routeStatus?.localAgentAccessEnabled)}
-            title={language === "zh" ? "仅允许本机其它 Agent 通过网关访问" : "Allow other local agents to use this gateway"}
+            title={language === "zh" ? "允许本机工具通过此环境网关访问" : language === "ja" ? "この環境ゲートウェイへのローカルツール接続を許可" : "Allow local tools to use this environment gateway"}
           >
             <RadioTower className="size-4" />
-            {language === "zh" ? (routeStatus?.localAgentAccessEnabled ? "本机 Agent 已开启" : "本机 Agent") : language === "ja" ? (routeStatus?.localAgentAccessEnabled ? "ローカル Agent 有効" : "ローカル Agent") : (routeStatus?.localAgentAccessEnabled ? "Local agents on" : "Local agents")}
+            {language === "zh" ? (routeStatus?.localAgentAccessEnabled ? "本地调用已开启" : "开启本地调用") : language === "ja" ? (routeStatus?.localAgentAccessEnabled ? "ローカル呼び出し有効" : "ローカル呼び出し") : (routeStatus?.localAgentAccessEnabled ? "Local calls on" : "Local calls")}
           </Button>
           <Button
             size="sm"
@@ -438,7 +757,7 @@ function EnvCard({
         <div className="rounded-xl border border-primary/15 bg-primary/[0.035] px-3.5 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <div className="text-[12px] font-semibold text-neutral-800">{language === "zh" ? "本机 Agent 接入" : language === "ja" ? "ローカル Agent 接続" : "Local Agent access"}</div>
+              <div className="text-[12px] font-semibold text-neutral-800">{language === "zh" ? "本地调用入口" : language === "ja" ? "ローカル呼び出し入口" : "Local call entry"}</div>
               <div className="mt-0.5 text-[11px] text-muted-foreground">{language === "zh" ? `127.0.0.1:${routeStatus.port ?? "—"}，仅本机可访问，不对局域网或公网开放` : language === "ja" ? `127.0.0.1:${routeStatus.port ?? "—"} のみで待受けます` : `127.0.0.1:${routeStatus.port ?? "—"} · loopback only`}</div>
             </div>
             <div className="flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
@@ -464,6 +783,7 @@ function EnvCard({
           </div>
         </div>
       ) : null}
+      <RoutePreviewPanel preview={routePreview} language={language} />
     </ListCard>
   );
 }
@@ -491,8 +811,13 @@ export function EnvironmentsPage({
   onImportDefaultEnv,
   onDeleteEnv,
   routeStatuses,
+  remoteStatuses,
+  routePreviews,
   onToggleGateway,
+  onSetModelIdentityMode,
   onToggleLocalAgentAccess,
+  onSetRemoteAccount,
+  onLaunchEnvironment,
   onCopyLocalAgentValue,
   accountPools,
   onSaveAccountPool,
@@ -519,8 +844,13 @@ export function EnvironmentsPage({
   onImportDefaultEnv: (envName: string) => void;
   onDeleteEnv: () => void;
   routeStatuses: EnvironmentRouteStatus[];
+  remoteStatuses: EnvironmentRemoteStatus[];
+  routePreviews: EnvironmentRoutePreview[];
   onToggleGateway: (envName: string, enabled: boolean) => Promise<void>;
+  onSetModelIdentityMode: (envName: string, mode: EnvironmentModelIdentityMode) => Promise<void>;
   onToggleLocalAgentAccess: (envName: string, enabled: boolean) => Promise<void>;
+  onSetRemoteAccount: (envName: string, accountName?: string) => Promise<void>;
+  onLaunchEnvironment: (target: "cli" | "app", envName: string, accountName?: string) => void;
   onCopyLocalAgentValue: (value: string, label: string) => void;
   accountPools: AccountPoolStatus[];
   onSaveAccountPool: (input: AccountPoolInput) => Promise<boolean>;
@@ -557,6 +887,9 @@ export function EnvironmentsPage({
   const [poolTtl, setPoolTtl] = useState("1440");
   const [poolSameAccountFailures, setPoolSameAccountFailures] = useState("1");
   const [poolFailover, setPoolFailover] = useState("1");
+  const [launchTarget, setLaunchTarget] = useState<"cli" | "app">();
+  const [launchEnvName, setLaunchEnvName] = useState("");
+  const [remotePanelEnv, setRemotePanelEnv] = useState<string>();
   const pageCopy = getDesktopCopy(language);
   const text = getTranslations(language);
 
@@ -598,9 +931,12 @@ export function EnvironmentsPage({
   const selectedDeleteAccounts = selectedDeleteEnv ? accountCountByEnv.get(selectedDeleteEnv.name) ?? 0 : 0;
   const poolEnvAccounts = overview.accounts.filter((account) => account.envName === poolEnvName
     && (poolProtocol === "responses"
-      ? account.runtime.apiProtocol !== "chat_completions" || account.authMode === "auth"
+      ? account.authMode === "auth" || !account.runtime.apiProtocol || account.runtime.apiProtocol === "responses"
       : account.authMode !== "auth" && account.runtime.apiProtocol === "chat_completions"));
   const poolStatus = accountPools.find((pool) => pool.envName === poolEnvName);
+  const launchCandidates = overview.accounts.filter((account) => account.envName === launchEnvName);
+  const remotePanelStatus = remoteStatuses.find((item) => item.envName === remotePanelEnv);
+  const remoteCandidates = overview.accounts.filter((account) => account.envName === remotePanelEnv && account.authMode === "auth");
   const repairInspection = conversationRepairDialog?.inspection;
   const selectedRepairCandidate = repairInspection?.candidates.find((candidate) => candidate.envName === conversationRepairEnvName)
     ?? (repairInspection?.candidates.length === 1 ? repairInspection.candidates[0] : undefined);
@@ -664,7 +1000,7 @@ export function EnvironmentsPage({
     const available = overview.accounts.filter((account) => account.envName === envName
       && (current?.protocol === "chat_completions"
         ? account.authMode !== "auth" && account.runtime.apiProtocol === "chat_completions"
-        : account.runtime.apiProtocol !== "chat_completions" || account.authMode === "auth"));
+        : account.authMode === "auth" || !account.runtime.apiProtocol || account.runtime.apiProtocol === "responses"));
     setPoolEnvName(envName);
     setPoolProtocol(current?.protocol ?? "responses");
     setPoolMembers(current?.members.filter((member) => member.enabled).map((member) => member.accountName) ?? available.map((account) => account.name));
@@ -673,6 +1009,16 @@ export function EnvironmentsPage({
     setPoolSameAccountFailures(String(current?.maxSameAccountFailures ?? 1));
     setPoolFailover(String(current?.maxFailoverAttempts ?? 1));
     setPoolOpen(true);
+  }
+
+  function openEnvironmentLauncher(target: "cli" | "app", envName: string) {
+    const routeStatus = routeStatuses.find((item) => item.envName === envName);
+    if (routeStatus?.gatewayEnabled) {
+      onLaunchEnvironment(target, envName);
+      return;
+    }
+    setLaunchTarget(target);
+    setLaunchEnvName(envName);
   }
 
   return (
@@ -715,16 +1061,22 @@ export function EnvironmentsPage({
               accountCount={accountCountByEnv.get(env.name) ?? 0}
               busy={busy}
               routeStatus={routeStatuses.find((item) => item.envName === env.name)}
+              remoteStatus={remoteStatuses.find((item) => item.envName === env.name)}
+              routePreview={routePreviews.find((item) => item.envName === env.name)}
               poolStatus={accountPools.find((item) => item.envName === env.name)}
                   canRoute={overview.accounts.some((account) => account.envName === env.name)}
               onToggleGateway={() => {
                 const status = routeStatuses.find((item) => item.envName === env.name);
                 void onToggleGateway(env.name, !status?.gatewayEnabled);
               }}
+              onSetModelIdentityMode={(mode) => { void onSetModelIdentityMode(env.name, mode); }}
               onToggleLocalAgentAccess={() => {
                 const status = routeStatuses.find((item) => item.envName === env.name);
                 void onToggleLocalAgentAccess(env.name, !status?.localAgentAccessEnabled);
               }}
+              onOpenRemote={() => setRemotePanelEnv(env.name)}
+              onLaunchCli={() => openEnvironmentLauncher("cli", env.name)}
+              onLaunchApp={() => openEnvironmentLauncher("app", env.name)}
               onCopyLocalAgentValue={onCopyLocalAgentValue}
               onOpenPool={() => openPoolEditor(env.name)}
               onEdit={() => {
@@ -761,6 +1113,93 @@ export function EnvironmentsPage({
             />
           ))}
       </ListStack>
+
+      <SidePanel
+        open={Boolean(launchTarget)}
+        title={launchTarget === "app" ? (language === "zh" ? "启动 App" : language === "ja" ? "App を起動" : "Launch App") : (language === "zh" ? "启动 CLI" : language === "ja" ? "CLI を起動" : "Launch CLI")}
+        onClose={() => setLaunchTarget(undefined)}
+        closeLabel={pageCopy.common.close}
+      >
+        <div className="space-y-2">
+          {launchCandidates.map((account) => (
+            <button
+              key={account.name}
+              type="button"
+              className="flex w-full items-center justify-between rounded-xl border border-black/[0.06] bg-white px-3.5 py-3 text-left transition-colors hover:border-primary/30 hover:bg-primary/[0.035]"
+              onClick={() => {
+                if (!launchTarget) return;
+                onLaunchEnvironment(launchTarget, launchEnvName, account.name);
+                setLaunchTarget(undefined);
+              }}
+            >
+              <span className="min-w-0 truncate text-[13px] font-medium text-foreground">{account.name}</span>
+              <span className="ml-3 shrink-0 text-[11px] text-muted-foreground">{account.authMode === "apikey" ? "API KEY" : account.authMode.toUpperCase()}</span>
+            </button>
+          ))}
+        </div>
+      </SidePanel>
+
+      <SidePanel
+        open={Boolean(remotePanelEnv)}
+        title={remotePanelEnv ? `${remotePanelEnv} · ${language === "zh" ? "手机远程" : language === "ja" ? "スマホ遠隔" : "Phone remote"}` : ""}
+        onClose={() => setRemotePanelEnv(undefined)}
+        closeLabel={pageCopy.common.close}
+      >
+        <div className="space-y-4">
+          <div className="flex items-center justify-between rounded-lg bg-[#f7f8fa] px-3.5 py-3">
+            <span className="text-[12px] text-muted-foreground">{language === "zh" ? "当前模型服务" : language === "ja" ? "現在のモデルサービス" : "Current model service"}</span>
+            <span className="text-[12px] font-semibold text-neutral-800">{remotePanelStatus?.modelServiceLabel ?? "—"}</span>
+          </div>
+          <div className="space-y-2">
+            <div className="text-[12px] font-semibold text-neutral-900">{language === "zh" ? "官方账号" : language === "ja" ? "公式アカウント" : "Official account"}</div>
+            {remoteCandidates.length ? remoteCandidates.map((account) => {
+              const selected = remotePanelStatus?.remoteAccountName === account.name;
+              return (
+                <button
+                  key={account.name}
+                  type="button"
+                  className={cn("flex w-full items-center justify-between rounded-xl border px-3.5 py-3 text-left transition-colors", selected ? "border-primary/35 bg-primary/[0.06]" : "border-black/[0.06] bg-white hover:border-primary/30 hover:bg-primary/[0.035]")}
+                  onClick={async () => {
+                    if (!remotePanelEnv) return;
+                    try {
+                      await onSetRemoteAccount(remotePanelEnv, account.name);
+                      setRemotePanelEnv(undefined);
+                    } catch {
+                      // The page-level handler already surfaces the error.
+                    }
+                  }}
+                  disabled={busy}
+                >
+                  <span className="min-w-0 truncate text-[13px] font-medium text-neutral-800">{account.name}</span>
+                  {selected ? <SoftBadge tone="success" label={language === "zh" ? "已选" : language === "ja" ? "選択中" : "Selected"} /> : null}
+                </button>
+              );
+            }) : <div className="rounded-lg bg-[#f7f8fa] px-3.5 py-4 text-[12px] text-muted-foreground">{language === "zh" ? "暂无已登录的官方账号" : language === "ja" ? "ログイン済みの公式アカウントはありません" : "No signed-in official account"}</div>}
+          </div>
+          {remotePanelStatus?.status === "needs_pairing" ? (
+            <div className="rounded-lg bg-[#f7f8fa] px-3.5 py-3 text-[12px] leading-5 text-muted-foreground">
+              {language === "zh"
+                ? "请在 ChatGPT 桌面端“设置 → 连接”中完成手机配对"
+                : language === "ja"
+                  ? "ChatGPT デスクトップの「設定 → 接続」でスマホをペアリングしてください"
+                  : "Finish pairing in ChatGPT desktop: Settings → Connections"}
+            </div>
+          ) : null}
+          {remotePanelStatus?.remoteAccountName ? (
+            <Button variant="outline" className="w-full" onClick={async () => {
+              if (!remotePanelEnv) return;
+              try {
+                await onSetRemoteAccount(remotePanelEnv);
+                setRemotePanelEnv(undefined);
+              } catch {
+                // The page-level handler already surfaces the error.
+              }
+            }} disabled={busy}>
+              {language === "zh" ? "取消绑定" : language === "ja" ? "バインドを解除" : "Unbind"}
+            </Button>
+          ) : null}
+        </div>
+      </SidePanel>
 
       <SidePanel open={drawerOpen} title={pageCopy.environments.createTitle} onClose={() => setDrawerOpen(false)} closeLabel={pageCopy.common.close}>
         <div className="space-y-4">
@@ -942,7 +1381,7 @@ export function EnvironmentsPage({
               setPoolProtocol(nextProtocol);
               setPoolMembers(overview.accounts.filter((account) => account.envName === poolEnvName
                 && (nextProtocol === "responses"
-                  ? account.runtime.apiProtocol !== "chat_completions" || account.authMode === "auth"
+                  ? account.authMode === "auth" || !account.runtime.apiProtocol || account.runtime.apiProtocol === "responses"
                   : account.authMode !== "auth" && account.runtime.apiProtocol === "chat_completions"))
                 .map((account) => account.name));
             }} items={[{ value: "responses", label: "Responses" }, { value: "chat_completions", label: "Chat Completions" }]} />

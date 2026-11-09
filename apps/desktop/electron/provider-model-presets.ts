@@ -295,6 +295,7 @@ export function getProviderDefaultModelSlug(providerId?: string): string | undef
 }
 
 export function getProviderDefaultBaseUrl(providerId?: string): string | undefined {
+  if (providerId?.trim().toLowerCase() === "anthropic") return "https://api.anthropic.com";
   if (normalizeProviderId(providerId) === "deepseek") return "https://api.deepseek.com";
   if (normalizeProviderId(providerId) === "mimo") return "https://api.xiaomimimo.com/v1";
   if (normalizeProviderId(providerId) === "kimi") return "https://api.moonshot.ai/v1";
@@ -302,7 +303,8 @@ export function getProviderDefaultBaseUrl(providerId?: string): string | undefin
   return undefined;
 }
 
-export function getProviderDefaultApiProtocol(providerId?: string): "responses" | "chat_completions" | undefined {
+export function getProviderDefaultApiProtocol(providerId?: string): "responses" | "chat_completions" | "anthropic" | undefined {
+  if (providerId?.trim().toLowerCase() === "anthropic") return "anthropic";
   const normalized = normalizeProviderId(providerId);
   if (normalized === "deepseek" || normalized === "mimo") return "responses";
   if (normalized === "kimi" || normalized === "zai") return "chat_completions";

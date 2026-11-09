@@ -276,7 +276,14 @@ function encodeStreamEvents(protocol, event, state) {
             return [json({ id: state.id, object: "chat.completion.chunk", choices: [{ index: 0, delta: { content: [{ type: media.mediaType === "image" ? "image_url" : "file", ...(media.mediaType === "image" ? { image_url: media.media.image_url ?? media.media.url ?? media.media } : { file: media.media }) }] }, finish_reason: null }], ...sequence() })];
         if (protocol === "anthropic") {
             const index = state.anthropicNextBlockIndex++;
-            return [json({ type: "content_block_start", index, content_block: { type: media.mediaType === "image" ? "image" : "document", ...(media.mediaType === "image" ? { source: media.media.source ?? media.media } : { source: media.media.source ?? media.media }) }, ...sequence() }), json({ type: "content_block_stop", index, ...sequence() })];
+            const events = [];
+            if (state.anthropicOpenBlock) {
+                events.push(json({ type: "content_block_stop", index: state.anthropicOpenBlock.index, ...sequence() }));
+                state.anthropicOpenBlock = undefined;
+            }
+            events.push(json({ type: "content_block_start", index, content_block: { type: media.mediaType === "image" ? "image" : "document", source: media.media.source ?? media.media }, ...sequence() }));
+            events.push(json({ type: "content_block_stop", index, ...sequence() }));
+            return events;
         }
         return [json({ responseId: state.id, candidates: [{ content: { role: "model", parts: [{ ...(media.mediaType === "image" ? { inlineData: media.media } : { fileData: media.media }) }] } }], ...sequence() })];
     }
@@ -293,8 +300,17 @@ function encodeStreamEvents(protocol, event, state) {
             const type = event.kind === "custom" ? "custom_tool_call_output" : event.kind === "tool_search" && event.raw?.type === "tool_search_output" ? "tool_search_output" : event.kind === "tool_search" ? "tool_search_call_output" : "function_call_output";
             return [json({ ...(event.raw ?? {}), type, call_id: event.callId, output: event.output, ...(event.isError !== undefined ? { is_error: event.isError } : {}), ...sequence() })];
         }
-        if (protocol === "anthropic")
-            return [json({ type: "content_block_start", index: state.anthropicNextBlockIndex++, content_block: { type: "tool_result", tool_use_id: event.callId, content: event.output, ...(event.isError !== undefined ? { is_error: event.isError } : {}) }, ...sequence() }), json({ type: "content_block_stop", index: state.anthropicNextBlockIndex - 1, ...sequence() })];
+        if (protocol === "anthropic") {
+            const index = state.anthropicNextBlockIndex++;
+            const events = [];
+            if (state.anthropicOpenBlock) {
+                events.push(json({ type: "content_block_stop", index: state.anthropicOpenBlock.index, ...sequence() }));
+                state.anthropicOpenBlock = undefined;
+            }
+            events.push(json({ type: "content_block_start", index, content_block: { type: "tool_result", tool_use_id: event.callId, content: event.output, ...(event.isError !== undefined ? { is_error: event.isError } : {}) }, ...sequence() }));
+            events.push(json({ type: "content_block_stop", index, ...sequence() }));
+            return events;
+        }
         // Gemini function responses are user/tool context, not model output. A
         // model-role functionResponse is rejected by the native API and was the
         // source of otherwise silent tool-turn termination on Gemini routes.
@@ -479,8 +495,12 @@ function finishResponsesStream(state, reason, sequence, incompleteDetails) {
 function emitBufferedToolCalls(state, protocol, sequence) {
     const calls = completeToolStates(state);
     if (protocol === "chat_completions") {
-        return calls.map((tool) => json({ id: state.id, object: "chat.completion.chunk", choices: [{ index: 0, delta: {
-                        tool_calls: [{ id: tool.callId, type: "function", function: { name: tool.name, arguments: encodeToolArguments(protocol, tool) } }],
+        return calls.map((tool, index) => json({ id: state.id, object: "chat.completion.chunk", choices: [{ index: 0, delta: {
+                        // Chat Completions uses this zero-based index to associate argument
+                        // fragments with the correct parallel tool call.  Responses exposes a
+                        // separate output_index, so it must not be forwarded here: output items
+                        // such as reasoning/text can make it sparse or non-contiguous.
+                        tool_calls: [{ index, id: tool.callId, type: "function", function: { name: tool.name, arguments: encodeToolArguments(protocol, tool) } }],
                     }, finish_reason: null }], ...sequence() }));
     }
     if (protocol === "anthropic") {
@@ -630,7 +650,10 @@ function isJsonObjectText(value) {
     }
 }
 function openAnthropicBlock(state, type, requestedIndex, tool) {
-    const index = requestedIndex ?? state.anthropicNextBlockIndex;
+    const index = requestedIndex
+        ?? (state.anthropicOpenBlock?.type === type
+            ? state.anthropicOpenBlock.index
+            : state.anthropicNextBlockIndex);
     if (state.anthropicOpenBlock?.type === type && state.anthropicOpenBlock.index === index)
         return [];
     const events = [];

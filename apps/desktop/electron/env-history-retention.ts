@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 
 import { readEnvHistoryRetentionSettings } from "./desktop-settings.js";
 import { deleteExpiredEnvFileHistoryEntries, type EnvFileHistoryCleanupResult } from "./env-file-history.js";
+import { deleteExpiredClaudeCodeConfigHistoryEntries } from "./claude-code-config-history.js";
 
 interface EnvHistoryCleanupState {
   completedDate?: string;
@@ -33,9 +34,18 @@ export async function runEnvHistoryCleanupIfDue(options: {
     return { ran: false, reason: "already-completed", scanned: 0, deleted: 0, cutoff };
   }
 
-  const result = await deleteExpiredEnvFileHistoryEntries(options.stateDir, settings.retentionDays, now);
+  const [envResult, claudeCodeResult] = await Promise.all([
+    deleteExpiredEnvFileHistoryEntries(options.stateDir, settings.retentionDays, now),
+    deleteExpiredClaudeCodeConfigHistoryEntries(options.stateDir, settings.retentionDays, now),
+  ]);
   await writeCleanupState(statePath, { completedDate, completedAt: now.toISOString() });
-  return { ran: true, reason: "completed", ...result };
+  return {
+    ran: true,
+    reason: "completed",
+    scanned: envResult.scanned + claudeCodeResult.scanned,
+    deleted: envResult.deleted + claudeCodeResult.deleted,
+    cutoff: envResult.cutoff,
+  };
 }
 
 function formatLocalDate(value: Date): string {

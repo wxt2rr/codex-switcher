@@ -6,6 +6,7 @@ import { PluginMiddlewareRuntimeManager, type PluginMiddlewareRuntimeOptions } f
 import type { ActiveGatewayMiddleware } from "./middleware.js";
 import type { GatewayPluginManifest } from "./host.js";
 import { PluginSettingsStore } from "./settings.js";
+import { PluginAgentRuntimeManager, type ActivePluginAgent } from "./agent-runtime.js";
 export interface ProviderPluginManagerOptions extends Omit<PluginRuntimeOptions, "registry">, Omit<PluginMiddlewareRuntimeOptions, "registry"> {
     rootDir: string;
     registry?: ProviderRegistry;
@@ -21,11 +22,13 @@ export interface PluginActivationFailure {
 export interface PluginActivationReport {
     activated: ActivePluginProvider[];
     middlewareActivated: ActiveGatewayMiddleware[];
+    agentsActivated: ActivePluginAgent[];
     failed: PluginActivationFailure[];
 }
 export interface ActivePluginComponents {
     provider?: ActivePluginProvider;
     middleware?: ActiveGatewayMiddleware;
+    agent?: ActivePluginAgent;
 }
 /**
  * Desktop-facing lifecycle coordinator for installed Provider plugins.
@@ -40,6 +43,7 @@ export declare class ProviderPluginManager {
     readonly installations: PluginInstallationStore;
     readonly runtime: PluginRuntimeManager;
     readonly middlewareRuntime: PluginMiddlewareRuntimeManager;
+    readonly agentRuntime: PluginAgentRuntimeManager;
     readonly settings?: PluginSettingsStore;
     constructor(options: ProviderPluginManagerOptions);
     activateInstalled(): Promise<PluginActivationReport>;
@@ -53,6 +57,7 @@ export declare class ProviderPluginManager {
     listInstalled(): Promise<InstalledPlugin[]>;
     listActive(): ActivePluginProvider[];
     listActiveMiddleware(): ActiveGatewayMiddleware[];
+    listActiveAgents(): ActivePluginAgent[];
     getSettings(id: string): Promise<Record<string, unknown>>;
     setSettings(id: string, values: Record<string, unknown>): Promise<Record<string, unknown>>;
     clearSettings(id: string): Promise<void>;

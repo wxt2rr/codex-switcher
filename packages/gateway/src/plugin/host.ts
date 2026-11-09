@@ -25,7 +25,7 @@ export interface GatewayPluginManifest {
   checksum?: string;
 }
 
-export type PluginKind = "provider" | "middleware";
+export type PluginKind = "provider" | "middleware" | "agent";
 export type PluginTrustLevel = "official" | "verified" | "community" | "local";
 export type PluginPermission = "provider" | "middleware" | "agent" | "usage" | "network" | "filesystem" | "secrets";
 
@@ -154,7 +154,7 @@ export function validatePluginManifest(value: unknown): value is GatewayPluginMa
   if (typeof value.version !== "string" || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(value.version)) return false;
   if (!SUPPORTED_PLUGIN_PROTOCOL_VERSIONS.includes(value.apiVersion as 1 | 2) || typeof value.entry !== "string" || !isSafePluginEntry(value.entry)) return false;
   if (!Array.isArray(value.permissions) || value.permissions.some((permission) => !["provider", "middleware", "agent", "usage", "network", "filesystem", "secrets"].includes(String(permission)))) return false;
-  if (value.kind !== undefined && (!Array.isArray(value.kind) || value.kind.length === 0 || value.kind.some((kind) => kind !== "provider" && kind !== "middleware"))) return false;
+  if (value.kind !== undefined && (!Array.isArray(value.kind) || value.kind.length === 0 || value.kind.some((kind) => kind !== "provider" && kind !== "middleware" && kind !== "agent"))) return false;
   if (value.description !== undefined && typeof value.description !== "string") return false;
   if (value.author !== undefined && typeof value.author !== "string") return false;
   if (value.homepage !== undefined && typeof value.homepage !== "string") return false;

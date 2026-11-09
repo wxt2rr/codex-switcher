@@ -1,4 +1,4 @@
-import { type AccountState, type AuthDataRecord, type SwitcherState } from "./store.js";
+import { type AccountState, type AuthDataRecord, type EnvironmentModelIdentityMode, type SwitcherState } from "./store.js";
 import { type GatewayEnvironmentState } from "../gateway/model.js";
 import { type GatewayEnvironmentStateV2 } from "../gateway/v2.js";
 export interface ReadLegacyStateOptions {
@@ -53,6 +53,17 @@ export interface UpdateLegacyEnvOptions {
     envName: string;
     nextEnvName: string;
     homePath: string;
+    modelIdentityMode?: EnvironmentModelIdentityMode;
+}
+export interface SetLegacyEnvModelIdentityModeOptions {
+    stateDir: string;
+    envName: string;
+    modelIdentityMode: EnvironmentModelIdentityMode;
+}
+export interface SetLegacyEnvRemoteAccountOptions {
+    stateDir: string;
+    envName: string;
+    accountName?: string;
 }
 export declare function readLegacyState(options: ReadLegacyStateOptions): Promise<SwitcherState>;
 export declare function writeLegacyPointers(options: WriteLegacyPointersOptions): Promise<void>;
@@ -66,3 +77,5 @@ export declare function readLegacyGatewayV2(options: ReadLegacyGatewayV2Options)
 export declare function clearLegacyGatewayV2(options: ClearLegacyGatewayOptions): Promise<void>;
 export declare function createLegacyEnv(options: CreateLegacyEnvOptions): Promise<void>;
 export declare function updateLegacyEnv(options: UpdateLegacyEnvOptions): Promise<void>;
+export declare function setLegacyEnvModelIdentityMode(options: SetLegacyEnvModelIdentityModeOptions): Promise<void>;
+export declare function setLegacyEnvRemoteAccount(options: SetLegacyEnvRemoteAccountOptions): Promise<void>;

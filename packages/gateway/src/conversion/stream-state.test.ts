@@ -115,6 +115,21 @@ test("Responses-to-Chat streaming emits only complete tool arguments", async () 
   assert.equal(((completeDelta?.tool_calls as Array<Record<string, unknown>>)[0]?.function as Record<string, unknown>).arguments, "{\"q\":\"x\"}");
 });
 
+test("Responses-to-Chat streaming emits standard indexes for parallel tool calls", async () => {
+  const state = createResponseStreamState("responses", "chat_completions", { requestId: "responses-to-chat-parallel" });
+  await convertStreamChunk(state, { type: "response.function_call_arguments.delta", call_id: "call-a", name: "alpha", delta: "{}" });
+  await convertStreamChunk(state, { type: "response.function_call_arguments.delta", call_id: "call-b", name: "beta", delta: "{}" });
+
+  const terminal = await convertStreamChunk(state, { type: "response.completed", response: { id: "responses-to-chat-parallel", status: "completed" } });
+  const toolChunks = terminal.value.filter((event) => Array.isArray(event.choices)
+    && (event.choices as Array<Record<string, unknown>>).some((choice) => Array.isArray((choice.delta as Record<string, unknown> | undefined)?.tool_calls)));
+  const toolCalls = toolChunks.flatMap((event) => (event.choices as Array<Record<string, unknown>>)
+    .flatMap((choice) => ((choice.delta as Record<string, unknown> | undefined)?.tool_calls as Array<Record<string, unknown>> | undefined) ?? []));
+
+  assert.deepEqual(toolCalls.map((toolCall) => toolCall.index), [0, 1]);
+  assert.deepEqual(toolCalls.map((toolCall) => toolCall.id), ["call-a", "call-b"]);
+});
+
 test("stream finalization emits a terminal event and rejects reuse", async () => {
   const state = createResponseStreamState("responses", "chat_completions", { requestId: "stream-2" });
   const result = await finalizeResponseStream(state);
@@ -145,6 +160,67 @@ test("stream decoder understands native Responses and Anthropic event envelopes"
   const targetEnd = await convertStreamChunk(anthropicTarget, { choices: [{ delta: {}, finish_reason: "stop" }] });
   assert.equal(targetEnd.value.some((event) => event.type === "message_delta"), true);
   assert.equal(targetEnd.value.some((event) => event.type === "message_stop"), true);
+});
+
+test("Anthropic target reuses one text block across Chat and Responses deltas", async () => {
+  const chat = createResponseStreamState("chat_completions", "anthropic", { requestId: "anthropic-chat-text" });
+  const chatResults = [];
+  for (const text of ["目录", "`", "再", "让我"]) {
+    chatResults.push(await convertStreamChunk(chat, { choices: [{ delta: { content: text }, finish_reason: null }] }));
+  }
+  chatResults.push(await convertStreamChunk(chat, { choices: [{ delta: {}, finish_reason: "stop" }] }));
+  const chatEvents = chatResults.flatMap((result) => result.value);
+  assert.deepEqual(chatEvents.filter((event) => event.type === "content_block_start").map((event) => event.index), [0]);
+  assert.deepEqual(chatEvents.filter((event) => event.type === "content_block_stop").map((event) => event.index), [0]);
+  assert.equal(chatEvents.filter((event) => event.type === "content_block_delta").length, 4);
+
+  const responses = createResponseStreamState("responses", "anthropic", { requestId: "anthropic-responses-text" });
+  const responsesResults = [];
+  for (const text of ["one", "two", "three"]) {
+    responsesResults.push(await convertStreamChunk(responses, { type: "response.output_text.delta", delta: text }));
+  }
+  responsesResults.push(await convertStreamChunk(responses, { type: "response.completed", response: { status: "completed" } }));
+  const responseEvents = responsesResults.flatMap((result) => result.value);
+  assert.deepEqual(responseEvents.filter((event) => event.type === "content_block_start").map((event) => event.index), [0]);
+  assert.deepEqual(responseEvents.filter((event) => event.type === "content_block_stop").map((event) => event.index), [0]);
+});
+
+test("Anthropic target reuses thinking blocks and closes them on type changes", async () => {
+  const state = createResponseStreamState("responses", "anthropic", { requestId: "anthropic-thinking-blocks" });
+  const results = [];
+  results.push(await convertStreamChunk(state, { type: "response.reasoning_summary_text.delta", delta: "plan" }));
+  results.push(await convertStreamChunk(state, { type: "response.reasoning_summary_text.delta", delta: " more" }));
+  results.push(await convertStreamChunk(state, { type: "response.output_text.delta", delta: "answer" }));
+  results.push(await convertStreamChunk(state, { type: "response.output_text.delta", delta: " done" }));
+  results.push(await convertStreamChunk(state, { type: "response.completed", response: { status: "completed" } }));
+  const events = results.flatMap((result) => result.value);
+  assert.deepEqual(events.filter((event) => event.type === "content_block_start").map((event) => event.index), [0, 1]);
+  assert.deepEqual(events.filter((event) => event.type === "content_block_delta").map((event) => event.index), [0, 0, 1, 1]);
+  assert.deepEqual(events.filter((event) => event.type === "content_block_stop").map((event) => event.index), [0, 1]);
+});
+
+test("Anthropic target closes an open text block before media and tool results", async () => {
+  const media = createResponseStreamState("responses", "anthropic", { requestId: "anthropic-media-boundary" });
+  const mediaResults = [
+    await convertStreamChunk(media, { type: "response.output_text.delta", delta: "before" }),
+    await convertStreamChunk(media, { type: "response.output_item.done", output_index: 1, item: { id: "image-1", type: "message", role: "assistant", content: [{ type: "output_image", image_url: "https://example.test/image.png" }] } }),
+    await convertStreamChunk(media, { type: "response.output_text.delta", delta: "after" }),
+    await convertStreamChunk(media, { type: "response.completed", response: { status: "completed" } }),
+  ];
+  const mediaEvents = mediaResults.flatMap((result) => result.value);
+  assert.deepEqual(mediaEvents.filter((event) => event.type === "content_block_start").map((event) => event.index), [0, 1, 2]);
+  assert.deepEqual(mediaEvents.filter((event) => event.type === "content_block_stop").map((event) => event.index), [0, 1, 2]);
+
+  const toolResult = createResponseStreamState("responses", "anthropic", { requestId: "anthropic-tool-result-boundary" });
+  const toolResults = [
+    await convertStreamChunk(toolResult, { type: "response.output_text.delta", delta: "before" }),
+    await convertStreamChunk(toolResult, { type: "response.output_item.done", output_index: 1, item: { id: "output-1", type: "function_call_output", call_id: "call-1", output: "ok" } }),
+    await convertStreamChunk(toolResult, { type: "response.output_text.delta", delta: "after" }),
+    await convertStreamChunk(toolResult, { type: "response.completed", response: { status: "completed" } }),
+  ];
+  const toolEvents = toolResults.flatMap((result) => result.value);
+  assert.deepEqual(toolEvents.filter((event) => event.type === "content_block_start").map((event) => event.index), [0, 1, 2]);
+  assert.deepEqual(toolEvents.filter((event) => event.type === "content_block_stop").map((event) => event.index), [0, 1, 2]);
 });
 
 test("stream conversion reports unknown provider events without fabricating output", async () => {

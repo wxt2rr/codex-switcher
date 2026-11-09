@@ -13,6 +13,7 @@ export * from "./plugin/settings.js";
 export * from "./plugin/signing.js";
 export * from "./plugin/middleware.js";
 export * from "./plugin/middleware-runtime.js";
+export * from "./plugin/agent-runtime.js";
 export * from "./usage/ledger.js";
 export * from "./profile/runtime.js";
 export * from "./provider/contracts.js";

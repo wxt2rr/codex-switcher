@@ -87,7 +87,10 @@ function addBundledModelBindings(
   const uniqueModels = new Map(bundledModels.map((model) => [model.slug, model]));
   for (const model of uniqueModels.values()) {
     if (!model.slug.trim() || model.supported_in_api === false) continue;
-    const routeGroupId = createBuiltinRouteGroupId(environment.name, model.slug);
+    const unified = environment.modelIdentityMode === "unified";
+    const routeGroupId = unified
+      ? createUnifiedRouteGroupId(environment.name, model.slug)
+      : createBuiltinRouteGroupId(environment.name, model.slug);
     const capabilities = {
       reasoning: Array.isArray(model.supported_reasoning_levels)
         || model.supports_reasoning_summaries === true,
@@ -154,6 +157,10 @@ function addBundledModelBindings(
 
     if (group.members.length) {
       group.members.sort((left, right) => left.priority - right.priority || left.modelId.localeCompare(right.modelId));
+      if (unified) {
+        group.capabilities = intersectCapabilities(group.members.map((member) => gateway.models[member.modelId]?.capabilities ?? {}));
+        group.capabilityProfile = intersectCapabilityProfiles(group.members.map((member) => gateway.models[member.modelId]?.capabilityProfile));
+      }
       gateway.routeGroups[routeGroupId] = group;
     }
   }
@@ -236,11 +243,15 @@ function addModelBinding(
   };
   gateway.models[internalModelId] = modelDefinition;
 
-  const routeGroupId = createCatalogRouteGroupId(environment.name, model.entry.slug);
+  const unified = environment.modelIdentityMode === "unified";
+  const logicalModelId = unified ? resolveUnifiedModelId(model, binding.upstreamModelId) : model.entry.slug;
+  const routeGroupId = unified
+    ? createUnifiedRouteGroupId(environment.name, logicalModelId)
+    : createCatalogRouteGroupId(environment.name, model.entry.slug);
   const group: GatewayRouteGroupDefinition = gateway.routeGroups[routeGroupId] ?? {
     id: routeGroupId,
-    displayName,
-    exposedModelId: model.entry.slug,
+    displayName: unified ? (model.entry.display_name?.trim() || logicalModelId) : displayName,
+    exposedModelId: logicalModelId,
     members: [],
     strategy: "smart",
     sessionPolicy: "auto",
@@ -265,6 +276,28 @@ function addModelBinding(
     });
   }
   group.members.sort((left, right) => left.priority - right.priority || left.modelId.localeCompare(right.modelId));
+  if (unified) {
+    group.capabilities = intersectCapabilities(group.members.map((member) => gateway.models[member.modelId]?.capabilities ?? {}));
+    group.capabilityProfile = intersectCapabilityProfiles(group.members.map((member) => gateway.models[member.modelId]?.capabilityProfile));
+    // Keep provider-qualified IDs accepted for existing Codex sessions without
+    // exposing duplicate entries in the generated model catalog.
+    const legacySlug = model.entry.slug.trim();
+    if (legacySlug && legacySlug !== logicalModelId && legacySlug.includes(":")) {
+      const aliasId = createCompatibilityRouteGroupId(environment.name, legacySlug);
+      gateway.routeGroups[aliasId] = {
+        id: aliasId,
+        displayName: group.displayName,
+        members: [],
+        nestedGroupIds: [group.id],
+        strategy: group.strategy,
+        sessionPolicy: group.sessionPolicy,
+        fallbackEnabled: group.fallbackEnabled,
+        capabilities: group.capabilities,
+        capabilityProfile: group.capabilityProfile,
+        exposedModelId: legacySlug,
+      };
+    }
+  }
   gateway.routeGroups[group.id] = group;
 }
 
@@ -388,6 +421,14 @@ function createCatalogRouteGroupId(environmentName: string, exposedModelId: stri
   return ["catalog-route-group", environmentName, exposedModelId].map(encodeURIComponent).join(":");
 }
 
+function createUnifiedRouteGroupId(environmentName: string, exposedModelId: string): string {
+  return ["unified-route-group", environmentName, exposedModelId].map(encodeURIComponent).join(":");
+}
+
+function createCompatibilityRouteGroupId(environmentName: string, exposedModelId: string): string {
+  return ["compat-route-group", environmentName, exposedModelId].map(encodeURIComponent).join(":");
+}
+
 function createBuiltinModelId(environmentName: string, modelSlug: string, providerId: string): string {
   return ["builtin-model", environmentName, modelSlug, providerId].map(encodeURIComponent).join(":");
 }
@@ -405,10 +446,51 @@ function removeCompiledModelBindings(gateway: GatewayEnvironmentState): void {
       !member.modelId.startsWith("catalog-model:")
       && !member.modelId.startsWith("builtin-model:")
     ));
-    if ((groupId.startsWith("catalog-route-group:") || groupId.startsWith("builtin-route-group:")) && members.length === 0) {
+    if ((groupId.startsWith("catalog-route-group:")
+      || groupId.startsWith("builtin-route-group:")
+      || groupId.startsWith("unified-route-group:")
+      || groupId.startsWith("compat-route-group:")) && members.length === 0) {
       delete gateway.routeGroups[groupId];
       continue;
     }
     gateway.routeGroups[groupId] = { ...group, members };
   }
+}
+
+function resolveUnifiedModelId(model: CustomModelRecord, upstreamModelId: string): string {
+  const upstream = upstreamModelId.trim();
+  if (upstream && !upstream.includes(":")) return upstream;
+  const declared = typeof model.entry.upstream_model_id === "string" ? model.entry.upstream_model_id.trim() : "";
+  if (declared && !declared.includes(":")) return declared;
+  const slug = model.entry.slug.trim();
+  const parts = slug.split(":");
+  return parts.at(-1)?.trim() || slug;
+}
+
+function intersectCapabilities(
+  values: Array<{ reasoning?: boolean; tools?: boolean; vision?: boolean; streaming?: boolean }>,
+): { reasoning?: boolean; tools?: boolean; vision?: boolean; streaming?: boolean } {
+  if (!values.length) return {};
+  const keys = ["reasoning", "tools", "vision", "streaming"] as const;
+  return Object.fromEntries(keys.map((key) => [key, values.every((value) => value[key] === true)])) as ReturnType<typeof intersectCapabilities>;
+}
+
+function intersectCapabilityProfiles(
+  values: Array<GatewayCapabilityProfile | undefined>,
+): GatewayCapabilityProfile | undefined {
+  const profiles = values.filter((value): value is GatewayCapabilityProfile => Boolean(value));
+  if (!profiles.length) return undefined;
+  const keys = [...new Set(profiles.flatMap((profile) => Object.keys(profile)))];
+  const result: GatewayCapabilityProfile = {};
+  for (const key of keys) {
+    const observations = profiles.map((profile) => profile[key]);
+    if (observations.some((observation) => observation?.status === "unsupported")) {
+      result[key] = { status: "unsupported", source: "legacy", checkedAt: Date.now(), evidence: "At least one route does not support this capability" };
+    } else if (observations.every((observation) => observation?.status === "supported")) {
+      result[key] = { status: "supported", source: observations[0]?.source ?? "legacy", checkedAt: Date.now() };
+    } else {
+      result[key] = { status: "unknown", source: "legacy", checkedAt: Date.now() };
+    }
+  }
+  return Object.keys(result).length ? result : undefined;
 }

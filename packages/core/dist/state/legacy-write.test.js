@@ -98,4 +98,27 @@ test("legacy writer persists runtime settings for account", async () => {
         await rm(root, { recursive: true, force: true });
     }
 });
+test("legacy writer persists Anthropic Messages protocol", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-legacy-anthropic-runtime-"));
+    const stateDir = join(root, ".codex-switcher");
+    try {
+        await writeLegacyRuntime({
+            stateDir,
+            envName: "default",
+            accountName: "claude",
+            runtime: {
+                preferredAuthMethod: "apikey",
+                openaiBaseUrlMode: "custom",
+                openaiBaseUrl: "https://api.anthropic.com",
+                providerId: "anthropic",
+                apiProtocol: "anthropic",
+            },
+        });
+        const raw = await readFile(join(stateDir, "env-accounts", "default", "claude", "runtime.json"), "utf8");
+        assert.match(raw, /"api_protocol": "anthropic"/);
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
 //# sourceMappingURL=legacy-write.test.js.map

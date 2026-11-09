@@ -42,3 +42,8 @@ test("official Kimi and Z.AI endpoints resolve to the matching catalog preset", 
   assert.equal(resolveProviderModelPreset({ baseUrl: "https://api.moonshot.ai/v1" })?.providerId, "kimi");
   assert.equal(resolveProviderModelPreset({ baseUrl: "https://open.bigmodel.cn/api/paas/v4" })?.providerId, "zai");
 });
+
+test("Anthropic defaults to the native Messages endpoint", () => {
+  assert.equal(getProviderDefaultApiProtocol("anthropic"), "anthropic");
+  assert.equal(getProviderDefaultBaseUrl("anthropic"), "https://api.anthropic.com");
+});

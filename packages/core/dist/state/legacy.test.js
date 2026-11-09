@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clearLegacyGateway, readLegacyGatewayV2, readLegacyState, writeLegacyGateway, writeLegacyGatewayV2, } from "./legacy.js";
+import { clearLegacyGateway, readLegacyGatewayV2, readLegacyState, setLegacyEnvModelIdentityMode, setLegacyEnvRemoteAccount, writeLegacyGateway, writeLegacyGatewayV2, } from "./legacy.js";
 import { GATEWAY_SCHEMA_VERSION } from "../gateway/model.js";
 import { migrateGatewayEnvironmentStateToV2 } from "../gateway/v2.js";
 test("legacy reader hydrates envs, accounts, runtime settings, and target pointers", async () => {
@@ -51,6 +51,50 @@ test("legacy reader hydrates envs, accounts, runtime settings, and target pointe
         assert.equal(state.envs.default.accounts.work.runtime.independentModelApiKey, "sk-model");
         assert.equal(state.envs.default.accounts.work.runtime.independentModelBaseUrl, "https://model.example/v1");
         assert.equal(state.envs.default.accounts.work.runtime.providerId, "deepseek");
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+test("legacy environment remote account can be selected and cleared without losing other metadata", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-legacy-remote-account-"));
+    const stateDir = join(root, ".codex-switcher");
+    const envsDir = join(root, ".codex-envs");
+    const defaultHome = join(root, ".codex");
+    try {
+        await mkdir(join(stateDir, "env-accounts", "default", "plus"), { recursive: true });
+        await mkdir(defaultHome, { recursive: true });
+        await setLegacyEnvModelIdentityMode({ stateDir, envName: "default", modelIdentityMode: "unified" });
+        await setLegacyEnvRemoteAccount({ stateDir, envName: "default", accountName: " plus " });
+        const selected = await readLegacyState({ stateDir, envsDir, defaultHome });
+        assert.equal(selected.envs.default?.remoteControl?.accountName, "plus");
+        assert.equal(selected.envs.default?.modelIdentityMode, "unified");
+        await setLegacyEnvRemoteAccount({ stateDir, envName: "default", accountName: "   " });
+        const cleared = await readLegacyState({ stateDir, envsDir, defaultHome });
+        assert.equal(cleared.envs.default?.remoteControl, undefined);
+        assert.equal(cleared.envs.default?.modelIdentityMode, "unified");
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+test("legacy reader hydrates Anthropic Messages account protocol", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-legacy-anthropic-"));
+    const stateDir = join(root, ".codex-switcher");
+    const envsDir = join(root, ".codex-envs");
+    const defaultHome = join(root, ".codex");
+    try {
+        await mkdir(join(stateDir, "env-accounts", "default", "claude"), { recursive: true });
+        await mkdir(defaultHome, { recursive: true });
+        await writeFile(join(stateDir, "env-accounts", "default", "claude", "runtime.json"), JSON.stringify({
+            preferred_auth_method: "apikey",
+            openai_base_url_mode: "custom",
+            openai_base_url: "https://api.anthropic.com",
+            provider_id: "anthropic",
+            api_protocol: "anthropic",
+        }), "utf8");
+        const state = await readLegacyState({ stateDir, envsDir, defaultHome });
+        assert.equal(state.envs.default.accounts.claude?.runtime.apiProtocol, "anthropic");
     }
     finally {
         await rm(root, { recursive: true, force: true });
@@ -318,6 +362,26 @@ test("legacy reader prefers persisted env metadata home path overrides", async (
             now: "2026-06-16T01:02:03.000Z",
         });
         assert.equal(state.envs["project-a"]?.path, "/tmp/custom-project-home");
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+test("legacy environment model identity mode is optional and survives updates", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-legacy-model-identity-"));
+    const stateDir = join(root, ".codex-switcher");
+    const envsDir = join(root, ".codex-envs");
+    const defaultHome = join(root, ".codex");
+    try {
+        await mkdir(defaultHome, { recursive: true });
+        const before = await readLegacyState({ stateDir, envsDir, defaultHome });
+        assert.equal(before.envs.default?.modelIdentityMode, undefined);
+        await setLegacyEnvModelIdentityMode({ stateDir, envName: "default", modelIdentityMode: "unified" });
+        const unified = await readLegacyState({ stateDir, envsDir, defaultHome });
+        assert.equal(unified.envs.default?.modelIdentityMode, "unified");
+        await setLegacyEnvModelIdentityMode({ stateDir, envName: "default", modelIdentityMode: "invalid" });
+        const normalized = await readLegacyState({ stateDir, envsDir, defaultHome });
+        assert.equal(normalized.envs.default?.modelIdentityMode, "account");
     }
     finally {
         await rm(root, { recursive: true, force: true });

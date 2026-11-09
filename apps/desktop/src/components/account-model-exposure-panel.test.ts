@@ -5,6 +5,7 @@ import { buildAccountModelCandidates, providerIdForAccountModel } from "./accoun
 import type { ModelCatalogSnapshot } from "../bridge";
 
 const source = readFileSync(new URL("./account-model-exposure-panel.tsx", import.meta.url), "utf8");
+const testButtonSource = readFileSync(new URL("./model-test-button.tsx", import.meta.url), "utf8");
 
 test("account model exposure panel keeps discovery, manual models, retry, and explicit save paths", () => {
   assert.match(source, /discoverAccountModels/);
@@ -21,6 +22,17 @@ test("account model exposure panel keeps discovery, manual models, retry, and ex
   assert.match(source, /<Select/);
   assert.match(source, /grid shrink-0 gap-2 rounded-lg border/);
   assert.match(source, /flex min-w-0 flex-wrap items-center gap-2/);
+  assert.match(source, /当前可用/);
+  assert.match(source, /不可用模型已隐藏/);
+  assert.match(source, /打开模型管理/);
+  assert.match(source, /availableCandidates/);
+  assert.match(source, /visibleSelectedIds/);
+  assert.match(source, /隐藏的/);
+  assert.doesNotMatch(source, /全部模型/);
+  assert.match(source, /手动配置 · 未验证/);
+  assert.match(source, /disabledReason/);
+  assert.match(source, /Discovery is stale; refresh models before testing/);
+  assert.match(testButtonSource, /disabledReason/);
   assert.doesNotMatch(source, /<select[\s>]/);
 });
 

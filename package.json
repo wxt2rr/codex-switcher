@@ -30,6 +30,7 @@
     "packages/plugin-sdk/**",
     "examples/plugins/**",
     "plugins/csw-our-free-model/**",
+    "plugins/claude-code/**",
     "packages/gateway/**",
     "plugins/codex-switcher/**",
     "!plugins/codex-switcher/**/__pycache__/**",

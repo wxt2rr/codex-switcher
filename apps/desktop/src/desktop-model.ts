@@ -18,6 +18,139 @@ export interface EnvironmentRouteStatus {
   localAgentAccessToken?: string;
 }
 
+export type RemoteControlStatus = "available" | "needs_account" | "needs_pairing" | "needs_login" | "unavailable";
+
+export interface EnvironmentRemoteStatus {
+  envName: string;
+  status: RemoteControlStatus;
+  remoteAccountName?: string;
+  remoteAccountEmail?: string;
+  modelServiceLabel: string;
+  modelAccountName?: string;
+}
+
+export type ClaudeCodeSourceKind = "environment_gateway" | "account";
+export type ClaudeCodeSourceState = "ready" | "needs_gateway" | "needs_local_agent" | "unavailable";
+
+export interface ClaudeCodeModelOption {
+  id: string;
+  displayName: string;
+}
+
+export interface ClaudeCodeSourceSummary {
+  id: string;
+  kind: ClaudeCodeSourceKind;
+  environmentName: string;
+  accountName?: string;
+  displayName: string;
+  providerDisplayName?: string;
+  state: ClaudeCodeSourceState;
+  reason?: string;
+  baseUrl?: string;
+  apiKeyPreview?: string;
+  models: ClaudeCodeModelOption[];
+  gatewayEnabled?: boolean;
+  localAgentAccessEnabled?: boolean;
+}
+
+export type ClaudeCodeAuthorizationConflictKind =
+  | "claude_ai_oauth"
+  | "anthropic_auth_token"
+  | "claude_code_oauth_token"
+  | "claude_code_oauth_token_file"
+  | "ccr_oauth_token_file"
+  | "api_key_helper"
+  | "external_api_key"
+  | "external_auth_token"
+  | "wif_auth";
+
+export interface ClaudeCodeAuthorizationConflict {
+  kind: ClaudeCodeAuthorizationConflictKind;
+  path: string;
+  source: "credentials" | "settings" | "process";
+  removable: boolean;
+  description: string;
+}
+
+export interface ClaudeCodeAuthorizationInspection {
+  configDir: string;
+  settingsPath: string;
+  credentialsPath: string;
+  detectedEndpoints: string[];
+  detectedAuthSources: string[];
+  conflicts: ClaudeCodeAuthorizationConflict[];
+  hasConflict: boolean;
+  canCleanup: boolean;
+}
+
+export interface ClaudeCodeConnectionRecord {
+  version: 1;
+  sourceId: string;
+  kind: ClaudeCodeSourceKind;
+  environmentName: string;
+  accountName?: string;
+  gatewayId?: string;
+  modelId?: string;
+  configPath: string;
+  snapshotBindingId: string;
+  connectedAt: number;
+}
+
+export interface ClaudeCodeConnectionState {
+  connected: boolean;
+  configPath: string;
+  configPathChanged?: boolean;
+  authorization?: ClaudeCodeAuthorizationInspection;
+  source?: ClaudeCodeSourceSummary;
+  record?: ClaudeCodeConnectionRecord;
+  drift?: "clean" | "missing" | "drifted" | "unwired";
+  restartRequired?: boolean;
+}
+
+export type EnvironmentModelIdentityMode = "account" | "unified";
+
+export interface EnvironmentRoutePreviewRoute {
+  routeId: string;
+  accountName: string;
+  providerId: string;
+  providerDisplayName: string;
+  upstreamModelId: string;
+  protocol: string;
+  status: "healthy" | "cooldown" | "disabled" | "unavailable" | "unknown";
+  capabilities: {
+    tools: boolean;
+    vision: boolean;
+    streaming: boolean;
+    reasoning: boolean;
+  };
+  priority: number;
+  weight: number;
+  isDefault: boolean;
+}
+
+export interface EnvironmentRoutePreviewModel {
+  exposedModelId: string;
+  displayName: string;
+  routes: EnvironmentRoutePreviewRoute[];
+  capabilities: EnvironmentRoutePreviewRoute["capabilities"];
+  strategy: string;
+  sessionPolicy: string;
+  fallbackEnabled: boolean;
+}
+
+export interface EnvironmentRoutePreview {
+  envName: string;
+  gatewayEnabled: boolean;
+  gatewayStatus: "running" | "configured" | "stopped";
+  mode: EnvironmentModelIdentityMode;
+  gatewayId?: string;
+  baseUrl?: string;
+  generatedAt: number;
+  models: EnvironmentRoutePreviewModel[];
+  providerCount: number;
+  warnings: string[];
+}
+
 export interface UsageFilter {
   from: number;
   to: number;
@@ -187,6 +320,8 @@ export interface EnvSummary {
   path: string;
   isCurrentCli: boolean;
   isCurrentApp: boolean;
+  modelIdentityMode: EnvironmentModelIdentityMode;
+  remoteAccountName?: string;
 }
 
 export interface AccountSummary {
@@ -219,7 +354,7 @@ export interface AccountSummary {
     independentModelProviderId?: string;
     independentModelApiKey?: string;
     independentModelBaseUrl?: string;
-    apiProtocol?: "responses" | "chat_completions";
+    apiProtocol?: "responses" | "chat_completions" | "anthropic";
     compatibilityRouteEnabled?: boolean;
     compatibilityRouteBaseUrl?: string;
     compatibilityUpstreamModel?: string;
@@ -286,8 +421,8 @@ export const fallbackOverview: OverviewPayload = {
     },
   },
   envs: [
-    { name: "default", path: "~/.codex", isCurrentCli: false, isCurrentApp: true },
-    { name: "wangxt", path: "~/.codex-envs/wangxt/home", isCurrentCli: true, isCurrentApp: false },
+    { name: "default", path: "~/.codex", isCurrentCli: false, isCurrentApp: true, modelIdentityMode: "account" },
+    { name: "wangxt", path: "~/.codex-envs/wangxt/home", isCurrentCli: true, isCurrentApp: false, modelIdentityMode: "account" },
   ],
   accounts: [
     {

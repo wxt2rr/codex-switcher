@@ -1,0 +1,16 @@
+{
+  "id": "claude-code",
+  "name": "Claude Code",
+  "version": "1.0.0",
+  "apiVersion": 2,
+  "entry": "plugin.mjs",
+  "permissions": ["agent", "filesystem", "secrets"],
+  "kind": ["agent"],
+  "description": "Connect Claude Code CLI to a Codex Switcher environment gateway or an Anthropic-compatible API key account.",
+  "author": "Codex Switcher",
+  "trust": "official",
+  "settingsSchema": {
+    "type": "object",
+    "properties": {}
+  }
+}

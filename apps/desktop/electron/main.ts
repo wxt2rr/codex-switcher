@@ -75,6 +75,10 @@ import {
   testModelRequest,
   updateRuntime,
   getEnvironmentRouteStatuses,
+  getEnvironmentRoutePreviews,
+  getEnvironmentRemoteStatuses,
+  setEnvironmentRemoteAccount,
+  setEnvironmentModelIdentityMode,
   getCodexToolPaths,
   getCliAutoResumeSettings,
   getEnvHistoryRetentionSettings,
@@ -100,6 +104,15 @@ import {
   toggleEnvironmentRoute,
   toggleEnvironmentGateway,
   toggleEnvironmentLocalAgentAccess,
+  listClaudeCodeSources,
+  getClaudeCodeConnection,
+  connectClaudeCode,
+  reapplyClaudeCode,
+  disconnectClaudeCode,
+  diagnoseClaudeCode,
+  listClaudeCodeConfigHistory,
+  restoreClaudeCodeConfigHistory,
+  deleteClaudeCodeConfigHistory,
   listAccountPools,
   saveAccountPool,
   loadUsageSnapshot,
@@ -814,12 +827,31 @@ function registerHandlers() {
   ipcMain.handle("desktop:readSwitcherLog", () => readSwitcherLog());
   ipcMain.handle("desktop:readTokenRefreshLog", () => readTokenRefreshLog());
   ipcMain.handle("desktop:getEnvironmentRouteStatuses", () => getEnvironmentRouteStatuses());
+  ipcMain.handle("desktop:getEnvironmentRoutePreviews", () => getEnvironmentRoutePreviews());
+  ipcMain.handle("desktop:getEnvironmentRemoteStatuses", () => getEnvironmentRemoteStatuses());
+  ipcMain.handle("desktop:setEnvironmentRemoteAccount", (_event: IpcMainInvokeEvent, envName: string, accountName?: string) =>
+    setEnvironmentRemoteAccount(envName, accountName));
+  ipcMain.handle("desktop:setEnvironmentModelIdentityMode", (_event: IpcMainInvokeEvent, envName: string, mode: "account" | "unified") =>
+    setEnvironmentModelIdentityMode(envName, mode));
   ipcMain.handle("desktop:toggleEnvironmentRoute", (_event: IpcMainInvokeEvent, envName: string, enabled: boolean) =>
     toggleEnvironmentRoute(envName, enabled));
   ipcMain.handle("desktop:toggleEnvironmentGateway", (_event: IpcMainInvokeEvent, envName: string, enabled: boolean) =>
     toggleEnvironmentGateway(envName, enabled));
   ipcMain.handle("desktop:toggleEnvironmentLocalAgentAccess", (_event: IpcMainInvokeEvent, envName: string, enabled: boolean) =>
     toggleEnvironmentLocalAgentAccess(envName, enabled));
+  ipcMain.handle("desktop:listClaudeCodeSources", () => listClaudeCodeSources());
+  ipcMain.handle("desktop:getClaudeCodeConnection", () => getClaudeCodeConnection());
+  ipcMain.handle("desktop:connectClaudeCode", (_event: IpcMainInvokeEvent, input: { sourceId: string; modelId?: string; cleanupAuthorization?: boolean }) => connectClaudeCode(input));
+  ipcMain.handle("desktop:reapplyClaudeCode", () => reapplyClaudeCode());
+  ipcMain.handle("desktop:disconnectClaudeCode", () => disconnectClaudeCode());
+  ipcMain.handle("desktop:diagnoseClaudeCode", () => diagnoseClaudeCode());
+  ipcMain.handle("desktop:listClaudeCodeConfigHistory", () => listClaudeCodeConfigHistory());
+  ipcMain.handle("desktop:restoreClaudeCodeConfigHistory", (_event: IpcMainInvokeEvent, entryId: string) =>
+    restoreClaudeCodeConfigHistory(entryId)
+  );
+  ipcMain.handle("desktop:deleteClaudeCodeConfigHistory", (_event: IpcMainInvokeEvent, entryIds: string[]) =>
+    deleteClaudeCodeConfigHistory(entryIds)
+  );
   ipcMain.handle("desktop:listAccountPools", () => listAccountPools());
   ipcMain.handle("desktop:saveAccountPool", (_event: IpcMainInvokeEvent, input) => saveAccountPool(input));
   ipcMain.handle("desktop:toggleAccountCompatibility", (_event: IpcMainInvokeEvent, input) =>

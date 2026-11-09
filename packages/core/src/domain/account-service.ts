@@ -126,6 +126,9 @@ export function createAccountService() {
           [input.envName]: {
             ...env,
             accounts,
+            ...(env.remoteControl?.accountName === input.accountName
+              ? { remoteControl: undefined }
+              : {}),
           },
         },
         targets: {

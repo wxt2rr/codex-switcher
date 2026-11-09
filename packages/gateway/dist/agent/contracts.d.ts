@@ -11,6 +11,10 @@ export interface AgentAdapterProfile {
     modelPath: string;
     baseUrlPath: string;
     tokenPath: string;
+    /** Paths that must be removed when the managed binding is applied. */
+    clearPaths?: readonly string[];
+    /** Additional model fields that should follow the selected model. */
+    managedModelPaths?: readonly string[];
     /** Optional explicit paths for advanced Agent configuration fields. */
     reasoningPath?: string;
     fallbackModelPath?: string;
@@ -41,6 +45,8 @@ export interface AgentGatewayBinding {
     reasoningProfile?: string;
     fallbackModelId?: string;
     subAgentModelId?: string;
+    /** Additional configuration values managed for this binding only. */
+    managedValues?: Readonly<Record<string, string>>;
     enabled: boolean;
     updatedAt: number;
 }

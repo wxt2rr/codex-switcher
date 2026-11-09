@@ -14,7 +14,11 @@ export function resolveAgentProfile(value) {
 export function importAgentConfiguration(profile, content) {
     const warnings = [];
     const parsed = parseAgentConfig(profile.format, content, warnings);
-    const model = readStringAtPath(parsed, profile.modelPath);
+    // Claude Code has used both a top-level `model` setting and the
+    // environment-backed ANTHROPIC_MODEL setting across CLI versions. Keep
+    // imports compatible with both layouts while the adapter writes the
+    // current environment-backed form.
+    const model = readStringAtPath(parsed, profile.modelPath) || (profile.id === "claude" ? readStringAtPath(parsed, "model") : "");
     const baseUrl = normalizeUrl(readStringAtPath(parsed, profile.baseUrlPath));
     const reasoningProfile = profile.reasoningPath ? readStringAtPath(parsed, profile.reasoningPath) : "";
     const fallbackModelId = profile.fallbackModelPath ? readStringAtPath(parsed, profile.fallbackModelPath) : "";

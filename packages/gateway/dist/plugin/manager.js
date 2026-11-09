@@ -5,6 +5,7 @@ import { PluginRuntimeManager, } from "./runtime.js";
 import { GatewayMiddlewareRegistry } from "./middleware.js";
 import { PluginMiddlewareRuntimeManager, } from "./middleware-runtime.js";
 import { PluginSettingsStore } from "./settings.js";
+import { PluginAgentRuntimeManager } from "./agent-runtime.js";
 /**
  * Desktop-facing lifecycle coordinator for installed Provider plugins.
  * Installation metadata is persisted beside each version, activation is
@@ -18,6 +19,7 @@ export class ProviderPluginManager {
     installations;
     runtime;
     middlewareRuntime;
+    agentRuntime;
     settings;
     constructor(options) {
         this.options = options;
@@ -29,10 +31,12 @@ export class ProviderPluginManager {
         });
         this.runtime = new PluginRuntimeManager({ ...options, registry: this.registry, ...(this.settings ? { settings: (pluginId) => this.settings.get(pluginId) } : {}) });
         this.middlewareRuntime = new PluginMiddlewareRuntimeManager({ ...options, registry: this.middlewareRegistry });
+        this.agentRuntime = new PluginAgentRuntimeManager();
     }
     async activateInstalled() {
         const activated = [];
         const middlewareActivated = [];
+        const agentsActivated = [];
         const failed = [];
         for (const installed of await this.installations.list()) {
             const manifest = installed.manifest;
@@ -47,12 +51,14 @@ export class ProviderPluginManager {
                     activated.push(components.provider);
                 if (components.middleware)
                     middlewareActivated.push(components.middleware);
+                if (components.agent)
+                    agentsActivated.push(components.agent);
             }
             catch (error) {
                 failed.push({ id: installed.id, version: installed.version, message: error instanceof Error ? error.message : String(error) });
             }
         }
-        return { activated, middlewareActivated, failed };
+        return { activated, middlewareActivated, agentsActivated, failed };
     }
     async install(manifest, source, runCommand) {
         const result = await this.installPlugin(manifest, source, runCommand);
@@ -88,10 +94,11 @@ export class ProviderPluginManager {
     async deactivate(id) {
         const provider = await this.runtime.deactivate(id);
         const middleware = await this.middlewareRuntime.deactivate(id);
-        return provider || middleware;
+        const agent = await this.agentRuntime.deactivate(id);
+        return provider || middleware || agent;
     }
     async activate(id) {
-        if (this.runtime.list().some((item) => item.manifest.id === id) || this.middlewareRuntime.list().some((item) => item.id === id)) {
+        if (this.runtime.list().some((item) => item.manifest.id === id) || this.middlewareRuntime.list().some((item) => item.id === id) || this.agentRuntime.list().some((item) => item.manifest.id === id)) {
             throw new Error(`Plugin '${id}' is already active`);
         }
         const installed = (await this.installations.list()).find((item) => item.id === id);
@@ -128,6 +135,9 @@ export class ProviderPluginManager {
     listActiveMiddleware() {
         return this.middlewareRuntime.list();
     }
+    listActiveAgents() {
+        return this.agentRuntime.list();
+    }
     async getSettings(id) {
         return this.settings?.get(id) ?? {};
     }
@@ -143,26 +153,32 @@ export class ProviderPluginManager {
     async close() {
         await this.runtime.close();
         await this.middlewareRuntime.close();
+        await this.agentRuntime.close();
     }
     async activateInstalledComponents(manifest, installed) {
         if (manifest.id !== installed.id || manifest.version !== installed.version)
             throw new Error("Installed plugin does not match its manifest");
         const shouldActivateProvider = manifest.permissions.includes("provider");
         const shouldActivateMiddleware = manifest.permissions.includes("middleware");
-        if (!shouldActivateProvider && !shouldActivateMiddleware)
+        const shouldActivateAgent = manifest.permissions.includes("agent");
+        if (!shouldActivateProvider && !shouldActivateMiddleware && !shouldActivateAgent)
             throw new Error(`Plugin '${manifest.id}' declares no executable capability`);
         let provider;
         let middleware;
+        let agent;
         try {
             if (shouldActivateProvider)
                 provider = await this.runtime.activateInstalled(manifest, installed);
             if (shouldActivateMiddleware)
                 middleware = await this.middlewareRuntime.activate(manifest, installed.path);
-            return { ...(provider ? { provider } : {}), ...(middleware ? { middleware } : {}) };
+            if (shouldActivateAgent)
+                agent = await this.agentRuntime.activate(manifest, installed.path);
+            return { ...(provider ? { provider } : {}), ...(middleware ? { middleware } : {}), ...(agent ? { agent } : {}) };
         }
         catch (error) {
             await this.runtime.deactivate(manifest.id).catch(() => undefined);
             await this.middlewareRuntime.deactivate(manifest.id).catch(() => undefined);
+            await this.agentRuntime.deactivate(manifest.id).catch(() => undefined);
             throw error;
         }
     }

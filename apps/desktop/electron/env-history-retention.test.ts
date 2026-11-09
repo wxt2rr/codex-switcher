@@ -13,6 +13,12 @@ async function writeHistoryEntry(root: string, envName: string, id: string, crea
   await writeFile(join(directory, `${id}.json`), JSON.stringify({ id, envName, createdAt }), "utf8");
 }
 
+async function writeClaudeCodeHistoryEntry(root: string, id: string, createdAt: string) {
+  const directory = join(root, "history", "agent-files", "claude-code");
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, `${id}.json`), JSON.stringify({ id, configPath: "/tmp/.claude/settings.json", source: "connect", createdAt, content: "{}\n" }), "utf8");
+}
+
 test("daily cleanup deletes only entries older than the retention window", async () => {
   const root = await mkdtemp(join(tmpdir(), "env-history-retention-"));
   const settingsPath = join(root, "desktop-settings.json");
@@ -42,6 +48,24 @@ test("cleanup runs at most once per local date unless forced", async () => {
   assert.equal((await runEnvHistoryCleanupIfDue({ stateDir: root, settingsPath, now })).reason, "completed");
   assert.equal((await runEnvHistoryCleanupIfDue({ stateDir: root, settingsPath, now })).reason, "already-completed");
   assert.equal((await runEnvHistoryCleanupIfDue({ stateDir: root, settingsPath, now, force: true })).reason, "completed");
+});
+
+test("daily cleanup applies the same retention window to Claude Code config history", async () => {
+  const root = await mkdtemp(join(tmpdir(), "claude-code-history-retention-"));
+  const settingsPath = join(root, "desktop-settings.json");
+  await saveEnvHistoryRetentionSettings(settingsPath, { enabled: true, retentionDays: 30 });
+  await writeClaudeCodeHistoryEntry(root, "claude-old", "2026-01-01T00:00:00.000Z");
+  await writeClaudeCodeHistoryEntry(root, "claude-recent", "2026-02-20T00:00:00.000Z");
+
+  const result = await runEnvHistoryCleanupIfDue({
+    stateDir: root,
+    settingsPath,
+    now: new Date("2026-03-01T00:00:00.000Z"),
+  });
+
+  assert.equal(result.deleted, 1);
+  await assert.rejects(() => readFile(join(root, "history", "agent-files", "claude-code", "claude-old.json")));
+  assert.match(await readFile(join(root, "history", "agent-files", "claude-code", "claude-recent.json"), "utf8"), /claude-recent/);
 });
 
 test("disabled retention does not scan history", async () => {

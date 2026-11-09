@@ -4,6 +4,9 @@ import { isGatewayEnvironmentState, } from "../gateway/model.js";
 import { writeFileAtomically } from "../system/atomic-file.js";
 export const DEFAULT_SCHEMA_VERSION = 1;
 const STATE_FILE_NAME = "core-state.json";
+export function normalizeEnvironmentModelIdentityMode(value) {
+    return value === "unified" ? "unified" : "account";
+}
 export function createStateStore(options) {
     const stateFile = join(options.rootDir, STATE_FILE_NAME);
     return {
@@ -100,6 +103,25 @@ function validateEnvState(name, value) {
             validateAccountState(accountName, accountValue),
         ])),
     };
+    // Keep the persisted shape of legacy environments stable. The business
+    // layer treats an omitted value as `account`, but migration must not rewrite
+    // every existing environment just because a new optional preference exists.
+    if (value.modelIdentityMode !== undefined) {
+        envState.modelIdentityMode = normalizeEnvironmentModelIdentityMode(value.modelIdentityMode);
+    }
+    if (value.remoteControl !== undefined) {
+        if (!isRecord(value.remoteControl)) {
+            throw createStoreError("INVALID_STATE", `Env '${name}' remoteControl must be an object`);
+        }
+        if (value.remoteControl.accountName !== undefined
+            && (typeof value.remoteControl.accountName !== "string"
+                || !value.remoteControl.accountName.trim())) {
+            throw createStoreError("INVALID_STATE", `Env '${name}' remoteControl.accountName must be a non-empty string`);
+        }
+        envState.remoteControl = value.remoteControl.accountName
+            ? { accountName: value.remoteControl.accountName.trim() }
+            : {};
+    }
     if (value.gateway !== undefined) {
         if (!isGatewayEnvironmentState(value.gateway)) {
             throw createStoreError("INVALID_STATE", `Env '${name}' gateway must be a valid gateway configuration`);
@@ -196,7 +218,7 @@ function validateRuntimeSettings(accountName, value) {
     return runtime;
 }
 function isAccountApiProtocol(value) {
-    return value === "responses" || value === "chat_completions";
+    return value === "responses" || value === "chat_completions" || value === "anthropic";
 }
 function isReasoningProfile(value) {
     return value === "auto" || value === "standard" || value === "reasoning_content" || value === "think_tags";

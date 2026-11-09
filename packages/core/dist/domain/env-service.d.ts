@@ -1,10 +1,12 @@
-import type { SwitcherState, TargetName } from "../state/store.js";
+import { type SwitcherState, type TargetName } from "../state/store.js";
 export interface EnvSummary {
     name: string;
     path: string;
     isCurrentCli: boolean;
     isCurrentApp: boolean;
     accountCount: number;
+    modelIdentityMode: "account" | "unified";
+    remoteAccountName?: string;
 }
 export interface CreateEnvInput {
     envName: string;

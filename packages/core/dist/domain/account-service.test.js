@@ -107,13 +107,16 @@ test("account service updates runtime settings for an account", () => {
 });
 test("account service removes account and resets target pointers that reference it", () => {
     const service = createAccountService();
-    const next = service.removeAccount(createSampleState(), {
+    const state = createSampleState();
+    state.envs.default.remoteControl = { accountName: "work" };
+    const next = service.removeAccount(state, {
         envName: "default",
         accountName: "work",
         now: "2026-06-16T09:10:00.000Z",
     });
     assert.equal(next.envs.default.accounts.work, undefined);
     assert.equal(next.targets.cli.account, "default");
+    assert.equal(next.envs.default.remoteControl, undefined);
 });
 test("account service rejects selecting an unknown account", () => {
     const service = createAccountService();

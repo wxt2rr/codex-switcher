@@ -78,6 +78,10 @@ test("desktop package defines electron packaging entrypoints", () => {
       to: "plugins/csw-our-free-model",
     },
     {
+      from: "../../plugins/claude-code",
+      to: "plugins/claude-code",
+    },
+    {
       from: "../../scripts/bin",
       to: "scripts/bin",
     },

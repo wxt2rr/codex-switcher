@@ -38,6 +38,31 @@ test("request conversion preserves Chat image data URLs for a Responses upstream
   ] }]);
 });
 
+test("Anthropic metadata is not forwarded to a Responses upstream", async () => {
+  const result = await convertGatewayRequest("anthropic", "responses", {
+    model: "claude",
+    metadata: { user_id: "claude-user" },
+    messages: [{ role: "user", content: "hello" }],
+    max_tokens: 256,
+  } as unknown as JsonObject, { upstreamModelName: "gpt-6-luna" });
+  assert.equal(result.value.metadata, undefined);
+  assert.equal(result.diagnostics.some((item) => item.code === "anthropic_metadata_dropped"), true);
+});
+
+test("Anthropic tool-result errors are not forwarded as unsupported Responses fields", async () => {
+  const result = await convertGatewayRequest("anthropic", "responses", {
+    model: "claude",
+    messages: [
+      { role: "assistant", content: [{ type: "tool_use", id: "tool-1", name: "Bash", input: { command: "pwd" } }] },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "tool-1", content: "permission denied", is_error: true }] },
+    ],
+  } as unknown as JsonObject, { upstreamModelName: "gpt-6-luna" });
+  const output = (result.value.input as Array<Record<string, unknown>>).at(-1);
+  assert.deepEqual(output, { type: "function_call_output", call_id: "tool-1", output: "permission denied" });
+  assert.equal(JSON.stringify(result.value).includes('"is_error"'), false);
+  assert.equal(result.diagnostics.some((item) => item.code === "responses_tool_error_flag_dropped"), true);
+});
+
 test("request conversion accepts the compatible Chat image_url string shorthand", async () => {
   const result = await convertGatewayRequest("chat_completions", "responses", {
     model: "logical",
@@ -54,6 +79,41 @@ test("request conversion emits the official Responses function-tool shape", asyn
   } as unknown as JsonObject, { upstreamModelName: "gpt" });
   assert.deepEqual(result.value.tools, [{ type: "function", name: "search", description: "Search", parameters: { type: "object" }, strict: true }]);
   assert.equal((result.value.tools as Array<Record<string, unknown>>)[0]?.function, undefined);
+});
+
+test("request conversion emits Responses tool calls and outputs as top-level input items", async () => {
+  const result = await convertGatewayRequest("chat_completions", "responses", {
+    model: "logical",
+    messages: [
+      { role: "assistant", content: "I will inspect the file.", tool_calls: [{ id: "call-read", type: "function", function: { name: "read_file", arguments: "{\"path\":\"README.md\"}" } }] },
+      { role: "tool", tool_call_id: "call-read", content: "file contents" },
+    ],
+  } as unknown as JsonObject, { upstreamModelName: "gpt" });
+  const input = result.value.input as Array<Record<string, unknown>>;
+  assert.deepEqual(input.map((item) => item.type ?? item.role), ["assistant", "function_call", "function_call_output"]);
+  assert.deepEqual(input[1], { type: "function_call", id: "fc_call-read", call_id: "call-read", name: "read_file", arguments: "{\"path\":\"README.md\"}" });
+  assert.deepEqual(input[2], { type: "function_call_output", call_id: "call-read", output: "file contents" });
+  assert.equal(JSON.stringify(input).includes('"content":[{"type":"function_call"'), false);
+});
+
+test("Responses history preserves reasoning items and top-level instructions", async () => {
+  const result = await convertGatewayRequest("responses", "responses", {
+    model: "logical",
+    instructions: "Follow the project policy.",
+    input: [
+      { type: "reasoning", id: "rs-1", encrypted_content: "sealed" },
+      { role: "assistant", content: [{ type: "output_text", text: "I checked the files." }] },
+      { type: "function_call", id: "fc-1", call_id: "call-1", name: "read_file", arguments: "{}" },
+      { type: "function_call_output", call_id: "call-1", output: "ok" },
+    ],
+  } as unknown as JsonObject, { upstreamModelName: "gpt" });
+  assert.equal(result.value.instructions, "Follow the project policy.");
+  const input = result.value.input as Array<Record<string, unknown>>;
+  assert.deepEqual(input[0], { type: "reasoning", id: "rs-1", encrypted_content: "sealed" });
+  assert.equal(input.some((item) => item.type === "function_call" && item.call_id === "call-1"), true);
+  assert.equal(input.some((item) => item.type === "function_call_output" && item.call_id === "call-1"), true);
+  assert.equal((input.find((item) => item.type === "function_call") as Record<string, unknown>)?.id, "fc_fc-1");
+  assert.equal(input.some((item) => (item.content as Array<Record<string, unknown>> | undefined)?.some((part) => part.type === "function_call")), false);
 });
 
 test("request conversion groups Responses namespace tools and maps tool choice per target", async () => {

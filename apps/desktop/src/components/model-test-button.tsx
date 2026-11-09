@@ -6,10 +6,11 @@ import type { UiLanguage } from "../i18n";
 import { cn } from "../lib/utils";
 import { Tooltip } from "./ui/tooltip";
 
-export function ModelTestButton({ bridge, request, language }: {
+export function ModelTestButton({ bridge, request, language, disabledReason }: {
   bridge: DesktopBridge;
   request?: ModelRequestTestRequest;
   language: UiLanguage;
+  disabledReason?: string;
 }) {
   const zh = language === "zh";
   const [testing, setTesting] = useState(false);
@@ -18,7 +19,7 @@ export function ModelTestButton({ bridge, request, language }: {
   async function test(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
     event.stopPropagation();
-    if (!request || testing) return;
+    if (!request || disabledReason || testing) return;
     setTesting(true);
     setResult(undefined);
     try {
@@ -49,8 +50,8 @@ export function ModelTestButton({ bridge, request, language }: {
       <button
         type="button"
         onClick={test}
-        disabled={!request || testing}
-        title={request ? (zh ? "使用当前服务商发送：你是什么模型" : "Ask the current provider: What model are you?") : (zh ? "需要先绑定账号" : "Bind an account before testing")}
+        disabled={!request || Boolean(disabledReason) || testing}
+        title={disabledReason ?? (request ? (zh ? "使用当前服务商发送：你是什么模型" : "Ask the current provider: What model are you?") : (zh ? "需要先绑定账号" : "Bind an account before testing"))}
         className={cn(
           "inline-flex h-8 min-w-[68px] items-center justify-center gap-1.5 rounded-lg border border-black/[0.08] bg-white px-2.5 text-[11px] font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-50",
           result?.ok && "border-primary/30 bg-primary/10 text-primary",

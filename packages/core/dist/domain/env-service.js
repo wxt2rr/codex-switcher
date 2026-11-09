@@ -1,3 +1,4 @@
+import { normalizeEnvironmentModelIdentityMode, } from "../state/store.js";
 const DEFAULT_ENV_NAME = "default";
 const DEFAULT_ACCOUNT_NAME = "default";
 export function createEnvService() {
@@ -10,6 +11,10 @@ export function createEnvService() {
                 isCurrentCli: state.targets.cli.env === env.name,
                 isCurrentApp: state.targets.app.env === env.name,
                 accountCount: Object.keys(env.accounts).length,
+                modelIdentityMode: normalizeEnvironmentModelIdentityMode(env.modelIdentityMode),
+                ...(env.remoteControl?.accountName
+                    ? { remoteAccountName: env.remoteControl.accountName }
+                    : {}),
             }))
                 .sort((a, b) => a.name.localeCompare(b.name));
         },

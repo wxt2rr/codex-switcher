@@ -16,6 +16,8 @@ interface CanonicalMessage { role: CanonicalRole; parts: CanonicalPart[]; name?:
 interface CanonicalRequest {
   model: string;
   messages: CanonicalMessage[];
+  /** Responses instructions are a top-level field, not a message item. */
+  instructions?: JsonValue;
   tools: CanonicalTool[];
   stream: boolean;
   reasoning?: ReasoningConversionState;
@@ -126,6 +128,10 @@ function decodeCanonicalRequest(protocol: GatewayProtocol, body: JsonObject): Ca
   if (protocol === "responses") {
     return {
       model: asString(body.model) ?? "",
+      instructions: body.instructions,
+      // Keep instructions in the canonical message list for non-Responses
+      // targets, while retaining the raw top-level value for a Responses
+      // target. The encoder decides which wire location is valid.
       messages: [...decodeMessages("system", body.instructions), ...decodeMessagesFromInput(body.input)],
       tools: decodeTools(protocol, body.tools),
       stream: body.stream === true,
@@ -196,15 +202,18 @@ function encodeProtocolRequest(source: GatewayProtocol, protocol: GatewayProtoco
     : encodedTools;
   if (protocol === "responses") {
     const toolChoice = encodeToolChoice(protocol, request.toolChoice);
+    const responsesMessages = encodeResponsesInput(request.messages, source, diagnostics);
+    const instructions = request.instructions ?? encodeResponsesInstructions(request.messages);
     return { value: {
       model: request.model,
-      input: request.messages.map((message) => ({ role: message.role, ...(message.name ? { name: message.name } : {}), ...(message.phase ? { phase: message.phase } : {}), content: message.parts.map((part) => encodeResponsesPart(part, message.role)) })),
+      input: responsesMessages,
       stream: request.stream,
       ...(encodedTools ? { tools: encodedTools } : {}),
       ...(toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
       ...(request.parallelToolCalls !== undefined ? { parallel_tool_calls: request.parallelToolCalls } : {}),
       ...(reasoning ? { reasoning: reasoning } : {}),
-      ...encodeResponsesParameters(request.parameters),
+      ...encodeResponsesParameters(request.parameters, source, diagnostics, protocol),
+      ...(instructions !== undefined ? { instructions } : {}),
       ...(request.previousResponseId ? { previous_response_id: request.previousResponseId } : {}),
       ...request.metadata,
     }, toolNameMap: qualifiedTools.toolNameMap, toolNamespaceMap: qualifiedTools.toolNamespaceMap, toolKindMap: qualifiedTools.toolKindMap, toolChoiceMap: qualifiedTools.toolChoiceMap };
@@ -286,6 +295,12 @@ function decodeMessagesFromInput(value: JsonValue | undefined): CanonicalMessage
     if (["function_call_output", "custom_tool_call_output", "tool_search_call_output", "tool_search_output"].includes(type ?? "")) {
       return [{ role: "tool" as const, parts: [{ type: "tool_result" as const, value: item }] }];
     }
+    if (type === "reasoning") {
+      // A Responses reasoning item has no message role. Keep the complete raw
+      // item so encrypted content, ids and provider-specific fields survive a
+      // history round trip instead of being mistaken for normal text.
+      return [{ role: "assistant" as const, parts: [{ type: "reasoning" as const, value: item, wireType: "responses_reasoning" }] }];
+    }
     if (type === "agent_message") {
       return [{ role: "user" as const, parts: decodeParts(item.content ?? item.text ?? "") }];
     }
@@ -345,29 +360,125 @@ function decodePart(value: JsonValue): CanonicalPart[] {
   return [{ type: "unknown", value }];
 }
 
-function encodeResponsesPart(part: CanonicalPart, role: CanonicalRole = "user"): JsonObject {
-  if (part.type === "text" || part.type === "reasoning") return { type: role === "assistant" || part.wireType === "output_text" ? "output_text" : "input_text", text: encodeText(part.value) };
+/**
+ * Encode Responses history as an ordered item stream. Function calls,
+ * function outputs and reasoning are top-level input items; only normal
+ * message content is allowed inside `message.content`.
+ */
+function encodeResponsesInput(messages: CanonicalMessage[], source: GatewayProtocol, diagnostics: ConversionDiagnostic[]): JsonValue[] {
+  const input: JsonValue[] = [];
+  for (const message of messages) {
+    if (message.role === "system" || message.role === "developer") continue;
+    let content: JsonObject[] = [];
+    const flushMessage = (): void => {
+      if (!content.length) return;
+      input.push({
+        role: message.role === "tool" ? "user" : message.role,
+        ...(message.name ? { name: message.name } : {}),
+        ...(message.phase ? { phase: message.phase } : {}),
+        content,
+      });
+      content = [];
+    };
+    for (const part of message.parts) {
+      if (part.type === "tool_use") {
+        flushMessage();
+        input.push(encodeResponsesToolUse(part));
+      } else if (part.type === "tool_result") {
+        flushMessage();
+        input.push(encodeResponsesToolResult(part, source, diagnostics, "responses"));
+      } else if (part.type === "reasoning") {
+        flushMessage();
+        const reasoning = encodeResponsesReasoning(part);
+        if (reasoning) input.push(reasoning);
+      } else {
+        content.push(encodeResponsesContentPart(part, message.role));
+      }
+    }
+    flushMessage();
+  }
+  return input;
+}
+
+function encodeResponsesInstructions(messages: CanonicalMessage[]): string | undefined {
+  const text = messages
+    .filter((message) => message.role === "system" || message.role === "developer")
+    .flatMap((message) => message.parts)
+    .filter((part) => part.type === "text" || part.type === "reasoning")
+    .map((part) => encodeText(part.value))
+    .filter(Boolean)
+    .join("\n");
+  return text || undefined;
+}
+
+function encodeResponsesContentPart(part: CanonicalPart, role: CanonicalRole): JsonObject {
+  if (part.type === "text") return { type: role === "assistant" || part.wireType === "output_text" ? "output_text" : "input_text", text: encodeText(part.value) };
   if (part.type === "image") return part.media?.data ? { type: "input_image", image_url: `data:${part.media.mimeType ?? "image/png"};base64,${part.media.data}` } : { type: "input_image", image_url: part.media?.url ?? "" };
   if (part.type === "file") return part.media?.data ? { type: "input_file", file_data: `data:${part.media.mimeType ?? "application/octet-stream"};base64,${part.media.data}`, ...(part.media.fileName ? { filename: part.media.fileName } : {}) } : { type: "input_file", file_url: part.media?.url ?? "" };
-  if (part.type === "tool_use" && isObject(part.value)) {
-    const name = asString(part.value.name) ?? "tool";
-    const originalType = asString(part.value.type);
-    const callId = asString(part.value.call_id) ?? asString(part.value.id) ?? `name:${name}`;
-    if (originalType === "custom_tool_call") return { type: "custom_tool_call", call_id: callId, name, input: asString(part.value.input) ?? JSON.stringify(part.value.input ?? "") };
-    if (originalType === "tool_search_call") return { type: "tool_search_call", call_id: callId, name, ...(isObject(part.value.input) ? { input: part.value.input } : {}) };
-    return { type: "function_call", call_id: callId, name, arguments: asString(part.value.arguments) ?? JSON.stringify(part.value.input ?? part.value.args ?? {}) };
+  return { type: "input_text", text: encodeText(part.value) };
+}
+
+function encodeResponsesToolUse(part: CanonicalPart): JsonObject {
+  if (!isObject(part.value)) return { type: "function_call", call_id: "call", name: "tool", arguments: "{}" };
+  const value = part.value;
+  const fn = isObject(value.function) ? value.function : value;
+  const name = asString(value.name) ?? asString(fn.name) ?? "tool";
+  const originalType = asString(value.type);
+  const callId = asString(value.call_id) ?? asString(value.tool_call_id) ?? asString(value.id) ?? `name:${name}`;
+  // Responses distinguishes the executable call id (`call_id`, which can be
+  // inherited from Chat Completions) from the input item id (`id`).  OpenAI
+  // validates function-call item ids and requires the `fc_` prefix.  A Chat
+  // id such as `call_abc` is therefore preserved only as `call_id`; derive a
+  // stable Responses item id for the history item itself.
+  const originalId = asString(value.id);
+  if (originalType === "custom_tool_call") return { type: "custom_tool_call", ...(originalId ? { id: originalId } : {}), call_id: callId, name, input: asString(value.input) ?? JSON.stringify(value.input ?? "") };
+  if (originalType === "tool_search_call") return { type: "tool_search_call", ...(originalId ? { id: originalId } : {}), call_id: callId, name, ...(isObject(value.input) ? { input: value.input } : {}) };
+  const id = normalizeResponsesItemId("fc_", originalId, callId);
+  return { type: "function_call", ...(id ? { id } : {}), call_id: callId, name, arguments: asString(value.arguments) ?? asString(fn.arguments) ?? JSON.stringify(value.input ?? fn.input ?? value.args ?? fn.args ?? {}) };
+}
+
+function normalizeResponsesItemId(prefix: string, candidate: string | undefined, fallback: string): string {
+  const raw = candidate?.trim() || fallback.trim();
+  const suffixSource = raw.startsWith(prefix) ? raw.slice(prefix.length) : raw;
+  const suffix = suffixSource.replace(/[^A-Za-z0-9_-]/g, "_") || "item";
+  return `${prefix}${suffix}`;
+}
+
+function encodeResponsesToolResult(
+  part: CanonicalPart,
+  source: GatewayProtocol,
+  diagnostics: ConversionDiagnostic[],
+  target: GatewayProtocol,
+): JsonObject {
+  if (!isObject(part.value)) return { type: "function_call_output", call_id: "call", output: encodeText(part.value) };
+  const value = part.value;
+  const name = asString(value.name);
+  const originalType = asString(value.type);
+  const callId = asString(value.call_id) ?? asString(value.tool_call_id) ?? asString(value.tool_use_id) ?? asString(value.id) ?? (name ? `name:${name}` : "call");
+  const output = value.output ?? value.content ?? "";
+  const error = value.is_error ?? value.isError;
+  if (typeof error === "boolean") {
+    diagnostics.push({
+      code: "responses_tool_error_flag_dropped",
+      level: "warning",
+      message: "Dropped tool-result is_error because Responses function_call_output does not accept this field; the error text remains in output.",
+      source,
+      target,
+      path: "input[].is_error",
+    });
   }
-  if (part.type === "tool_result" && isObject(part.value)) {
-    const name = asString(part.value.name);
-    const originalType = asString(part.value.type);
-    const callId = asString(part.value.call_id) ?? asString(part.value.tool_call_id) ?? asString(part.value.tool_use_id) ?? asString(part.value.id) ?? (name ? `name:${name}` : "call");
-    const output = part.value.output ?? part.value.content ?? "";
-    const error = part.value.is_error ?? part.value.isError;
-    if (originalType === "custom_tool_call_output") return { type: "custom_tool_call_output", call_id: callId, output, ...(typeof error === "boolean" ? { is_error: error } : {}) };
-    if (originalType === "tool_search_call_output" || originalType === "tool_search_output") return { type: "tool_search_call_output", call_id: callId, output, ...(typeof error === "boolean" ? { is_error: error } : {}) };
-    return { type: "function_call_output", call_id: callId, output, ...(typeof error === "boolean" ? { is_error: error } : {}) };
-  }
-  return { type: part.type === "tool_use" ? "function_call" : part.type === "tool_result" ? "function_call_output" : "input_text", ...(isObject(part.value) ? part.value : { text: String(part.value) }) };
+  const itemType = originalType === "custom_tool_call_output"
+    ? "custom_tool_call_output"
+    : originalType === "tool_search_call_output" || originalType === "tool_search_output"
+      ? "tool_search_call_output"
+      : "function_call_output";
+  return { type: itemType, call_id: callId, output };
+}
+
+function encodeResponsesReasoning(part: CanonicalPart): JsonObject | undefined {
+  if (part.wireType === "responses_reasoning" && isObject(part.value)) return part.value;
+  const text = encodeText(part.value);
+  return text ? { type: "reasoning", summary: [{ type: "summary_text", text }] } : undefined;
 }
 
 function encodeChatMessage(message: CanonicalMessage, instructionRole: ConversionOptions["instructionRole"] = "auto"): JsonObject {
@@ -654,9 +765,25 @@ function decodeGeminiParameters(body: JsonObject): CanonicalRequestParameters {
   });
 }
 
-function encodeResponsesParameters(parameters: CanonicalRequestParameters): JsonObject {
+function encodeResponsesParameters(
+  parameters: CanonicalRequestParameters,
+  source: GatewayProtocol,
+  diagnostics: ConversionDiagnostic[],
+  target: GatewayProtocol,
+): JsonObject {
   const text = parameters.textFormat ?? responseFormatToResponsesText(parameters.responseFormat);
   const maxTokens = parameters.maxTokens ?? parameters.maxCompletionTokens;
+  const shouldForwardProviderMetadata = source !== "anthropic";
+  if (!shouldForwardProviderMetadata && parameters.providerMetadata !== undefined) {
+    diagnostics.push({
+      code: "anthropic_metadata_dropped",
+      level: "warning",
+      message: "Dropped Anthropic provider metadata because the Responses upstream contract does not define it.",
+      source,
+      target,
+      path: "metadata",
+    });
+  }
   return compactObject({
     ...(maxTokens !== undefined ? { max_output_tokens: maxTokens } : {}),
     ...(parameters.temperature !== undefined ? { temperature: parameters.temperature } : {}),
@@ -668,7 +795,7 @@ function encodeResponsesParameters(parameters: CanonicalRequestParameters): Json
     ...(parameters.streamOptions !== undefined ? { stream_options: parameters.streamOptions } : {}),
     ...(text !== undefined ? { text } : {}),
     ...(parameters.clientMetadata !== undefined ? { client_metadata: parameters.clientMetadata } : {}),
-    ...(parameters.providerMetadata !== undefined ? { metadata: parameters.providerMetadata } : {}),
+    ...(shouldForwardProviderMetadata && parameters.providerMetadata !== undefined ? { metadata: parameters.providerMetadata } : {}),
     ...(parameters.modalities !== undefined ? { modalities: parameters.modalities } : {}),
     ...(parameters.prediction !== undefined ? { prediction: parameters.prediction } : {}),
     ...(parameters.store !== undefined ? { store: parameters.store } : {}),

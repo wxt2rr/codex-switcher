@@ -5,6 +5,12 @@ export interface ApplyTargetHomeStateOptions {
     state: SwitcherState;
     target: TargetName;
     /**
+     * Controls whether a target-home projection is allowed to replace the
+     * existing Codex auth cache. Route switches should preserve it; explicit
+     * login flows can opt into the selected account's credentials.
+     */
+    authProjection?: "selected" | "preserve" | "clear";
+    /**
      * Override the selected account route with the environment gateway route.
      *
      * Account runtime data may still contain a direct compatibility route (or a

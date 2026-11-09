@@ -3,6 +3,12 @@ import { dirname, join } from "node:path";
 import { writeFileAtomically } from "./atomic-file.js";
 /** Stable Codex provider namespace used for all Switcher-managed API routes. */
 export const MANAGED_PROVIDER_ID = "codex_switcher_router";
+/**
+ * Codex expects a bearer field on some provider profiles. The Switcher router
+ * owns upstream authentication, so this value is only a non-secret shape
+ * placeholder and is never used as a credential.
+ */
+const MANAGED_PROVIDER_PLACEHOLDER_TOKEN = "codex-switcher-placeholder";
 export async function repairLegacyTargetHomeConfigs(options) {
     const result = {
         checked: 0,
@@ -57,16 +63,47 @@ export async function applyTargetHomeState(options) {
         await clearTargetHomeState(env.path);
         return;
     }
+    // Remote control is authenticated with the environment's explicitly chosen
+    // official account. It is independent from the account that supplies the
+    // model route, which may be an API key or a gateway profile.
+    const remoteAccount = env.remoteControl?.accountName
+        ? env.accounts[env.remoteControl.accountName]
+        : undefined;
+    const remoteAuthData = remoteAccount?.authMode === "auth" && remoteAccount.authData
+        ? remoteAccount.authData
+        : undefined;
     const targetRuntime = options.gatewayBaseUrl
         ? {
             ...account.runtime,
+            // A gateway can route an API-key account while the host remains
+            // signed in with the environment's AUTH account for remote control.
+            // Keep the Codex-facing auth mode aligned with that remote identity;
+            // the gateway provider still owns model authentication below.
+            ...(remoteAuthData ? { preferredAuthMethod: "chatgpt" } : {}),
             openaiBaseUrlMode: "custom",
             openaiBaseUrl: options.gatewayBaseUrl,
+            // The environment gateway exposes the Codex-facing Responses ingress
+            // even when the selected upstream account speaks Anthropic Messages.
+            apiProtocol: "responses",
             // A compatibility route is account-scoped. When the environment
             // gateway is selected, project the gateway ingress instead.
             compatibilityRouteEnabled: false,
         }
         : account.runtime;
+    // A direct Codex home has one auth.json. When the environment uses an
+    // official account for remote control, a different AUTH account cannot also
+    // be projected as the model identity without silently replacing that
+    // remote session. API-key accounts remain safe because their model key is
+    // delivered through the provider environment key below. An environment
+    // gateway is the explicit escape hatch: its route credentials are hydrated
+    // inside the gateway and the home can keep the remote account's auth.json.
+    if (!options.gatewayBaseUrl
+        && remoteAuthData
+        && account.authMode === "auth"
+        && env.remoteControl?.accountName
+        && env.remoteControl.accountName !== account.name) {
+        throw new Error(`Environment '${env.name}' uses '${env.remoteControl.accountName}' for remote control; split AUTH accounts into separate environments or enable the environment gateway`);
+    }
     const compatibilityRouteActive = targetRuntime.apiProtocol === "chat_completions" &&
         targetRuntime.compatibilityRouteEnabled === true;
     if (compatibilityRouteActive &&
@@ -74,9 +111,18 @@ export async function applyTargetHomeState(options) {
             !targetRuntime.compatibilityRouteToken)) {
         throw new Error(`Compatibility route for '${account.name}' is incomplete`);
     }
-    const targetAuthData = compatibilityRouteActive
+    const selectedAuthData = compatibilityRouteActive
         ? { OPENAI_API_KEY: targetRuntime.compatibilityRouteToken }
         : account.authData;
+    const existingAuthData = options.authProjection === "preserve"
+        ? await readAuthData(join(env.path, "auth.json"))
+        : undefined;
+    const projectedAuthData = options.authProjection === "preserve"
+        ? existingAuthData
+        : options.authProjection === "clear"
+            ? undefined
+            : selectedAuthData;
+    const targetAuthData = remoteAuthData ?? projectedAuthData;
     if (targetAuthData) {
         await writeFileAtomically(join(env.path, "auth.json"), `${JSON.stringify(normalizeAuthDataForTargetHome(targetAuthData), null, 2)}\n`, { encoding: "utf8" });
     }
@@ -92,11 +138,12 @@ export async function applyTargetHomeState(options) {
         // token with the hydrated upstream credential. Only the account-scoped
         // Chat compatibility route needs a local bearer token from Codex.
         localRouterAuthEnabled: !options.gatewayBaseUrl
-            && targetRuntime.apiProtocol === "chat_completions"
+            && (remoteAuthData !== undefined || targetRuntime.apiProtocol === "chat_completions")
+            && targetRuntime.preferredAuthMethod === "apikey"
             && targetRuntime.providerAuthMethod !== "none"
-            && Boolean(readAuthApiKey(targetAuthData)),
+            && Boolean(readAuthApiKey(selectedAuthData)),
         localRouterAuthMode: options.localRouterAuthMode ?? "env",
-        localRouterToken: readAuthApiKey(targetAuthData),
+        localRouterToken: readAuthApiKey(selectedAuthData),
     });
 }
 export async function clearTargetHomeState(homePath) {
@@ -125,7 +172,8 @@ async function writeManagedConfig(configPath, runtime, options = {}) {
     if (compatibilityRouteActive && !localRouterActive) {
         managedLines.push(`openai_base_url = ${quoteTomlString(runtime.compatibilityRouteBaseUrl)}`);
     }
-    const directManagedBaseUrl = !compatibilityRouteActive && runtime.apiProtocol !== "chat_completions"
+    const directManagedBaseUrl = !compatibilityRouteActive
+        && (runtime.apiProtocol === undefined || runtime.apiProtocol === "responses")
         && runtime.openaiBaseUrlMode === "custom" && runtime.openaiBaseUrl
         ? runtime.openaiBaseUrl
         : undefined;
@@ -147,6 +195,7 @@ async function writeManagedConfig(configPath, runtime, options = {}) {
         managedLines.push('wire_api = "responses"');
         managedLines.push("supports_websockets = false");
         if (runtime.preferredAuthMethod === "chatgpt") {
+            managedLines.push(`experimental_bearer_token = ${quoteTomlString(MANAGED_PROVIDER_PLACEHOLDER_TOKEN)}`);
             // The local router owns upstream account authentication. Do not project
             // the selected upstream account's ChatGPT auth method into Codex's local
             // provider: requires_openai_auth=true makes Codex apply ChatGPT's native
@@ -269,13 +318,18 @@ function repairLegacyTargetHomeConfig(content, hasManagedApiKey) {
     };
 }
 async function readTargetHomeApiKey(homePath) {
-    const raw = await readText(join(homePath, "auth.json"));
+    const value = await readAuthData(join(homePath, "auth.json"));
+    const apiKey = value?.OPENAI_API_KEY;
+    return typeof apiKey === "string" && apiKey.trim() ? apiKey.trim() : undefined;
+}
+async function readAuthData(path) {
+    const raw = await readText(path);
     if (!raw)
         return undefined;
     try {
         const value = JSON.parse(raw);
-        return typeof value.OPENAI_API_KEY === "string" && value.OPENAI_API_KEY.trim()
-            ? value.OPENAI_API_KEY.trim()
+        return value && typeof value === "object" && !Array.isArray(value)
+            ? value
             : undefined;
     }
     catch {

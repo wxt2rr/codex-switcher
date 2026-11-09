@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -436,6 +436,57 @@ test("provider switch migrates the selected account binding to the new provider 
   assert.equal(snapshot.accountBindings["test/阿里云"]?.includes(oldCatalogModel.id), false);
 });
 
+test("account binding projection keeps unavailable history out of the picker but preserves it on save", async () => {
+  const root = await mkdtemp(join(tmpdir(), "model-binding-historical-preserve-"));
+  const store = createModelCatalogStore(join(root, "models.json"));
+  const accountKey = "test/provider";
+  const historical = {
+    providerModelKey: "provider:retired-model",
+    providerId: "provider",
+    upstreamModelId: "retired-model",
+    displayName: "Retired model",
+    protocols: ["responses"],
+    capabilities: { reasoning: false, tools: true, vision: false, streaming: true },
+    source: "discovery" as const,
+  };
+  const available = {
+    providerModelKey: "provider:current-model",
+    providerId: "provider",
+    upstreamModelId: "current-model",
+    displayName: "Current model",
+    protocols: ["responses"],
+    capabilities: { reasoning: true, tools: true, vision: false, streaming: true },
+    source: "discovery" as const,
+  };
+  await store.saveAccountModelDiscovery({ accountKey, providerId: "provider", state: "ready", models: [historical, available] });
+  const firstSnapshot = await store.load();
+  const historicalRecord = firstSnapshot.models.find((model) => model.entry.provider_model_key === historical.providerModelKey)!;
+  const availableRecord = firstSnapshot.models.find((model) => model.entry.provider_model_key === available.providerModelKey)!;
+  await store.setAccountBindings(accountKey, [historicalRecord.id], {
+    [historicalRecord.id]: { priority: 2, weight: 3 },
+  });
+  await store.saveAccountModelDiscovery({ accountKey, providerId: "provider", state: "ready", models: [available] });
+
+  const snapshot = await store.load();
+  const projected = projectAccountBindingsFromCatalog(structuredClone(snapshot), {
+    accountKey,
+    modelIds: [availableRecord.id],
+    providerId: "provider",
+    protocol: "responses",
+    preserveHistoricalBindings: true,
+  });
+
+  assert.deepEqual(projected.accountBindings[accountKey], [availableRecord.id, historicalRecord.id]);
+  assert.deepEqual(projected.accountBindingOptions?.[accountKey]?.[historicalRecord.id], { priority: 2, weight: 3 });
+
+  const persisted = await store.setAccountBindings(accountKey, [availableRecord.id], undefined, true);
+  assert.deepEqual(persisted.accountBindings[accountKey], [availableRecord.id, historicalRecord.id]);
+
+  await store.saveAccountModelDiscovery({ accountKey, providerId: "provider", state: "failed", models: [], lastError: "temporary failure" });
+  const failedRefresh = await store.setAccountBindings(accountKey, [], undefined, true);
+  assert.deepEqual(failedRefresh.accountBindings[accountKey], [availableRecord.id, historicalRecord.id]);
+});
+
 test("catalog binding projection creates the provider model without mutating the source snapshot", async () => {
   const root = await mkdtemp(join(tmpdir(), "model-binding-projection-"));
   const store = createModelCatalogStore(join(root, "models.json"));
@@ -704,4 +755,89 @@ test("removing an account clears its discovery and binding relations", async () 
   assert.equal(snapshot.accountBindings["work/remove"], undefined);
   assert.equal(snapshot.accountModelDiscoveries?.["work/remove"], undefined);
   assert.equal(snapshot.models.length, 1);
+});
+
+test("legacy Gateway provider identities migrate into the canonical provider and keep relations", async () => {
+  const root = await mkdtemp(join(tmpdir(), "model-catalog-legacy-provider-migration-"));
+  const path = join(root, "models.json");
+  const store = createModelCatalogStore(path);
+  const legacyProvider = "custom-openai:127.0.0.1-17832:gateways-gateway-test";
+  const canonicalProvider = "custom-openai:aicode.ckt.cn";
+  const legacy = await store.saveModel({ entry: {
+    slug: `${legacyProvider}:gpt-6.1-sol`,
+    display_name: "Legacy GPT",
+    provider_id: legacyProvider,
+    provider_model_key: `${legacyProvider}:gpt-6.1-sol`,
+    upstream_model_id: "gpt-6.1-sol",
+    model_source: "manual",
+    vendor_metadata: { legacyLabel: "keep-me" },
+  } });
+  const canonical = await store.saveModel({ entry: {
+    slug: `${canonicalProvider}:gpt-6.1-sol`,
+    display_name: "GPT-6.1 Sol",
+    provider_id: canonicalProvider,
+    provider_model_key: `${canonicalProvider}:gpt-6.1-sol`,
+    upstream_model_id: "gpt-6.1-sol",
+    model_source: "discovered",
+  } });
+  await store.setAccountBindings("default/ckt-aicode", [legacy.id], {
+    [legacy.id]: { upstreamModelId: "gpt-6.1-sol", priority: 2, weight: 3 },
+  });
+  await store.saveAccountModelDiscovery({
+    accountKey: "default/ckt-aicode",
+    providerId: legacyProvider,
+    state: "ready",
+    models: [{
+      providerModelKey: `${legacyProvider}:gpt-6.1-sol`,
+      providerId: legacyProvider,
+      upstreamModelId: "gpt-6.1-sol",
+      displayName: "Legacy GPT",
+      protocols: ["responses"],
+      capabilities: { reasoning: true, tools: true, vision: true, streaming: true },
+      source: "discovery",
+    }],
+  });
+
+  const result = await store.reconcileLegacyProviderIdentities({ [legacyProvider]: canonicalProvider });
+  assert.equal(result.changed, true);
+  assert.equal(result.migratedModels, 1);
+  assert.equal(result.mergedModels, 1);
+  assert.ok(result.backupPath);
+  const snapshot = await store.load();
+  assert.equal(snapshot.models.some((model) => model.id === legacy.id), false);
+  assert.equal(snapshot.models.some((model) => model.id === canonical.id), true);
+  assert.deepEqual(snapshot.accountBindings["default/ckt-aicode"], [canonical.id]);
+  assert.deepEqual(snapshot.accountBindingOptions?.["default/ckt-aicode"]?.[canonical.id], {
+    upstreamModelId: "gpt-6.1-sol",
+    priority: 2,
+    weight: 3,
+  });
+  assert.equal(snapshot.accountModelDiscoveries?.["default/ckt-aicode"]?.providerId, canonicalProvider);
+  assert.equal(snapshot.accountModelDiscoveries?.["default/ckt-aicode"]?.models[0]?.providerModelKey, `${canonicalProvider}:gpt-6.1-sol`);
+  assert.deepEqual(snapshot.models.find((model) => model.id === canonical.id)?.entry.vendor_metadata, { legacyLabel: "keep-me" });
+
+  const backup = await readFile(result.backupPath!, "utf8");
+  assert.match(backup, new RegExp(legacyProvider.replaceAll(".", "\\.")));
+  const historyEntries = await readdir(join(root, "history", "model-catalog"));
+  assert.equal(historyEntries.length, 1);
+  const second = await store.reconcileLegacyProviderIdentities({ [legacyProvider]: canonicalProvider });
+  assert.deepEqual(second, { changed: false, migratedModels: 0, mergedModels: 0 });
+  assert.equal((await readdir(join(root, "history", "model-catalog"))).length, 1);
+});
+
+test("legacy Gateway migration leaves unmapped and non-Gateway local providers untouched", async () => {
+  const root = await mkdtemp(join(tmpdir(), "model-catalog-legacy-provider-safe-"));
+  const store = createModelCatalogStore(join(root, "models.json"));
+  const local = await store.saveModel({ entry: {
+    slug: "custom-openai:127.0.0.1:local-model",
+    display_name: "Local Model",
+    provider_id: "custom-openai:127.0.0.1:local",
+    provider_model_key: "custom-openai:127.0.0.1:local:model",
+    upstream_model_id: "model",
+  } });
+  const snapshot = await store.reconcileLegacyProviderIdentities({
+    "custom-openai:127.0.0.1-17832:gateways-ambiguous": "custom-openai:should-not-be-used",
+  });
+  assert.equal(snapshot.changed, false);
+  assert.equal((await store.load()).models[0]?.id, local.id);
 });

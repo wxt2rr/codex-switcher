@@ -26,12 +26,12 @@ function accountKeyOf(envName: string, accountName: string): string {
   return `${envName}/${accountName}`;
 }
 
-function modelSourceLabel(source: string | undefined, zh: boolean): string {
+function modelSourceLabel(source: string | undefined, zh: boolean, verified = true): string {
   if (source === "bundled") return zh ? "Codex 内置" : "Codex built-in";
   if (source === "discovered") return zh ? "服务商发现" : "Discovered";
   if (source === "preset") return zh ? "服务商预设" : "Provider preset";
   if (source === "cached") return zh ? "缓存模型" : "Cached";
-  return zh ? "手动配置" : "Manual";
+  return verified ? (zh ? "手动配置" : "Manual") : (zh ? "手动配置 · 未验证" : "Manual · Unverified");
 }
 
 function discoveryStateLabel(snapshot: AccountModelDiscoverySnapshot | undefined, zh: boolean): string {
@@ -42,11 +42,31 @@ function discoveryStateLabel(snapshot: AccountModelDiscoverySnapshot | undefined
   return zh ? `已发现 ${snapshot.models.length} 个模型` : `${snapshot.models.length} models discovered`;
 }
 
+function staleModelLabel(status: string | undefined, zh: boolean): string {
+  if (status === "unavailable") return zh ? "服务商已移除" : "No longer advertised";
+  return zh ? "上次可用" : "Previously available";
+}
+
 function providerLabel(providerId: string, providerCatalog: ProviderCatalogItem[], zh: boolean, displayName?: string): string {
   if (displayName?.trim()) return displayName.trim();
   if (providerId === "codex-bundled") return zh ? "Codex 内置" : "Codex built-in";
   if (providerId === "custom") return zh ? "手动配置" : "Manual";
   return providerCatalog.find((provider) => provider.id === providerId)?.displayName ?? providerId;
+}
+
+function accountModelNeedsAttention(
+  model: ModelCatalogSnapshot["models"][number],
+  discoveryByProviderKey: ReturnType<typeof discoveryByProviderKeyOf>,
+  catalogFallback: boolean,
+  selectedIds: readonly string[],
+): boolean {
+  const providerModelKey = typeof model.entry.provider_model_key === "string"
+    ? model.entry.provider_model_key.trim()
+    : "";
+  const discovered = providerModelKey ? discoveryByProviderKey.get(providerModelKey) : undefined;
+  return discovered?.status === "stale"
+    || discovered?.status === "unavailable"
+    || (!catalogFallback && Boolean(providerModelKey && !discovered && selectedIds.includes(model.id)));
 }
 
 export function AccountModelExposurePanel({
@@ -79,7 +99,7 @@ export function AccountModelExposurePanel({
   const [snapshot, setSnapshot] = useState<ModelCatalogSnapshot>({ version: 1, models: [], accountBindings: {} });
   const [search, setSearch] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
-  const [modelFilter, setModelFilter] = useState("all");
+  const [modelFilter, setModelFilter] = useState("available");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -107,7 +127,7 @@ export function AccountModelExposurePanel({
     if (!open) return;
     setSearch("");
     setProviderFilter("all");
-    setModelFilter("all");
+    setModelFilter("available");
     void loadModels(false);
     // The panel is scoped to one account; the account key is the complete
     // reload boundary and deliberately avoids leaking another account's picks.
@@ -126,22 +146,35 @@ export function AccountModelExposurePanel({
     return buildAccountModelCandidates(snapshot, accountKey, selectedIds, catalogFallback);
   }, [accountKey, catalogFallback, selectedIds, snapshot]);
 
+  const availableCandidates = useMemo(
+    () => allCandidates.filter((model) => !accountModelNeedsAttention(model, discoveryByProviderKey, catalogFallback, selectedIds)),
+    [allCandidates, discoveryByProviderKey, catalogFallback, selectedIds],
+  );
+  const availableModelIds = useMemo(
+    () => new Set(availableCandidates.map((model) => model.id)),
+    [availableCandidates],
+  );
+  const availableSelectedCount = selectedIds.filter((id) => availableModelIds.has(id)).length;
+  const hiddenSelectedCount = selectedIds.length - availableSelectedCount;
+  const availableCount = availableCandidates.length;
+  const attentionCount = allCandidates.length - availableCount;
+
   const providerOptions = useMemo(() => {
-    return [...new Set(allCandidates.map((model) => providerIdForAccountModel(model, discoveryByProviderKey)))].sort((left, right) =>
+    return [...new Set(availableCandidates.map((model) => providerIdForAccountModel(model, discoveryByProviderKey)))].sort((left, right) =>
       providerLabel(left, providerCatalog, zh).localeCompare(providerLabel(right, providerCatalog, zh)),
     );
-  }, [allCandidates, discoveryByProviderKey, providerCatalog, zh]);
+  }, [availableCandidates, discoveryByProviderKey, providerCatalog, zh]);
 
   const candidates = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return allCandidates.filter((model) => {
+    return availableCandidates.filter((model) => {
       const providerId = providerIdForAccountModel(model, discoveryByProviderKey);
       if (providerFilter !== "all" && providerId !== providerFilter) return false;
       if (modelFilter === "selected" && !selectedIds.includes(model.id)) return false;
       if (!query) return true;
       return `${model.entry.display_name} ${model.entry.slug} ${providerId} ${String(model.entry.provider_display_name ?? "")}`.toLowerCase().includes(query);
     });
-  }, [allCandidates, discoveryByProviderKey, modelFilter, providerFilter, search, selectedIds]);
+  }, [availableCandidates, discoveryByProviderKey, modelFilter, providerFilter, search, selectedIds]);
 
   function toggleModel(modelId: string, checked: boolean) {
     setSelectedIds((current) => checked
@@ -159,7 +192,10 @@ export function AccountModelExposurePanel({
     if (!accountKey) return;
     setSaving(true);
     try {
-      const result = await bridge.setAccountModelBindings(accountKey, selectedIds);
+      // Hidden historical bindings are intentionally left to Model management;
+      // the account picker only writes the currently available choices.
+      const visibleSelectedIds = selectedIds.filter((id) => availableModelIds.has(id));
+      const result = await bridge.setAccountModelBindings(accountKey, visibleSelectedIds);
       setSnapshot(result.snapshot);
       if (result.appRefresh.required) onAppRefreshRequired?.(result.appRefresh);
       onSaved?.();
@@ -214,10 +250,33 @@ export function AccountModelExposurePanel({
             </div>
             {discovery.lastError ? <div className="mt-1 break-words text-warm-600">{discovery.lastError}</div> : null}
             <div className="mt-1 text-warm-600">
-              {zh ? "你可以从当前模型列表中选择模型；保存后会按当前服务商绑定。" : "Choose from the existing model catalog; saved selections will be bound to this provider."}
+              {zh ? "账号页只展示当前可用模型；可先添加手动模型，或检查凭据后重新发现。" : "This picker shows available models only; add a manual model or check credentials before retrying discovery."}
             </div>
           </div>
         ) : null}
+        {attentionCount > 0 ? (
+          <div role="status" className="flex shrink-0 items-center justify-between gap-3 rounded-lg border border-warm-200 bg-warm-50/70 px-3.5 py-3 text-[12px] leading-5 text-warm-700">
+            <div className="min-w-0">
+              <div className="font-medium">{zh ? `${attentionCount} 个不可用模型已隐藏` : `${attentionCount} unavailable model${attentionCount === 1 ? "" : "s"} hidden`}</div>
+              <div className="mt-0.5 truncate text-warm-600">{zh ? "账号绑定只展示当前可用模型；可到模型管理页清理历史模型和绑定。" : "Account binding shows available models only; manage historical models and bindings on the Models page."}</div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <button type="button" onClick={() => void loadModels(true)} disabled={refreshing} className="rounded-md px-2 py-1 font-medium text-warm-800 transition-colors hover:bg-warm-100 disabled:opacity-50">
+                {zh ? "重新发现" : "Refresh"}
+              </button>
+              <button type="button" onClick={onOpenModelSettings} className="rounded-md px-2 py-1 font-medium text-warm-800 transition-colors hover:bg-warm-100">
+                {zh ? "打开模型管理" : "Open Models"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+        <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-black/[0.05] bg-[#fafbfc] px-3 py-2 text-[11px] text-muted-foreground">
+          <span className="font-medium text-neutral-800">{zh ? "模型状态" : "Models"}</span>
+          <span>{zh ? `当前可用 ${availableCount}` : `${availableCount} available`}</span>
+          <span>{zh ? `已启用 ${availableSelectedCount}` : `${availableSelectedCount} selected`}</span>
+          {hiddenSelectedCount > 0 ? <span className="text-warm-700">{zh ? `历史绑定已隐藏 ${hiddenSelectedCount}` : `${hiddenSelectedCount} historical hidden`}</span> : null}
+          {attentionCount > 0 ? <span className="text-warm-700">{zh ? `需处理 ${attentionCount}` : `${attentionCount} need attention`}</span> : null}
+        </div>
         <div className="grid shrink-0 gap-2 rounded-lg border border-black/[0.05] bg-white p-1.5">
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -235,7 +294,7 @@ export function AccountModelExposurePanel({
                     providerId,
                     providerCatalog,
                     zh,
-                    String(allCandidates.find((model) => providerIdForAccountModel(model, discoveryByProviderKey) === providerId)?.entry.provider_display_name ?? ""),
+                    String(availableCandidates.find((model) => providerIdForAccountModel(model, discoveryByProviderKey) === providerId)?.entry.provider_display_name ?? ""),
                   ),
                 })),
               ]}
@@ -246,7 +305,7 @@ export function AccountModelExposurePanel({
               value={modelFilter}
               onValueChange={setModelFilter}
               items={[
-                { value: "all", label: zh ? "全部模型" : "All models" },
+                { value: "available", label: zh ? "当前可用" : "Available now" },
                 { value: "selected", label: zh ? "已选择" : "Selected" },
               ]}
               openOnHover={false}
@@ -289,7 +348,7 @@ export function AccountModelExposurePanel({
             <span>{zh ? "全选" : "Select all"}</span>
           </label>
           <span className="ml-3 text-[12px] text-muted-foreground">
-            {loading ? (zh ? "正在加载…" : "Loading…") : (zh ? `${selectedIds.length}/${candidates.length} 已选` : `${selectedIds.length}/${candidates.length} selected`)}
+            {loading ? (zh ? "正在加载…" : "Loading…") : (zh ? `${availableSelectedCount}/${availableCandidates.length} 已选` : `${availableSelectedCount}/${availableCandidates.length} selected`)}
           </span>
         </div>
         <div
@@ -314,8 +373,9 @@ export function AccountModelExposurePanel({
             const stale = discovered?.status === "stale" || discovered?.status === "unavailable";
             const checked = selectedIds.includes(model.id);
             const historicalBinding = !catalogFallback && Boolean(providerModelKey && !discovered && checked);
+            const needsAttention = stale || historicalBinding;
             return (
-              <div key={model.id} className={cn("flex items-start gap-3 rounded-lg border px-3.5 py-3 transition-colors", historicalBinding ? "border-warm-200 bg-warm-50/40" : checked ? "border-neutral-300 bg-neutral-50" : "border-black/[0.07] bg-white hover:bg-neutral-50")}>
+              <div key={model.id} className={cn("flex items-start gap-3 rounded-lg border px-3.5 py-3 transition-colors", needsAttention ? "border-warm-200 bg-warm-50/40" : checked ? "border-neutral-300 bg-neutral-50" : "border-black/[0.07] bg-white hover:bg-neutral-50")}>
                 <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
                   <input type="checkbox" checked={checked} onChange={(event) => toggleModel(model.id, event.target.checked)} className="mt-1 size-4 accent-primary" />
                   <ProviderIcon
@@ -334,16 +394,21 @@ export function AccountModelExposurePanel({
                       <span className={cn("rounded px-1.5 py-0.5", historicalBinding ? "bg-warm-100 text-warm-600" : "bg-accent")}>
                         {historicalBinding
                           ? (zh ? "历史绑定，当前账号未发现" : "Historical binding; not found for this account")
-                          : modelSourceLabel(discovered?.source ?? String(model.entry.model_source ?? "manual"), zh)}
+                          : modelSourceLabel(
+                              discovered?.source ?? String(model.entry.model_source ?? "manual"),
+                              zh,
+                              Boolean(providerModelKey || discovered),
+                            )}
                       </span>
                       {discovered?.upstreamModelId && discovered.upstreamModelId !== model.entry.slug ? <span className="font-mono">→ {discovered.upstreamModelId}</span> : null}
-                      {stale ? <span className="rounded bg-warm-50 px-1.5 py-0.5 text-warm-600">{zh ? "结果已过期" : "Stale"}</span> : null}
+                      {stale ? <span title={zh ? "先重新发现模型，再进行测试" : "Refresh discovery before testing this model"} className="rounded bg-warm-50 px-1.5 py-0.5 text-warm-600">{staleModelLabel(discovered?.status, zh)}</span> : null}
                     </span>
                   </span>
                 </label>
                 <ModelTestButton
                   bridge={bridge}
                   language={language}
+                  disabledReason={stale ? (zh ? "模型发现结果已过期，请先重新发现" : "Discovery is stale; refresh models before testing") : undefined}
                   request={{
                     envName: envName!,
                     accountName: accountName!,
@@ -359,10 +424,12 @@ export function AccountModelExposurePanel({
           })}
         </div>
         <div className="flex shrink-0 items-center justify-between gap-3 border-t border-black/[0.06] pt-4">
-          <span className="text-[11px] leading-5 text-muted-foreground">{zh ? "可在模型页面继续调整优先级、权重和上游模型名。" : "Adjust priority, weight, and upstream ids later on the Models page."}</span>
+          <span className="text-[11px] leading-5 text-muted-foreground">{hiddenSelectedCount > 0
+            ? (zh ? `隐藏的 ${hiddenSelectedCount} 个历史绑定会保留，可在模型管理页清理。` : `${hiddenSelectedCount} hidden historical binding${hiddenSelectedCount === 1 ? "" : "s"} will be kept; remove them on the Models page.`)
+            : (zh ? "可在模型页面继续调整优先级、权重和上游模型名。" : "Adjust priority, weight, and upstream ids later on the Models page.")}</span>
           <div className="flex shrink-0 gap-2">
             <Button type="button" variant="outline" onClick={onClose}>{zh ? "取消" : "Cancel"}</Button>
-            <Button type="button" onClick={() => void save()} disabled={saving || loading || selectedIds.length === 0}>{saving ? (zh ? "保存中…" : "Saving…") : (zh ? `启用所选模型 (${selectedIds.length})` : `Enable selected (${selectedIds.length})`)}</Button>
+            <Button type="button" onClick={() => void save()} disabled={saving || loading}>{saving ? (zh ? "保存中…" : "Saving…") : availableSelectedCount > 0 ? (zh ? `启用所选模型 (${availableSelectedCount})` : `Enable selected (${availableSelectedCount})`) : (zh ? "保存模型选择" : "Save model selection")}</Button>
           </div>
         </div>
       </div>

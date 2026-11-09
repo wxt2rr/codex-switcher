@@ -21,7 +21,7 @@ export interface GatewayPluginManifest {
     signature?: string;
     checksum?: string;
 }
-export type PluginKind = "provider" | "middleware";
+export type PluginKind = "provider" | "middleware" | "agent";
 export type PluginTrustLevel = "official" | "verified" | "community" | "local";
 export type PluginPermission = "provider" | "middleware" | "agent" | "usage" | "network" | "filesystem" | "secrets";
 export interface PluginProviderDeclaration {

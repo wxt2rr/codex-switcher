@@ -122,3 +122,68 @@ test("discovery view is isolated and only rebinds the selected account", () => {
   const originalOther = Object.values(gateway.credentials).find((credential) => credential.secretRef === createAccountSecretRef("test", "other"));
   assert.equal(originalOther?.providerId, "openai");
 });
+
+test("local gateway runtime restores a custom upstream provider from route metadata", () => {
+  const env = environment();
+  env.accounts["阿里云"]!.runtime = {
+    ...env.accounts["阿里云"]!.runtime,
+    providerId: "",
+    openaiBaseUrlMode: "custom",
+    openaiBaseUrl: "http://127.0.0.1:17833/gateways/legacy",
+  };
+  const gateway = buildLegacyGatewayEnvironmentState({
+    ...env,
+    accounts: {
+      "阿里云": {
+        ...env.accounts["阿里云"]!,
+        runtime: {
+          ...env.accounts["阿里云"]!.runtime,
+          providerId: "openai",
+          openaiBaseUrl: "https://api.openai.com/v1",
+        },
+      },
+    },
+  });
+
+  const credentialId = Object.keys(gateway.credentials)[0]!;
+  const next = synchronizeGatewayAccountMetadata(env, gateway, {
+    accountProviderMetadata: {
+      "阿里云": {
+        providerId: "custom-openai:aicode.ckt.cn",
+        upstreamBaseUrl: "https://aicode.ckt.cn/v1",
+      },
+    },
+  });
+
+  assert.equal(next.credentials[credentialId]?.providerId, "custom-openai:aicode.ckt.cn");
+  assert.equal(next.providers["custom-openai:aicode.ckt.cn"]?.endpoints.chatCompletions, "https://aicode.ckt.cn/v1");
+  assert.ok(next.providers.openai);
+});
+
+test("Anthropic API key accounts compile an Anthropic credential and endpoint", () => {
+  const env: EnvState = {
+    name: "claude-env",
+    path: "/tmp/claude-env",
+    accounts: {
+      claude: {
+        name: "Claude API",
+        authMode: "apikey",
+        runtime: {
+          preferredAuthMethod: "apikey",
+          openaiBaseUrlMode: "custom",
+          openaiBaseUrl: "https://api.anthropic.com",
+          providerId: "anthropic",
+          providerAuthMethod: "api_key",
+          apiProtocol: "anthropic",
+        },
+      },
+    },
+  };
+  const gateway = synchronizeGatewayAccountMetadata(
+    env,
+    buildLegacyGatewayEnvironmentState(env),
+  );
+  const credential = Object.values(gateway.credentials)[0]!;
+  assert.equal(credential.supportedProtocols.includes("anthropic"), true);
+  assert.equal(gateway.providers.anthropic?.endpoints.anthropicMessages, "https://api.anthropic.com");
+});

@@ -243,6 +243,68 @@ test("structured config writers preserve comments, unknown fields, and valid TOM
   }
 });
 
+test("Claude Code removes a conflicting auth token while preserving it for restore", async () => {
+  const root = await mkdtemp(join(tmpdir(), "gateway-agent-claude-auth-conflict-"));
+  try {
+    const fs = createNodeAgentFileSystem(root);
+    const profile = BUILT_IN_AGENT_PROFILES.find((item) => item.id === "claude")!;
+    const original = "{\n  \"apiKeyHelper\": \"./read-key.sh\",\n  \"env\": {\n    \"ANTHROPIC_AUTH_TOKEN\": \"legacy-token\",\n    \"CLAUDE_CODE_OAUTH_TOKEN\": \"oauth-token\",\n    \"CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR\": \"9\",\n    \"CCR_OAUTH_TOKEN_FILE\": \"/tmp/ccr-token\",\n    \"ANTHROPIC_FEDERATION_RULE_ID\": \"rule\",\n    \"ANTHROPIC_ORGANIZATION_ID\": \"org\",\n    \"ANTHROPIC_DEFAULT_OPUS_MODEL\": \"old-opus\",\n    \"ANTHROPIC_DEFAULT_SONNET_MODEL\": \"old-sonnet\",\n    \"CLAUDE_CODE_SUBAGENT_MODEL\": \"old-subagent\",\n    \"CLAUDE_CODE_USE_VERTEX\": \"1\",\n    \"KEEP_ME\": \"yes\"\n  }\n}\n";
+    await fs.write(profile.configPath, original);
+    const adapter = createAgentAdapter(profile, { fs, stateDir: ".switcher", now: () => 1 });
+    const snapshot = await adapter.apply({
+      bindingId: "claude-global",
+      agentId: "claude",
+      gatewayBaseUrl: "http://127.0.0.1:17832/gateways/test/v1",
+      gatewayTokenRef: "local-agent-token",
+      protocol: "anthropic",
+      exposedModelId: "claude-model",
+      enabled: true,
+      updatedAt: 1,
+    });
+    assert.doesNotMatch(snapshot.expectedContent, /ANTHROPIC_AUTH_TOKEN/);
+    assert.doesNotMatch(snapshot.expectedContent, /CLAUDE_CODE_OAUTH_TOKEN|CCR_OAUTH_TOKEN_FILE|ANTHROPIC_FEDERATION_RULE_ID|ANTHROPIC_ORGANIZATION_ID|apiKeyHelper/);
+    assert.doesNotMatch(snapshot.expectedContent, /CLAUDE_CODE_USE_VERTEX/);
+    assert.doesNotMatch(snapshot.expectedContent, /CLAUDE_CODE_AUTO_MODE_SERVER/);
+    assert.match(snapshot.expectedContent, /ANTHROPIC_API_KEY/);
+    assert.match(snapshot.expectedContent, /\"ANTHROPIC_DEFAULT_OPUS_MODEL\": \"claude-model\"/);
+    assert.match(snapshot.expectedContent, /\"ANTHROPIC_DEFAULT_SONNET_MODEL\": \"claude-model\"/);
+    assert.match(snapshot.expectedContent, /\"CLAUDE_CODE_SUBAGENT_MODEL\": \"claude-model\"/);
+    assert.match(snapshot.expectedContent, /KEEP_ME/);
+    await adapter.restore("claude-global");
+    assert.equal(await fs.read(profile.configPath), original);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Claude Code local gateway bindings disable Auto Mode server and restore user value", async () => {
+  const root = await mkdtemp(join(tmpdir(), "gateway-agent-claude-auto-mode-"));
+  try {
+    const fs = createNodeAgentFileSystem(root);
+    const profile = BUILT_IN_AGENT_PROFILES.find((item) => item.id === "claude")!;
+    const original = JSON.stringify({ env: { CLAUDE_CODE_AUTO_MODE_SERVER: "1", KEEP_ME: "yes" } }, null, 2) + "\n";
+    await fs.write(profile.configPath, original);
+    const adapter = createAgentAdapter(profile, { fs, stateDir: ".switcher", now: () => 1 });
+    const snapshot = await adapter.apply({
+      bindingId: "claude-local-gateway",
+      agentId: "claude",
+      gatewayBaseUrl: "http://127.0.0.1:17832/gateways/test/v1",
+      gatewayTokenRef: "local-agent-token",
+      protocol: "anthropic",
+      exposedModelId: "claude-model",
+      managedValues: { "env.CLAUDE_CODE_AUTO_MODE_SERVER": "0" },
+      enabled: true,
+      updatedAt: 1,
+    });
+    assert.match(snapshot.expectedContent, /"CLAUDE_CODE_AUTO_MODE_SERVER": "0"/);
+    assert.match(snapshot.expectedContent, /"KEEP_ME": "yes"/);
+    await adapter.restore("claude-local-gateway");
+    assert.equal(await fs.read(profile.configPath), original);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 function fixtureFor(profile: AgentAdapterProfile): string {
   if (profile.format === "toml") return "# fixture for " + profile.id + "\nmodel = \"old-" + profile.id + "\"\nkeep = true\n";
   if (profile.format === "yaml") return "config:\n  providers:\n    codex-switcher:\n      baseURL: https://old.test\n      apiKey: old\nkeep: true\n";

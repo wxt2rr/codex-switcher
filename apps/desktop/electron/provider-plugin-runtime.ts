@@ -27,6 +27,7 @@ export interface ProviderPluginSnapshot {
   trust?: string;
   settingsSchema?: unknown;
   middleware?: { hooks: string[]; priority: number };
+  agent?: { id: string; displayName: string };
   provider?: {
     id: string;
     displayName: string;
@@ -267,17 +268,19 @@ export async function listProviderPlugins(stateDir: string): Promise<ProviderPlu
   const installed = await current.listInstalled();
   const active = new Map(current.listActive().map((item) => [item.manifest.id, item]));
   const activeMiddleware = new Map((current.listActiveMiddleware?.() ?? []).map((item) => [item.id, item]));
+  const activeAgents = new Map((current.listActiveAgents?.() ?? []).map((item) => [item.manifest.id, item]));
   return installed.map((item) => {
     const running = active.get(item.id);
     const middleware = activeMiddleware.get(item.id);
+    const agent = activeAgents.get(item.id);
     const manifest = item.manifest;
     return {
       id: item.id,
       name: manifest?.name ?? item.id,
       version: item.version,
-      active: Boolean(running || middleware),
+      active: Boolean(running || middleware || agent),
       permissions: [...(manifest?.permissions ?? [])],
-      kind: [...(manifest?.kind ?? (manifest?.permissions.includes("middleware") ? ["middleware"] : ["provider"]))],
+      kind: [...(manifest?.kind ?? inferPluginKinds(manifest?.permissions ?? []))],
       ...(manifest?.description ? { description: manifest.description } : {}),
       ...(manifest?.author ? { author: manifest.author } : {}),
       ...(manifest?.homepage ? { homepage: manifest.homepage } : {}),
@@ -286,6 +289,7 @@ export async function listProviderPlugins(stateDir: string): Promise<ProviderPlu
       ...(manifest?.settingsSchema ? { settingsSchema: manifest.settingsSchema } : {}),
       ...(running ? { provider: running.descriptor } : {}),
       ...(middleware ? { middleware: { hooks: [...middleware.hooks], priority: middleware.priority } } : {}),
+      ...(agent ? { agent: { id: agent.manifest.id, displayName: agent.manifest.name } } : {}),
       ...(activationFailures.has(item.id) ? { error: activationFailures.get(item.id) } : {}),
     };
   });
@@ -311,14 +315,14 @@ export async function installProviderPlugin(stateDir: string, input: ProviderPlu
   activationFailures.delete(input.manifest.id);
   const running = components.provider;
   const middleware = components.middleware;
-  if (!running && !middleware) throw new Error(`Plugin '${input.manifest.id}' did not activate a provider or middleware capability`);
+  if (!running && !middleware && !components.agent) throw new Error(`Plugin '${input.manifest.id}' did not activate a provider, middleware, or agent capability`);
   return {
     id: input.manifest.id,
     name: input.manifest.name,
     version: input.manifest.version,
     active: true,
     permissions: [...input.manifest.permissions],
-    kind: [...(input.manifest.kind ?? (input.manifest.permissions.includes("middleware") ? ["middleware"] : ["provider"]))],
+    kind: [...(input.manifest.kind ?? inferPluginKinds(input.manifest.permissions))],
     ...(input.manifest.description ? { description: input.manifest.description } : {}),
     ...(input.manifest.author ? { author: input.manifest.author } : {}),
     ...(input.manifest.homepage ? { homepage: input.manifest.homepage } : {}),
@@ -327,6 +331,7 @@ export async function installProviderPlugin(stateDir: string, input: ProviderPlu
     ...(input.manifest.settingsSchema ? { settingsSchema: input.manifest.settingsSchema } : {}),
     ...(running ? { provider: running.descriptor } : {}),
     ...(middleware ? { middleware: { hooks: [...middleware.hooks], priority: middleware.priority } } : {}),
+    ...(components.agent ? { agent: { id: components.agent.manifest.id, displayName: components.agent.manifest.name } } : {}),
   };
 }
 
@@ -432,19 +437,27 @@ export async function closeProviderPluginRuntime(): Promise<void> {
 
 async function loadBuiltinPluginMarketEntries(): Promise<PluginMarketEntry[]> {
   const currentFile = typeof __dirname === "string" ? __dirname : join(process.cwd(), "apps", "desktop", "electron");
-  const candidates = [
-    join(process.resourcesPath ?? "", "plugins", "csw-our-free-model"),
-    join(currentFile, "../../..", "plugins", "csw-our-free-model"),
-    join(process.cwd(), "plugins", "csw-our-free-model"),
-    join(process.cwd(), "..", "..", "plugins", "csw-our-free-model"),
+  const roots = [
+    join(process.resourcesPath ?? "", "plugins"),
+    join(currentFile, "../../..", "plugins"),
+    join(process.cwd(), "plugins"),
+    join(process.cwd(), "..", "..", "plugins"),
   ];
-  for (const root of candidates) {
-    try {
-      const manifest = JSON.parse(await readFile(join(root, "plugin.json"), "utf8")) as PluginMarketEntry;
-      if (!manifest.id || !manifest.entry) continue;
-      await stat(join(root, manifest.entry));
-      return [{ ...manifest, updatedAt: 0, source: { kind: "local", path: root } }];
-    } catch { /* try the next packaged/source location */ }
+  const entries = new Map<string, PluginMarketEntry>();
+  for (const pluginsRoot of roots) {
+    for (const pluginId of ["claude-code", "csw-our-free-model"]) {
+      const root = join(pluginsRoot, pluginId);
+      try {
+        const manifest = JSON.parse(await readFile(join(root, "plugin.json"), "utf8")) as PluginMarketEntry;
+        if (!manifest.id || !manifest.entry) continue;
+        await stat(join(root, manifest.entry));
+        entries.set(`${manifest.id}@${manifest.version}`, { ...manifest, updatedAt: 0, source: { kind: "local", path: root } });
+      } catch { /* try the next packaged/source location */ }
+    }
   }
-  return [];
+  return [...entries.values()];
+}
+
+function inferPluginKinds(permissions: readonly string[]): string[] {
+  return ["provider", "middleware", "agent"].filter((kind) => permissions.includes(kind));
 }

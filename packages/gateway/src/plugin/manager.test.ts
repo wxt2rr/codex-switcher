@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ProviderPluginManager } from "./manager.js";
+import type { GatewayPluginManifest } from "./host.js";
 
 const manifest = {
   id: "managed-provider",
@@ -70,6 +71,36 @@ test("provider plugin manager revalidates signed plugins before restart activati
       assert.equal(untrusted.registry.has(manifest.id), false);
     } finally {
       await untrusted.close();
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("agent-only plugin participates in lifecycle without starting a credential-bearing process", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-agent-plugin-manager-"));
+  const agentManifest: GatewayPluginManifest = {
+    id: "claude-code",
+    name: "Claude Code",
+    version: "1.0.0",
+    apiVersion: 2 as const,
+    entry: "plugin.mjs",
+    permissions: ["agent", "filesystem", "secrets"],
+    kind: ["agent"],
+  };
+  try {
+    const manager = new ProviderPluginManager({ rootDir: root, sandbox: { mode: "disabled" } });
+    try {
+      const components = await manager.installPlugin(agentManifest, { kind: "local", path: await writePlugin(root) });
+      assert.equal(components.agent?.manifest.id, "claude-code");
+      assert.equal(manager.listActiveAgents().length, 1);
+      assert.equal((await manager.deactivate("claude-code")), true);
+      assert.equal(manager.listActiveAgents().length, 0);
+      const report = await manager.activateInstalled();
+      assert.equal(report.agentsActivated.length, 1);
+      assert.equal(report.failed.length, 0);
+    } finally {
+      await manager.close();
     }
   } finally {
     await rm(root, { recursive: true, force: true });

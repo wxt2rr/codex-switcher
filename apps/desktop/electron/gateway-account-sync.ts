@@ -10,12 +10,23 @@ import type {
   GatewayProviderKind,
   GatewayProtocol,
 } from "../../../packages/core/dist/gateway/model.js";
+import { resolveModelCatalogProviderId } from "./model-catalog-store.js";
 
 export interface GatewayAccountSyncOptions {
   /** Limit reconciliation to the account being discovered. */
   accountNames?: readonly string[];
   /** Rebind existing route members after a provider id change. */
   rebindRoutes?: boolean;
+  /**
+   * Metadata retained by the gateway/runtime for accounts whose Codex home
+   * currently points at the local gateway.  The account runtime deliberately
+   * stores the local ingress URL in that state, so it cannot by itself tell us
+   * which upstream provider/endpoint the credential belongs to.
+   */
+  accountProviderMetadata?: Readonly<Record<string, {
+    providerId?: string;
+    upstreamBaseUrl?: string;
+  }>>;
 }
 
 /**
@@ -23,9 +34,30 @@ export interface GatewayAccountSyncOptions {
  * this same id; otherwise discovery can fail before an upstream request is
  * even attempted because the credential lookup is provider-scoped.
  */
-export function resolveRuntimeProviderId(account: Pick<AccountState, "authMode" | "runtime">): string {
-  return account.runtime.providerId?.trim()
+export function resolveRuntimeProviderId(
+  account: Pick<AccountState, "authMode" | "runtime">,
+  options: { fallbackProviderId?: string; fallbackBaseUrl?: string } = {},
+): string {
+  const configured = account.runtime.providerId?.trim()
     || (account.authMode === "auth" ? "chatgpt" : "openai");
+  const fallbackProviderId = options.fallbackProviderId?.trim();
+  const fallbackBaseUrl = options.fallbackBaseUrl?.trim();
+  const runtimeBaseUrl = account.runtime.openaiBaseUrlMode === "custom"
+    ? account.runtime.openaiBaseUrl?.trim()
+    : undefined;
+
+  // When Gateway mode is enabled, runtimeBaseUrl is the local ingress.  The
+  // persisted route metadata is the authoritative upstream identity in that
+  // case.  Prefer an explicit non-generic provider id, then the route's
+  // provider/base URL, and finally the legacy default.
+  const generic = configured === "openai" || configured === "custom" || configured === "custom-openai";
+  if (!generic) return configured;
+  if (fallbackProviderId && !isGenericProviderId(fallbackProviderId)) return fallbackProviderId;
+  const identityBaseUrl = !isLocalGatewayUrl(runtimeBaseUrl) ? runtimeBaseUrl : fallbackBaseUrl;
+  const identity = resolveModelCatalogProviderId(configured, identityBaseUrl);
+  if (identity !== configured) return identity;
+  if (fallbackProviderId) return fallbackProviderId;
+  return configured;
 }
 
 export function createAccountSecretRef(envName: string, accountName: string): string {
@@ -71,7 +103,11 @@ export function synchronizeGatewayAccountMetadata(
     if (!credentialEntry) continue;
 
     const [credentialId, credential] = credentialEntry;
-    const providerId = resolveRuntimeProviderId(account);
+    const metadata = options.accountProviderMetadata?.[accountName];
+    const providerId = resolveRuntimeProviderId(account, {
+      fallbackProviderId: metadata?.providerId,
+      fallbackBaseUrl: metadata?.upstreamBaseUrl,
+    });
     const oldProviderId = credential.providerId;
     next.credentials[credentialId] = synchronizeCredential(
       credential,
@@ -79,7 +115,7 @@ export function synchronizeGatewayAccountMetadata(
       providerId,
       secretRef,
     );
-    ensureProviderForAccount(next, environment, accountName, account, providerId, oldProviderId);
+    ensureProviderForAccount(next, environment, accountName, account, providerId, oldProviderId, metadata?.upstreamBaseUrl);
     if (oldProviderId !== providerId) {
       changedCredentials.set(credentialId, { oldProviderId, newProviderId: providerId });
     }
@@ -130,10 +166,11 @@ function ensureProviderForAccount(
   account: AccountState,
   providerId: string,
   oldProviderId: string,
+  upstreamBaseUrl?: string,
 ): void {
   const existing = gateway.providers[providerId];
   if (existing) {
-    ensureAccountProtocolEndpoint(existing, account);
+    ensureAccountProtocolEndpoint(existing, account, upstreamBaseUrl);
     gateway.providers[providerId] = existing;
     return;
   }
@@ -148,9 +185,10 @@ function ensureProviderForAccount(
         ...oldProvider,
         id: providerId,
         displayName: providerId,
+        kind: resolveProviderKind(account, providerId),
       }
-    : buildProviderFromAccount(environment, accountName, account, providerId);
-  ensureAccountProtocolEndpoint(provider, account);
+    : buildProviderFromAccount(environment, accountName, account, providerId, upstreamBaseUrl);
+  ensureAccountProtocolEndpoint(provider, account, upstreamBaseUrl);
   gateway.providers[providerId] = provider;
 }
 
@@ -159,11 +197,12 @@ function buildProviderFromAccount(
   _accountName: string,
   account: AccountState,
   providerId: string,
+  upstreamBaseUrl?: string,
 ): GatewayProviderDefinition {
   const protocol = account.authMode === "auth"
     ? "responses" as const
     : account.runtime.apiProtocol ?? "responses";
-  const endpoint = resolveAccountBaseUrl(account);
+  const endpoint = resolveAccountBaseUrl(account, upstreamBaseUrl);
   return {
     id: providerId,
     displayName: providerId,
@@ -183,26 +222,45 @@ function resolveProviderKind(account: AccountState, providerId: string): Gateway
 function ensureAccountProtocolEndpoint(
   provider: GatewayProviderDefinition,
   account: AccountState,
+  upstreamBaseUrl?: string,
 ): void {
   const protocol = account.authMode === "auth"
     ? "responses" as const
     : account.runtime.apiProtocol ?? "responses";
-  const endpoint = resolveAccountBaseUrl(account);
+  const endpoint = resolveAccountBaseUrl(account, upstreamBaseUrl);
   if (!endpoint) return;
   const endpoints = { ...provider.endpoints };
   const key = protocolEndpointKey(protocol);
-  if (!endpoints[key]) endpoints[key] = endpoint;
+  // A persisted route is the source of truth when an old gateway document
+  // still points its generic `openai` provider at api.openai.com.  Replace a
+  // stale/default endpoint with the route's non-local upstream; otherwise
+  // preserve an explicitly configured provider endpoint.
+  if (upstreamBaseUrl && !isLocalGatewayUrl(upstreamBaseUrl)) endpoints[key] = endpoint;
+  else if (!endpoints[key]) endpoints[key] = endpoint;
   provider.endpoints = endpoints;
 }
 
-function resolveAccountBaseUrl(account: AccountState): string | undefined {
+function resolveAccountBaseUrl(account: AccountState, upstreamBaseUrl?: string): string | undefined {
+  if (upstreamBaseUrl && !isLocalGatewayUrl(upstreamBaseUrl)) return upstreamBaseUrl;
   const custom = account.runtime.openaiBaseUrlMode === "custom"
     ? account.runtime.openaiBaseUrl?.trim()
     : undefined;
   if (custom) return custom;
+  const providerId = account.runtime.providerId?.trim().toLowerCase();
+  if (providerId === "anthropic" || providerId === "custom-anthropic") {
+    return "https://api.anthropic.com";
+  }
   return account.authMode === "auth"
     ? "https://chatgpt.com/backend-api/codex"
     : "https://api.openai.com/v1";
+}
+
+function isGenericProviderId(value: string): boolean {
+  return value === "openai" || value === "custom" || value === "custom-openai";
+}
+
+function isLocalGatewayUrl(value: string | undefined): boolean {
+  return Boolean(value && /^https?:\/\/(?:127\.0\.0\.1|localhost):\d+\/(?:routes|pools|gateways)\//i.test(value.trim()));
 }
 
 function endpointForProtocol(

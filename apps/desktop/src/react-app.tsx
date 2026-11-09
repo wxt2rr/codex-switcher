@@ -6,7 +6,7 @@ import { ConfirmDialog } from "./components/admin-primitives";
 import { useTheme } from "@/components/theme-provider";
 import type { AccountPoolInput, AccountPoolStatus, AppEnvironmentBadgeStatus, AppPresenceStatus, CliAutoResumeSettings, CliTerminalId, CliTerminalSettings, CodexConversationInspectionResult, CodexConversationRepairResult, CodexHistorySyncResult, CodexToolStatus, DesktopAutoUpdateStatus, DesktopEnvEditableFiles, DesktopEnvFileHistoryEntry, DesktopLaunchStrategy, EnvHistoryRetentionSettings, GeneratedImageRecoveryStatus, LaunchAtLoginStatus, ModelCatalogAppRefreshRequirement, ProviderCatalogItem, ProviderCredentialImportRequest, RouterLifecycleSettings, RouterPortSettings } from "./bridge";
 import { DesktopShell } from "./components/desktop-shell";
-import type { AccountSummary, AuthMetricsPayload, EnvironmentRouteStatus, NavView, OverviewPayload } from "./desktop-model";
+import type { AccountSummary, AuthMetricsPayload, EnvironmentRemoteStatus, EnvironmentRoutePreview, EnvironmentRouteStatus, NavView, OverviewPayload } from "./desktop-model";
 import { resolveDesktopBridge } from "./bridge";
 import { LANGUAGE_LABELS, SUPPORTED_LANGUAGES, DEFAULT_LANGUAGE, getTranslations, normalizeLanguage, translate, type UiLanguage } from "./i18n";
 import { AccountsPage, type AccountProtocolSettings } from "./pages/accounts-page";
@@ -36,16 +36,22 @@ const MIMO_OFFICIAL_BASE_URL = "https://api.xiaomimimo.com/v1";
 const KIMI_OFFICIAL_BASE_URL = "https://api.moonshot.ai/v1";
 const ZAI_OFFICIAL_BASE_URL = "https://open.bigmodel.cn/api/paas/v4";
 const SKIPPED_UPDATE_VERSION_KEY = "codex-switcher-skipped-update-version";
+const DEFAULT_ACCOUNT_ENVIRONMENT_KEY = "codex-switcher.accounts.default-environment";
+
+function readDefaultAccountEnvironment(): string {
+  if (typeof window === "undefined") return "default";
+  return window.localStorage.getItem(DEFAULT_ACCOUNT_ENVIRONMENT_KEY)?.trim() || "default";
+}
 
 function resolveInitialView(): NavView {
   if (typeof window === "undefined") {
-    return "accounts";
+    return "environments";
   }
   const view = new URLSearchParams(window.location.search).get("view");
   if (view === "environments" || view === "accounts" || view === "providers" || view === "models" || view === "plugins" || view === "skills" || view === "usage" || view === "operations") {
     return view;
   }
-  return "accounts";
+  return "environments";
 }
 
 export function App() {
@@ -78,7 +84,7 @@ export function App() {
   const [accountModeDraft, setAccountModeDraft] = useState("auth");
   const [accountProviderDraft, setAccountProviderDraft] = useState<AccountProviderId>("openai");
   const [providerCatalog, setProviderCatalog] = useState<ProviderCatalogItem[]>([]);
-  const [accountWizardRequest, setAccountWizardRequest] = useState<{ providerId?: string; requestId: number }>();
+  const [accountWizardRequest, setAccountWizardRequest] = useState<{ providerId?: string; envName?: string; requestId: number }>();
   const [accountApiKeyDraft, setAccountApiKeyDraft] = useState("");
   const [accountBaseUrlModeDraft, setAccountBaseUrlModeDraft] = useState("default");
   const [accountBaseUrlDraft, setAccountBaseUrlDraft] = useState("");
@@ -111,6 +117,8 @@ export function App() {
   const [cliTerminalSettings, setCliTerminalSettings] = useState<CliTerminalSettings | null>(null);
   const [cliTerminalSaving, setCliTerminalSaving] = useState(false);
   const [routeStatuses, setRouteStatuses] = useState<EnvironmentRouteStatus[]>([]);
+  const [routePreviews, setRoutePreviews] = useState<EnvironmentRoutePreview[]>([]);
+  const [remoteStatuses, setRemoteStatuses] = useState<EnvironmentRemoteStatus[]>([]);
   const [accountPools, setAccountPools] = useState<AccountPoolStatus[]>([]);
   const [autoUpdateStatus, setAutoUpdateStatus] = useState<DesktopAutoUpdateStatus>({ enabled: false, state: "disabled" });
   const [skippedUpdateVersion, setSkippedUpdateVersion] = useState<string | null>(() => {
@@ -225,14 +233,25 @@ export function App() {
   }, [view]);
 
   useEffect(() => {
-    if (view !== "environments" || !overview) return;
+    if (!overview) return;
     const refreshPools = () => bridge.listAccountPools().then(setAccountPools).catch(setErrorMessage);
-    void Promise.all([bridge.getEnvironmentRouteStatuses(), bridge.listAccountPools()])
-      .then(([routes, pools]) => { setRouteStatuses(routes); setAccountPools(pools); })
+    const refreshRoutes = async () => {
+      // Reconcile the live gateway once, then read the redacted preview from
+      // the same persisted/runtime snapshot. Parallel calls can race a gateway
+      // rebuild and briefly show a half-compiled route table.
+      const routes = await bridge.getEnvironmentRouteStatuses();
+      const previews = await bridge.getEnvironmentRoutePreviews();
+      const remotes = await bridge.getEnvironmentRemoteStatuses();
+      setRouteStatuses(routes);
+      setRoutePreviews(previews);
+      setRemoteStatuses(remotes);
+    };
+    void Promise.all([refreshRoutes(), bridge.listAccountPools()])
+      .then(([, pools]) => { setAccountPools(pools); })
       .catch(setErrorMessage);
-    const interval = window.setInterval(() => { void refreshPools(); }, 10_000);
+    const interval = window.setInterval(() => { void refreshPools(); void refreshRoutes().catch(setErrorMessage); }, 10_000);
     return () => window.clearInterval(interval);
-  }, [view, overview?.generatedAt]);
+  }, [overview?.generatedAt]);
 
   useEffect(() => {
     if (view !== "operations") return;
@@ -584,10 +603,44 @@ export function App() {
     try {
       const next = await bridge.toggleEnvironmentGateway(envName, enabled);
       setRouteStatuses((current) => [...current.filter((item) => item.envName !== envName), next]);
+      setRoutePreviews(await bridge.getEnvironmentRoutePreviews());
       setSuccessMessage(language === "zh" ? `环境 ${envName} 网关已${enabled ? "开启" : "关闭"}` : `Gateway ${enabled ? "enabled" : "disabled"} for ${envName}`);
       await refreshOverview({ loadMetrics: false });
     } catch (error) { setErrorMessage(error); }
     finally { setBusy(false); }
+  }
+
+  async function handleSetEnvironmentRemoteAccount(envName: string, accountName?: string): Promise<void> {
+    setBusy(true);
+    try {
+      const next = await bridge.setEnvironmentRemoteAccount(envName, accountName);
+      setRemoteStatuses((current) => [...current.filter((item) => item.envName !== envName), next]);
+      setSuccessMessage(language === "zh"
+        ? accountName ? `环境 ${envName} 已配置远程账号，请完成配对` : `环境 ${envName} 已取消手机远程绑定`
+        : accountName ? `Remote account configured for ${envName}; finish pairing in ChatGPT` : `Phone remote unbound for ${envName}`);
+      await refreshOverview({ loadMetrics: false });
+    } catch (error) {
+      setErrorMessage(error);
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSetEnvironmentModelIdentityMode(envName: string, mode: "account" | "unified") {
+    setBusy(true);
+    try {
+      const next = await bridge.setEnvironmentModelIdentityMode(envName, mode);
+      setRoutePreviews((current) => [...current.filter((item) => item.envName !== envName), next]);
+      setSuccessMessage(language === "zh"
+        ? `环境 ${envName} 已切换为${mode === "unified" ? "统一模型自动路由" : "按服务商区分模型"}`
+        : `Model identity mode updated for ${envName}`);
+      await refreshOverview({ loadMetrics: false });
+    } catch (error) {
+      setErrorMessage(error);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleToggleEnvironmentLocalAgentAccess(envName: string, enabled: boolean) {
@@ -596,8 +649,8 @@ export function App() {
       const next = await bridge.toggleEnvironmentLocalAgentAccess(envName, enabled);
       setRouteStatuses((current) => [...current.filter((item) => item.envName !== envName), next]);
       setSuccessMessage(language === "zh"
-        ? `环境 ${envName} 的本机 Agent 接入已${enabled ? "开启" : "关闭"}`
-        : `Local Agent access ${enabled ? "enabled" : "disabled"} for ${envName}`);
+        ? `环境 ${envName} 的本地调用入口已${enabled ? "开启" : "关闭"}`
+        : `Local call entry ${enabled ? "enabled" : "disabled"} for ${envName}`);
     } catch (error) {
       setErrorMessage(error);
     } finally {
@@ -837,6 +890,18 @@ export function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function handleLaunchEnvironment(target: "cli" | "app", envName: string, accountName?: string) {
+    const candidates = overview?.accounts.filter((account) => account.envName === envName) ?? [];
+    const account = accountName
+      ? candidates.find((candidate) => candidate.name === accountName)
+      : candidates.find((candidate) => target === "cli" ? candidate.isCurrentCli : candidate.isCurrentApp) ?? candidates[0];
+    if (!account) {
+      setView("accounts");
+      return;
+    }
+    void handleSwitchAccount(target, account, target === "cli" ? "new-window" : "replace-current");
   }
 
   async function handleCopyAccount(account: AccountSummary, targetEnvName: string) {
@@ -1088,10 +1153,10 @@ export function App() {
     }
   }
 
-  function openAccountWizard(providerId?: string) {
+  function openAccountWizard(providerId?: string, envName?: string) {
     setView("accounts");
     if (providerId) setAccountProviderDraft(providerId);
-    setAccountWizardRequest({ providerId, requestId: Date.now() });
+    setAccountWizardRequest({ providerId, envName, requestId: Date.now() });
   }
 
   async function handleNativeLogin(
@@ -1133,10 +1198,12 @@ export function App() {
               ? ZAI_OFFICIAL_BASE_URL
               : undefined);
       const isPresetApiKeyProvider = accountModeDraft === "apikey" && Boolean(providerBaseUrl) && (legacyPresetProvider || Boolean(selectedProvider));
-      const presetProtocol = selectedProvider?.protocols.includes("chat_completions") && !selectedProvider.protocols.includes("responses")
-        || accountProviderDraft === "kimi" || accountProviderDraft === "zai"
-        ? "chat_completions"
-        : "responses";
+      const presetProtocol = selectedProvider?.protocols.includes("anthropic") && !selectedProvider.protocols.includes("responses")
+        ? "anthropic"
+        : selectedProvider?.protocols.includes("chat_completions") && !selectedProvider.protocols.includes("responses")
+          || accountProviderDraft === "kimi" || accountProviderDraft === "zai"
+          ? "chat_completions"
+          : "responses";
       const result = await bridge.nativeLogin({
         providerId: accountProviderDraft,
         mode: accountModeDraft === "apikey" || accountModeDraft === "sub2api" || accountModeDraft === "cpa"
@@ -1290,9 +1357,14 @@ export function App() {
     }
   }
 
-  function primeAccountDrafts(account?: AccountSummary) {
+  function primeAccountDrafts(account?: AccountSummary, preferredEnvName?: string) {
     if (!account) {
-      setAccountEnvDraft("");
+      const preferredEnvironment = preferredEnvName && overview?.envs.some((environment) => environment.name === preferredEnvName)
+        ? preferredEnvName
+        : overview?.envs.some((environment) => environment.name === readDefaultAccountEnvironment())
+          ? readDefaultAccountEnvironment()
+          : overview?.envs[0]?.name ?? "";
+      setAccountEnvDraft(preferredEnvironment);
       setAccountNameDraft("");
       setAccountTargetDraft("cli");
       setAccountModeDraft("auth");
@@ -1333,8 +1405,8 @@ export function App() {
       <DesktopShell
         brand={copy.brand}
         nav={[
-          { view: "accounts", label: copy.nav.accounts },
           { view: "environments", label: copy.nav.environments },
+          { view: "accounts", label: copy.nav.accounts },
           { view: "providers", label: copy.nav.providers },
           { view: "models", label: copy.nav.models },
           { view: "plugins", label: copy.nav.plugins },
@@ -1374,8 +1446,8 @@ export function App() {
       <DesktopShell
         brand={copy.brand}
         nav={[
-          { view: "accounts", label: copy.nav.accounts },
           { view: "environments", label: copy.nav.environments },
+          { view: "accounts", label: copy.nav.accounts },
           { view: "providers", label: copy.nav.providers },
           { view: "models", label: copy.nav.models },
           { view: "plugins", label: copy.nav.plugins },
@@ -1421,8 +1493,8 @@ export function App() {
     <DesktopShell
       brand={copy.brand}
       nav={[
-        { view: "accounts", label: copy.nav.accounts },
         { view: "environments", label: copy.nav.environments },
+        { view: "accounts", label: copy.nav.accounts },
         { view: "providers", label: copy.nav.providers },
         { view: "models", label: copy.nav.models },
         { view: "plugins", label: copy.nav.plugins },
@@ -1461,8 +1533,13 @@ export function App() {
           onImportDefaultEnv={(envName) => void handleImportDefaultEnv(envName)}
           onDeleteEnv={() => void handleDeleteEnv()}
           routeStatuses={routeStatuses}
+          remoteStatuses={remoteStatuses}
+          routePreviews={routePreviews}
           onToggleGateway={handleToggleEnvironmentGateway}
+          onSetModelIdentityMode={handleSetEnvironmentModelIdentityMode}
           onToggleLocalAgentAccess={handleToggleEnvironmentLocalAgentAccess}
+          onSetRemoteAccount={handleSetEnvironmentRemoteAccount}
+          onLaunchEnvironment={handleLaunchEnvironment}
           onCopyLocalAgentValue={handleCopyLocalAgentValue}
           accountPools={accountPools}
           onSaveAccountPool={handleSaveAccountPool}
@@ -1472,6 +1549,7 @@ export function App() {
       {view === "accounts" ? (
         <AccountsPage
           overview={overview}
+          environmentRouteStatuses={routeStatuses}
           language={language}
           providerCatalog={providerCatalog}
           accountWizardRequest={accountWizardRequest}

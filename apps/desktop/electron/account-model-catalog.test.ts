@@ -379,6 +379,42 @@ test("account catalog rejects custom slugs that collide with bundled models", as
   );
 });
 
+test("unified gateway catalog deduplicates logical models against the bundled catalog", async () => {
+  const root = await mkdtemp(join(tmpdir(), "gateway-model-catalog-unified-"));
+  try {
+    const result = await synchronizeEnvironmentGatewayModelCatalog({
+      homePath: join(root, "home"),
+      environmentName: "work",
+      gateway: {
+        schemaVersion: 1,
+        mode: "gateway",
+        gatewayId: "gateway-work",
+        providers: { openai: { id: "openai", displayName: "OpenAI", kind: "openai", endpoints: { responses: "https://api.openai.com/v1" }, modelDiscovery: "manual", enabled: true } },
+        credentials: { key: { id: "key", providerId: "openai", displayName: "key", kind: "api_key", secretRef: "account:work:key", supportedProtocols: ["responses"], status: "active" } },
+        models: { model: { id: "model", providerId: "openai", upstreamModelId: "gpt-6.1-sol", displayName: "GPT-6.1-Sol", protocols: ["responses"], capabilities: {}, enabled: true } },
+        routeGroups: {
+          "unified-route-group:work:gpt-6.1-sol": {
+            id: "unified-route-group:work:gpt-6.1-sol",
+            displayName: "GPT-6.1-Sol",
+            exposedModelId: "gpt-6.1-sol",
+            members: [{ providerId: "openai", modelId: "model", credentialSelector: { credentialIds: ["key"] }, priority: 0, weight: 1 }],
+            strategy: "smart",
+            sessionPolicy: "auto",
+            fallbackEnabled: true,
+          },
+        },
+        catalogVersion: 1,
+      },
+      loadBundledCatalog: async () => ({ models: [{ slug: "gpt-6.1-sol", display_name: "GPT-6.1-Sol" }] }),
+      modelCatalog: { version: 1, models: [], accountBindings: {} },
+    });
+    const catalog = JSON.parse(await readFile(result.catalogPath!, "utf8")) as { models: Array<{ slug: string }> };
+    assert.deepEqual(catalog.models.map((model) => model.slug), ["gpt-6.1-sol"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("bundled catalog command wraps Windows command shims", () => {
   assert.deepEqual(buildBundledCatalogCommand("C:\\Tools\\codex.cmd", "win32"), {
     command: "cmd.exe",
