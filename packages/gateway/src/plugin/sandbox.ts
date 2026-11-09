@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, win32 } from "node:path";
+import { dirname, isAbsolute, join, posix, win32 } from "node:path";
 
 import type { GatewayPluginManifest } from "./host.js";
 
@@ -174,10 +174,12 @@ function macRuntimeReadPaths(nodeExecutable: string): string[] {
   // loader resolves Electron Framework plus V8 snapshots from sibling
   // Contents/Frameworks and Contents/Resources directories. The home-directory
   // deny rule above otherwise blocks those reads in packaged macOS builds.
-  const macosDir = dirname(nodeExecutable);
-  const contentsDir = dirname(macosDir);
-  if (basename(macosDir) !== "MacOS" || basename(contentsDir) !== "Contents") return [];
-  return [macosDir, join(contentsDir, "Frameworks"), join(contentsDir, "Resources")];
+  // Use POSIX path semantics even when this platform branch is exercised by
+  // a cross-platform test runner on Windows.
+  const macosDir = posix.dirname(nodeExecutable);
+  const contentsDir = posix.dirname(macosDir);
+  if (posix.basename(macosDir) !== "MacOS" || posix.basename(contentsDir) !== "Contents") return [];
+  return [macosDir, posix.join(contentsDir, "Frameworks"), posix.join(contentsDir, "Resources")];
 }
 
 function buildBubblewrapArgs(manifest: GatewayPluginManifest, cwd: string, nodeExecutable: string, entry: string, writablePaths: readonly string[] = []): string[] {
