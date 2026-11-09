@@ -214,6 +214,8 @@ test("launchNewCodexApp does not create an isolated profile for a packaged AppID
       env: {
         CODEX_SWITCHER_APP_BIN: target,
         CODEX_SWITCHER_TEST_PLATFORM: "win32",
+        SystemRoot: "",
+        WINDIR: "",
       },
     }, async (command, args, _env, options) => {
       assert.equal(command, "explorer.exe");

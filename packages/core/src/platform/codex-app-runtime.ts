@@ -168,7 +168,7 @@ export async function removeManagedAppProfile(
       return;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
-      if (code === "EACCES" && !permissionsPrepared) {
+      if ((code === "EACCES" || code === "EPERM") && !permissionsPrepared) {
         permissionsPrepared = true;
         await makeManagedAppProfileWritable(profilePath).catch(() => undefined);
       }
