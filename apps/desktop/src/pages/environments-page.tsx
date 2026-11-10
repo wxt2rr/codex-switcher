@@ -197,13 +197,15 @@ function getRouteRuntimeSummary(routeStatus: EnvironmentRouteStatus | undefined,
   if (routeStatus.enabled) {
     return {
       tone: "success" as const,
-      label: language === "zh" ? "本地路由运行中" : language === "ja" ? "ローカルルート稼働中" : "Local routing running",
+      label: routeStatus.poolEnabled
+        ? language === "zh" ? "账号池运行中" : language === "ja" ? "アカウントプール稼働中" : "Account pool running"
+        : language === "zh" ? "账号路由已生效" : language === "ja" ? "アカウントルート有効" : "Account routing active",
       detail: [endpointDetail, accountDetail].filter(Boolean).join(" · "),
     };
   }
   return {
     tone: "neutral" as const,
-    label: language === "zh" ? "服务未运行" : language === "ja" ? "サービス停止中" : "Service stopped",
+    label: language === "zh" ? "直连模式" : language === "ja" ? "直接接続" : "Direct mode",
     detail: "",
   };
 }

@@ -1085,6 +1085,16 @@ export class UsageRouterManager {
     return this.removeRoutesMatching((route) => route.envName === envName);
   }
 
+  /**
+   * Remove only response routes owned by an environment.  Direct mode no
+   * longer uses these routes; keeping this narrower than
+   * removeEnvironmentRoutes preserves chat-completions compatibility routes
+   * and account-pool routes while migrating legacy direct-mode state.
+   */
+  async removeEnvironmentResponseRoutes(envName: string): Promise<number> {
+    return this.removeRoutesMatching((route) => route.envName === envName && route.protocol === "responses");
+  }
+
   async enableAccountCompatibility(
     account: RoutableAccount,
     updateRuntime: (value: { baseUrl: string; localRouteToken: string }) => Promise<void>,

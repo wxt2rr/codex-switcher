@@ -1706,11 +1706,32 @@ async function syncEnvironmentRouteIfEnabled(envName: string): Promise<void> {
     }, poolAccounts, createAccountPoolRuntimeUpdater(runtime, envName, pool.protocol));
     return;
   }
-  await getUsageRouterManager().syncEnvironmentIfEnabled(
-    envName,
-    getEnvironmentRouteAccounts(state, envName),
-    createEnvironmentRouteBaseUrlUpdater(runtime, envName),
-  );
+  // Direct mode must use the account's original Auth/Base URL/API key. Older
+  // versions persisted response routes for every environment and rewrote
+  // account Base URLs to /routes/...; migrate those records back instead of
+  // silently recreating a hidden third routing mode.
+  await restoreLegacyDirectResponseRoutes(runtime, state, envName);
+}
+
+async function restoreLegacyDirectResponseRoutes(
+  runtime: Awaited<ReturnType<typeof loadCoreRuntime>>,
+  state: Awaited<ReturnType<Awaited<ReturnType<typeof loadCoreRuntime>>["readLegacyState"]>>,
+  envName: string,
+  options: { applyTargetHome?: boolean } = {},
+): Promise<void> {
+  const manager = getUsageRouterManager();
+  const routes = (await manager.listPersistedRoutes())
+    .filter((route) => route.envName === envName && route.enabled && route.protocol === "responses");
+  if (!routes.length) return;
+  const updateBaseUrl = createEnvironmentRouteBaseUrlUpdater(runtime, envName, options);
+  for (const route of routes) {
+    try {
+      await updateBaseUrl(route.accountName, route.originalBaseUrl);
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== `Account '${envName}/${route.accountName}' not found`) throw error;
+    }
+  }
+  await manager.removeEnvironmentResponseRoutes(envName);
 }
 
 async function synchronizeEnabledEnvironmentRoutes(): Promise<void> {
@@ -1736,6 +1757,7 @@ async function restoreEnabledRoutes(): Promise<void> {
   let initialState = await runtime.readLegacyState(getLegacyOptions());
   const runningAppEnvironments = await findRunningManagedAppEnvironments(initialState);
   const gatewayEnvironments = new Set(gateways.map((gateway) => gateway.envName));
+  const poolEnvironments = new Set(pools.map((pool) => pool.envName));
   for (const pool of pools) {
     if (!initialState.envs[pool.envName]) {
       await manager.removeAccountPoolConfiguration(pool.envName).catch(() => undefined);
@@ -1757,7 +1779,9 @@ async function restoreEnabledRoutes(): Promise<void> {
   }
   const responseEnvNames = Array.from(new Set(
     routes
-      .filter((route) => route.protocol === "responses" && !gatewayEnvironments.has(route.envName))
+      .filter((route) => route.protocol === "responses"
+        && !gatewayEnvironments.has(route.envName)
+        && !poolEnvironments.has(route.envName))
       .map((route) => route.envName),
   ));
   for (const envName of responseEnvNames) {
@@ -1765,13 +1789,9 @@ async function restoreEnabledRoutes(): Promise<void> {
       await manager.removeEnvironmentRoutes(envName);
       continue;
     }
-    await manager.enableEnvironment(
-      envName,
-      getEnvironmentRouteAccounts(initialState, envName),
-      createEnvironmentRouteBaseUrlUpdater(runtime, envName, {
-        applyTargetHome: !runningAppEnvironments.has(envName),
-      }),
-    );
+    await restoreLegacyDirectResponseRoutes(runtime, initialState, envName, {
+      applyTargetHome: !runningAppEnvironments.has(envName),
+    });
   }
 
   for (const route of routes.filter((item) => item.protocol === "chat_completions")) {

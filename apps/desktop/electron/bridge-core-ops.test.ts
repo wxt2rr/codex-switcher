@@ -1236,7 +1236,7 @@ test("desktop bridge materializes environment route changes in the active config
   }
 });
 
-test("desktop bridge loadOverview refreshes stale environment route ports after router restart", async () => {
+test("desktop bridge loadOverview restores legacy direct routes instead of reviving them", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-route-resync-"));
   const previousEnv = { ...process.env };
   let firstService: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
@@ -1289,15 +1289,21 @@ test("desktop bridge loadOverview refreshes stale environment route ports after 
 
     const runtimeRaw = await readFile(join(root, "state", "env-accounts", "project", "key", "runtime.json"), "utf8");
     const runtime = JSON.parse(runtimeRaw) as { openai_base_url?: string };
-    assert.match(runtime.openai_base_url ?? "", new RegExp(`^http://127\\.0\\.0\\.1:${secondService.port}/routes/`));
+    assert.equal(runtime.openai_base_url, "https://api.example.com/v1");
 
     const config = await readFile(join(root, "envs", "project", "home", "config.toml"), "utf8");
+    // A direct API-key account may still use the managed provider stanza so
+    // Codex can honor a custom upstream Base URL, but it must never point to
+    // the local /routes ingress.
     assert.match(config, /model_provider = "codex_switcher_router"/);
-    assert.match(
-      config,
-      new RegExp(`base_url = \"http://127\\.0\\.0\\.1:${secondService.port}/routes/`),
-    );
+    assert.match(config, /base_url = "https:\/\/api\.example\.com\/v1"/);
+    assert.doesNotMatch(config, /base_url = \"http:\/\/127\\.0\\.0\\.1:\d+\/routes\//);
     assert.match(config, /model = 'gpt-5'/);
+    assert.deepEqual(await (new UsageRouterManager({
+      stateDir: join(root, "state"),
+      serviceEntryPath: "unused",
+      launchService: async () => undefined,
+    })).listPersistedRoutes(), []);
   } finally {
     await firstService?.close();
     await secondService?.close();
