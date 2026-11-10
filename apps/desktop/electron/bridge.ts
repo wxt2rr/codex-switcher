@@ -1790,7 +1790,11 @@ async function restoreEnabledRoutes(): Promise<void> {
       continue;
     }
     await restoreLegacyDirectResponseRoutes(runtime, initialState, envName, {
-      applyTargetHome: !runningAppEnvironments.has(envName),
+      // This is an intentional mode migration, not a passive port refresh:
+      // once the legacy route is removed, a running target must also receive
+      // the restored native account configuration instead of keeping a dead
+      // /routes URL in its live home.
+      applyTargetHome: true,
     });
   }
 

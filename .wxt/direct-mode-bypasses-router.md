@@ -18,9 +18,9 @@
 | ID | Task | Files/Modules | Verify | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
 | 1 | 梳理并隔离直连/网关生命周期 | bridge, manager | 单测 | done | 已确认 `enableEnvironment` 当前会把账号改写到 `/routes`，并将网关入口改为 `/gateways` |
-| 2 | 直连模式清理旧 routes 并恢复原始账号配置 | bridge, manager | 路由恢复测试 | done | `loadOverview` 会恢复原始 Base URL、清理 response routes；网关和账号池路径保持不变 |
+| 2 | 直连模式清理旧 routes 并恢复原始账号配置 | bridge, manager | 路由恢复测试 | done | `loadOverview` 会恢复原始 Base URL、同步当前目标配置、清理 response routes；网关和账号池路径保持不变 |
 | 3 | 调整页面状态文案，隐藏内部 routes 语义 | environments page | 页面测试/构建 | done | 非网关且无账号池时显示“直连模式”，账号池单独显示“账号池运行中” |
-| 4 | 全量验证并更新 dist | core/desktop | desktop test/build/check | done | `desktop:build`、`desktop:test`（629，628 pass/1 skip）、`npm run check`、`git diff --check` 全部通过 |
+| 4 | 全量验证并更新 dist | core/desktop | desktop test/build/check | done | `desktop:build`、`desktop:test`（629，628 pass/1 skip）、`npm run check`、定向回归测试、`git diff --check` 全部通过 |
 
 ## Rules
 - 同时只能有一个 `in_progress`
