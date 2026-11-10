@@ -6,7 +6,6 @@ import { dirname, join, posix } from "node:path";
 
 import {
   accountModelBindingKey,
-  formatCodexModelDisplayName,
   isModelAvailableForAccount,
   normalizeCustomModelInput,
   type ModelCatalogEntry,
@@ -189,10 +188,7 @@ export async function synchronizeAccountModelCatalog(options: {
   }).map((id) => {
     const model = byId.get(id);
     if (!model) throw new Error(`Bound custom model '${id}' no longer exists`);
-    return normalizeCodexCatalogEntry({
-      ...model.entry,
-      display_name: formatCodexModelDisplayName(model.entry, undefined, options.accountName),
-    });
+    return normalizeDirectAccountModelEntry(model.entry);
   });
   const bundled = options.loadBundledCatalog
     ? await options.loadBundledCatalog()
@@ -204,14 +200,47 @@ export async function synchronizeAccountModelCatalog(options: {
     await appendCatalogDiagnostic(options.diagnosticLogPath, { environmentName: options.environmentName, mode: "account", status: "disabled", reason: "no_available_model_binding" });
     return { enabled: false };
   }
-  const bundledSlugs = new Set(catalogEntries.map((model) => model.slug));
-  const collision = customEntries.find((model) => bundledSlugs.has(model.slug));
-  if (collision) throw new Error(`Custom model '${collision.slug}' conflicts with a bundled model`);
+  // A direct account owns the upstream endpoint for this home. If its
+  // discovered model has the same upstream id as a bundled Codex model, the
+  // account entry must replace the bundled candidate rather than creating the
+  // Gateway-style provider-qualified duplicate.
+  const customSlugs = new Set(customEntries.map((model) => model.slug));
+  const directCatalogEntries = catalogEntries.filter((model) => !customSlugs.has(model.slug));
 
-  await atomicWriteJson(catalogPath, { models: [...catalogEntries, ...customEntries] });
+  await atomicWriteJson(catalogPath, { models: [...directCatalogEntries, ...customEntries] });
   await setModelCatalogConfig(configPath, catalogPath);
-  await appendCatalogDiagnostic(options.diagnosticLogPath, { environmentName: options.environmentName, mode: "account", status: "synchronized", catalogPath, modelCount: catalogEntries.length + customEntries.length });
+  await appendCatalogDiagnostic(options.diagnosticLogPath, { environmentName: options.environmentName, mode: "account", status: "synchronized", catalogPath, modelCount: directCatalogEntries.length + customEntries.length });
   return { enabled: true, catalogPath };
+}
+
+/**
+ * Direct mode has one upstream account, so the client must send the raw model
+ * id accepted by that account. Provider/account prefixes are Gateway ingress
+ * identities and would either leak the Gateway concept into the picker or be
+ * rejected by a native upstream endpoint.
+ */
+function normalizeDirectAccountModelEntry(entry: ModelCatalogEntry): ModelCatalogEntry {
+  const upstreamModelId = typeof entry.upstream_model_id === "string" && entry.upstream_model_id.trim()
+    ? entry.upstream_model_id.trim()
+    : entry.slug;
+  const providerDisplayName = typeof entry.provider_display_name === "string"
+    ? entry.provider_display_name.trim()
+    : "";
+  const displayName = providerDisplayName && entry.display_name.startsWith(`${providerDisplayName}:`)
+    ? entry.display_name.slice(providerDisplayName.length + 1).trim()
+    : entry.display_name;
+  const {
+    provider_id: _providerId,
+    provider_model_key: _providerModelKey,
+    provider_display_name: _providerDisplayName,
+    upstream_model_id: _upstreamModelId,
+    ...directEntry
+  } = entry;
+  return normalizeCodexCatalogEntry({
+    ...directEntry,
+    slug: upstreamModelId,
+    display_name: displayName,
+  });
 }
 
 export async function synchronizeEnvironmentGatewayModelCatalog(options: {

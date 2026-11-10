@@ -71,7 +71,7 @@ test("account catalog merges bundled models with the account's bound custom mode
   assert.equal(after.mtimeMs, before.mtimeMs);
 });
 
-test("account catalog prefixes discovered provider aliases in Codex display names", async () => {
+test("account catalog uses native ids and names for direct account models", async () => {
   const root = await mkdtemp(join(tmpdir(), "account-model-catalog-label-"));
   const store = createModelCatalogStore(join(root, "custom-models.json"));
   const custom = await store.saveModel({
@@ -95,12 +95,13 @@ test("account catalog prefixes discovered provider aliases in Codex display name
   const generated = JSON.parse(await readFile(result.catalogPath!, "utf8")) as {
     models: Array<Record<string, unknown>>;
   };
-  assert.equal(generated.models[0]?.slug, "custom:aicode.ckt.cn:gpt-5.5");
-  assert.equal(generated.models[0]?.display_name, "ckt-aicode:5.5");
-  assert.equal(generated.models[0]?.upstream_model_id, "gpt-5.5");
+  assert.equal(generated.models[0]?.slug, "gpt-5.5");
+  assert.equal(generated.models[0]?.display_name, "GPT-5.5");
+  assert.equal(generated.models[0]?.provider_id, undefined);
+  assert.equal(generated.models[0]?.provider_model_key, undefined);
 });
 
-test("account catalog prefixes managed provider models to avoid bundled collisions", async () => {
+test("account catalog replaces a bundled model with the direct account model", async () => {
   const root = await mkdtemp(join(tmpdir(), "account-model-catalog-managed-label-"));
   const store = createModelCatalogStore(join(root, "custom-models.json"));
   const custom = await store.saveModel({
@@ -122,8 +123,8 @@ test("account catalog prefixes managed provider models to avoid bundled collisio
     loadBundledCatalog: async () => ({ models: [{ slug: "kimi-k3", display_name: "Kimi K3" }] }),
   });
   const generated = JSON.parse(await readFile(result.catalogPath!, "utf8")) as { models: Array<Record<string, unknown>> };
-  assert.equal(generated.models.find((model) => model.slug === "our-free-model:kimi-k3")?.display_name, "ourfree1:kimi-k3");
-  assert.equal(generated.models.find((model) => model.slug === "kimi-k3")?.display_name, "Kimi K3");
+  assert.equal(generated.models.length, 1);
+  assert.equal(generated.models.find((model) => model.slug === "kimi-k3")?.display_name, "kimi-k3");
 });
 
 test("account catalog does not duplicate a selected Codex bundled model", async () => {
@@ -361,22 +362,21 @@ test("account catalog does not publish a discovered model after it becomes unava
   assert.equal(result.enabled, false);
 });
 
-test("account catalog rejects custom slugs that collide with bundled models", async () => {
+test("account catalog lets a direct account replace a bundled model with the same upstream id", async () => {
   const root = await mkdtemp(join(tmpdir(), "account-model-catalog-collision-"));
   const store = createModelCatalogStore(join(root, "custom-models.json"));
   const custom = await store.saveModel({ entry: { slug: "gpt-official", display_name: "Override" } });
   await store.setAccountBindings("work/alice", [custom.id]);
 
-  await assert.rejects(
-    synchronizeAccountModelCatalog({
-      envName: "work",
-      accountName: "alice",
-      homePath: join(root, "home"),
-      store,
-      loadBundledCatalog: async () => ({ models: [{ slug: "gpt-official", display_name: "Official" }] }),
-    }),
-    /conflicts with a bundled model/,
-  );
+  const result = await synchronizeAccountModelCatalog({
+    envName: "work",
+    accountName: "alice",
+    homePath: join(root, "home"),
+    store,
+    loadBundledCatalog: async () => ({ models: [{ slug: "gpt-official", display_name: "Official" }] }),
+  });
+  const generated = JSON.parse(await readFile(result.catalogPath!, "utf8")) as { models: Array<Record<string, unknown>> };
+  assert.deepEqual(generated.models.map((model) => model.slug), ["gpt-official"]);
 });
 
 test("unified gateway catalog deduplicates logical models against the bundled catalog", async () => {
@@ -589,5 +589,5 @@ test("a discovered account catalog follows explicit model exposure instead of th
     loadBundledCatalog: async () => ({ models: [] }),
   });
   const generated = JSON.parse(await readFile(result.catalogPath!, "utf8")) as { models: Array<{ slug: string }> };
-  assert.deepEqual(generated.models.map((model) => model.slug), ["deepseek:deepseek-v4-flash"]);
+  assert.deepEqual(generated.models.map((model) => model.slug), ["deepseek-v4-flash"]);
 });

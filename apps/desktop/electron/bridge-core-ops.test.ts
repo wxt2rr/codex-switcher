@@ -1313,6 +1313,59 @@ test("desktop bridge loadOverview restores legacy direct routes instead of reviv
   }
 });
 
+test("desktop bridge rebuilds a direct model catalog after a stale gateway catalog pointer", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-direct-catalog-repair-"));
+  const previousEnv = { ...process.env };
+
+  try {
+    process.env.HOME = root;
+    process.env.CODEX_SWITCHER_STATE_DIR = join(root, "state");
+    process.env.CODEX_SWITCHER_ENVS_DIR = join(root, "envs");
+    process.env.CODEX_SWITCHER_DEFAULT_HOME = join(root, "default-home");
+    bridge.__testUtils.resetUsageRouterManagerForTest();
+
+    await writeFileRecursive(join(root, "state", "current_cli_env"), "project\n");
+    await writeFileRecursive(join(root, "state", "current_cli_account"), "key\n");
+    await writeFileRecursive(join(root, "state", "current_app_env"), "project\n");
+    await writeFileRecursive(join(root, "state", "current_app_account"), "key\n");
+    await writeFileRecursive(join(root, "envs", "project", "home", "config.toml"), [
+      'model_catalog_json = "/tmp/codex-switcher-gateway-models.json"',
+      'preferred_auth_method = "apikey"',
+      'openai_base_url = "https://api.example.com/v1"',
+      'model_provider = "codex_switcher_router"',
+      '',
+    ].join("\n"));
+    await writeFileRecursive(
+      join(root, "state", "env-accounts", "project", "key", "runtime.json"),
+      '{"preferred_auth_method":"apikey","openai_base_url_mode":"custom","openai_base_url":"https://api.example.com/v1"}\n',
+    );
+    await writeFileRecursive(join(root, "state", "env-accounts", "project", "key", "auth.json"), '{"OPENAI_API_KEY":"sk-direct"}\n');
+    await writeFileRecursive(join(root, "state", "custom-model-catalogs.json"), `${JSON.stringify({
+      version: 1,
+      models: [
+        { id: "current-model", entry: { slug: "custom-openai:provider:current", display_name: "provider:Current", provider_display_name: "provider", upstream_model_id: "current" }, createdAt: "2026-11-10T00:00:00.000Z", updatedAt: "2026-11-10T00:00:00.000Z" },
+        { id: "other-model", entry: { slug: "other:model", display_name: "other:Model", provider_display_name: "other", upstream_model_id: "other" }, createdAt: "2026-11-10T00:00:00.000Z", updatedAt: "2026-11-10T00:00:00.000Z" },
+      ],
+      accountBindings: { "project/key": ["current-model"], "project/other": ["other-model"] },
+    }, null, 2)}\n`);
+
+    await bridge.loadOverview();
+
+    const config = await readFile(join(root, "envs", "project", "home", "config.toml"), "utf8");
+    assert.match(config, /model_catalog_json = .*codex-switcher-models\.json/);
+    assert.doesNotMatch(config, /codex-switcher-gateway-models/);
+    const catalog = JSON.parse(await readFile(join(root, "envs", "project", "home", "model-catalogs", "codex-switcher-models.json"), "utf8")) as {
+      models: Array<{ slug: string; display_name: string }>;
+    };
+    assert.ok(catalog.models.some((model) => model.slug === "current" && model.display_name === "Current"));
+    assert.ok(!catalog.models.some((model) => model.slug === "other" || model.display_name.includes("other")));
+  } finally {
+    bridge.__testUtils.resetUsageRouterManagerForTest();
+    restoreEnv(previousEnv);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("desktop bridge imports default env directly and can copy auth artifacts", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-desktop-env-import-"));
   const previousEnv = { ...process.env };

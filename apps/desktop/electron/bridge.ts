@@ -1751,10 +1751,12 @@ async function restoreEnabledRoutes(): Promise<void> {
   const routes = (await manager.listPersistedRoutes()).filter((route) => route.enabled);
   const pools = (await manager.listPersistedAccountPools()).filter((pool) => pool.enabled);
   const gateways = (await manager.listPersistedEnvironmentGateways()).filter((gateway) => gateway.enabled);
-  if (!routes.length && !pools.length && !gateways.length) return;
-
   const runtime = await loadCoreRuntime();
   let initialState = await runtime.readLegacyState(getLegacyOptions());
+  if (!routes.length && !pools.length && !gateways.length) {
+    await synchronizeStaleDirectEnvironmentModelCatalogs(runtime, initialState);
+    return;
+  }
   const runningAppEnvironments = await findRunningManagedAppEnvironments(initialState);
   const gatewayEnvironments = new Set(gateways.map((gateway) => gateway.envName));
   const poolEnvironments = new Set(pools.map((pool) => pool.envName));
@@ -1797,6 +1799,15 @@ async function restoreEnabledRoutes(): Promise<void> {
       applyTargetHome: true,
     });
   }
+
+  // A previous gateway disable could leave only the gateway catalog pointer
+  // behind after the routes were already removed. Rebuild the direct catalog
+  // on the next load so the App cannot keep showing another account's models.
+  await synchronizeStaleDirectEnvironmentModelCatalogs(
+    runtime,
+    initialState,
+    new Set([...gatewayEnvironments, ...poolEnvironments]),
+  );
 
   for (const route of routes.filter((item) => item.protocol === "chat_completions")) {
     const latestState = await runtime.readLegacyState(getLegacyOptions());
@@ -1919,6 +1930,7 @@ export async function toggleEnvironmentGateway(envName: string, enabled: boolean
     await runtime.clearLegacyGateway({ stateDir: getStateDir(), envName });
     const nextState = await runtime.readLegacyState(getLegacyOptions());
     await reapplyEnvironmentTargetHomes(runtime, nextState, envName, "disable-environment-gateway");
+    await synchronizeDirectEnvironmentModelCatalogs(runtime, nextState, envName);
     return result;
   }
 
@@ -2259,6 +2271,32 @@ async function reapplyEnvironmentTargetHomes(
   for (const target of ["cli", "app"] as const) {
     if (state.targets[target].env !== envName) continue;
     await applyTargetHomeStateWithHistory(runtime, state, target, source);
+  }
+}
+
+async function synchronizeDirectEnvironmentModelCatalogs(
+  runtime: CoreRuntime,
+  state: Awaited<ReturnType<CoreRuntime["readLegacyState"]>>,
+  envName: string,
+): Promise<void> {
+  const environment = state.envs[envName];
+  if (!environment || environment.gateway?.mode === "gateway") return;
+  for (const target of ["cli", "app"] as const) {
+    if (state.targets[target].env !== envName) continue;
+    await synchronizeTargetModelCatalog(runtime, state, target, environment.path);
+  }
+}
+
+async function synchronizeStaleDirectEnvironmentModelCatalogs(
+  runtime: CoreRuntime,
+  state: Awaited<ReturnType<CoreRuntime["readLegacyState"]>>,
+  excludedEnvironments: ReadonlySet<string> = new Set(),
+): Promise<void> {
+  for (const environment of Object.values(state.envs)) {
+    if (excludedEnvironments.has(environment.name)) continue;
+    const config = await readFile(join(environment.path, "config.toml"), "utf8").catch(() => "");
+    if (!/model_catalog_json\s*=.*codex-switcher-gateway-models\.json/.test(config)) continue;
+    await synchronizeDirectEnvironmentModelCatalogs(runtime, state, environment.name);
   }
 }
 
