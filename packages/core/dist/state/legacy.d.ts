@@ -25,6 +25,20 @@ export interface WriteLegacyAuthDataOptions {
     accountName: string;
     authData: AuthDataRecord;
 }
+export interface WriteLegacySystemAuthRuntimeOptions {
+    stateDir: string;
+    envName: string;
+    runtime: AccountState["runtime"];
+}
+export interface WriteLegacySystemAuthDataOptions {
+    stateDir: string;
+    envName: string;
+    authData: AuthDataRecord;
+}
+export interface ClearLegacySystemAuthOptions {
+    stateDir: string;
+    envName: string;
+}
 export interface WriteLegacyGatewayOptions {
     stateDir: string;
     envName: string;
@@ -70,6 +84,12 @@ export declare function writeLegacyPointers(options: WriteLegacyPointersOptions)
 export declare function writeLegacyRuntime(options: WriteLegacyRuntimeOptions): Promise<void>;
 /** Persist credential material only in the account auth store, never in Gateway metadata. */
 export declare function writeLegacyAuthData(options: WriteLegacyAuthDataOptions): Promise<void>;
+/** Persist the environment-owned system identity separately from accounts. */
+export declare function writeLegacySystemAuthRuntime(options: WriteLegacySystemAuthRuntimeOptions): Promise<void>;
+export declare function writeLegacySystemAuthData(options: WriteLegacySystemAuthDataOptions): Promise<void>;
+/** Clear the active slot without touching the legacy account directory. The
+ * old directory is intentionally retained as a recoverable migration backup. */
+export declare function clearLegacySystemAuth(options: ClearLegacySystemAuthOptions): Promise<void>;
 export declare function writeLegacyGateway(options: WriteLegacyGatewayOptions): Promise<void>;
 export declare function clearLegacyGateway(options: ClearLegacyGatewayOptions): Promise<void>;
 export declare function writeLegacyGatewayV2(options: WriteLegacyGatewayV2Options): Promise<void>;

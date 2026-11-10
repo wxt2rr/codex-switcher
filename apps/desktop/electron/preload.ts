@@ -207,6 +207,9 @@ contextBridge.exposeInMainWorld("codexDesktop", {
   getEnvironmentRemoteStatuses: () => ipcRenderer.invoke("desktop:getEnvironmentRemoteStatuses"),
   setEnvironmentRemoteAccount: (envName: string, accountName?: string) =>
     ipcRenderer.invoke("desktop:setEnvironmentRemoteAccount", envName, accountName),
+  configureSystemAuth: (input: { envName: string; mode: "auth" | "apikey"; apiKey?: string; baseUrlMode?: "default" | "custom"; baseUrl?: string }) =>
+    ipcRenderer.invoke("desktop:configureSystemAuth", input),
+  clearSystemAuth: (envName: string) => ipcRenderer.invoke("desktop:clearSystemAuth", envName),
   listClaudeCodeSources: () => ipcRenderer.invoke("desktop:listClaudeCodeSources"),
   getClaudeCodeConnection: () => ipcRenderer.invoke("desktop:getClaudeCodeConnection"),
   connectClaudeCode: (input: { sourceId: string; modelId?: string; cleanupAuthorization?: boolean }) => ipcRenderer.invoke("desktop:connectClaudeCode", input),

@@ -628,7 +628,7 @@ function EnvCard({
   // The card summarizes whether this environment has a remote account bound.
   // Pairing and sign-in details stay in the remote side panel where they can be
   // acted on, so the card only needs the two stable states users scan for.
-  const remoteBound = Boolean(remoteStatus?.remoteAccountName);
+  const remoteBound = Boolean(remoteStatus?.remoteAccountName || remoteStatus?.systemAuthBound);
   const remoteLabel = remoteBound
     ? language === "zh" ? "已绑定" : language === "ja" ? "バインド済み" : "Bound"
     : language === "zh" ? "待绑定" : language === "ja" ? "未バインド" : "Not bound";
@@ -1152,6 +1152,15 @@ export function EnvironmentsPage({
           </div>
           <div className="space-y-2">
             <div className="text-[12px] font-semibold text-neutral-900">{language === "zh" ? "官方账号" : language === "ja" ? "公式アカウント" : "Official account"}</div>
+            {remotePanelStatus?.systemAuthBound ? (
+              <div className="flex items-center justify-between rounded-xl border border-primary/25 bg-primary/[0.05] px-3.5 py-3">
+                <div className="min-w-0">
+                  <div className="text-[13px] font-medium text-neutral-800">{language === "zh" ? "系统授权" : language === "ja" ? "システム認証" : "System authorization"}</div>
+                  <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{remotePanelStatus.systemAuthEmail ?? (language === "zh" ? "官方 Auth" : "Official Auth")}</div>
+                </div>
+                <SoftBadge tone="success" label={language === "zh" ? "已绑定" : language === "ja" ? "バインド済み" : "Bound"} />
+              </div>
+            ) : null}
             {remoteCandidates.length ? remoteCandidates.map((account) => {
               const selected = remotePanelStatus?.remoteAccountName === account.name;
               return (
@@ -1197,6 +1206,11 @@ export function EnvironmentsPage({
             }} disabled={busy}>
               {language === "zh" ? "取消绑定" : language === "ja" ? "バインドを解除" : "Unbind"}
             </Button>
+          ) : null}
+          {remotePanelStatus?.systemAuthBound ? (
+            <div className="text-center text-[11px] text-muted-foreground">
+              {language === "zh" ? "系统授权请在账号页面管理" : language === "ja" ? "システム認証はアカウント画面で管理します" : "Manage system authorization on the Accounts page"}
+            </div>
           ) : null}
         </div>
       </SidePanel>

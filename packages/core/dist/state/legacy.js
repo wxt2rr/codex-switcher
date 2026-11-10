@@ -67,6 +67,37 @@ export async function writeLegacyAuthData(options) {
     const accountDir = join(options.stateDir, "env-accounts", options.envName, options.accountName);
     await atomicWrite(join(accountDir, "auth.json"), `${JSON.stringify(options.authData, null, 2)}\n`);
 }
+/** Persist the environment-owned system identity separately from accounts. */
+export async function writeLegacySystemAuthRuntime(options) {
+    const directory = getSystemAuthPath(options.stateDir, options.envName);
+    await mkdir(directory, { recursive: true });
+    await atomicWrite(join(directory, "runtime.json"), `${JSON.stringify({
+        preferred_auth_method: options.runtime.preferredAuthMethod,
+        openai_base_url_mode: options.runtime.openaiBaseUrlMode,
+        openai_base_url: options.runtime.openaiBaseUrl ?? "",
+        provider_id: options.runtime.providerId ?? "",
+        provider_auth_method: options.runtime.providerAuthMethod ?? "",
+        provider_request_headers: options.runtime.providerRequestHeaders ?? {},
+        api_protocol: options.runtime.apiProtocol ?? "responses",
+    }, null, 2)}\n`);
+}
+export async function writeLegacySystemAuthData(options) {
+    const directory = getSystemAuthPath(options.stateDir, options.envName);
+    await mkdir(directory, { recursive: true });
+    await atomicWrite(join(directory, "auth.json"), `${JSON.stringify(options.authData, null, 2)}\n`);
+}
+/** Clear the active slot without touching the legacy account directory. The
+ * old directory is intentionally retained as a recoverable migration backup. */
+export async function clearLegacySystemAuth(options) {
+    const directory = getSystemAuthPath(options.stateDir, options.envName);
+    await mkdir(directory, { recursive: true });
+    await rm(join(directory, "auth.json"), { force: true });
+    await atomicWrite(join(directory, "runtime.json"), `${JSON.stringify({
+        preferred_auth_method: "chatgpt",
+        openai_base_url_mode: "default",
+        openai_base_url: "",
+    }, null, 2)}\n`);
+}
 export async function writeLegacyGateway(options) {
     if (!isGatewayEnvironmentState(options.gateway)) {
         throw new Error(`Invalid gateway configuration for environment '${options.envName}'`);
@@ -187,6 +218,7 @@ export async function updateLegacyEnv(options) {
     if (options.envName !== options.nextEnvName && options.nextEnvName !== DEFAULT_ENV_NAME) {
         await renameIfExists(join(options.envsDir, options.envName), join(options.envsDir, options.nextEnvName));
         await renameIfExists(join(options.stateDir, "env-accounts", options.envName), join(options.stateDir, "env-accounts", options.nextEnvName));
+        await renameIfExists(getSystemAuthPath(options.stateDir, options.envName), getSystemAuthPath(options.stateDir, options.nextEnvName));
         await renameIfExists(getEnvMetaPath(options.stateDir, options.envName), getEnvMetaPath(options.stateDir, options.nextEnvName));
         await renameIfExists(getGatewayPath(options.stateDir, options.envName), getGatewayPath(options.stateDir, options.nextEnvName));
         await renameIfExists(getGatewayV2Path(options.stateDir, options.envName), getGatewayV2Path(options.stateDir, options.nextEnvName));
@@ -217,8 +249,10 @@ export async function setLegacyEnvRemoteAccount(options) {
 async function readLegacyEnvState(envName, options) {
     const accountRoot = join(options.stateDir, "env-accounts", envName);
     const accountNames = await listDirectoryNames(accountRoot);
-    const names = envName === DEFAULT_ENV_NAME && !accountNames.includes(DEFAULT_ACCOUNT_NAME)
-        ? [DEFAULT_ACCOUNT_NAME, ...accountNames]
+    // `default/default` used to be synthesized as an account. It is now the
+    // reserved system slot and must never leak into the ordinary account list.
+    const names = envName === DEFAULT_ENV_NAME
+        ? accountNames.filter((accountName) => accountName !== DEFAULT_ACCOUNT_NAME)
         : accountNames;
     const accounts = Object.fromEntries(await Promise.all(names.map(async (accountName) => [
         accountName,
@@ -226,6 +260,7 @@ async function readLegacyEnvState(envName, options) {
     ])));
     const gateway = await readLegacyGateway(options.stateDir, envName);
     const meta = await readLegacyEnvMeta(options.stateDir, envName);
+    const systemAuth = await readLegacySystemAuthState(options.stateDir, envName, accountRoot);
     return {
         name: envName,
         path: (await readLegacyEnvMeta(options.stateDir, envName)).homePath ||
@@ -233,6 +268,7 @@ async function readLegacyEnvState(envName, options) {
                 ? options.defaultHome
                 : join(options.envsDir, envName, "home")),
         accounts,
+        systemAuth,
         ...(meta.modelIdentityMode
             ? { modelIdentityMode: normalizeEnvironmentModelIdentityMode(meta.modelIdentityMode) }
             : {}),
@@ -240,6 +276,36 @@ async function readLegacyEnvState(envName, options) {
             ? { remoteControl: { accountName: meta.remoteAccountName } }
             : {}),
         ...(gateway ? { gateway } : {}),
+    };
+}
+async function readLegacySystemAuthState(stateDir, envName, accountRoot) {
+    const systemRoot = getSystemAuthPath(stateDir, envName);
+    const hasSystemFiles = await fileExists(join(systemRoot, "runtime.json"))
+        || await fileExists(join(systemRoot, "auth.json"));
+    const legacyRoot = join(accountRoot, DEFAULT_ACCOUNT_NAME);
+    const hasLegacyFiles = envName === DEFAULT_ENV_NAME && (await fileExists(join(legacyRoot, "runtime.json"))
+        || await fileExists(join(legacyRoot, "auth.json")));
+    if (!hasSystemFiles && !hasLegacyFiles)
+        return undefined;
+    // Compatibility migration: read the former reserved account as the system
+    // slot, but leave its files in place as the user's historical backup.
+    const sourceRoot = hasSystemFiles || envName !== DEFAULT_ENV_NAME ? systemRoot : legacyRoot;
+    const runtimeRecord = await readRuntimeRecord(join(sourceRoot, "runtime.json"));
+    const authData = await readAuthRecord(join(sourceRoot, "auth.json"));
+    return {
+        authMode: runtimeRecord.preferred_auth_method === "apikey" ? "apikey" : "auth",
+        runtime: {
+            preferredAuthMethod: normalizePreferredAuthMethod(runtimeRecord.preferred_auth_method),
+            openaiBaseUrlMode: normalizeOpenAIBaseUrlMode(runtimeRecord.openai_base_url_mode),
+            openaiBaseUrl: runtimeRecord.openai_base_url || undefined,
+            providerId: runtimeRecord.provider_id || undefined,
+            providerAuthMethod: isProviderCredentialAuthMethod(runtimeRecord.provider_auth_method)
+                ? runtimeRecord.provider_auth_method : undefined,
+            providerRequestHeaders: runtimeRecord.provider_request_headers,
+            apiProtocol: runtimeRecord.api_protocol === "chat_completions"
+                ? "chat_completions" : runtimeRecord.api_protocol === "anthropic" ? "anthropic" : "responses",
+        },
+        ...(authData ? { authData } : {}),
     };
 }
 async function readLegacyGateway(stateDir, envName) {
@@ -353,8 +419,12 @@ async function readAndReconcileLegacyTargets(stateDir, envs) {
         return targets;
     }
     const accounts = envs[targets.cli.env]?.accounts ?? {};
-    const cliAccountExists = Boolean(accounts[targets.cli.account]);
-    const appAccountExists = Boolean(accounts[targets.app.account]);
+    const cliEnvironment = envs[targets.cli.env];
+    const appEnvironment = envs[targets.app.env];
+    const cliAccountExists = Boolean(accounts[targets.cli.account])
+        || isSystemSlotPointer(targets.cli.env, targets.cli.account, cliEnvironment);
+    const appAccountExists = Boolean(appEnvironment?.accounts[targets.app.account])
+        || isSystemSlotPointer(targets.app.env, targets.app.account, appEnvironment);
     const account = cliAccountExists && !appAccountExists
         ? targets.cli.account
         : appAccountExists && !cliAccountExists
@@ -370,6 +440,13 @@ async function readAndReconcileLegacyTargets(stateDir, envs) {
         writePointer(stateDir, "app", "account", account),
     ]);
     return targets;
+}
+function isSystemSlotPointer(envName, accountName, environment) {
+    // The reserved default environment always has a system slot, even before it
+    // has been configured. Other environments only acquire one after a system
+    // auth file has been written.
+    return accountName === DEFAULT_ACCOUNT_NAME
+        && (envName === DEFAULT_ENV_NAME || Boolean(environment?.systemAuth));
 }
 async function readPointerSnapshot(stateDir, target, kind, fallback) {
     const path = join(stateDir, `current_${target}_${kind}`);
@@ -451,6 +528,9 @@ async function restoreOptionalText(path, content) {
 function getEnvMetaPath(stateDir, envName) {
     return join(stateDir, "env-meta", `${envName}.json`);
 }
+function getSystemAuthPath(stateDir, envName) {
+    return join(stateDir, "env-system-auth", envName);
+}
 function getGatewayPath(stateDir, envName) {
     return join(stateDir, "env-gateways", `${envName}.json`);
 }
@@ -466,6 +546,15 @@ async function renameIfExists(source, target) {
     }
     await mkdir(dirname(target), { recursive: true });
     await rename(source, target);
+}
+async function fileExists(path) {
+    try {
+        await stat(path);
+        return true;
+    }
+    catch {
+        return false;
+    }
 }
 function isMissingFileError(error) {
     return error?.code === "ENOENT";

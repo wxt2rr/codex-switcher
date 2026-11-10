@@ -51,6 +51,14 @@ export interface AccountState {
     runtime: AccountRuntimeSettings;
     authData?: AuthDataRecord;
 }
+/** Environment-owned Codex identity. This is deliberately not an account:
+ * it is the single system slot used for official App/remote authentication
+ * or a direct API-key runtime. */
+export interface SystemAuthSlot {
+    authMode: Extract<AuthMode, "auth" | "apikey">;
+    runtime: AccountRuntimeSettings;
+    authData?: AuthDataRecord;
+}
 /** Official ChatGPT identity used by Codex App remote control. This is
  * intentionally separate from the account currently used for model calls. */
 export interface EnvironmentRemoteControlSettings {
@@ -60,6 +68,7 @@ export interface EnvState {
     name: string;
     path: string;
     accounts: Record<string, AccountState>;
+    systemAuth?: SystemAuthSlot;
     /** Controls the Codex-facing model identity while retaining internal routes. */
     modelIdentityMode?: EnvironmentModelIdentityMode;
     remoteControl?: EnvironmentRemoteControlSettings;

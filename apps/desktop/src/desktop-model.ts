@@ -25,6 +25,8 @@ export interface EnvironmentRemoteStatus {
   status: RemoteControlStatus;
   remoteAccountName?: string;
   remoteAccountEmail?: string;
+  systemAuthBound?: boolean;
+  systemAuthEmail?: string;
   modelServiceLabel: string;
   modelAccountName?: string;
 }
@@ -322,7 +324,15 @@ export interface EnvSummary {
   isCurrentApp: boolean;
   modelIdentityMode: EnvironmentModelIdentityMode;
   remoteAccountName?: string;
+  systemAuth?: SystemAuthSummary;
 }
+
+export type SystemAuthSummary = {
+  status: "unbound" | "bound";
+  authMode: "auth" | "apikey";
+  apiKeyPreview?: string;
+  baseUrl?: string;
+};
 
 export interface AccountSummary {
   envName: string;

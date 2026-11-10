@@ -6,12 +6,15 @@ import assert from "node:assert/strict";
 
 import {
   clearLegacyGateway,
+  clearLegacySystemAuth,
   readLegacyGatewayV2,
   readLegacyState,
   setLegacyEnvModelIdentityMode,
   setLegacyEnvRemoteAccount,
   writeLegacyGateway,
   writeLegacyGatewayV2,
+  writeLegacySystemAuthData,
+  writeLegacySystemAuthRuntime,
 } from "./legacy.js";
 import { GATEWAY_SCHEMA_VERSION } from "../gateway/model.js";
 import { migrateGatewayEnvironmentStateToV2 } from "../gateway/v2.js";
@@ -86,6 +89,41 @@ test("legacy reader hydrates envs, accounts, runtime settings, and target pointe
       "https://model.example/v1",
     );
     assert.equal(state.envs.default.accounts.work.runtime.providerId, "deepseek");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("legacy default slot is isolated as system auth and keeps old files recoverable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-system-auth-slot-"));
+  const stateDir = join(root, ".codex-switcher");
+  const envsDir = join(root, ".codex-envs");
+  const defaultHome = join(root, ".codex");
+  try {
+    await mkdir(join(stateDir, "env-accounts", "default", "default"), { recursive: true });
+    await mkdir(defaultHome, { recursive: true });
+    await writeFile(join(stateDir, "env-accounts", "default", "default", "runtime.json"), JSON.stringify({
+      preferred_auth_method: "chatgpt", openai_base_url_mode: "default",
+    }), "utf8");
+    await writeFile(join(stateDir, "env-accounts", "default", "default", "auth.json"), JSON.stringify({ email: "legacy@example.com" }), "utf8");
+
+    const migrated = await readLegacyState({ stateDir, envsDir, defaultHome });
+    assert.equal(migrated.envs.default.accounts.default, undefined);
+    assert.equal(migrated.envs.default.systemAuth?.authData?.email, "legacy@example.com");
+
+    await writeLegacySystemAuthRuntime({ stateDir, envName: "default", runtime: {
+      preferredAuthMethod: "apikey", openaiBaseUrlMode: "custom", openaiBaseUrl: "https://api.example/v1",
+    }});
+    await writeLegacySystemAuthData({ stateDir, envName: "default", authData: { OPENAI_API_KEY: "sk-system" } });
+    const configured = await readLegacyState({ stateDir, envsDir, defaultHome });
+    assert.equal(configured.envs.default.systemAuth?.authMode, "apikey");
+    assert.equal(configured.envs.default.systemAuth?.authData?.OPENAI_API_KEY, "sk-system");
+    assert.equal(configured.envs.default.accounts.default, undefined);
+
+    await clearLegacySystemAuth({ stateDir, envName: "default" });
+    const cleared = await readLegacyState({ stateDir, envsDir, defaultHome });
+    assert.equal(cleared.envs.default.systemAuth?.authData, undefined);
+    assert.equal(cleared.envs.default.accounts.default, undefined);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

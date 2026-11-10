@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.102 - 2026-11-10
+
+- Added an environment-owned system authorization slot with independent official Auth and API Key modes.
+- Added isolated API Key/Base URL projection for Codex CLI and App, including legacy `default/default` migration backups.
+- Added account-page configuration, unbinding, stale-auth cleanup, and regression coverage for system-slot credentials.
+
+## 0.8.18 - 2026-11-10
+
+- Added independent system authorization support for official Auth and API Key credentials, including custom Base URLs and safe legacy migration.
+
 ## 0.1.101 - 2026-11-08
 
 - Added the Claude Code provider plugin with API-key configuration, environment gateway connections, credential conflict detection, and configuration history rollback.

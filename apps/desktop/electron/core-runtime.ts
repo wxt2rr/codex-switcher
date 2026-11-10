@@ -17,6 +17,9 @@ export interface CoreRuntime {
   setLegacyEnvRemoteAccount: typeof import("../../../packages/core/dist/state/legacy.js").setLegacyEnvRemoteAccount;
   writeLegacyPointers: typeof import("../../../packages/core/dist/state/legacy.js").writeLegacyPointers;
   writeLegacyRuntime: typeof import("../../../packages/core/dist/state/legacy.js").writeLegacyRuntime;
+  writeLegacySystemAuthRuntime: typeof import("../../../packages/core/dist/state/legacy.js").writeLegacySystemAuthRuntime;
+  writeLegacySystemAuthData: typeof import("../../../packages/core/dist/state/legacy.js").writeLegacySystemAuthData;
+  clearLegacySystemAuth: typeof import("../../../packages/core/dist/state/legacy.js").clearLegacySystemAuth;
   writeLegacyGateway: typeof import("../../../packages/core/dist/state/legacy.js").writeLegacyGateway;
   writeLegacyGatewayV2: typeof import("../../../packages/core/dist/state/legacy.js").writeLegacyGatewayV2;
   readLegacyGatewayV2: typeof import("../../../packages/core/dist/state/legacy.js").readLegacyGatewayV2;
@@ -127,6 +130,9 @@ export async function loadCoreRuntime(): Promise<CoreRuntime> {
     setLegacyEnvRemoteAccount: legacyModule.setLegacyEnvRemoteAccount,
     writeLegacyPointers: legacyModule.writeLegacyPointers,
     writeLegacyRuntime: legacyModule.writeLegacyRuntime,
+    writeLegacySystemAuthRuntime: legacyModule.writeLegacySystemAuthRuntime,
+    writeLegacySystemAuthData: legacyModule.writeLegacySystemAuthData,
+    clearLegacySystemAuth: legacyModule.clearLegacySystemAuth,
     writeLegacyGateway: legacyModule.writeLegacyGateway,
     writeLegacyGatewayV2: legacyModule.writeLegacyGatewayV2,
     readLegacyGatewayV2: legacyModule.readLegacyGatewayV2,

@@ -368,7 +368,8 @@ test("shared selects open on hover without button press scaling", () => {
 
 test("account side panel selects require a manual click", () => {
   const clickOnlySelects = accounts.match(/openOnHover=\{false\}/g) ?? [];
-  assert.equal(clickOnlySelects.length, 13);
+  // The system authorization panel adds authentication and Base URL selects.
+  assert.equal(clickOnlySelects.length, 15);
   assert.match(accounts, /API protocol/);
   assert.match(accounts, /长会话处理/);
   assert.match(accounts, /安全压缩（推荐）/);

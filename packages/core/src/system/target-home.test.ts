@@ -70,6 +70,73 @@ test("target-home writer installs auth.json and managed config for apikey accoun
   }
 });
 
+test("target-home projects the independent system slot when the default pointer is active", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-system-slot-"));
+  const homePath = join(root, "home");
+  const state: SwitcherState = {
+    schemaVersion: DEFAULT_SCHEMA_VERSION,
+    generatedAt: "2026-11-10T10:00:00.000Z",
+    targets: { cli: { env: "default", account: "default" }, app: { env: "default", account: "default" } },
+    envs: {
+      default: {
+        name: "default",
+        path: homePath,
+        accounts: {},
+        systemAuth: {
+          authMode: "apikey",
+          runtime: { preferredAuthMethod: "apikey", openaiBaseUrlMode: "custom", openaiBaseUrl: "https://system.example/v1" },
+          authData: { OPENAI_API_KEY: "sk-system", experimental_bearer_token: "codex-switcher-system-slot" },
+        },
+      },
+    },
+    tasks: { recent: [] },
+  };
+  try {
+    await applyTargetHomeState({ state, target: "app" });
+    const auth = JSON.parse(await readFile(join(homePath, "auth.json"), "utf8")) as Record<string, string>;
+    assert.equal(auth.OPENAI_API_KEY, "sk-system");
+    assert.equal(auth.experimental_bearer_token, "codex-switcher-system-slot");
+    const config = await readFile(join(homePath, "config.toml"), "utf8");
+    assert.match(config, /base_url = "https:\/\/system\.example\/v1"/);
+    assert.match(config, /preferred_auth_method = "apikey"/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("target-home projects the system API key even when callers preserve existing auth", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-system-slot-preserve-"));
+  const homePath = join(root, "home");
+  const state: SwitcherState = {
+    schemaVersion: DEFAULT_SCHEMA_VERSION,
+    generatedAt: "2026-11-10T10:00:00.000Z",
+    targets: { cli: { env: "default", account: "default" }, app: { env: "default", account: "default" } },
+    envs: {
+      default: {
+        name: "default",
+        path: homePath,
+        accounts: {},
+        systemAuth: {
+          authMode: "apikey",
+          runtime: { preferredAuthMethod: "apikey", openaiBaseUrlMode: "default" },
+          authData: { OPENAI_API_KEY: "sk-system", experimental_bearer_token: "codex-switcher-system-slot" },
+        },
+      },
+    },
+    tasks: { recent: [] },
+  };
+  try {
+    await mkdir(homePath, { recursive: true });
+    await writeFile(join(homePath, "auth.json"), '{"OPENAI_API_KEY":"stale"}\n', "utf8");
+    await applyTargetHomeState({ state, target: "app", authProjection: "preserve" });
+    const auth = JSON.parse(await readFile(join(homePath, "auth.json"), "utf8")) as Record<string, string>;
+    assert.equal(auth.OPENAI_API_KEY, "sk-system");
+    assert.equal(auth.experimental_bearer_token, "codex-switcher-system-slot");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("target-home keeps official auth for remote control while routing models through an API key account", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-switcher-target-home-remote-"));
   const homePath = join(root, "home");

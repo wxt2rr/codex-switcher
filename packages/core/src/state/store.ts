@@ -71,6 +71,15 @@ export interface AccountState {
   authData?: AuthDataRecord;
 }
 
+/** Environment-owned Codex identity. This is deliberately not an account:
+ * it is the single system slot used for official App/remote authentication
+ * or a direct API-key runtime. */
+export interface SystemAuthSlot {
+  authMode: Extract<AuthMode, "auth" | "apikey">;
+  runtime: AccountRuntimeSettings;
+  authData?: AuthDataRecord;
+}
+
 /** Official ChatGPT identity used by Codex App remote control. This is
  * intentionally separate from the account currently used for model calls. */
 export interface EnvironmentRemoteControlSettings {
@@ -81,6 +90,7 @@ export interface EnvState {
   name: string;
   path: string;
   accounts: Record<string, AccountState>;
+  systemAuth?: SystemAuthSlot;
   /** Controls the Codex-facing model identity while retaining internal routes. */
   modelIdentityMode?: EnvironmentModelIdentityMode;
   remoteControl?: EnvironmentRemoteControlSettings;
@@ -256,6 +266,10 @@ function validateEnvState(name: string, value: unknown): EnvState {
     ),
   };
 
+  if (value.systemAuth !== undefined) {
+    envState.systemAuth = validateSystemAuthSlot(name, value.systemAuth);
+  }
+
   // Keep the persisted shape of legacy environments stable. The business
   // layer treats an omitted value as `account`, but migration must not rewrite
   // every existing environment just because a new optional preference exists.
@@ -294,6 +308,21 @@ function validateEnvState(name: string, value: unknown): EnvState {
   }
 
   return envState;
+}
+
+function validateSystemAuthSlot(envName: string, value: unknown): SystemAuthSlot {
+  if (!isRecord(value)) {
+    throw createStoreError("INVALID_STATE", `Env '${envName}' systemAuth must be an object`);
+  }
+  if (value.authMode !== "auth" && value.authMode !== "apikey") {
+    throw createStoreError("INVALID_STATE", `Env '${envName}' systemAuth has invalid authMode`);
+  }
+  const slot: SystemAuthSlot = {
+    authMode: value.authMode,
+    runtime: validateRuntimeSettings(`${envName}/system`, value.runtime),
+  };
+  if (isAuthDataRecord(value.authData)) slot.authData = value.authData;
+  return slot;
 }
 
 function validateAccountState(name: string, value: unknown): AccountState {

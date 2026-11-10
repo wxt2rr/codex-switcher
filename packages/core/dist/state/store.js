@@ -103,6 +103,9 @@ function validateEnvState(name, value) {
             validateAccountState(accountName, accountValue),
         ])),
     };
+    if (value.systemAuth !== undefined) {
+        envState.systemAuth = validateSystemAuthSlot(name, value.systemAuth);
+    }
     // Keep the persisted shape of legacy environments stable. The business
     // layer treats an omitted value as `account`, but migration must not rewrite
     // every existing environment just because a new optional preference exists.
@@ -129,6 +132,21 @@ function validateEnvState(name, value) {
         envState.gateway = value.gateway;
     }
     return envState;
+}
+function validateSystemAuthSlot(envName, value) {
+    if (!isRecord(value)) {
+        throw createStoreError("INVALID_STATE", `Env '${envName}' systemAuth must be an object`);
+    }
+    if (value.authMode !== "auth" && value.authMode !== "apikey") {
+        throw createStoreError("INVALID_STATE", `Env '${envName}' systemAuth has invalid authMode`);
+    }
+    const slot = {
+        authMode: value.authMode,
+        runtime: validateRuntimeSettings(`${envName}/system`, value.runtime),
+    };
+    if (isAuthDataRecord(value.authData))
+        slot.authData = value.authData;
+    return slot;
 }
 function validateAccountState(name, value) {
     if (!isRecord(value)) {

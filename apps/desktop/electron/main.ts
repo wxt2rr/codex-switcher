@@ -78,6 +78,8 @@ import {
   getEnvironmentRoutePreviews,
   getEnvironmentRemoteStatuses,
   setEnvironmentRemoteAccount,
+  configureSystemAuth,
+  clearSystemAuth,
   setEnvironmentModelIdentityMode,
   getCodexToolPaths,
   getCliAutoResumeSettings,
@@ -831,6 +833,8 @@ function registerHandlers() {
   ipcMain.handle("desktop:getEnvironmentRemoteStatuses", () => getEnvironmentRemoteStatuses());
   ipcMain.handle("desktop:setEnvironmentRemoteAccount", (_event: IpcMainInvokeEvent, envName: string, accountName?: string) =>
     setEnvironmentRemoteAccount(envName, accountName));
+  ipcMain.handle("desktop:configureSystemAuth", (_event: IpcMainInvokeEvent, input) => configureSystemAuth(input));
+  ipcMain.handle("desktop:clearSystemAuth", (_event: IpcMainInvokeEvent, envName: string) => clearSystemAuth(envName));
   ipcMain.handle("desktop:setEnvironmentModelIdentityMode", (_event: IpcMainInvokeEvent, envName: string, mode: "account" | "unified") =>
     setEnvironmentModelIdentityMode(envName, mode));
   ipcMain.handle("desktop:toggleEnvironmentRoute", (_event: IpcMainInvokeEvent, envName: string, enabled: boolean) =>

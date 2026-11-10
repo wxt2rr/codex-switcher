@@ -669,6 +669,8 @@ export interface DesktopElectronApi {
   toggleEnvironmentLocalAgentAccess(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
   getEnvironmentRemoteStatuses(): Promise<EnvironmentRemoteStatus[]>;
   setEnvironmentRemoteAccount(envName: string, accountName?: string): Promise<EnvironmentRemoteStatus>;
+  configureSystemAuth?(input: { envName: string; mode: "auth" | "apikey"; apiKey?: string; baseUrlMode?: "default" | "custom"; baseUrl?: string }): Promise<DesktopActionResult>;
+  clearSystemAuth?(envName: string): Promise<DesktopActionResult>;
   listClaudeCodeSources(): Promise<ClaudeCodeSourceSummary[]>;
   getClaudeCodeConnection(): Promise<ClaudeCodeConnectionState>;
   connectClaudeCode(input: { sourceId: string; modelId?: string; cleanupAuthorization?: boolean }): Promise<ClaudeCodeConnectionState>;
@@ -832,6 +834,8 @@ export interface DesktopBridge {
   toggleEnvironmentLocalAgentAccess(envName: string, enabled: boolean): Promise<EnvironmentRouteStatus>;
   getEnvironmentRemoteStatuses(): Promise<EnvironmentRemoteStatus[]>;
   setEnvironmentRemoteAccount(envName: string, accountName?: string): Promise<EnvironmentRemoteStatus>;
+  configureSystemAuth(input: { envName: string; mode: "auth" | "apikey"; apiKey?: string; baseUrlMode?: "default" | "custom"; baseUrl?: string }): Promise<DesktopActionResult>;
+  clearSystemAuth(envName: string): Promise<DesktopActionResult>;
   listClaudeCodeSources(): Promise<ClaudeCodeSourceSummary[]>;
   getClaudeCodeConnection(): Promise<ClaudeCodeConnectionState>;
   connectClaudeCode(input: { sourceId: string; modelId?: string; cleanupAuthorization?: boolean }): Promise<ClaudeCodeConnectionState>;
@@ -991,6 +995,8 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       toggleEnvironmentLocalAgentAccess: unavailable,
       getEnvironmentRemoteStatuses: unavailable,
       setEnvironmentRemoteAccount: unavailable,
+      configureSystemAuth: unavailable,
+      clearSystemAuth: unavailable,
       listClaudeCodeSources: unavailable,
       getClaudeCodeConnection: unavailable,
       connectClaudeCode: unavailable,
@@ -1059,6 +1065,8 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
     onResetCardOperation: api.onResetCardOperation ?? (() => () => undefined),
     onResetCardNotification: api.onResetCardNotification ?? (() => () => undefined),
     onResetCardNotificationClick: api.onResetCardNotificationClick ?? (() => () => undefined),
+    configureSystemAuth: api.configureSystemAuth ?? (async () => browserPreviewAction()),
+    clearSystemAuth: api.clearSystemAuth ?? (async () => browserPreviewAction()),
     loadProviderPluginDiagnostics: api.loadProviderPluginDiagnostics ?? (async () => []),
     loadProviderPluginSettings: api.loadProviderPluginSettings ?? (async (id) => ({ pluginId: id, values: {}, secretKeys: [] })),
     saveProviderPluginSettings: api.saveProviderPluginSettings ?? (async (id, values) => ({ pluginId: id, values, secretKeys: [] })),
@@ -1329,6 +1337,8 @@ function createBrowserPreviewBridge(): DesktopBridge {
       ...(accountName ? { remoteAccountName: accountName } : {}),
       modelServiceLabel: "官方账号",
     }),
+    configureSystemAuth: async () => browserPreviewAction(),
+    clearSystemAuth: async () => browserPreviewAction(),
     listClaudeCodeSources: async () => [{
       id: "environment:wangxt",
       kind: "environment_gateway",

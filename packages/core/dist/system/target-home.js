@@ -9,6 +9,7 @@ export const MANAGED_PROVIDER_ID = "codex_switcher_router";
  * placeholder and is never used as a credential.
  */
 const MANAGED_PROVIDER_PLACEHOLDER_TOKEN = "codex-switcher-placeholder";
+const SYSTEM_SLOT_ACCOUNT_NAME = "default";
 export async function repairLegacyTargetHomeConfigs(options) {
     const result = {
         checked: 0,
@@ -55,11 +56,12 @@ export async function applyTargetHomeState(options) {
     const pointer = options.state.targets[options.target];
     const env = options.state.envs[pointer.env];
     const account = env?.accounts[pointer.account];
+    const systemSlot = pointer.account === SYSTEM_SLOT_ACCOUNT_NAME ? env?.systemAuth : undefined;
     if (!env) {
         throw new Error(`Cannot apply target home state for ${options.target}`);
     }
     await mkdir(env.path, { recursive: true });
-    if (!account) {
+    if (!account && !systemSlot) {
         await clearTargetHomeState(env.path);
         return;
     }
@@ -69,12 +71,22 @@ export async function applyTargetHomeState(options) {
     const remoteAccount = env.remoteControl?.accountName
         ? env.accounts[env.remoteControl.accountName]
         : undefined;
-    const remoteAuthData = remoteAccount?.authMode === "auth" && remoteAccount.authData
-        ? remoteAccount.authData
-        : undefined;
+    const remoteAuthData = env.systemAuth?.authMode === "auth" && env.systemAuth.authData
+        ? env.systemAuth.authData
+        : remoteAccount?.authMode === "auth" && remoteAccount.authData
+            ? remoteAccount.authData
+            : undefined;
+    // The system slot owns the target home when the default pointer is active.
+    // Do not preserve a stale auth.json from a previous ordinary account in that
+    // case: both official Auth and API Key must be projected from the slot.
+    const authProjection = options.authProjection === "clear"
+        ? "clear"
+        : systemSlot
+            ? "selected"
+            : options.authProjection ?? "selected";
     const targetRuntime = options.gatewayBaseUrl
         ? {
-            ...account.runtime,
+            ...(account?.runtime ?? systemSlot.runtime),
             // A gateway can route an API-key account while the host remains
             // signed in with the environment's AUTH account for remote control.
             // Keep the Codex-facing auth mode aligned with that remote identity;
@@ -89,7 +101,7 @@ export async function applyTargetHomeState(options) {
             // gateway is selected, project the gateway ingress instead.
             compatibilityRouteEnabled: false,
         }
-        : account.runtime;
+        : account?.runtime ?? systemSlot.runtime;
     // A direct Codex home has one auth.json. When the environment uses an
     // official account for remote control, a different AUTH account cannot also
     // be projected as the model identity without silently replacing that
@@ -99,7 +111,7 @@ export async function applyTargetHomeState(options) {
     // inside the gateway and the home can keep the remote account's auth.json.
     if (!options.gatewayBaseUrl
         && remoteAuthData
-        && account.authMode === "auth"
+        && account?.authMode === "auth"
         && env.remoteControl?.accountName
         && env.remoteControl.accountName !== account.name) {
         throw new Error(`Environment '${env.name}' uses '${env.remoteControl.accountName}' for remote control; split AUTH accounts into separate environments or enable the environment gateway`);
@@ -109,17 +121,17 @@ export async function applyTargetHomeState(options) {
     if (compatibilityRouteActive &&
         (!targetRuntime.compatibilityRouteBaseUrl ||
             !targetRuntime.compatibilityRouteToken)) {
-        throw new Error(`Compatibility route for '${account.name}' is incomplete`);
+        throw new Error(`Compatibility route for '${pointer.account}' is incomplete`);
     }
     const selectedAuthData = compatibilityRouteActive
         ? { OPENAI_API_KEY: targetRuntime.compatibilityRouteToken }
-        : account.authData;
-    const existingAuthData = options.authProjection === "preserve"
+        : account?.authData ?? systemSlot?.authData;
+    const existingAuthData = authProjection === "preserve"
         ? await readAuthData(join(env.path, "auth.json"))
         : undefined;
-    const projectedAuthData = options.authProjection === "preserve"
+    const projectedAuthData = authProjection === "preserve"
         ? existingAuthData
-        : options.authProjection === "clear"
+        : authProjection === "clear"
             ? undefined
             : selectedAuthData;
     const targetAuthData = remoteAuthData ?? projectedAuthData;

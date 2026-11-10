@@ -41,12 +41,14 @@ import type {
   GatewayRouteGroupDefinition,
   GatewayProtocol,
 } from "../../../packages/core/dist/gateway/model.js";
+import type { AuthDataRecord } from "../../../packages/core/dist/state/store.js";
 import type {
   ClaudeCodeAuthorizationInspection,
   ClaudeCodeConnectionState,
   ClaudeCodeModelOption,
   EnvironmentModelIdentityMode,
   EnvironmentRemoteStatus,
+  SystemAuthSummary,
   EnvironmentRoutePreview,
   EnvironmentRoutePreviewModel,
   EnvironmentRoutePreviewRoute,
@@ -888,6 +890,106 @@ export async function setEnvironmentRemoteAccount(
   return buildEnvironmentRemoteStatus(nextState, envName, routeStatuses);
 }
 
+/** Configure the environment-owned system slot. Unlike an ordinary account,
+ * this identity is never copied, listed in the account pool, or synchronized
+ * by auth-identity matching. */
+export async function configureSystemAuth(request: {
+  envName: string;
+  mode: "auth" | "apikey";
+  apiKey?: string;
+  baseUrlMode?: "default" | "custom";
+  baseUrl?: string;
+}): Promise<DesktopActionResult> {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  const environment = state.envs[request.envName];
+  if (!environment) throw new Error(`Environment '${request.envName}' not found`);
+  if (request.mode !== "auth" && request.mode !== "apikey") {
+    throw new Error("System authorization mode must be official Auth or API Key");
+  }
+
+  if (request.mode === "auth") {
+    const codexBin = await requireCodexCliPath();
+    const tempHome = await mkdtemp(join(tmpdir(), "codex-switcher-system-auth-"));
+    try {
+      await execFileAsync(codexBin, ["login"], {
+        cwd: getRepoRoot(),
+        env: {
+          ...await getEffectiveCodexEnv(),
+          CODEX_HOME: tempHome,
+        },
+      });
+      const authRaw = await readFile(join(tempHome, "auth.json"), "utf8");
+      const authData = parseAuthJsonRecord(authRaw);
+      if (!authData) throw new Error("Codex login did not produce a valid auth.json");
+      await runtime.writeLegacySystemAuthRuntime({
+        stateDir: getStateDir(),
+        envName: request.envName,
+        runtime: {
+          preferredAuthMethod: "chatgpt",
+          openaiBaseUrlMode: "default",
+          apiProtocol: "responses",
+        },
+      });
+      await runtime.writeLegacySystemAuthData({
+        stateDir: getStateDir(),
+        envName: request.envName,
+        authData: authData as AuthDataRecord,
+      });
+    } finally {
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  } else {
+    const apiKey = request.apiKey?.trim();
+    if (!apiKey) throw new Error("API key is required");
+    const baseUrl = request.baseUrl?.trim() || undefined;
+    if (request.baseUrlMode === "custom" && !baseUrl) {
+      throw new Error("Base URL is required when custom mode is selected");
+    }
+    const custom = request.baseUrlMode === "custom" && Boolean(baseUrl);
+    await runtime.writeLegacySystemAuthRuntime({
+      stateDir: getStateDir(),
+      envName: request.envName,
+      runtime: {
+        preferredAuthMethod: "apikey",
+        openaiBaseUrlMode: custom ? "custom" : "default",
+        ...(custom ? { openaiBaseUrl: baseUrl } : {}),
+        apiProtocol: "responses",
+      },
+    });
+    await runtime.writeLegacySystemAuthData({
+      stateDir: getStateDir(),
+      envName: request.envName,
+      // Codex App versions that inspect the auth shape expect this field to
+      // exist. The Switcher router never uses it as a credential; the API key
+      // remains the only model credential for this slot.
+      authData: {
+        OPENAI_API_KEY: apiKey,
+        experimental_bearer_token: "codex-switcher-system-slot",
+      },
+    });
+  }
+
+  const nextState = await runtime.readLegacyState(getLegacyOptions());
+  await reapplyEnvironmentTargetHomes(runtime, nextState, request.envName, "switch-cli");
+  return {
+    message: request.mode === "auth"
+      ? `Bound official Auth for ${request.envName}`
+      : `Saved system API key for ${request.envName}`,
+    output: `${request.envName}/system ${request.mode}\n`,
+  };
+}
+
+export async function clearSystemAuth(envName: string): Promise<DesktopActionResult> {
+  const runtime = await loadCoreRuntime();
+  const state = await runtime.readLegacyState(getLegacyOptions());
+  if (!state.envs[envName]) throw new Error(`Environment '${envName}' not found`);
+  await runtime.clearLegacySystemAuth({ stateDir: getStateDir(), envName });
+  const nextState = await runtime.readLegacyState(getLegacyOptions());
+  await reapplyEnvironmentTargetHomes(runtime, nextState, envName, "switch-cli");
+  return { message: `Unbound system authorization for ${envName}` };
+}
+
 function buildEnvironmentRemoteStatus(
   state: Awaited<ReturnType<CoreRuntime["readLegacyState"]>>,
   envName: string,
@@ -897,17 +999,19 @@ function buildEnvironmentRemoteStatus(
   if (!environment) throw new Error(`Environment '${envName}' not found`);
   const remoteAccountName = environment.remoteControl?.accountName;
   const remoteAccount = remoteAccountName ? environment.accounts[remoteAccountName] : undefined;
+  const systemAuthBound = environment.systemAuth?.authMode === "auth" && Boolean(environment.systemAuth.authData);
   const hasOfficialAccount = Object.values(environment.accounts).some((account) => (
     account.authMode === "auth" && Boolean(account.authData)
   ));
   // Official pairing happens in ChatGPT desktop settings and cannot be
   // verified by Switcher. A valid account therefore means pairing is still
   // required; never present it as an active mobile connection here.
-  const status: EnvironmentRemoteStatus["status"] = remoteAccountName
-    ? remoteAccount?.authMode === "auth" && remoteAccount.authData
-      ? "needs_pairing"
-      : "needs_login"
-    : hasOfficialAccount ? "needs_account" : "unavailable";
+  const status: EnvironmentRemoteStatus["status"] = systemAuthBound
+    || (remoteAccount?.authMode === "auth" && Boolean(remoteAccount.authData))
+    ? "needs_pairing"
+    : remoteAccountName
+      ? "needs_login"
+      : hasOfficialAccount ? "needs_account" : "unavailable";
 
   const target = state.targets.app.env === envName
     ? state.targets.app
@@ -933,6 +1037,7 @@ function buildEnvironmentRemoteStatus(
     status,
     ...(remoteAccountName ? { remoteAccountName } : {}),
     ...(remoteAccount ? { remoteAccountEmail: readAccountEmail(remoteAccount.authData) } : {}),
+    ...(systemAuthBound ? { systemAuthBound: true, systemAuthEmail: readAccountEmail(environment.systemAuth?.authData) } : {}),
     modelServiceLabel,
     ...(modelAccountName ? { modelAccountName } : {}),
   };
@@ -3149,6 +3254,7 @@ export async function loadOverview(): Promise<string> {
     getState: () => state,
   });
   const overview = api.getOverview() as {
+    envs: Array<{ name: string }>;
     accounts: OverviewAccountRecord[];
     status: {
       cli: Record<string, unknown>;
@@ -3207,7 +3313,23 @@ export async function loadOverview(): Promise<string> {
     };
   }));
 
-  return `${JSON.stringify({ ...overview, accounts }, null, 2)}\n`;
+  const envs = overview.envs.map((summary) => {
+    const systemAuth = state.envs[summary.name]?.systemAuth;
+    const apiKey = readAuthStringField(systemAuth?.authData, "OPENAI_API_KEY");
+    const authMode = systemAuth?.authMode === "apikey" ? "apikey" : "auth";
+    const bound = Boolean(systemAuth?.authData && (
+      authMode === "auth" || apiKey
+    ));
+    const systemAuthSummary: SystemAuthSummary = {
+      status: bound ? "bound" : "unbound",
+      authMode,
+      ...(apiKey ? { apiKeyPreview: maskApiKey(apiKey) } : {}),
+      ...(systemAuth?.runtime.openaiBaseUrl ? { baseUrl: systemAuth.runtime.openaiBaseUrl } : {}),
+    };
+    return { ...summary, systemAuth: systemAuthSummary };
+  });
+
+  return `${JSON.stringify({ ...overview, envs, accounts }, null, 2)}\n`;
 }
 
 export async function repairLegacyEnvironmentConfigs() {
@@ -3583,6 +3705,7 @@ export async function createEnv(request: {
   } catch (error) {
     await rm(join(getEnvsDir(), request.envName), { recursive: true, force: true });
     await rm(join(getStateDir(), "env-accounts", request.envName), { recursive: true, force: true });
+    await rm(join(getStateDir(), "env-system-auth", request.envName), { recursive: true, force: true });
     throw error;
   }
 
@@ -5305,9 +5428,16 @@ async function openCommandInPreferredTerminalOnce(
   const launchState = await launchRuntime.readLegacyState(getLegacyOptions());
   const launchPointer = launchState.targets.cli;
   const launchAccount = launchState.envs[launchPointer.env]?.accounts[launchPointer.account];
+  const launchSystemSlot = launchPointer.account === "default"
+    ? launchState.envs[launchPointer.env]?.systemAuth
+    : undefined;
+  const launchSystemAuthPath = join(getStateDir(), "env-system-auth", launchPointer.env, "auth.json");
+  const launchLegacySystemAuthPath = join(getStateDir(), "env-accounts", launchPointer.env, "default", "auth.json");
   const apiKeySourcePath = launchAccount?.authData && readAuthStringField(launchAccount.authData, "OPENAI_API_KEY")
     ? join(getStateDir(), "env-accounts", launchPointer.env, launchPointer.account, "auth.json")
-    : undefined;
+    : launchSystemSlot?.authMode === "apikey" && readAuthStringField(launchSystemSlot.authData, "OPENAI_API_KEY")
+      ? existsSync(launchSystemAuthPath) ? launchSystemAuthPath : launchLegacySystemAuthPath
+      : undefined;
   const launchDirectory = strategy === "current-window"
     ? undefined
     : await resolveCliWorkingDirectory(workingDirectory);
@@ -6021,6 +6151,9 @@ async function nativeAuthLogin(request: {
   if (!env) {
     throw new Error(`Env '${request.envName}' not found`);
   }
+  if (request.envName === "default" && request.account.trim() === "default") {
+    throw new Error("The reserved default slot belongs to system authorization; choose another account name");
+  }
   assertDirectRemoteIdentityCompatibility(state, request.envName, request.account);
 
   await mkdir(env.path, { recursive: true });
@@ -6223,6 +6356,9 @@ async function saveAccountArtifacts(options: {
   target: "cli" | "app" | "both" | "none";
   authProjection?: "selected" | "preserve" | "clear";
 }): Promise<void> {
+  if (options.envName === "default" && options.account.trim() === "default") {
+    throw new Error("The reserved default slot belongs to system authorization; choose another account name");
+  }
   const runtime = await loadCoreRuntime();
   let state = await runtime.readLegacyState(getLegacyOptions());
   const env = state.envs[options.envName];
@@ -7058,6 +7194,10 @@ async function removeEnvDirect(runtime: CoreRuntime, envName: string): Promise<v
     recursive: true,
     force: true,
   });
+  await rm(join(getStateDir(), "env-system-auth", envName), {
+    recursive: true,
+    force: true,
+  });
   await removeAppWindowCount(getCodexToolPathOptions().settingsPath, envName);
   await syncTargetsDirect(runtime, next, ["cli", "app"]);
 }
@@ -7081,6 +7221,7 @@ async function importDefaultEnvDirect(
     }
     await rm(join(getEnvsDir(), envName), { recursive: true, force: true });
     await rm(join(getStateDir(), "env-accounts", envName), { recursive: true, force: true });
+    await rm(join(getStateDir(), "env-system-auth", envName), { recursive: true, force: true });
   }
 
   await runtime.createLegacyEnv({
@@ -7092,12 +7233,24 @@ async function importDefaultEnvDirect(
     return;
   }
 
-  const defaultAccount = state.envs.default?.accounts.default;
-  const defaultAuthPath = join(getStateDir(), "env-accounts", "default", "default", "auth.json");
+  const defaultAccount = state.envs.default?.systemAuth;
+  const defaultAuthPaths = [
+    join(getStateDir(), "env-system-auth", "default", "auth.json"),
+    join(getStateDir(), "env-accounts", "default", "default", "auth.json"),
+  ];
   const targetAccountDir = join(getStateDir(), "env-accounts", envName, "default");
 
   try {
-    const authRaw = await readFile(defaultAuthPath, "utf8");
+    let authRaw: string | undefined;
+    for (const authPath of defaultAuthPaths) {
+      try {
+        authRaw = await readFile(authPath, "utf8");
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
+      }
+    }
+    if (!authRaw) return;
     await mkdir(targetAccountDir, { recursive: true });
     await writeFile(join(targetAccountDir, "auth.json"), authRaw, "utf8");
     await runtime.writeLegacyRuntime({
@@ -8154,9 +8307,13 @@ async function launchAppTargetUnlocked(
   });
   const support = await loadCoreSupportModules();
   const account = state.envs[state.targets.app.env]?.accounts[state.targets.app.account];
+  const systemSlot = state.targets.app.account === "default"
+    ? state.envs[state.targets.app.env]?.systemAuth
+    : undefined;
   const apiKey = account?.runtime.apiProtocol === "chat_completions" && account.runtime.compatibilityRouteEnabled
     ? account.runtime.compatibilityRouteToken
-    : readAuthStringField(account?.authData, "OPENAI_API_KEY");
+    : readAuthStringField(account?.authData, "OPENAI_API_KEY")
+      ?? (systemSlot?.authMode === "apikey" ? readAuthStringField(systemSlot.authData, "OPENAI_API_KEY") : undefined);
   const effectiveEnv: NodeJS.ProcessEnv = {
     ...await getEffectiveCodexEnv(),
     ...(apiKey ? { OPENAI_API_KEY: apiKey } : {}),

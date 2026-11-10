@@ -1625,6 +1625,7 @@ export function App() {
           resetCardSettings={resetCardSettings}
           onSetResetCardAccountAutoUse={(accountKey, value) => bridge.setResetCardAccountAutoUse(accountKey, value).then(setResetCardSettings)}
           onSuccess={setSuccessMessage}
+          onRefreshOverview={async () => { await refreshOverview({ loadMetrics: true }); }}
           onAppRefreshRequired={requestModelCatalogRefresh}
           onError={setErrorMessage}
         />

@@ -40,7 +40,7 @@ import {
   SidePanel,
 } from "../components/admin-primitives";
 import { Field, Input, Select, Textarea } from "../components/form-primitives";
-import type { AccountRequestHealth, AccountSummary, EnvironmentRouteStatus, OverviewPayload } from "../desktop-model";
+import type { AccountRequestHealth, AccountSummary, EnvironmentRouteStatus, OverviewPayload, EnvSummary } from "../desktop-model";
 import type { ResetCardPendingAction, ResetCardSettings, ResetCardSnapshot } from "../reset-card-model";
 import { providerIconUrls } from "../components/provider-icon";
 import { AccountModelExposurePanel } from "../components/account-model-exposure-panel";
@@ -161,6 +161,145 @@ function isSubscriptionResetCardAccount(account: AccountSummary): boolean {
   return !providerId || ["openai", "chatgpt", "chatgpt-subscription", "codex-subscription"].includes(providerId);
 }
 
+function SystemAuthCard({
+  environment,
+  language,
+  bridge,
+  busy,
+  onRefresh,
+  onSuccess,
+  onError,
+}: {
+  environment: EnvSummary;
+  language: UiLanguage;
+  bridge: DesktopBridge;
+  busy: boolean;
+  onRefresh: () => Promise<void>;
+  onSuccess: (message: string) => void;
+  onError: (error: unknown) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"auth" | "apikey">(environment.systemAuth?.authMode ?? "auth");
+  const [apiKey, setApiKey] = useState("");
+  const [baseUrlMode, setBaseUrlMode] = useState<"default" | "custom">("default");
+  const [baseUrl, setBaseUrl] = useState(environment.systemAuth?.baseUrl ?? "");
+  const [saving, setSaving] = useState(false);
+  const bound = environment.systemAuth?.status === "bound";
+
+  useEffect(() => {
+    if (!open) return;
+    setMode(environment.systemAuth?.authMode ?? "auth");
+    setBaseUrl(environment.systemAuth?.baseUrl ?? "");
+    setBaseUrlMode(environment.systemAuth?.baseUrl ? "custom" : "default");
+    setApiKey("");
+  }, [environment.systemAuth?.authMode, environment.systemAuth?.baseUrl, open]);
+
+  async function submit() {
+    setSaving(true);
+    try {
+      await bridge.configureSystemAuth({
+        envName: environment.name,
+        mode,
+        ...(mode === "apikey" ? { apiKey, baseUrlMode, baseUrl } : {}),
+      });
+      setOpen(false);
+      onSuccess(language === "zh" ? "系统授权已更新" : language === "ja" ? "システム認証を更新しました" : "System authorization updated");
+      await onRefresh();
+    } catch (error) {
+      onError(error);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function unbind() {
+    setSaving(true);
+    try {
+      await bridge.clearSystemAuth(environment.name);
+      onSuccess(language === "zh" ? "系统授权已取消绑定" : language === "ja" ? "システム認証のバインドを解除しました" : "System authorization unbound");
+      await onRefresh();
+    } catch (error) {
+      onError(error);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="rounded-[18px] bg-white px-4 py-3.5 ring-1 ring-black/[0.04] shadow-[0_10px_30px_rgba(15,23,42,0.03)]">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="truncate text-[14px] font-semibold text-foreground">{language === "zh" ? "系统授权" : language === "ja" ? "システム認証" : "System authorization"}</span>
+              <span className="rounded-full bg-[#f3f4f6] px-2 py-0.5 text-[11px] text-muted-foreground">{environment.name}</span>
+            </div>
+            <div className="mt-1 text-[12px] text-muted-foreground">
+              {bound
+                ? environment.systemAuth?.authMode === "apikey"
+                  ? `API Key${environment.systemAuth.baseUrl ? ` · ${environment.systemAuth.baseUrl}` : ""}`
+                  : language === "zh" ? "官方 Auth · 已绑定" : language === "ja" ? "公式 Auth · バインド済み" : "Official Auth · Bound"
+                : language === "zh" ? "未绑定" : language === "ja" ? "未バインド" : "Unbound"}
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {bound ? (
+              <Button type="button" variant="ghost" className="h-8 rounded-lg px-2.5 text-[12px] text-muted-foreground" onClick={() => void unbind()} disabled={busy || saving}>
+                {language === "zh" ? "取消绑定" : language === "ja" ? "解除" : "Unbind"}
+              </Button>
+            ) : null}
+            <Button type="button" variant="secondary" className="h-8 rounded-lg px-3 text-[12px]" onClick={() => setOpen(true)} disabled={busy || saving}>
+              {bound ? (language === "zh" ? "重新配置" : language === "ja" ? "再設定" : "Configure") : (language === "zh" ? "配置" : language === "ja" ? "設定" : "Configure")}
+            </Button>
+          </div>
+        </div>
+      </div>
+      <SidePanel
+        open={open}
+        title={language === "zh" ? `系统授权 · ${environment.name}` : language === "ja" ? `システム認証 · ${environment.name}` : `System authorization · ${environment.name}`}
+        onClose={() => setOpen(false)}
+        closeLabel={language === "zh" ? "关闭" : language === "ja" ? "閉じる" : "Close"}
+      >
+        <div className="space-y-4">
+          <Field label={language === "zh" ? "认证方式" : language === "ja" ? "認証方式" : "Authentication"}>
+            <Select
+              value={mode}
+              onValueChange={(value) => setMode(value as "auth" | "apikey")}
+              openOnHover={false}
+              items={[
+                { value: "auth", label: language === "zh" ? "官方 Auth" : "Official Auth" },
+                { value: "apikey", label: "API Key" },
+              ]}
+            />
+          </Field>
+          {mode === "apikey" ? (
+            <>
+              <Field label="API Key">
+                <Input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-..." autoComplete="off" />
+              </Field>
+              <Field label="Base URL">
+                <Select
+                  value={baseUrlMode}
+                  onValueChange={(value) => setBaseUrlMode(value as "default" | "custom")}
+                  openOnHover={false}
+                  items={[
+                    { value: "default", label: language === "zh" ? "官方默认" : "Default" },
+                    { value: "custom", label: language === "zh" ? "自定义" : "Custom" },
+                  ]}
+                />
+              </Field>
+              {baseUrlMode === "custom" ? <Input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" /> : null}
+            </>
+          ) : null}
+          <Button type="button" className="w-full" onClick={() => void submit()} disabled={saving || (mode === "apikey" && !apiKey.trim())}>
+            {saving ? (language === "zh" ? "处理中…" : "Saving…") : language === "zh" ? "保存" : language === "ja" ? "保存" : "Save"}
+          </Button>
+        </div>
+      </SidePanel>
+    </>
+  );
+}
+
 function readDefaultAccountEnvironment(): string {
   if (typeof window === "undefined") return "default";
   return window.localStorage.getItem(DEFAULT_ACCOUNT_ENVIRONMENT_KEY)?.trim() || "default";
@@ -237,6 +376,7 @@ export function AccountsPage({
   onCancelResetCard,
   focusedResetCardAccountKey,
   onSuccess,
+  onRefreshOverview,
   onAppRefreshRequired,
   onError,
 }: {
@@ -305,6 +445,7 @@ export function AccountsPage({
   onCancelResetCard: (accountKey: string, actionId: string) => Promise<unknown>;
   focusedResetCardAccountKey?: string;
   onSuccess: (message: string) => void;
+  onRefreshOverview: () => Promise<void>;
   onAppRefreshRequired: (request: ModelCatalogAppRefreshRequirement) => void;
   onError: (error: unknown) => void;
 }) {
@@ -754,6 +895,23 @@ export function AccountsPage({
               </Button>
             </div>
           </div>
+        </div>
+
+        <div className="shrink-0 space-y-2">
+          {overview.envs
+            .filter((environment) => envFilter === "all" || environment.name === envFilter)
+            .map((environment) => (
+              <SystemAuthCard
+                key={`system-auth-${environment.name}`}
+                environment={environment}
+                language={language}
+                bridge={bridge}
+                busy={busy}
+                onRefresh={onRefreshOverview}
+                onSuccess={onSuccess}
+                onError={onError}
+              />
+            ))}
         </div>
 
         <div className="relative min-h-0 flex-1">
