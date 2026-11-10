@@ -900,6 +900,9 @@ export async function configureSystemAuth(request: {
   baseUrlMode?: "default" | "custom";
   baseUrl?: string;
 }): Promise<DesktopActionResult> {
+  if (request.envName !== "default") {
+    throw new Error("默认账号只存在于 default 环境");
+  }
   const runtime = await loadCoreRuntime();
   const state = await runtime.readLegacyState(getLegacyOptions());
   const environment = state.envs[request.envName];
@@ -981,6 +984,9 @@ export async function configureSystemAuth(request: {
 }
 
 export async function clearSystemAuth(envName: string): Promise<DesktopActionResult> {
+  if (envName !== "default") {
+    throw new Error("默认账号只存在于 default 环境");
+  }
   const runtime = await loadCoreRuntime();
   const state = await runtime.readLegacyState(getLegacyOptions());
   if (!state.envs[envName]) throw new Error(`Environment '${envName}' not found`);
@@ -5428,7 +5434,7 @@ async function openCommandInPreferredTerminalOnce(
   const launchState = await launchRuntime.readLegacyState(getLegacyOptions());
   const launchPointer = launchState.targets.cli;
   const launchAccount = launchState.envs[launchPointer.env]?.accounts[launchPointer.account];
-  const launchSystemSlot = launchPointer.account === "default"
+  const launchSystemSlot = launchPointer.env === "default" && launchPointer.account === "default"
     ? launchState.envs[launchPointer.env]?.systemAuth
     : undefined;
   const launchSystemAuthPath = join(getStateDir(), "env-system-auth", launchPointer.env, "auth.json");
@@ -8307,7 +8313,7 @@ async function launchAppTargetUnlocked(
   });
   const support = await loadCoreSupportModules();
   const account = state.envs[state.targets.app.env]?.accounts[state.targets.app.account];
-  const systemSlot = state.targets.app.account === "default"
+  const systemSlot = state.targets.app.env === "default" && state.targets.app.account === "default"
     ? state.envs[state.targets.app.env]?.systemAuth
     : undefined;
   const apiKey = account?.runtime.apiProtocol === "chat_completions" && account.runtime.compatibilityRouteEnabled

@@ -88,6 +88,27 @@ test("legacy default slot is isolated as system auth and keeps old files recover
         await rm(root, { recursive: true, force: true });
     }
 });
+test("system auth is only available in the reserved default environment", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-switcher-system-auth-default-only-"));
+    const stateDir = join(root, ".codex-switcher");
+    const envsDir = join(root, ".codex-envs");
+    const defaultHome = join(root, ".codex");
+    try {
+        await mkdir(join(stateDir, "env-system-auth", "work"), { recursive: true });
+        await writeFile(join(stateDir, "env-system-auth", "work", "runtime.json"), JSON.stringify({
+            preferred_auth_method: "chatgpt", openai_base_url_mode: "default",
+        }), "utf8");
+        await writeFile(join(stateDir, "env-system-auth", "work", "auth.json"), JSON.stringify({ email: "legacy@example.com" }), "utf8");
+        const state = await readLegacyState({ stateDir, envsDir, defaultHome });
+        assert.equal(state.envs.work?.systemAuth, undefined);
+        await assert.rejects(writeLegacySystemAuthRuntime({ stateDir, envName: "work", runtime: {
+                preferredAuthMethod: "chatgpt", openaiBaseUrlMode: "default",
+            } }), /only available in the reserved default environment/);
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
 test("legacy environment remote account can be selected and cleared without losing other metadata", async () => {
     const root = await mkdtemp(join(tmpdir(), "codex-switcher-legacy-remote-account-"));
     const stateDir = join(root, ".codex-switcher");

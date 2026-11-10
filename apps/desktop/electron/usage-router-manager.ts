@@ -1359,6 +1359,15 @@ export class UsageRouterManager {
     if (!eligible.length) throw new Error(`Environment '${envName}' has no compatible credentials`);
     const state = await this.ensureService();
     const existing = await this.listRoutes();
+    // Account names are user data and can disappear independently from the
+    // router database. Purge routes for removed accounts before rebuilding an
+    // environment, otherwise gateway restoration later tries to write the
+    // local URL back through a missing account and aborts the whole startup.
+    const knownAccountNames = new Set(accounts.map((account) => account.accountName));
+    const staleRoutes = existing.filter((route) => (
+      route.envName === envName && route.enabled && !knownAccountNames.has(route.accountName)
+    ));
+    if (staleRoutes.length) await this.deleteRoutes(staleRoutes);
     const tokens = await this.readRouteTokens();
     const changed: Array<{ accountName: string; originalBaseUrl: string; routeId: string }> = [];
     try {

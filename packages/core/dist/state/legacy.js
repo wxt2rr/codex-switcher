@@ -69,6 +69,7 @@ export async function writeLegacyAuthData(options) {
 }
 /** Persist the environment-owned system identity separately from accounts. */
 export async function writeLegacySystemAuthRuntime(options) {
+    assertDefaultSystemAuthEnv(options.envName);
     const directory = getSystemAuthPath(options.stateDir, options.envName);
     await mkdir(directory, { recursive: true });
     await atomicWrite(join(directory, "runtime.json"), `${JSON.stringify({
@@ -82,6 +83,7 @@ export async function writeLegacySystemAuthRuntime(options) {
     }, null, 2)}\n`);
 }
 export async function writeLegacySystemAuthData(options) {
+    assertDefaultSystemAuthEnv(options.envName);
     const directory = getSystemAuthPath(options.stateDir, options.envName);
     await mkdir(directory, { recursive: true });
     await atomicWrite(join(directory, "auth.json"), `${JSON.stringify(options.authData, null, 2)}\n`);
@@ -89,6 +91,7 @@ export async function writeLegacySystemAuthData(options) {
 /** Clear the active slot without touching the legacy account directory. The
  * old directory is intentionally retained as a recoverable migration backup. */
 export async function clearLegacySystemAuth(options) {
+    assertDefaultSystemAuthEnv(options.envName);
     const directory = getSystemAuthPath(options.stateDir, options.envName);
     await mkdir(directory, { recursive: true });
     await rm(join(directory, "auth.json"), { force: true });
@@ -218,7 +221,6 @@ export async function updateLegacyEnv(options) {
     if (options.envName !== options.nextEnvName && options.nextEnvName !== DEFAULT_ENV_NAME) {
         await renameIfExists(join(options.envsDir, options.envName), join(options.envsDir, options.nextEnvName));
         await renameIfExists(join(options.stateDir, "env-accounts", options.envName), join(options.stateDir, "env-accounts", options.nextEnvName));
-        await renameIfExists(getSystemAuthPath(options.stateDir, options.envName), getSystemAuthPath(options.stateDir, options.nextEnvName));
         await renameIfExists(getEnvMetaPath(options.stateDir, options.envName), getEnvMetaPath(options.stateDir, options.nextEnvName));
         await renameIfExists(getGatewayPath(options.stateDir, options.envName), getGatewayPath(options.stateDir, options.nextEnvName));
         await renameIfExists(getGatewayV2Path(options.stateDir, options.envName), getGatewayV2Path(options.stateDir, options.nextEnvName));
@@ -279,6 +281,8 @@ async function readLegacyEnvState(envName, options) {
     };
 }
 async function readLegacySystemAuthState(stateDir, envName, accountRoot) {
+    if (envName !== DEFAULT_ENV_NAME)
+        return undefined;
     const systemRoot = getSystemAuthPath(stateDir, envName);
     const hasSystemFiles = await fileExists(join(systemRoot, "runtime.json"))
         || await fileExists(join(systemRoot, "auth.json"));
@@ -419,12 +423,11 @@ async function readAndReconcileLegacyTargets(stateDir, envs) {
         return targets;
     }
     const accounts = envs[targets.cli.env]?.accounts ?? {};
-    const cliEnvironment = envs[targets.cli.env];
     const appEnvironment = envs[targets.app.env];
     const cliAccountExists = Boolean(accounts[targets.cli.account])
-        || isSystemSlotPointer(targets.cli.env, targets.cli.account, cliEnvironment);
+        || isSystemSlotPointer(targets.cli.env, targets.cli.account);
     const appAccountExists = Boolean(appEnvironment?.accounts[targets.app.account])
-        || isSystemSlotPointer(targets.app.env, targets.app.account, appEnvironment);
+        || isSystemSlotPointer(targets.app.env, targets.app.account);
     const account = cliAccountExists && !appAccountExists
         ? targets.cli.account
         : appAccountExists && !cliAccountExists
@@ -441,12 +444,11 @@ async function readAndReconcileLegacyTargets(stateDir, envs) {
     ]);
     return targets;
 }
-function isSystemSlotPointer(envName, accountName, environment) {
-    // The reserved default environment always has a system slot, even before it
-    // has been configured. Other environments only acquire one after a system
-    // auth file has been written.
-    return accountName === DEFAULT_ACCOUNT_NAME
-        && (envName === DEFAULT_ENV_NAME || Boolean(environment?.systemAuth));
+function isSystemSlotPointer(envName, accountName) {
+    // The reserved default environment owns the only system slot. A pointer to
+    // `default` in any other environment is an old account pointer and must be
+    // reconciled instead of being treated as a valid system identity.
+    return accountName === DEFAULT_ACCOUNT_NAME && envName === DEFAULT_ENV_NAME;
 }
 async function readPointerSnapshot(stateDir, target, kind, fallback) {
     const path = join(stateDir, `current_${target}_${kind}`);
@@ -530,6 +532,11 @@ function getEnvMetaPath(stateDir, envName) {
 }
 function getSystemAuthPath(stateDir, envName) {
     return join(stateDir, "env-system-auth", envName);
+}
+function assertDefaultSystemAuthEnv(envName) {
+    if (envName !== DEFAULT_ENV_NAME) {
+        throw new Error("System authorization is only available in the reserved default environment");
+    }
 }
 function getGatewayPath(stateDir, envName) {
     return join(stateDir, "env-gateways", `${envName}.json`);

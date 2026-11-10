@@ -56,7 +56,9 @@ export async function applyTargetHomeState(options) {
     const pointer = options.state.targets[options.target];
     const env = options.state.envs[pointer.env];
     const account = env?.accounts[pointer.account];
-    const systemSlot = pointer.account === SYSTEM_SLOT_ACCOUNT_NAME ? env?.systemAuth : undefined;
+    const systemSlot = pointer.env === "default" && pointer.account === SYSTEM_SLOT_ACCOUNT_NAME
+        ? env?.systemAuth
+        : undefined;
     if (!env) {
         throw new Error(`Cannot apply target home state for ${options.target}`);
     }

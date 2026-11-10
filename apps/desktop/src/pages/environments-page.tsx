@@ -1155,7 +1155,7 @@ export function EnvironmentsPage({
             {remotePanelStatus?.systemAuthBound ? (
               <div className="flex items-center justify-between rounded-xl border border-primary/25 bg-primary/[0.05] px-3.5 py-3">
                 <div className="min-w-0">
-                  <div className="text-[13px] font-medium text-neutral-800">{language === "zh" ? "系统授权" : language === "ja" ? "システム認証" : "System authorization"}</div>
+                  <div className="text-[13px] font-medium text-neutral-800">{language === "zh" ? "默认账号" : language === "ja" ? "デフォルトアカウント" : "Default account"}</div>
                   <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{remotePanelStatus.systemAuthEmail ?? (language === "zh" ? "官方 Auth" : "Official Auth")}</div>
                 </div>
                 <SoftBadge tone="success" label={language === "zh" ? "已绑定" : language === "ja" ? "バインド済み" : "Bound"} />
@@ -1209,7 +1209,7 @@ export function EnvironmentsPage({
           ) : null}
           {remotePanelStatus?.systemAuthBound ? (
             <div className="text-center text-[11px] text-muted-foreground">
-              {language === "zh" ? "系统授权请在账号页面管理" : language === "ja" ? "システム認証はアカウント画面で管理します" : "Manage system authorization on the Accounts page"}
+              {language === "zh" ? "默认账号请在账号页面管理" : language === "ja" ? "デフォルトアカウントはアカウント画面で管理します" : "Manage the default account on the Accounts page"}
             </div>
           ) : null}
         </div>

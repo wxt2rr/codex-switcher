@@ -124,6 +124,32 @@ test("environment gateway shares one local base URL and restores all member URLs
   }
 });
 
+test("environment gateway removes routes for accounts deleted from the state", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-manager-gateway-stale-account-"));
+  let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;
+  const manager = new UsageRouterManager({
+    stateDir, serviceEntryPath: "unused",
+    launchService: async () => { service = await startUsageRouterService({ stateDir: join(stateDir, "usage-router") }); },
+  });
+  try {
+    await manager.enableEnvironment("default", [{
+      envName: "default", accountName: "default", authMode: "auth", baseUrl: "default", apiKey: "legacy-token",
+    }], async () => undefined);
+    assert.equal((await manager.listRoutes()).some((route) => route.accountName === "default"), true);
+
+    await manager.enableEnvironmentGateway("default", [{
+      envName: "default", accountName: "key", authMode: "apikey", baseUrl: "https://api.example.com/v1", apiKey: "sk-key",
+    }], async () => undefined);
+
+    const routes = await manager.listRoutes();
+    assert.equal(routes.some((route) => route.accountName === "default"), false);
+    assert.equal(routes.some((route) => route.accountName === "key"), true);
+  } finally {
+    await service?.close();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("environment gateway local Agent access toggles independently and persists its credential", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-manager-local-agent-"));
   let service: Awaited<ReturnType<typeof startUsageRouterService>> | undefined;

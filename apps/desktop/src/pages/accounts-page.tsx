@@ -203,7 +203,7 @@ function SystemAuthCard({
         ...(mode === "apikey" ? { apiKey, baseUrlMode, baseUrl } : {}),
       });
       setOpen(false);
-      onSuccess(language === "zh" ? "系统授权已更新" : language === "ja" ? "システム認証を更新しました" : "System authorization updated");
+      onSuccess(language === "zh" ? "默认账号已更新" : language === "ja" ? "デフォルトアカウントを更新しました" : "Default account updated");
       await onRefresh();
     } catch (error) {
       onError(error);
@@ -216,7 +216,7 @@ function SystemAuthCard({
     setSaving(true);
     try {
       await bridge.clearSystemAuth(environment.name);
-      onSuccess(language === "zh" ? "系统授权已取消绑定" : language === "ja" ? "システム認証のバインドを解除しました" : "System authorization unbound");
+      onSuccess(language === "zh" ? "默认账号已取消绑定" : language === "ja" ? "デフォルトアカウントのバインドを解除しました" : "Default account unbound");
       await onRefresh();
     } catch (error) {
       onError(error);
@@ -231,7 +231,7 @@ function SystemAuthCard({
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="truncate text-[14px] font-semibold text-foreground">{language === "zh" ? "系统授权" : language === "ja" ? "システム認証" : "System authorization"}</span>
+              <span className="truncate text-[14px] font-semibold text-foreground">{language === "zh" ? "默认账号" : language === "ja" ? "デフォルトアカウント" : "Default account"}</span>
               <span className="rounded-full bg-[#f3f4f6] px-2 py-0.5 text-[11px] text-muted-foreground">{environment.name}</span>
             </div>
             <div className="mt-1 text-[12px] text-muted-foreground">
@@ -256,7 +256,7 @@ function SystemAuthCard({
       </div>
       <SidePanel
         open={open}
-        title={language === "zh" ? `系统授权 · ${environment.name}` : language === "ja" ? `システム認証 · ${environment.name}` : `System authorization · ${environment.name}`}
+        title={language === "zh" ? "默认账号" : language === "ja" ? "デフォルトアカウント" : "Default account"}
         onClose={() => setOpen(false)}
         closeLabel={language === "zh" ? "关闭" : language === "ja" ? "閉じる" : "Close"}
       >
@@ -899,7 +899,7 @@ export function AccountsPage({
 
         <div className="shrink-0 space-y-2">
           {overview.envs
-            .filter((environment) => envFilter === "all" || environment.name === envFilter)
+            .filter((environment) => environment.name === "default" && (envFilter === "all" || environment.name === envFilter))
             .map((environment) => (
               <SystemAuthCard
                 key={`system-auth-${environment.name}`}
