@@ -2324,7 +2324,69 @@ async function reapplyConnectedClaudeCodeForEnvironment(envName: string): Promis
 async function reapplyConnectedClaudeCodeForProxy(): Promise<void> {
   const record = await readClaudeCodeConnection(getStateDir());
   if (!record) return;
-  await reapplyClaudeCode().catch(() => undefined);
+  const proxyConfig = buildClaudeCodeProxyConfig(await resolveUsageProxy(), {
+    clearExisting: record.proxyManaged === true,
+  });
+  if (!proxyConfig.managedValues && proxyConfig.managedClearPaths.length === 0) return;
+
+  // Proxy changes only need to update Claude Code's managed env fields. Do not
+  // re-discover the selected source here: environment sources discover their
+  // local gateway through UsageRouterManager, which would unexpectedly start
+  // a router during a harmless proxy toggle (and can leave a child process
+  // behind when this path is exercised by the desktop test runner).
+  const configPath = record.configPath && isAbsolute(record.configPath)
+    ? record.configPath
+    : resolveClaudeCodeSettingsPath(homedir());
+  const beforeConfig = await readClaudeCodeConfigContent(configPath);
+  const currentConfig = parseClaudeCodeSettingsForProxy(beforeConfig);
+  if (!currentConfig) return;
+  const readValue = (path: string): string | undefined => {
+    const value = path.split(".").filter(Boolean).reduce<unknown>((current, key) => (
+      current && typeof current === "object" ? (current as Record<string, unknown>)[key] : undefined
+    ), currentConfig);
+    return typeof value === "string" ? value : undefined;
+  };
+  const changed = [...proxyConfig.managedClearPaths].some((path) => {
+    const current = readValue(path);
+    const next = proxyConfig.managedValues?.[path];
+    return next === undefined ? current !== undefined : current !== next;
+  });
+  if (!changed) return;
+
+  const agent = await createClaudeCodeAgentAdapter(configPath);
+  await appendClaudeCodeConfigHistoryEntry({
+    stateDir: getStateDir(),
+    configPath,
+    source: "connect",
+    content: beforeConfig,
+  });
+  const snapshot = await agent.adapter.apply({
+    bindingId: CLAUDE_CODE_BINDING_ID,
+    agentId: agent.profile.id,
+    gatewayBaseUrl: readValue(agent.profile.baseUrlPath) ?? "",
+    gatewayTokenRef: readValue(agent.profile.tokenPath) ?? "",
+    protocol: "anthropic",
+    exposedModelId: readValue(agent.profile.modelPath) ?? "",
+    managedClearPaths: proxyConfig.managedClearPaths,
+    ...(proxyConfig.managedValues ? { managedValues: proxyConfig.managedValues } : {}),
+    enabled: true,
+    updatedAt: Date.now(),
+  });
+  if (snapshot.expectedContent === beforeConfig) return;
+  await writeClaudeCodeConnection(getStateDir(), {
+    ...record,
+    ...(proxyConfig.managedValues ? { proxyManaged: true } : { proxyManaged: false }),
+  });
+}
+
+function parseClaudeCodeSettingsForProxy(content: string): Record<string, unknown> | undefined {
+  if (!content.trim()) return {};
+  try {
+    const parsed = JSON.parse(content) as unknown;
+    return isRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function inspectClaudeCodeAuthorization(): Promise<ClaudeCodeAuthorizationInspection> {

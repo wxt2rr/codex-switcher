@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.104 - 2026-11-10
+
+- Fixed Claude Code proxy resynchronization so proxy changes update only the managed JSON fields without starting a local gateway as a side effect.
+
+## 0.8.20 - 2026-11-10
+
+- Fixed Claude Code proxy resynchronization so proxy changes update only the managed JSON fields without starting a local gateway as a side effect.
+
 ## 0.1.103 - 2026-11-10
 
 - Added automatic Switcher HTTP/HTTPS proxy synchronization for Claude Code, including WebFetch and Git network support.
