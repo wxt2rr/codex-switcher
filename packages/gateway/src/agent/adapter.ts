@@ -365,6 +365,7 @@ export function createAgentAdapter(profile: AgentAdapterProfile, options: AgentA
         : currentContent;
       let expectedContent = setTextValue(currentContent, profile.baseUrlPath, binding.gatewayBaseUrl, profile.format);
       for (const path of profile.clearPaths ?? []) expectedContent = removeTextValue(expectedContent, path, profile.format);
+      for (const path of binding.managedClearPaths ?? []) expectedContent = removeTextValue(expectedContent, path, profile.format);
       if (binding.exposedModelId.trim()) {
         expectedContent = setTextValue(expectedContent, profile.modelPath, binding.exposedModelId, profile.format);
         for (const path of profile.managedModelPaths ?? []) {

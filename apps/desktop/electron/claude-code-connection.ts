@@ -56,6 +56,8 @@ export interface ClaudeCodeConnectionRecord {
   configPath: string;
   snapshotBindingId: string;
   connectedAt: number;
+  /** True when the last connection applied Switcher's HTTP proxy fields. */
+  proxyManaged?: boolean;
 }
 
 export interface ClaudeCodeConnectionState {
@@ -68,6 +70,40 @@ export interface ClaudeCodeConnectionState {
   record?: ClaudeCodeConnectionRecord;
   drift?: "clean" | "missing" | "drifted" | "unwired";
   restartRequired?: boolean;
+}
+
+export const CLAUDE_CODE_PROXY_CONFIG_PATHS = [
+  "env.HTTP_PROXY",
+  "env.HTTPS_PROXY",
+  "env.NO_PROXY",
+] as const;
+
+export interface ClaudeCodeProxyConfig {
+  managedClearPaths: readonly string[];
+  managedValues?: Readonly<Record<string, string>>;
+}
+
+/**
+ * Convert Switcher's proxy state into Claude Code settings fields. Claude Code
+ * accepts HTTP(S) proxies, but not SOCKS proxies; unsupported values are
+ * deliberately omitted so they cannot make Claude Code fail at startup.
+ */
+export function buildClaudeCodeProxyConfig(
+  proxyUrl?: string,
+  options: { clearExisting?: boolean } = {},
+): ClaudeCodeProxyConfig {
+  const normalized = proxyUrl?.trim();
+  if (!normalized || !/^https?:\/\//i.test(normalized)) {
+    return { managedClearPaths: options.clearExisting ? CLAUDE_CODE_PROXY_CONFIG_PATHS : [] };
+  }
+  return {
+    managedClearPaths: CLAUDE_CODE_PROXY_CONFIG_PATHS,
+    managedValues: {
+      "env.HTTP_PROXY": normalized,
+      "env.HTTPS_PROXY": normalized,
+      "env.NO_PROXY": "localhost,127.0.0.1,::1",
+    },
+  };
 }
 
 export function claudeCodeEnvironmentSourceId(environmentName: string): string {
@@ -287,6 +323,7 @@ export async function readClaudeCodeConnection(stateDir: string): Promise<Claude
       configPath: parsed.configPath,
       snapshotBindingId: parsed.snapshotBindingId,
       connectedAt: parsed.connectedAt,
+      ...(parsed.proxyManaged === true ? { proxyManaged: true } : {}),
     };
   } catch {
     return undefined;

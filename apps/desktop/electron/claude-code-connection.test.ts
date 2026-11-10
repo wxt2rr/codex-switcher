@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  buildClaudeCodeProxyConfig,
+  CLAUDE_CODE_PROXY_CONFIG_PATHS,
   claudeCodeAccountSourceId,
   claudeCodeConfigPathChanged,
   claudeCodeEnvironmentSourceId,
@@ -19,6 +21,22 @@ import {
   stripClaudeCodeAuthToken,
   writeClaudeCodeConnection,
 } from "./claude-code-connection.js";
+
+test("Claude Code proxy settings mirror supported Switcher HTTP proxies", () => {
+  const config = buildClaudeCodeProxyConfig(" http://127.0.0.1:7899 ");
+  assert.deepEqual(config.managedClearPaths, CLAUDE_CODE_PROXY_CONFIG_PATHS);
+  assert.deepEqual(config.managedValues, {
+    "env.HTTP_PROXY": "http://127.0.0.1:7899",
+    "env.HTTPS_PROXY": "http://127.0.0.1:7899",
+    "env.NO_PROXY": "localhost,127.0.0.1,::1",
+  });
+});
+
+test("Claude Code does not write unsupported SOCKS proxy settings", () => {
+  const config = buildClaudeCodeProxyConfig("socks5://127.0.0.1:7891");
+  assert.deepEqual(config, { managedClearPaths: [] });
+  assert.deepEqual(buildClaudeCodeProxyConfig(undefined, { clearExisting: true }), { managedClearPaths: CLAUDE_CODE_PROXY_CONFIG_PATHS });
+});
 
 test("Claude Code source IDs are stable and secret previews are masked", () => {
   assert.equal(claudeCodeEnvironmentSourceId("team/prod"), "environment:team%2Fprod");
@@ -148,10 +166,12 @@ test("Claude Code connection records are persisted with restrictive permissions"
       configPath: "/tmp/.claude/settings.json",
       snapshotBindingId: "global",
       connectedAt: 123,
+      proxyManaged: true,
     });
     const restored = await readClaudeCodeConnection(stateDir);
     assert.equal(restored?.sourceId, "account:prod:primary");
     assert.equal(restored?.snapshotBindingId, "global");
+    assert.equal(restored?.proxyManaged, true);
     const connectionPath = join(stateDir, "claude-code-connection.json");
     const mode = (await stat(connectionPath)).mode & 0o777;
     if (process.platform !== "win32") assert.equal(mode, 0o600);

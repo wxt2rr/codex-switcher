@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.103 - 2026-11-10
+
+- Added automatic Switcher HTTP/HTTPS proxy synchronization for Claude Code, including WebFetch and Git network support.
+- Re-applies Claude Code proxy settings when the Switcher proxy changes and preserves user-owned settings when no Switcher proxy is active.
+
+## 0.8.19 - 2026-11-10
+
+- Added Claude Code proxy synchronization from the shared Switcher proxy configuration, with safe SOCKS handling and configuration rollback support.
+
 ## 0.1.102 - 2026-11-10
 
 - Added an environment-owned system authorization slot with independent official Auth and API Key modes.

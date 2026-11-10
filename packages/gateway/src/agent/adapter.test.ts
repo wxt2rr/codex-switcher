@@ -305,6 +305,47 @@ test("Claude Code local gateway bindings disable Auto Mode server and restore us
   }
 });
 
+test("agent bindings clear managed paths before applying updated managed values", async () => {
+  const root = await mkdtemp(join(tmpdir(), "gateway-agent-managed-clear-"));
+  try {
+    const fs = createNodeAgentFileSystem(root);
+    const profile = BUILT_IN_AGENT_PROFILES.find((item) => item.id === "claude")!;
+    await fs.write(profile.configPath, JSON.stringify({ env: {
+      HTTP_PROXY: "http://old.proxy:8080",
+      HTTPS_PROXY: "http://old.proxy:8080",
+      NO_PROXY: "localhost",
+      KEEP_ME: "yes",
+    } }, null, 2) + "\n");
+    const adapter = createAgentAdapter(profile, { fs, stateDir: ".switcher", now: () => 1 });
+    const binding = {
+      bindingId: "claude-proxy",
+      agentId: "claude" as const,
+      gatewayBaseUrl: "http://gateway.test",
+      gatewayTokenRef: "secret-ref",
+      protocol: "anthropic" as const,
+      exposedModelId: "claude-model",
+      managedClearPaths: ["env.HTTP_PROXY", "env.HTTPS_PROXY", "env.NO_PROXY"],
+      enabled: true,
+      updatedAt: 1,
+    };
+    const cleared = await adapter.apply(binding);
+    assert.doesNotMatch(cleared.expectedContent, /HTTP_PROXY|HTTPS_PROXY|NO_PROXY/);
+    assert.match(cleared.expectedContent, /KEEP_ME/);
+    await adapter.apply({ ...binding, managedValues: {
+      "env.HTTP_PROXY": "http://new.proxy:8080",
+      "env.HTTPS_PROXY": "http://new.proxy:8080",
+      "env.NO_PROXY": "localhost,127.0.0.1,::1",
+    } });
+    const applied = await fs.read(profile.configPath);
+    assert.match(applied ?? "", /http:\/\/new\.proxy:8080/);
+    assert.match(applied ?? "", /localhost,127\.0\.0\.1,::1/);
+    await adapter.restore(binding.bindingId);
+    assert.match((await fs.read(profile.configPath)) ?? "", /old\.proxy:8080/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 function fixtureFor(profile: AgentAdapterProfile): string {
   if (profile.format === "toml") return "# fixture for " + profile.id + "\nmodel = \"old-" + profile.id + "\"\nkeep = true\n";
   if (profile.format === "yaml") return "config:\n  providers:\n    codex-switcher:\n      baseURL: https://old.test\n      apiKey: old\nkeep: true\n";

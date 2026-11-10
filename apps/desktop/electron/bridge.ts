@@ -55,6 +55,7 @@ import type {
 } from "../src/desktop-model.js";
 import {
   claudeCodeAccountSourceId,
+  buildClaudeCodeProxyConfig,
   claudeCodeConfigPathChanged,
   claudeCodeEnvironmentSourceId,
   clearClaudeCodeConnection,
@@ -2319,6 +2320,13 @@ async function reapplyConnectedClaudeCodeForEnvironment(envName: string): Promis
   await reapplyClaudeCode().catch(() => undefined);
 }
 
+/** Keep an already connected Claude Code session aligned with proxy changes. */
+async function reapplyConnectedClaudeCodeForProxy(): Promise<void> {
+  const record = await readClaudeCodeConnection(getStateDir());
+  if (!record) return;
+  await reapplyClaudeCode().catch(() => undefined);
+}
+
 export async function inspectClaudeCodeAuthorization(): Promise<ClaudeCodeAuthorizationInspection> {
   const environment = { ...process.env };
   const homeDir = homedir();
@@ -2465,6 +2473,7 @@ export async function connectClaudeCode(input: { sourceId: string; modelId?: str
     throw new Error("Claude Code authorization conflict detected; confirm backup and cleanup before connecting in API-key mode.");
   }
   const modelId = input.modelId?.trim() || source.models[0]?.id;
+  const previousRecord = await readClaudeCodeConnection(getStateDir());
   const status = source.kind === "environment_gateway"
     ? (await getUsageRouterManager().getEnvironmentStatuses([source.environmentName]))[0]
     : undefined;
@@ -2473,10 +2482,22 @@ export async function connectClaudeCode(input: { sourceId: string; modelId?: str
   if (input.cleanupAuthorization) await cleanupClaudeCodeAuthorizationConflicts(authorization);
   const configPath = resolveClaudeCodeSettingsPath(homedir());
   const beforeConfig = await readClaudeCodeConfigContent(configPath);
-  const managedValues = shouldDisableClaudeAutoModeServer(source)
-    ? { "env.CLAUDE_CODE_AUTO_MODE_SERVER": "0" }
-    : undefined;
-  if (shouldBackupClaudeCodeConfig(beforeConfig, source.baseUrl ?? "", secret, modelId, managedValues)) {
+  const proxyConfig = buildClaudeCodeProxyConfig(await resolveUsageProxy(), {
+    clearExisting: previousRecord?.proxyManaged === true,
+  });
+  const managedValues = {
+    ...(shouldDisableClaudeAutoModeServer(source) ? { "env.CLAUDE_CODE_AUTO_MODE_SERVER": "0" } : {}),
+    ...(proxyConfig.managedValues ?? {}),
+  };
+  const hasManagedValues = Object.keys(managedValues).length > 0;
+  if (shouldBackupClaudeCodeConfig(
+    beforeConfig,
+    source.baseUrl ?? "",
+    secret,
+    modelId,
+    hasManagedValues ? managedValues : undefined,
+    proxyConfig.managedClearPaths,
+  )) {
     await appendClaudeCodeConfigHistoryEntry({
       stateDir: getStateDir(),
       configPath,
@@ -2492,7 +2513,8 @@ export async function connectClaudeCode(input: { sourceId: string; modelId?: str
     protocol: "anthropic",
     exposedModelId: modelId ?? "",
     ...(source.kind === "environment_gateway" && status?.gatewayId ? { routeGroupId: status.gatewayId } : {}),
-    ...(managedValues ? { managedValues } : {}),
+    managedClearPaths: proxyConfig.managedClearPaths,
+    ...(hasManagedValues ? { managedValues } : {}),
     enabled: true,
     updatedAt: Date.now(),
   });
@@ -2507,6 +2529,7 @@ export async function connectClaudeCode(input: { sourceId: string; modelId?: str
     configPath,
     snapshotBindingId: CLAUDE_CODE_BINDING_ID,
     connectedAt: Date.now(),
+    ...(proxyConfig.managedValues ? { proxyManaged: true } : {}),
   };
   await writeClaudeCodeConnection(getStateDir(), record);
   return getClaudeCodeConnection();
@@ -2630,6 +2653,7 @@ function shouldBackupClaudeCodeConfig(
   apiKey: string,
   modelId?: string,
   managedValues?: Readonly<Record<string, string>>,
+  managedClearPaths?: readonly string[],
 ): boolean {
   if (!content) return true;
   try {
@@ -2644,6 +2668,14 @@ function shouldBackupClaudeCodeConfig(
         current && typeof current === "object" ? (current as Record<string, unknown>)[key] : undefined
       ), parsed);
       if (value !== expected) return true;
+    }
+    const managedValuePaths = new Set(Object.keys(managedValues ?? {}));
+    for (const path of managedClearPaths ?? []) {
+      if (managedValuePaths.has(path)) continue;
+      const value = path.split(".").filter(Boolean).reduce<unknown>((current, key) => (
+        current && typeof current === "object" ? (current as Record<string, unknown>)[key] : undefined
+      ), parsed);
+      if (value !== undefined) return true;
     }
     return false;
   } catch {
@@ -5372,15 +5404,21 @@ export async function showProxy(): Promise<DesktopActionResult> {
 }
 
 export async function setProxy(value: string): Promise<DesktopActionResult> {
-  return (await loadDesktopOperationsService()).setProxy({ value });
+  const result = await (await loadDesktopOperationsService()).setProxy({ value });
+  await reapplyConnectedClaudeCodeForProxy();
+  return result;
 }
 
 export async function restoreProxyAutoDetect(): Promise<DesktopActionResult> {
-  return (await loadDesktopOperationsService()).restoreProxyAutoDetect();
+  const result = await (await loadDesktopOperationsService()).restoreProxyAutoDetect();
+  await reapplyConnectedClaudeCodeForProxy();
+  return result;
 }
 
 export async function disableProxy(): Promise<DesktopActionResult> {
-  return (await loadDesktopOperationsService()).disableProxy();
+  const result = await (await loadDesktopOperationsService()).disableProxy();
+  await reapplyConnectedClaudeCodeForProxy();
+  return result;
 }
 
 export async function testProxy(): Promise<DesktopActionResult> {

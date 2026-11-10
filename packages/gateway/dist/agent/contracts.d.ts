@@ -47,6 +47,8 @@ export interface AgentGatewayBinding {
     subAgentModelId?: string;
     /** Additional configuration values managed for this binding only. */
     managedValues?: Readonly<Record<string, string>>;
+    /** Configuration paths managed by this binding that should be removed before values are applied. */
+    managedClearPaths?: readonly string[];
     enabled: boolean;
     updatedAt: number;
 }
