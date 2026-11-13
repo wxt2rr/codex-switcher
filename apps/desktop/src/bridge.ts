@@ -48,7 +48,7 @@ export interface DesktopEnvFileHistoryEntry {
 export interface ClaudeCodeConfigHistoryEntry {
   id: string;
   configPath: string;
-  source: "connect" | "disconnect" | "restore" | "migration" | "authorization_cleanup";
+  source: "connect" | "disconnect" | "restore" | "migration" | "authorization_cleanup" | "manual";
   createdAt: string;
   contentPreview: string;
 }
@@ -673,7 +673,9 @@ export interface DesktopElectronApi {
   clearSystemAuth?(envName: string): Promise<DesktopActionResult>;
   listClaudeCodeSources(): Promise<ClaudeCodeSourceSummary[]>;
   getClaudeCodeConnection(): Promise<ClaudeCodeConnectionState>;
-  connectClaudeCode(input: { sourceId: string; modelId?: string; cleanupAuthorization?: boolean }): Promise<ClaudeCodeConnectionState>;
+  connectClaudeCode(input: { sourceId: string; modelId?: string; modelIds?: string[]; modelOverrides?: Record<string, string>; cleanupAuthorization?: boolean }): Promise<ClaudeCodeConnectionState>;
+  readClaudeCodeConfig(): Promise<string>;
+  updateClaudeCodeConfig(content: string): Promise<DesktopActionResult>;
   reapplyClaudeCode(): Promise<ClaudeCodeConnectionState>;
   disconnectClaudeCode(): Promise<ClaudeCodeConnectionState>;
   diagnoseClaudeCode(): Promise<ClaudeCodeConnectionState & { sources: ClaudeCodeSourceSummary[] }>;
@@ -838,7 +840,9 @@ export interface DesktopBridge {
   clearSystemAuth(envName: string): Promise<DesktopActionResult>;
   listClaudeCodeSources(): Promise<ClaudeCodeSourceSummary[]>;
   getClaudeCodeConnection(): Promise<ClaudeCodeConnectionState>;
-  connectClaudeCode(input: { sourceId: string; modelId?: string; cleanupAuthorization?: boolean }): Promise<ClaudeCodeConnectionState>;
+  connectClaudeCode(input: { sourceId: string; modelId?: string; modelIds?: string[]; modelOverrides?: Record<string, string>; cleanupAuthorization?: boolean }): Promise<ClaudeCodeConnectionState>;
+  readClaudeCodeConfig(): Promise<string>;
+  updateClaudeCodeConfig(content: string): Promise<DesktopActionResult>;
   reapplyClaudeCode(): Promise<ClaudeCodeConnectionState>;
   disconnectClaudeCode(): Promise<ClaudeCodeConnectionState>;
   diagnoseClaudeCode(): Promise<ClaudeCodeConnectionState & { sources: ClaudeCodeSourceSummary[] }>;
@@ -1000,6 +1004,8 @@ export function createDesktopBridge(api: DesktopElectronApi | undefined): Deskto
       listClaudeCodeSources: unavailable,
       getClaudeCodeConnection: unavailable,
       connectClaudeCode: unavailable,
+      readClaudeCodeConfig: unavailable,
+      updateClaudeCodeConfig: unavailable,
       reapplyClaudeCode: unavailable,
       disconnectClaudeCode: unavailable,
       diagnoseClaudeCode: unavailable,
@@ -1347,12 +1353,19 @@ function createBrowserPreviewBridge(): DesktopBridge {
       state: "ready",
       baseUrl: "http://127.0.0.1:17832/gateways/preview/v1",
       apiKeyPreview: "prev••••oken",
+      officialModels: [
+        { id: "claude-opus-4-8", displayName: "Claude Opus 4.8" },
+        { id: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6" },
+        { id: "claude-haiku-4-5", displayName: "Claude Haiku 4.5" },
+      ],
       models: [{ id: "preview-model", displayName: "Preview model" }],
       gatewayEnabled: true,
       localAgentAccessEnabled: true,
     }],
     getClaudeCodeConnection: async () => ({ connected: false, configPath: "~/.claude/settings.json" }),
     connectClaudeCode: async () => ({ connected: true, configPath: "~/.claude/settings.json", restartRequired: true }),
+    readClaudeCodeConfig: async () => "{}\n",
+    updateClaudeCodeConfig: async () => browserPreviewAction(),
     reapplyClaudeCode: async () => ({ connected: true, configPath: "~/.claude/settings.json", restartRequired: true }),
     disconnectClaudeCode: async () => ({ connected: false, configPath: "~/.claude/settings.json", restartRequired: true }),
     diagnoseClaudeCode: async () => ({ connected: false, configPath: "~/.claude/settings.json", sources: [] }),

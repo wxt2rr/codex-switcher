@@ -52,6 +52,37 @@ test("agent adapter applies, detects drift, and restores an original config", as
   }
 });
 
+test("agent adapter acknowledges an intentional edit without changing the rollback baseline", async () => {
+  const root = await mkdtemp(join(tmpdir(), "gateway-agent-acknowledge-"));
+  try {
+    const fs = createNodeAgentFileSystem(root);
+    const profile = BUILT_IN_AGENT_PROFILES.find((item) => item.id === "claude")!;
+    const adapter = createAgentAdapter(profile, { fs, stateDir: ".switcher", now: () => 123 });
+    const original = "{\n  \"keep\": true\n}\n";
+    await fs.write(profile.configPath, original);
+    await adapter.apply({
+      bindingId: "claude-global",
+      agentId: "claude",
+      gatewayBaseUrl: "http://gateway.test",
+      gatewayTokenRef: "secret-ref",
+      protocol: "anthropic",
+      exposedModelId: "claude-model",
+      enabled: true,
+      updatedAt: 123,
+    });
+    const intentional = `${(await fs.read(profile.configPath)) ?? ""}  \"pluginEdit\": true\n`;
+    await fs.write(profile.configPath, intentional);
+    assert.equal((await adapter.check("claude-global")).state, "drifted");
+    const acknowledged = await adapter.acknowledge("claude-global");
+    assert.equal(acknowledged?.expectedContent, intentional);
+    assert.equal((await adapter.check("claude-global")).state, "clean");
+    await adapter.restore("claude-global");
+    assert.equal(await fs.read(profile.configPath), original);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("agent adapter keeps the pre-wire snapshot across repeated applies", async () => {
   const root = await mkdtemp(join(tmpdir(), "gateway-agent-reapply-"));
   try {
@@ -258,6 +289,11 @@ test("Claude Code removes a conflicting auth token while preserving it for resto
       gatewayTokenRef: "local-agent-token",
       protocol: "anthropic",
       exposedModelId: "claude-model",
+      availableModelIds: ["claude-model", "claude-haiku"],
+      modelOverrides: {
+        "claude-opus-4-8": "claude-model",
+        "claude-sonnet-4-6": "claude-haiku",
+      },
       enabled: true,
       updatedAt: 1,
     });
@@ -266,9 +302,11 @@ test("Claude Code removes a conflicting auth token while preserving it for resto
     assert.doesNotMatch(snapshot.expectedContent, /CLAUDE_CODE_USE_VERTEX/);
     assert.doesNotMatch(snapshot.expectedContent, /CLAUDE_CODE_AUTO_MODE_SERVER/);
     assert.match(snapshot.expectedContent, /ANTHROPIC_API_KEY/);
-    assert.match(snapshot.expectedContent, /\"ANTHROPIC_DEFAULT_OPUS_MODEL\": \"claude-model\"/);
-    assert.match(snapshot.expectedContent, /\"ANTHROPIC_DEFAULT_SONNET_MODEL\": \"claude-model\"/);
-    assert.match(snapshot.expectedContent, /\"CLAUDE_CODE_SUBAGENT_MODEL\": \"claude-model\"/);
+    assert.match(snapshot.expectedContent, /\"model\": \"claude-model\"/);
+    assert.match(snapshot.expectedContent, /\"availableModels\": \[/);
+    assert.match(snapshot.expectedContent, /\"claude-haiku\"/);
+    assert.match(snapshot.expectedContent, /\"modelOverrides\": \{/);
+    assert.match(snapshot.expectedContent, /\"claude-opus-4-8\": \"claude-model\"/);
     assert.match(snapshot.expectedContent, /KEEP_ME/);
     await adapter.restore("claude-global");
     assert.equal(await fs.read(profile.configPath), original);

@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import { access, appendFile, chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { getUiLanguage, setUiLanguage, type UiLanguage } from "./ui-language.js";
+import { parse as parseJsonc, type ParseError } from "jsonc-parser";
 import {
   loadCoreRuntime,
   loadCoreSupportModules,
@@ -44,6 +45,7 @@ import type {
 import type { AuthDataRecord } from "../../../packages/core/dist/state/store.js";
 import type {
   ClaudeCodeAuthorizationInspection,
+  ClaudeCodeOfficialModelOption,
   ClaudeCodeConnectionState,
   ClaudeCodeModelOption,
   EnvironmentModelIdentityMode,
@@ -55,6 +57,8 @@ import type {
 } from "../src/desktop-model.js";
 import {
   claudeCodeAccountSourceId,
+  CLAUDE_CODE_DEFAULT_MODEL_ID,
+  CLAUDE_CODE_OFFICIAL_MODELS,
   buildClaudeCodeProxyConfig,
   claudeCodeConfigPathChanged,
   claudeCodeEnvironmentSourceId,
@@ -2367,6 +2371,8 @@ async function reapplyConnectedClaudeCodeForProxy(): Promise<void> {
     gatewayTokenRef: readValue(agent.profile.tokenPath) ?? "",
     protocol: "anthropic",
     exposedModelId: readValue(agent.profile.modelPath) ?? "",
+    ...(readStringArrayAtPath(currentConfig, agent.profile.availableModelsPath) ? { availableModelIds: readStringArrayAtPath(currentConfig, agent.profile.availableModelsPath) } : {}),
+    ...(readRecordAtPath(currentConfig, agent.profile.modelOverridesPath) ? { modelOverrides: readRecordAtPath(currentConfig, agent.profile.modelOverridesPath) } : {}),
     managedClearPaths: proxyConfig.managedClearPaths,
     ...(proxyConfig.managedValues ? { managedValues: proxyConfig.managedValues } : {}),
     enabled: true,
@@ -2382,11 +2388,63 @@ async function reapplyConnectedClaudeCodeForProxy(): Promise<void> {
 function parseClaudeCodeSettingsForProxy(content: string): Record<string, unknown> | undefined {
   if (!content.trim()) return {};
   try {
-    const parsed = JSON.parse(content) as unknown;
+    const parsed = parseJsonc(content) as unknown;
     return isRecord(parsed) ? parsed : undefined;
   } catch {
     return undefined;
   }
+}
+
+function readStringArrayAtPath(value: Record<string, unknown>, path: string | undefined): string[] | undefined {
+  if (!path) return undefined;
+  const current = path.split(".").filter(Boolean).reduce<unknown>((item, key) => (
+    item && typeof item === "object" ? (item as Record<string, unknown>)[key] : undefined
+  ), value);
+  if (!Array.isArray(current)) return undefined;
+  return current
+    .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    .map((item) => item.trim());
+}
+
+function readRecordAtPath(value: Record<string, unknown>, path: string | undefined): Record<string, string> | undefined {
+  if (!path) return undefined;
+  const current = path.split(".").filter(Boolean).reduce<unknown>((item, key) => (
+    item && typeof item === "object" ? (item as Record<string, unknown>)[key] : undefined
+  ), value);
+  if (!isRecord(current)) return undefined;
+  const entries = Object.entries(current)
+    .filter(([, item]) => typeof item === "string" && item.trim().length > 0)
+    .map(([key, item]) => [key.trim(), (item as string).trim()] as const)
+    .filter(([key]) => key.length > 0);
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+function normalizeClaudeCodeModelIds(modelIds: readonly string[], defaultModel?: string): string[] {
+  const normalized = Array.from(new Set(modelIds.map((model) => model.trim()).filter(Boolean)));
+  if (defaultModel?.trim() && !normalized.includes(defaultModel.trim())) normalized.unshift(defaultModel.trim());
+  return normalized;
+}
+
+function normalizeClaudeCodeConfigContent(content: string): string {
+  const trimmed = content.trim();
+  return `${trimmed ? trimmed : "{}"}\n`;
+}
+
+function sameStringArray(left: unknown, right: readonly string[]): boolean {
+  return Array.isArray(left)
+    && left.length === right.length
+    && left.every((item, index) => typeof item === "string" && item === right[index]);
+}
+
+function sameStringRecord(left: unknown, right: Readonly<Record<string, string>> | undefined): boolean {
+  if (!right) return true;
+  if (!isRecord(left)) return false;
+  const leftEntries = Object.entries(left)
+    .filter(([, value]) => typeof value === "string")
+    .map(([key, value]) => [key, value] as const);
+  const rightEntries = Object.entries(right);
+  return leftEntries.length === rightEntries.length
+    && rightEntries.every(([key, value]) => left[key] === value);
 }
 
 export async function inspectClaudeCodeAuthorization(): Promise<ClaudeCodeAuthorizationInspection> {
@@ -2466,6 +2524,7 @@ export async function listClaudeCodeSources(): Promise<ClaudeCodeSourceSummary[]
       ...(sourceState === "needs_local_agent" ? { reason: "本机 Agent 接入未开启" } : {}),
       ...(status?.localAgentBaseUrl ? { baseUrl: status.localAgentBaseUrl } : {}),
       ...(status?.localAgentAccessToken ? { apiKeyPreview: maskClaudeCodeSecret(status.localAgentAccessToken) } : {}),
+      officialModels: CLAUDE_CODE_OFFICIAL_MODELS.map((model): ClaudeCodeOfficialModelOption => ({ ...model })),
       models,
       gatewayEnabled,
       localAgentAccessEnabled,
@@ -2509,6 +2568,8 @@ export async function getClaudeCodeConnection(): Promise<ClaudeCodeConnectionSta
       ...(record.accountName ? { accountName: record.accountName } : {}),
       ...(record.gatewayId ? { gatewayId: record.gatewayId } : {}),
       ...(record.modelId ? { modelId: record.modelId } : {}),
+      ...(record.modelIds?.length ? { modelIds: record.modelIds } : {}),
+      ...(record.modelOverrides && Object.keys(record.modelOverrides).length ? { modelOverrides: record.modelOverrides } : {}),
       configPath: record.configPath,
       snapshotBindingId: record.snapshotBindingId,
       connectedAt: record.connectedAt,
@@ -2521,7 +2582,7 @@ export async function getClaudeCodeConnection(): Promise<ClaudeCodeConnectionSta
   };
 }
 
-export async function connectClaudeCode(input: { sourceId: string; modelId?: string; cleanupAuthorization?: boolean }): Promise<ClaudeCodeConnectionState> {
+export async function connectClaudeCode(input: { sourceId: string; modelId?: string; modelIds?: string[]; modelOverrides?: Record<string, string>; cleanupAuthorization?: boolean }): Promise<ClaudeCodeConnectionState> {
   const sources = await listClaudeCodeSources();
   const source = sources.find((item) => item.id === input.sourceId);
   if (!source) throw new Error(`Claude Code source '${input.sourceId}' was not found`);
@@ -2534,7 +2595,36 @@ export async function connectClaudeCode(input: { sourceId: string; modelId?: str
   if (authorization.hasConflict && !input.cleanupAuthorization) {
     throw new Error("Claude Code authorization conflict detected; confirm backup and cleanup before connecting in API-key mode.");
   }
-  const modelId = input.modelId?.trim() || source.models[0]?.id;
+  const actualModelIds = new Set(source.models.map((model) => model.id));
+  const officialModels = source.officialModels?.length ? source.officialModels : CLAUDE_CODE_OFFICIAL_MODELS;
+  const officialModelIds = officialModels.map((model) => model.id);
+  const legacyActualModelIds = normalizeClaudeCodeModelIds(
+    [input.modelId ?? "", ...(input.modelIds ?? [])].filter((model) => actualModelIds.has(model.trim())),
+  );
+  const hasLegacyRawModelSelection = !input.modelOverrides
+    && legacyActualModelIds.length > 0
+    && ([input.modelId ?? "", ...(input.modelIds ?? [])].some((model) => model.trim().length > 0 && !officialModelIds.includes(model.trim())));
+  const requestedDefaultModelId = input.modelId?.trim() || CLAUDE_CODE_DEFAULT_MODEL_ID;
+  const modelId = officialModelIds.includes(requestedDefaultModelId)
+    ? requestedDefaultModelId
+    : officialModels.find((model) => model.id === CLAUDE_CODE_DEFAULT_MODEL_ID)?.id ?? officialModels[0]?.id;
+  const availableModelIds = normalizeClaudeCodeModelIds(
+    hasLegacyRawModelSelection
+      ? officialModels.slice(0, Math.max(1, Math.min(3, legacyActualModelIds.length))).map((model) => model.id)
+      : input.modelIds?.filter((model) => officialModelIds.includes(model.trim())) ?? officialModelIds,
+    modelId,
+  );
+  const suppliedOverrides = input.modelOverrides ?? {};
+  const modelOverrides = Object.fromEntries(availableModelIds.map((officialModelId) => {
+    const legacyIndex = availableModelIds.indexOf(officialModelId);
+    const actualModelId = suppliedOverrides[officialModelId]?.trim()
+      ?? (hasLegacyRawModelSelection ? legacyActualModelIds[legacyIndex % legacyActualModelIds.length] : undefined);
+    return [officialModelId, actualModelId ?? ""] as const;
+  }));
+  const missingOverride = availableModelIds.find((officialModelId) => !modelOverrides[officialModelId]);
+  if (missingOverride) throw new Error(`Claude Code model '${missingOverride}' must be mapped to a Switcher model`);
+  const invalidOverride = Object.values(modelOverrides).find((actualModelId) => !actualModelIds.has(actualModelId));
+  if (invalidOverride) throw new Error(`Switcher model '${invalidOverride}' is not available for this source`);
   const previousRecord = await readClaudeCodeConnection(getStateDir());
   const status = source.kind === "environment_gateway"
     ? (await getUsageRouterManager().getEnvironmentStatuses([source.environmentName]))[0]
@@ -2557,6 +2647,8 @@ export async function connectClaudeCode(input: { sourceId: string; modelId?: str
     source.baseUrl ?? "",
     secret,
     modelId,
+    availableModelIds,
+    modelOverrides,
     hasManagedValues ? managedValues : undefined,
     proxyConfig.managedClearPaths,
   )) {
@@ -2574,6 +2666,8 @@ export async function connectClaudeCode(input: { sourceId: string; modelId?: str
     gatewayTokenRef: secret,
     protocol: "anthropic",
     exposedModelId: modelId ?? "",
+    availableModelIds,
+    modelOverrides,
     ...(source.kind === "environment_gateway" && status?.gatewayId ? { routeGroupId: status.gatewayId } : {}),
     managedClearPaths: proxyConfig.managedClearPaths,
     ...(hasManagedValues ? { managedValues } : {}),
@@ -2588,6 +2682,8 @@ export async function connectClaudeCode(input: { sourceId: string; modelId?: str
     ...(source.accountName ? { accountName: source.accountName } : {}),
     ...(status?.gatewayId ? { gatewayId: status.gatewayId } : {}),
     ...(modelId ? { modelId } : {}),
+    ...(availableModelIds.length ? { modelIds: availableModelIds } : {}),
+    modelOverrides,
     configPath,
     snapshotBindingId: CLAUDE_CODE_BINDING_ID,
     connectedAt: Date.now(),
@@ -2624,7 +2720,38 @@ export async function diagnoseClaudeCode(): Promise<ClaudeCodeConnectionState & 
 export async function reapplyClaudeCode(): Promise<ClaudeCodeConnectionState> {
   const record = await readClaudeCodeConnection(getStateDir());
   if (!record) throw new Error("Claude Code is not connected");
-  return connectClaudeCode({ sourceId: record.sourceId, ...(record.modelId ? { modelId: record.modelId } : {}) });
+  return connectClaudeCode({ sourceId: record.sourceId, ...(record.modelId ? { modelId: record.modelId } : {}), ...(record.modelIds ? { modelIds: record.modelIds } : {}), ...(record.modelOverrides ? { modelOverrides: record.modelOverrides } : {}) });
+}
+
+export async function readClaudeCodeConfig(): Promise<string> {
+  return readClaudeCodeConfigContent(resolveClaudeCodeSettingsPath(homedir()));
+}
+
+export async function updateClaudeCodeConfig(content: string): Promise<DesktopActionResult> {
+  const errors: ParseError[] = [];
+  const parsed = parseJsonc(content, errors, { allowTrailingComma: true, disallowComments: false });
+  if (errors.length || !isRecord(parsed)) {
+    throw new Error("Claude Code settings.json must contain a valid JSON object");
+  }
+  const configPath = resolveClaudeCodeSettingsPath(homedir());
+  const before = await readClaudeCodeConfigContent(configPath);
+  const next = normalizeClaudeCodeConfigContent(content);
+  if (before !== next) {
+    await ensureClaudeCodeConfigHistorySeeded();
+    await appendClaudeCodeConfigHistoryEntry({
+      stateDir: getStateDir(),
+      configPath,
+      source: "manual",
+      content: before,
+    });
+    await writeClaudeCodeConfig(configPath, next);
+    const record = await readClaudeCodeConnection(getStateDir());
+    if (record && !claudeCodeConfigPathChanged(record.configPath, configPath)) {
+      const agent = await createClaudeCodeAgentAdapter(configPath);
+      await agent.adapter.acknowledge(CLAUDE_CODE_BINDING_ID);
+    }
+  }
+  return { message: "Updated Claude Code settings", output: configPath };
 }
 
 export async function listClaudeCodeConfigHistory(): Promise<string> {
@@ -2714,16 +2841,20 @@ function shouldBackupClaudeCodeConfig(
   baseUrl: string,
   apiKey: string,
   modelId?: string,
+  availableModelIds?: readonly string[],
+  modelOverrides?: Readonly<Record<string, string>>,
   managedValues?: Readonly<Record<string, string>>,
   managedClearPaths?: readonly string[],
 ): boolean {
   if (!content) return true;
   try {
-    const parsed = JSON.parse(content) as { env?: Record<string, unknown> };
+    const parsed = parseJsonc(content) as { env?: Record<string, unknown>; model?: unknown; availableModels?: unknown; modelOverrides?: unknown };
     const env = parsed.env ?? {};
     if (env.ANTHROPIC_BASE_URL !== baseUrl
       || env.ANTHROPIC_API_KEY !== apiKey
-      || (modelId ? env.ANTHROPIC_MODEL !== modelId : false)
+      || (modelId ? parsed.model !== modelId : false)
+      || (availableModelIds ? !sameStringArray(parsed.availableModels, availableModelIds) : false)
+      || !sameStringRecord(parsed.modelOverrides, modelOverrides)
       || typeof env.ANTHROPIC_AUTH_TOKEN === "string") return true;
     for (const [path, expected] of Object.entries(managedValues ?? {})) {
       const value = path.split(".").filter(Boolean).reduce<unknown>((current, key) => (
@@ -2847,6 +2978,7 @@ function resolveClaudeCodeAccountSource(
     state: "ready",
     baseUrl,
     apiKeyPreview: maskClaudeCodeSecret(secret),
+    officialModels: CLAUDE_CODE_OFFICIAL_MODELS.map((model): ClaudeCodeOfficialModelOption => ({ ...model })),
     models: modelOptions,
   };
 }

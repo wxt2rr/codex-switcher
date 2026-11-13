@@ -15,6 +15,10 @@ export interface AgentAdapterProfile {
     clearPaths?: readonly string[];
     /** Additional model fields that should follow the selected model. */
     managedModelPaths?: readonly string[];
+    /** Optional array-valued model allowlist (for example Claude Code's `availableModels`). */
+    availableModelsPath?: string;
+    /** Optional official-model to provider-model mapping (for example Claude Code's `modelOverrides`). */
+    modelOverridesPath?: string;
     /** Optional explicit paths for advanced Agent configuration fields. */
     reasoningPath?: string;
     fallbackModelPath?: string;
@@ -41,6 +45,10 @@ export interface AgentGatewayBinding {
     gatewayTokenRef: string;
     protocol: GatewayProtocol;
     exposedModelId: string;
+    /** Model IDs exposed in the Agent's model picker. */
+    availableModelIds?: readonly string[];
+    /** Official model ID -> actual provider model ID mapping. */
+    modelOverrides?: Readonly<Record<string, string>>;
     routeGroupId?: string;
     reasoningProfile?: string;
     fallbackModelId?: string;
@@ -104,6 +112,8 @@ export interface AgentAdapter {
     unwire(bindingId: string): Promise<void>;
     restore(bindingId: string): Promise<void>;
     check(bindingId: string): Promise<AgentDriftReport>;
+    /** Mark the current managed file content as expected without changing the rollback baseline. */
+    acknowledge(bindingId: string): Promise<AgentConfigSnapshot | null>;
     sync(binding: AgentGatewayBinding): Promise<AgentConfigSnapshot>;
     renameRefs(oldRef: string, newRef: string): Promise<void>;
 }

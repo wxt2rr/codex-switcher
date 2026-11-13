@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.105 - 2026-11-13
+
+- Added Claude Code official-model mapping, including dated model aliases, so local gateway model discovery and request routing use the configured Switcher models.
+- Added a managed Claude Code `settings.json` editor with configuration history, safe rollback, source-aware drift detection, and a fixed action area while editing JSON.
+- Improved the Claude Code connection panel layout and made the local gateway read the connection record from the production state-directory hierarchy.
+
+## 0.8.21 - 2026-11-13
+
+- Added Claude Code model alias routing, configuration editing and history support, and production-safe connection-state discovery.
+
 ## 0.1.104 - 2026-11-10
 
 - Fixed Claude Code proxy resynchronization so proxy changes update only the managed JSON fields without starting a local gateway as a side effect.

@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import type {
   ClaudeCodeAuthorizationConflict,
   ClaudeCodeAuthorizationInspection,
+  ClaudeCodeOfficialModelOption,
 } from "../src/desktop-model.js";
 
 export type ClaudeCodeSourceKind = "environment_gateway" | "account";
@@ -29,6 +30,56 @@ export interface ClaudeCodeModelOption {
   displayName: string;
 }
 
+/**
+ * Claude Code model IDs are the values exposed to the CLI. They are kept
+ * separate from Switcher's provider/model catalog because modelOverrides maps
+ * these official IDs to the actual upstream model used by the selected source.
+ */
+export const CLAUDE_CODE_OFFICIAL_MODELS: readonly ClaudeCodeOfficialModelOption[] = [
+  { id: "claude-opus-4-8", displayName: "Claude Opus 4.8" },
+  { id: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6" },
+  { id: "claude-haiku-4-5", displayName: "Claude Haiku 4.5" },
+];
+export const CLAUDE_CODE_DEFAULT_MODEL_ID = "claude-sonnet-4-6";
+
+/**
+ * Claude Code occasionally uses a dated provider ID for the same model that
+ * the settings file exposes under its shorter official alias. Keep this
+ * compatibility list at the integration boundary instead of changing the
+ * user's selected model IDs.
+ */
+const CLAUDE_CODE_DATED_MODEL_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  "claude-haiku-4-5": ["claude-haiku-4-5-20251001"],
+};
+
+export function listClaudeCodeModelAliases(modelOverrides?: Readonly<Record<string, string>>): string[] {
+  const aliases = new Set<string>();
+  for (const [officialModelId, actualModelId] of Object.entries(modelOverrides ?? {})) {
+    if (!officialModelId.trim() || !actualModelId.trim()) continue;
+    aliases.add(officialModelId.trim());
+    for (const datedAlias of CLAUDE_CODE_DATED_MODEL_ALIASES[officialModelId.trim()] ?? []) aliases.add(datedAlias);
+  }
+  return [...aliases];
+}
+
+export function resolveClaudeCodeModelOverride(
+  requestedModel: string | undefined,
+  modelOverrides?: Readonly<Record<string, string>>,
+): string | undefined {
+  const normalizedModel = requestedModel?.trim();
+  if (!normalizedModel) return undefined;
+  const entries = Object.entries(modelOverrides ?? {})
+    .map(([officialModelId, actualModelId]) => [officialModelId.trim(), actualModelId.trim()] as const)
+    .filter(([officialModelId, actualModelId]) => officialModelId.length > 0 && actualModelId.length > 0);
+  const exact = entries.find(([officialModelId]) => officialModelId === normalizedModel);
+  if (exact) return exact[1];
+  const dated = entries.find(([officialModelId]) => (
+    normalizedModel.startsWith(`${officialModelId}-`)
+      && /^\d{8}$/.test(normalizedModel.slice(officialModelId.length + 1))
+  ));
+  return dated?.[1];
+}
+
 export interface ClaudeCodeSourceSummary {
   id: string;
   kind: ClaudeCodeSourceKind;
@@ -40,6 +91,7 @@ export interface ClaudeCodeSourceSummary {
   reason?: string;
   baseUrl?: string;
   apiKeyPreview?: string;
+  officialModels?: ClaudeCodeOfficialModelOption[];
   models: ClaudeCodeModelOption[];
   gatewayEnabled?: boolean;
   localAgentAccessEnabled?: boolean;
@@ -53,6 +105,8 @@ export interface ClaudeCodeConnectionRecord {
   accountName?: string;
   gatewayId?: string;
   modelId?: string;
+  modelIds?: string[];
+  modelOverrides?: Record<string, string>;
   configPath: string;
   snapshotBindingId: string;
   connectedAt: number;
@@ -320,6 +374,12 @@ export async function readClaudeCodeConnection(stateDir: string): Promise<Claude
       ...(typeof parsed.accountName === "string" ? { accountName: parsed.accountName } : {}),
       ...(typeof parsed.gatewayId === "string" ? { gatewayId: parsed.gatewayId } : {}),
       ...(typeof parsed.modelId === "string" ? { modelId: parsed.modelId } : {}),
+      ...(Array.isArray(parsed.modelIds) ? { modelIds: parsed.modelIds.filter((item): item is string => typeof item === "string" && item.trim().length > 0) } : {}),
+      ...(isRecord(parsed.modelOverrides) ? {
+        modelOverrides: Object.fromEntries(Object.entries(parsed.modelOverrides)
+          .filter(([, value]) => typeof value === "string" && value.trim().length > 0)
+          .map(([key, value]) => [key, (value as string).trim()] as const)),
+      } : {}),
       configPath: parsed.configPath,
       snapshotBindingId: parsed.snapshotBindingId,
       connectedAt: parsed.connectedAt,

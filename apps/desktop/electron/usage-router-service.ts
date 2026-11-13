@@ -36,6 +36,11 @@ import {
 import { initializeModelRouteEngine, resolveModelRoute } from "./model-router.js";
 import { applyProtocolCredentialHeaders, detectGatewayProtocol, extractProtocolModel } from "./protocol-adapters.js";
 import {
+  listClaudeCodeModelAliases,
+  readClaudeCodeConnection,
+  resolveClaudeCodeModelOverride,
+} from "./claude-code-connection.js";
+import {
   classifyPoolFailure,
   cooldownForFailure,
   derivePoolSessionKey,
@@ -230,6 +235,24 @@ function rewriteGatewayModel(body: Buffer | undefined, upstreamModel: string | u
   } catch {
     return body;
   }
+}
+
+async function readClaudeCodeGatewayModelOverrides(
+  stateDir: string,
+  gatewayId: string,
+): Promise<Readonly<Record<string, string>> | undefined> {
+  // The router keeps its own runtime state in `<root>/usage-router`, while
+  // the Claude Code connection record is persisted at `<root>`. Read the
+  // router directory first for compatibility with older/test layouts, then
+  // fall back to its parent directory used by the production desktop app.
+  const candidateStateDirs = [...new Set([stateDir, dirname(stateDir)])];
+  for (const candidateStateDir of candidateStateDirs) {
+    const connection = await readClaudeCodeConnection(candidateStateDir).catch(() => undefined);
+    if (connection?.kind === "environment_gateway" && connection.gatewayId === gatewayId) {
+      return connection.modelOverrides;
+    }
+  }
+  return undefined;
 }
 
 function normalizeResponsesRequest(
@@ -1448,10 +1471,11 @@ async function proxyAccountPoolRequest(
         });
       }
       // Credential pools use the same protocol conversion rules as direct
-      // Gateway routes. In particular, a Chat Completions pool member backed
-      // by a Responses-only provider may require an SSE retry for a
-      // non-streaming request.
-      if (!upstreamResponse.ok && pool.protocol === "chat_completions" && effectiveRoute.protocol === "responses" && candidateBody && candidateParsedBody?.stream !== true) {
+      // Gateway routes. A non-Responses client (including Claude Code's
+      // Anthropic protocol) may need an SSE retry for a Responses-only
+      // provider that rejects non-streaming requests.
+      if (!upstreamResponse.ok && pool.protocol !== "responses" && effectiveRoute.protocol === "responses"
+        && candidateBody && parsedBody?.stream !== true && candidateParsedBody?.stream !== true) {
         const streamRequiredMessage = await extractSafeUpstreamResponseError(upstreamResponse, `Upstream returned HTTP ${upstreamResponse.status}`);
         if (isStreamRequiredError(streamRequiredMessage)) {
           const streamingBody = forceStreamingRequestBody(candidateBody);
@@ -1727,7 +1751,8 @@ async function proxyRequest(
     ? await readRequestBodyBuffer(request)
     : undefined);
   const incomingRequestBody = requestBody ? parseRequestBody(requestBody) : undefined;
-  const nonStreamingChatRequest = incomingProtocol === "chat_completions"
+  const nonStreamingConvertedRequest = incomingProtocol !== undefined
+    && incomingProtocol !== "responses"
     && Boolean(incomingRequestBody)
     && incomingRequestBody?.stream !== true;
   for (const [index, candidate] of candidates.entries()) {
@@ -1856,9 +1881,10 @@ async function proxyRequest(
       // transport and reject a non-streaming request. Preserve the client's
       // non-streaming contract by retrying this exact candidate once with
       // `stream: true`, then aggregate the converted SSE back into one JSON
-      // Chat Completion. Do not apply this to normal streaming requests or to
-      // unrelated provider errors.
-      if (!response.ok && nonStreamingChatRequest && candidate.protocol === "responses") {
+      // response in the client's protocol. This also covers Claude Code's
+      // non-streaming Anthropic request converted to a Responses upstream.
+      // Do not apply this to normal streaming requests or unrelated errors.
+      if (!response.ok && nonStreamingConvertedRequest && candidate.protocol === "responses") {
         const streamRequiredMessage = await extractSafeUpstreamResponseError(response, `Upstream returned HTTP ${response.status}`);
         if (isStreamRequiredError(streamRequiredMessage)) {
           const streamingBody = forceStreamingRequestBody(candidateBody);
@@ -2878,6 +2904,9 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
         const upgradeRequested = hasUpgradeIntent(request.headers);
         const requestMethod = (request.method ?? "GET").toUpperCase();
         const isModelsRoute = gatewayRouteSuffix.toLowerCase() === "models" || gatewayRouteSuffix.toLowerCase() === "v1beta/models";
+        const claudeCodeModelOverrides = localAgentSurface
+          ? await readClaudeCodeGatewayModelOverrides(options.stateDir, gatewayId)
+          : undefined;
         if (localAgentSurface && isModelsRoute) {
           if (requestMethod !== "GET" || upgradeRequested) {
             response.setHeader("allow", "GET");
@@ -2893,6 +2922,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
             if (route.exposedModelId?.trim()) ids.add(route.exposedModelId.trim());
             else if (route.upstreamModel?.trim()) ids.add(route.upstreamModel.trim());
           }
+          for (const alias of listClaudeCodeModelAliases(claudeCodeModelOverrides)) ids.add(alias);
           return sendJson(response, 200, {
             object: "list",
             data: [...ids].sort().map((id) => ({
@@ -2937,13 +2967,18 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
         const ingressBody = bodyOverride;
         let parsedGatewayBody = bodyOverride?.length ? parseRequestBody(bodyOverride) : undefined;
         let middlewareModel: string | undefined;
+        const resolveGatewayModel = (model: string | undefined): string | undefined => (
+          gatewayProtocol === "anthropic"
+            ? resolveClaudeCodeModelOverride(model, claudeCodeModelOverrides) ?? model
+            : model
+        );
         const gatewayMiddleware = pluginManager?.middlewareRegistry;
         const gatewayMiddlewareContext: RuntimeGatewayMiddlewareContext | undefined = parsedGatewayBody && gatewayMiddleware
           ? {
             requestId: gatewayRequestId,
             traceId: request.headers["x-request-id"]?.toString().trim() || gatewayRequestId,
             protocol: gatewayProtocol,
-            model: extractProtocolModel(gatewayProtocol, gatewayRouteSuffix, parsedGatewayBody) ?? "unknown",
+            model: resolveGatewayModel(extractProtocolModel(gatewayProtocol, gatewayRouteSuffix, parsedGatewayBody)) ?? "unknown",
             stream: parsedGatewayBody.stream === true,
             path: url.pathname,
             agentId: request.headers["x-codex-agent"]?.toString().trim() || undefined,
@@ -2960,10 +2995,11 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           parsedGatewayBody = middlewareResult.body;
           middlewareModel = middlewareResult.model;
           bodyOverride = Buffer.from(JSON.stringify(parsedGatewayBody));
-          gatewayMiddlewareContext.model = middlewareModel ?? extractProtocolModel(gatewayProtocol, gatewayRouteSuffix, parsedGatewayBody) ?? "unknown";
+          gatewayMiddlewareContext.model = resolveGatewayModel(middlewareModel ?? extractProtocolModel(gatewayProtocol, gatewayRouteSuffix, parsedGatewayBody)) ?? "unknown";
           gatewayMiddlewareContext.stream = parsedGatewayBody.stream === true;
         }
         const requestedModel = middlewareModel ?? extractProtocolModel(gatewayProtocol, gatewayRouteSuffix, parsedGatewayBody);
+        const routedModel = resolveGatewayModel(requestedModel);
         const gatewayRoutes = gateway.routeIds
           .map((routeId) => routes.get(routeId))
           .filter((route): route is RouteTarget => route !== undefined);
@@ -2978,8 +3014,8 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
             allowProtocolConversion: true,
             routeMetrics: snapshotGatewayRouteMetrics(gateway),
             routeRules: gateway.routeRules,
-            ruleContext: inferGatewayRuleContext(request, parsedGatewayBody, requestedModel),
-            requestedModel,
+            ruleContext: inferGatewayRuleContext(request, parsedGatewayBody, routedModel),
+            requestedModel: routedModel,
             requestedAccountName: readGatewayAccountName(request.headers),
             sessionKey: request.headers["x-codex-session"]?.toString().trim() || undefined,
             requiredCapabilities: inferGatewayCapabilities(parsedGatewayBody),
@@ -3079,15 +3115,15 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           const pool = pools.get(gateway.poolId);
           if (!pool) return sendJson(response, 503, { error: "Gateway credential pool is unavailable", code: "GATEWAY_POOL_UNAVAILABLE" });
           if (pool.protocol !== gatewayProtocol) return sendJson(response, 400, { error: `Gateway protocol '${gatewayProtocol}' does not match credential pool protocol '${pool.protocol}'`, code: "GATEWAY_POOL_PROTOCOL_MISMATCH" });
-          const requestedGroup = requestedModel
-            ? Object.values(gateway.routeGroups ?? {}).find((group) => group.exposedModelId === requestedModel || group.id === requestedModel)
+          const requestedGroup = routedModel
+            ? Object.values(gateway.routeGroups ?? {}).find((group) => group.exposedModelId === routedModel || group.id === routedModel)
             : routeResult.reason === "route_rule" && routeResult.routeGroupId
               ? gateway.routeGroups?.[routeResult.routeGroupId]
               : undefined;
           const selectedGatewayRoutes = requestedGroup?.routeIds
             .map((routeId) => routes.get(routeId))
             .filter((candidate): candidate is RouteTarget => candidate !== undefined)
-            ?? (requestedModel || routeResult.reason === "route_rule"
+            ?? (routedModel || routeResult.reason === "route_rule"
               ? [route]
               : gateway.routeIds.map((routeId) => routes.get(routeId)).filter((candidate): candidate is RouteTarget => candidate !== undefined));
           const selectedAccountNames = new Set(selectedGatewayRoutes.map((candidate) => candidate.accountName));
@@ -3184,7 +3220,7 @@ export async function startUsageRouterService(options: UsageRouterServiceOptions
           (candidate) => routeSecrets.get(candidate.routeId),
           onGatewayRouteOutcome,
           gatewayProtocol,
-          requestedModel,
+          routedModel,
           (providerId) => providerId && pluginManager?.registry.has(providerId) ? pluginManager.registry.get(providerId) : undefined,
           gatewayUsageContext,
           defaultProxyUrl,

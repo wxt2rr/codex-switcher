@@ -39,6 +39,12 @@ export interface ClaudeCodeModelOption {
   displayName: string;
 }
 
+/** Claude Code's stable, user-facing model identifiers. */
+export interface ClaudeCodeOfficialModelOption {
+  id: string;
+  displayName: string;
+}
+
 export interface ClaudeCodeSourceSummary {
   id: string;
   kind: ClaudeCodeSourceKind;
@@ -50,6 +56,9 @@ export interface ClaudeCodeSourceSummary {
   reason?: string;
   baseUrl?: string;
   apiKeyPreview?: string;
+  /** Models shown by Claude Code's /model picker. */
+  officialModels?: ClaudeCodeOfficialModelOption[];
+  /** Switcher model candidates used as modelOverrides values. */
   models: ClaudeCodeModelOption[];
   gatewayEnabled?: boolean;
   localAgentAccessEnabled?: boolean;
@@ -93,9 +102,17 @@ export interface ClaudeCodeConnectionRecord {
   accountName?: string;
   gatewayId?: string;
   modelId?: string;
+  modelIds?: string[];
+  /** Claude official model ID -> Switcher actual model ID. */
+  modelOverrides?: Record<string, string>;
   configPath: string;
   snapshotBindingId: string;
   connectedAt: number;
+}
+
+export interface ClaudeCodeConfigDocument {
+  configPath: string;
+  content: string;
 }
 
 export interface ClaudeCodeConnectionState {

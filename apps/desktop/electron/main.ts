@@ -109,6 +109,8 @@ import {
   listClaudeCodeSources,
   getClaudeCodeConnection,
   connectClaudeCode,
+  readClaudeCodeConfig,
+  updateClaudeCodeConfig,
   reapplyClaudeCode,
   disconnectClaudeCode,
   diagnoseClaudeCode,
@@ -845,7 +847,9 @@ function registerHandlers() {
     toggleEnvironmentLocalAgentAccess(envName, enabled));
   ipcMain.handle("desktop:listClaudeCodeSources", () => listClaudeCodeSources());
   ipcMain.handle("desktop:getClaudeCodeConnection", () => getClaudeCodeConnection());
-  ipcMain.handle("desktop:connectClaudeCode", (_event: IpcMainInvokeEvent, input: { sourceId: string; modelId?: string; cleanupAuthorization?: boolean }) => connectClaudeCode(input));
+  ipcMain.handle("desktop:connectClaudeCode", (_event: IpcMainInvokeEvent, input: { sourceId: string; modelId?: string; modelIds?: string[]; modelOverrides?: Record<string, string>; cleanupAuthorization?: boolean }) => connectClaudeCode(input));
+  ipcMain.handle("desktop:readClaudeCodeConfig", () => readClaudeCodeConfig());
+  ipcMain.handle("desktop:updateClaudeCodeConfig", (_event: IpcMainInvokeEvent, content: string) => updateClaudeCodeConfig(content));
   ipcMain.handle("desktop:reapplyClaudeCode", () => reapplyClaudeCode());
   ipcMain.handle("desktop:disconnectClaudeCode", () => disconnectClaudeCode());
   ipcMain.handle("desktop:diagnoseClaudeCode", () => diagnoseClaudeCode());

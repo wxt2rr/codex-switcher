@@ -11,6 +11,8 @@ interface ProfileInput {
   tokenPath?: string;
   clearPaths?: readonly string[];
   managedModelPaths?: readonly string[];
+  availableModelsPath?: string;
+  modelOverridesPath?: string;
   reasoningPath?: string;
   fallbackModelPath?: string;
   subAgentModelPath?: string;
@@ -29,6 +31,8 @@ function profile(input: ProfileInput): AgentAdapterProfile {
     tokenPath: input.tokenPath ?? "api_key",
     ...(input.clearPaths ? { clearPaths: input.clearPaths } : {}),
     ...(input.managedModelPaths ? { managedModelPaths: input.managedModelPaths } : {}),
+    ...(input.availableModelsPath ? { availableModelsPath: input.availableModelsPath } : {}),
+    ...(input.modelOverridesPath ? { modelOverridesPath: input.modelOverridesPath } : {}),
     ...(input.reasoningPath ? { reasoningPath: input.reasoningPath } : {}),
     ...(input.fallbackModelPath ? { fallbackModelPath: input.fallbackModelPath } : {}),
     ...(input.subAgentModelPath ? { subAgentModelPath: input.subAgentModelPath } : {}),
@@ -43,17 +47,11 @@ export const BUILT_IN_AGENT_PROFILES: readonly AgentAdapterProfile[] = [
     displayName: "Claude Code",
     configPath: ".claude/settings.json",
     protocol: "anthropic",
-    modelPath: "env.ANTHROPIC_MODEL",
+    modelPath: "model",
+    availableModelsPath: "availableModels",
+    modelOverridesPath: "modelOverrides",
     baseUrlPath: "env.ANTHROPIC_BASE_URL",
     tokenPath: "env.ANTHROPIC_API_KEY",
-    managedModelPaths: [
-      "env.ANTHROPIC_DEFAULT_OPUS_MODEL",
-      "env.ANTHROPIC_DEFAULT_SONNET_MODEL",
-      "env.ANTHROPIC_DEFAULT_HAIKU_MODEL",
-      "env.ANTHROPIC_DEFAULT_FABLE_MODEL",
-      "env.ANTHROPIC_SMALL_FAST_MODEL",
-      "env.CLAUDE_CODE_SUBAGENT_MODEL",
-    ],
     clearPaths: [
       "env.ANTHROPIC_AUTH_TOKEN",
       "env.CLAUDE_CODE_OAUTH_TOKEN",
@@ -68,6 +66,13 @@ export const BUILT_IN_AGENT_PROFILES: readonly AgentAdapterProfile[] = [
       "env.CLAUDE_CODE_USE_ANTHROPIC_AWS",
       "env.CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
       "env.CLAUDE_CODE_USE_MANTLE",
+      "env.ANTHROPIC_MODEL",
+      "env.ANTHROPIC_DEFAULT_OPUS_MODEL",
+      "env.ANTHROPIC_DEFAULT_SONNET_MODEL",
+      "env.ANTHROPIC_DEFAULT_HAIKU_MODEL",
+      "env.ANTHROPIC_DEFAULT_FABLE_MODEL",
+      "env.ANTHROPIC_SMALL_FAST_MODEL",
+      "env.CLAUDE_CODE_SUBAGENT_MODEL",
     ],
     aliases: ["claude-code"],
   }),

@@ -11,11 +11,13 @@ import {
   claudeCodeConfigPathChanged,
   claudeCodeEnvironmentSourceId,
   inspectClaudeCodeAuthorizationContent,
+  listClaudeCodeModelAliases,
   maskClaudeCodeSecret,
   readClaudeCodeConnection,
   resolveClaudeCodeCredentialsPath,
   resolveClaudeCodeConfigDir,
   resolveClaudeCodeSettingsPath,
+  resolveClaudeCodeModelOverride,
   stripClaudeAiOauthCredentials,
   stripClaudeCodeAuthorizationSettings,
   stripClaudeCodeAuthToken,
@@ -154,6 +156,21 @@ test("Claude Code detects a saved binding that belongs to another config directo
   assert.equal(claudeCodeConfigPathChanged("/Users/demo/.claude/settings.json", "/Users/demo/.claude-work/settings.json"), true);
 });
 
+test("Claude Code model aliases include dated Haiku IDs and resolve to the configured provider model", () => {
+  const overrides = {
+    "claude-sonnet-4-6": "gpt-6.1-sol",
+    "claude-haiku-4-5": "gpt-6-luna",
+  };
+  assert.deepEqual(listClaudeCodeModelAliases(overrides), [
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5",
+    "claude-haiku-4-5-20251001",
+  ]);
+  assert.equal(resolveClaudeCodeModelOverride("claude-sonnet-4-6", overrides), "gpt-6.1-sol");
+  assert.equal(resolveClaudeCodeModelOverride("claude-haiku-4-5-20251001", overrides), "gpt-6-luna");
+  assert.equal(resolveClaudeCodeModelOverride("gpt-6-luna", overrides), undefined);
+});
+
 test("Claude Code connection records are persisted with restrictive permissions", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-claude-connection-"));
   try {
@@ -166,12 +183,16 @@ test("Claude Code connection records are persisted with restrictive permissions"
       configPath: "/tmp/.claude/settings.json",
       snapshotBindingId: "global",
       connectedAt: 123,
+      modelId: "claude-sonnet-4-6",
+      modelIds: ["claude-opus-4-8", "claude-sonnet-4-6"],
+      modelOverrides: { "claude-opus-4-8": "gpt-6.1-sol", "claude-sonnet-4-6": "deepseek-v4-pro" },
       proxyManaged: true,
     });
     const restored = await readClaudeCodeConnection(stateDir);
     assert.equal(restored?.sourceId, "account:prod:primary");
     assert.equal(restored?.snapshotBindingId, "global");
     assert.equal(restored?.proxyManaged, true);
+    assert.deepEqual(restored?.modelOverrides, { "claude-opus-4-8": "gpt-6.1-sol", "claude-sonnet-4-6": "deepseek-v4-pro" });
     const connectionPath = join(stateDir, "claude-code-connection.json");
     const mode = (await stat(connectionPath)).mode & 0o777;
     if (process.platform !== "win32") assert.equal(mode, 0o600);

@@ -515,6 +515,11 @@ body {
   height: 0;
 }
 
+.dialog-scroll-region {
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
 .skill-scope-edge-fade {
   position: absolute;
   inset-block: 1px;

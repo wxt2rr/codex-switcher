@@ -1,14 +1,47 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowLeft, CheckCircle2, PlugZap, RefreshCw, RotateCcw, Trash2, Unplug } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Braces, Check, CheckCircle2, PlugZap, RefreshCw, RotateCcw, Save, Trash2, Unplug } from "lucide-react";
 
 import { ConfirmDialog, SidePanel } from "./admin-primitives";
 import { SoftBadge } from "./account-list-primitives";
-import { Field, Select } from "./form-primitives";
+import { Field, Select, Textarea } from "./form-primitives";
 import { Button } from "./ui/button";
 import type { ClaudeCodeConfigHistoryEntry, DesktopBridge } from "../bridge";
-import type { ClaudeCodeConnectionState, ClaudeCodeSourceSummary } from "../desktop-model";
+import type { ClaudeCodeConnectionRecord, ClaudeCodeConnectionState, ClaudeCodeOfficialModelOption, ClaudeCodeSourceSummary } from "../desktop-model";
 import type { UiLanguage } from "../i18n";
 import { cn } from "../lib/utils";
+
+const FALLBACK_CLAUDE_OFFICIAL_MODELS: ClaudeCodeOfficialModelOption[] = [
+  { id: "claude-opus-4-8", displayName: "Claude Opus 4.8" },
+  { id: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6" },
+  { id: "claude-haiku-4-5", displayName: "Claude Haiku 4.5" },
+];
+const DEFAULT_CLAUDE_OFFICIAL_MODEL_ID = "claude-sonnet-4-6";
+
+function buildClaudeCodeModelSelection(source: ClaudeCodeSourceSummary | undefined, record: ClaudeCodeConnectionRecord | undefined) {
+  const officialModels = source?.officialModels?.length ? source.officialModels : FALLBACK_CLAUDE_OFFICIAL_MODELS;
+  const actualModelIds = source?.models.map((model) => model.id) ?? [];
+  const legacyActualIds = Array.from(new Set([record?.modelId ?? "", ...(record?.modelIds ?? [])]
+    .map((model) => model.trim())
+    .filter((model) => actualModelIds.includes(model))));
+  const hasNewMapping = Boolean(record?.modelOverrides && Object.keys(record.modelOverrides).length);
+  const hasLegacySelection = !hasNewMapping && legacyActualIds.length > 0;
+  const mappedOfficialIds = hasLegacySelection
+    ? officialModels.slice(0, Math.max(1, Math.min(3, legacyActualIds.length))).map((model) => model.id)
+    : (record?.modelIds ?? []).filter((modelId) => officialModels.some((model) => model.id === modelId));
+  const selectedOfficialModelIds = Array.from(new Set(mappedOfficialIds.length ? mappedOfficialIds : officialModels.map((model) => model.id)));
+  const selectedOfficialModelId = record?.modelId && officialModels.some((model) => model.id === record.modelId)
+    ? record.modelId
+    : officialModels.some((model) => model.id === DEFAULT_CLAUDE_OFFICIAL_MODEL_ID)
+      ? DEFAULT_CLAUDE_OFFICIAL_MODEL_ID
+      : selectedOfficialModelIds[0] ?? "";
+  const mapping = Object.fromEntries(selectedOfficialModelIds.map((officialModelId, index) => {
+    const saved = record?.modelOverrides?.[officialModelId]?.trim();
+    const legacy = hasLegacySelection ? legacyActualIds[index % legacyActualIds.length] : undefined;
+    const fallback = actualModelIds[index % Math.max(1, actualModelIds.length)];
+    return [officialModelId, saved || legacy || fallback || ""] as const;
+  }));
+  return { officialModels, selectedOfficialModelId, selectedOfficialModelIds, modelOverrides: mapping };
+}
 
 export function ClaudeCodeConnectionPanel({
   bridge,
@@ -31,10 +64,16 @@ export function ClaudeCodeConnectionPanel({
   const [sources, setSources] = useState<ClaudeCodeSourceSummary[]>([]);
   const [connection, setConnection] = useState<ClaudeCodeConnectionState>({ connected: false, configPath: "~/.claude/settings.json" });
   const [selectedSourceId, setSelectedSourceId] = useState("");
-  const [selectedModelId, setSelectedModelId] = useState("");
+  const [selectedOfficialModelId, setSelectedOfficialModelId] = useState("");
+  const [selectedOfficialModelIds, setSelectedOfficialModelIds] = useState<string[]>([]);
+  const [modelOverrides, setModelOverrides] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
+  const [configLoading, setConfigLoading] = useState(false);
+  const [configSaving, setConfigSaving] = useState(false);
+  const [configContent, setConfigContent] = useState("");
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyEntries, setHistoryEntries] = useState<ClaudeCodeConfigHistoryEntry[]>([]);
   const [historySelection, setHistorySelection] = useState<string[]>([]);
@@ -47,7 +86,15 @@ export function ClaudeCodeConnectionPanel({
       ? `${source.environmentName} · ${zh ? "环境网关" : "Environment gateway"}`
       : `${source.environmentName} · ${source.accountName ?? source.displayName}`,
   })), [sources, zh]);
-  const modelItems = useMemo(() => selectedSource?.models.map((model) => ({ value: model.id, label: model.displayName })) ?? [], [selectedSource]);
+  const actualModelItems = useMemo(() => selectedSource?.models.map((model) => ({ value: model.id, label: model.displayName })) ?? [], [selectedSource]);
+  const officialModelItems = useMemo(() => (selectedSource?.officialModels?.length ? selectedSource.officialModels : FALLBACK_CLAUDE_OFFICIAL_MODELS).map((model) => ({ value: model.id, label: model.displayName })), [selectedSource]);
+
+  function applyModelSelection(source: ClaudeCodeSourceSummary | undefined, record: ClaudeCodeConnectionRecord | undefined) {
+    const selection = buildClaudeCodeModelSelection(source, record);
+    setSelectedOfficialModelId(selection.selectedOfficialModelId);
+    setSelectedOfficialModelIds(selection.selectedOfficialModelIds);
+    setModelOverrides(selection.modelOverrides);
+  }
 
   async function load() {
     setLoading(true);
@@ -61,8 +108,8 @@ export function ClaudeCodeConnectionPanel({
         ?? nextSources[0]?.id
         ?? "";
       setSelectedSourceId(preferred);
-      const currentModel = nextConnection.record?.modelId ?? nextSources.find((source) => source.id === preferred)?.models[0]?.id ?? "";
-      setSelectedModelId(currentModel);
+      const preferredSource = nextSources.find((source) => source.id === preferred);
+      applyModelSelection(preferredSource, nextConnection.record);
     } catch (error) {
       onError?.(error);
     } finally {
@@ -73,22 +120,40 @@ export function ClaudeCodeConnectionPanel({
   useEffect(() => {
     if (open) {
       setHistoryOpen(false);
+      setConfigOpen(false);
       setHistorySelection([]);
       void load();
     }
   }, [open, initialEnvironmentName]);
 
-  useEffect(() => {
-    if (!selectedSource) return;
-    setSelectedModelId((current) => selectedSource.models.some((model) => model.id === current) ? current : selectedSource.models[0]?.id ?? "");
-  }, [selectedSource]);
+  function changeSource(sourceId: string) {
+    setSelectedSourceId(sourceId);
+    applyModelSelection(sources.find((source) => source.id === sourceId), undefined);
+  }
+
+  function toggleOfficialModel(modelId: string, checked: boolean) {
+    setSelectedOfficialModelIds((current) => {
+      if (checked) {
+        setModelOverrides((mapping) => ({ ...mapping, [modelId]: mapping[modelId] ?? actualModelItems[0]?.value ?? "" }));
+        return Array.from(new Set([...current, modelId]));
+      }
+      if (modelId === selectedOfficialModelId) return current;
+      setModelOverrides((mapping) => {
+        const next = { ...mapping };
+        delete next[modelId];
+        return next;
+      });
+      return current.filter((id) => id !== modelId);
+    });
+  }
 
   async function connect(cleanupAuthorization = false) {
     if (!selectedSourceId) return;
     setBusy(true);
     setAuthorizationConfirmOpen(false);
     try {
-      const next = await bridge.connectClaudeCode({ sourceId: selectedSourceId, ...(selectedModelId ? { modelId: selectedModelId } : {}), ...(cleanupAuthorization ? { cleanupAuthorization: true } : {}) });
+      const selectedOverrides = Object.fromEntries(selectedOfficialModelIds.map((modelId) => [modelId, modelOverrides[modelId] ?? ""]));
+      const next = await bridge.connectClaudeCode({ sourceId: selectedSourceId, ...(selectedOfficialModelId ? { modelId: selectedOfficialModelId } : {}), ...(selectedOfficialModelIds.length ? { modelIds: selectedOfficialModelIds } : {}), modelOverrides: selectedOverrides, ...(cleanupAuthorization ? { cleanupAuthorization: true } : {}) });
       setConnection(next);
       onSuccess?.(zh ? "Claude Code 已连接，重启 CLI 后生效" : "Claude Code connected; restart the CLI to apply it");
     } catch (error) {
@@ -156,6 +221,33 @@ export function ClaudeCodeConnectionPanel({
     await loadHistory();
   }
 
+  async function openConfig() {
+    setConfigLoading(true);
+    setConfigOpen(true);
+    try {
+      setConfigContent(await bridge.readClaudeCodeConfig());
+    } catch (error) {
+      setConfigOpen(false);
+      onError?.(error);
+    } finally {
+      setConfigLoading(false);
+    }
+  }
+
+  async function saveConfig() {
+    setConfigSaving(true);
+    try {
+      await bridge.updateClaudeCodeConfig(configContent);
+      await load();
+      setConfigOpen(false);
+      onSuccess?.(zh ? "Claude Code 配置已保存" : "Claude Code configuration saved");
+    } catch (error) {
+      onError?.(error);
+    } finally {
+      setConfigSaving(false);
+    }
+  }
+
   async function restoreHistory(entryId: string) {
     setBusy(true);
     try {
@@ -196,6 +288,8 @@ export function ClaudeCodeConnectionPanel({
       description={zh ? "为 Claude Code CLI 选择一个全局账号来源。密钥只在桌面主进程中解析。" : "Choose a global source for the Claude Code CLI. Secrets stay inside the desktop main process."}
       onClose={onClose}
       closeLabel={zh ? "关闭" : "Close"}
+      scrollable={!configOpen}
+      surfaceClassName="max-w-[600px]"
     >
       {historyOpen ? (
         <ClaudeCodeHistoryView
@@ -209,15 +303,30 @@ export function ClaudeCodeConnectionPanel({
           onRestore={(entryId) => void restoreHistory(entryId)}
           onDelete={() => void deleteHistory()}
         />
+      ) : configOpen ? (
+        <ClaudeCodeConfigView
+          zh={zh}
+          configPath={connection.configPath}
+          loading={configLoading}
+          saving={configSaving}
+          content={configContent}
+          onBack={() => setConfigOpen(false)}
+          onChange={setConfigContent}
+          onSave={() => void saveConfig()}
+        />
       ) : <div className="grid gap-4">
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-black/[0.05] bg-muted/50 px-3.5 py-3 dark:border-white/[0.07] dark:bg-[#1a2029]">
+        <div className="flex items-start justify-between gap-3 rounded-xl border border-black/[0.05] bg-muted/50 px-3.5 py-3 dark:border-white/[0.07] dark:bg-[#1a2029]">
           <div className="flex min-w-0 items-center gap-2.5">
             <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-lg", connection.connected ? "bg-primary/10 text-primary" : "bg-accent text-muted-foreground")}>
               {connection.connected ? <CheckCircle2 className="size-4" /> : <PlugZap className="size-4" />}
             </span>
             <div className="min-w-0">
               <div className="text-[13px] font-semibold text-neutral-900 dark:text-white">{stateLabel}</div>
-              <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={connection.configPath}>{connection.configPath}</div>
+              <div className="mt-1 flex min-w-0 items-center gap-1.5">
+                <div className="min-w-0 truncate font-mono text-[11px] text-muted-foreground" title={connection.configPath}>{connection.configPath}</div>
+                <Button size="sm" variant="ghost" className="h-6 shrink-0 px-1.5 text-[10px]" onClick={() => void openConfig()} disabled={busy || configLoading}><Braces className="size-3" />{zh ? "JSON" : "JSON"}</Button>
+                <Button size="sm" variant="ghost" className="h-6 shrink-0 px-1.5 text-[10px]" onClick={() => void openHistory()} disabled={busy}><RotateCcw className="size-3" />{zh ? "历史" : "History"}</Button>
+              </div>
             </div>
           </div>
           <SoftBadge tone={connection.connected ? "success" : "neutral"} label={connection.connected ? (zh ? "Global Profile" : "Global Profile") : (zh ? "待配置" : "Setup required")} className="h-5 shrink-0 px-2 text-[10px]" />
@@ -260,7 +369,7 @@ export function ClaudeCodeConnectionPanel({
         <Field label={zh ? "连接来源" : "Connection source"} hint={zh ? "环境网关适合统一路由；API Key 账号直接使用 Anthropic Base URL。" : "Use an environment gateway for routing, or an API key account with an Anthropic base URL."}>
           <Select
             value={selectedSourceId}
-            onValueChange={setSelectedSourceId}
+            onValueChange={changeSource}
             items={sourceItems}
             placeholder={loading ? (zh ? "加载来源…" : "Loading sources…") : (zh ? "选择来源" : "Select a source")}
             disabled={loading || busy || !sourceItems.length}
@@ -285,18 +394,50 @@ export function ClaudeCodeConnectionPanel({
           </div>
         ) : null}
 
-        {selectedSource && modelItems.length ? <Field label={zh ? "默认模型（可选）" : "Default model (optional)"} hint={zh ? "只写入 Claude Code 的 ANTHROPIC_MODEL，不会修改环境路由。" : "Only sets ANTHROPIC_MODEL for Claude Code; environment routing remains unchanged."}><Select value={selectedModelId} onValueChange={setSelectedModelId} items={modelItems} disabled={busy} openOnHover={false} /></Field> : null}
+        {selectedSource && officialModelItems.length ? <>
+          <Field label={zh ? "默认模型" : "Default model"} hint={zh ? "Claude Code 启动时使用的模型。" : "The model Claude Code uses by default."}>
+            <Select value={selectedOfficialModelId} onValueChange={(value) => {
+              setSelectedOfficialModelId(value);
+              setSelectedOfficialModelIds((current) => current.includes(value) ? current : [value, ...current]);
+              setModelOverrides((current) => ({ ...current, [value]: current[value] ?? actualModelItems[0]?.value ?? "" }));
+            }} items={officialModelItems} disabled={busy} openOnHover={false} />
+          </Field>
+          <Field label={zh ? "模型列表" : "Model list"} hint={zh ? "在 Claude Code 的 /model 中显示。" : "Shown in Claude Code's /model picker."}>
+            <div className="overflow-hidden rounded-lg border border-black/[0.05] bg-muted/40 dark:border-white/[0.07] dark:bg-[#1a2029]">
+              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] gap-2 border-b border-black/[0.05] px-2.5 py-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground dark:border-white/[0.07]">
+                <span>{zh ? "Claude 官方模型" : "Claude model"}</span>
+                <span>{zh ? "实际调用模型" : "Switcher model"}</span>
+              </div>
+              <div className="grid gap-1 p-2">
+                {officialModelItems.map((model) => {
+                  const checked = selectedOfficialModelIds.includes(model.value);
+                  const isDefault = model.value === selectedOfficialModelId;
+                  return <div key={model.value} className={cn("grid grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] items-center gap-2 rounded-md px-2.5 py-1.5 text-[12px] transition-colors", checked ? "bg-white text-neutral-900 dark:bg-[#141a22] dark:text-white" : "text-muted-foreground hover:bg-white/70 dark:hover:bg-[#141a22]/70")}>
+                    <label className="flex min-w-0 items-center gap-2">
+                      <input type="checkbox" checked={checked} disabled={busy || isDefault} onChange={(event) => toggleOfficialModel(model.value, event.target.checked)} className="sr-only" />
+                      <span aria-hidden="true" className={cn("flex size-4 shrink-0 items-center justify-center rounded border", checked ? "border-primary bg-primary text-primary-foreground" : "border-black/20 dark:border-white/20")}>
+                        {checked ? <Check className="size-3" /> : null}
+                      </span>
+                      <span className="min-w-0 truncate">{model.label}</span>
+                    </label>
+                    <Select value={modelOverrides[model.value] ?? ""} onValueChange={(value) => setModelOverrides((current) => ({ ...current, [model.value]: value }))} items={actualModelItems} placeholder={zh ? "选择实际模型" : "Select model"} disabled={busy || !checked || !actualModelItems.length} openOnHover={false} />
+                  </div>;
+                })}
+              <div className="px-2.5 pb-1 pt-1 text-[11px] text-muted-foreground">{zh ? `已选 ${selectedOfficialModelIds.length} 个` : `${selectedOfficialModelIds.length} selected`}</div>
+            </div>
+            </div>
+          </Field>
+        </> : null}
 
         {!sources.length && !loading ? <div className="rounded-xl border border-dashed border-black/[0.08] bg-muted/40 px-3.5 py-4 text-[13px] text-muted-foreground dark:border-white/[0.1] dark:bg-[#1a2029]">{zh ? "暂无可用来源。请先在环境中开启网关和本地调用，或添加兼容 Anthropic 的 API Key 账号。" : "No eligible sources yet. Enable a gateway and local calls, or add an Anthropic-compatible API key account first."}</div> : null}
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-black/[0.06] pt-4 dark:border-white/[0.07]">
           <div className="flex flex-wrap gap-1.5">
             <Button size="sm" variant="ghost" onClick={() => void diagnose()} disabled={busy || loading}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />{zh ? "诊断" : "Diagnose"}</Button>
-            <Button size="sm" variant="ghost" onClick={() => void openHistory()} disabled={busy}><RotateCcw className="size-3.5" />{zh ? "配置历史" : "Config history"}</Button>
           </div>
           <div className="flex flex-wrap gap-2">
             {connection.connected ? <Button size="sm" variant="outline" onClick={() => void disconnect()} disabled={busy}><Unplug className="size-3.5" />{zh ? "断开并恢复" : "Disconnect & restore"}</Button> : null}
-            <Button size="sm" onClick={() => connection.authorization?.hasConflict ? setAuthorizationConfirmOpen(true) : void connect()} disabled={busy || loading || !selectedSource || selectedSource.state !== "ready" || Boolean(connection.authorization?.hasConflict && !connection.authorization.canCleanup)}><PlugZap className="size-3.5" />{connection.connected ? (zh ? "切换来源" : "Switch source") : (zh ? "连接 Claude Code" : "Connect Claude Code")}</Button>
+            <Button size="sm" onClick={() => connection.authorization?.hasConflict ? setAuthorizationConfirmOpen(true) : void connect()} disabled={busy || loading || !selectedSource || selectedSource.state !== "ready" || !selectedOfficialModelId || !selectedOfficialModelIds.length || selectedOfficialModelIds.some((modelId) => !modelOverrides[modelId]) || Boolean(connection.authorization?.hasConflict && !connection.authorization.canCleanup)}><PlugZap className="size-3.5" />{connection.connected ? (zh ? "切换来源" : "Switch source") : (zh ? "连接 Claude Code" : "Connect Claude Code")}</Button>
           </div>
         </div>
       </div>}
@@ -314,6 +455,54 @@ export function ClaudeCodeConnectionPanel({
       />
     </SidePanel>
   );
+}
+
+function ClaudeCodeConfigView({
+  zh,
+  configPath,
+  loading,
+  saving,
+  content,
+  onBack,
+  onChange,
+  onSave,
+}: {
+  zh: boolean;
+  configPath: string;
+  loading: boolean;
+  saving: boolean;
+  content: string;
+  onBack: () => void;
+  onChange: (content: string) => void;
+  onSave: () => void;
+}) {
+  return <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
+    <div className="flex items-center justify-between gap-3">
+      <Button size="sm" variant="ghost" onClick={onBack}><ArrowLeft className="size-3.5" />{zh ? "返回连接" : "Back to connection"}</Button>
+      <SoftBadge tone="neutral" label="settings.json" className="h-5 px-2 text-[10px]" />
+    </div>
+    <div className="shrink-0">
+      <Field label={zh ? "配置文件" : "Config file"} hint={zh ? "保存前会自动备份当前内容，可在配置历史中回滚。" : "The current content is backed up before saving and can be restored from config history."}>
+        <div className="truncate rounded-lg bg-muted/60 px-3 py-2 font-mono text-[11px] text-muted-foreground" title={configPath}>{configPath}</div>
+      </Field>
+    </div>
+    <div className="min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg">
+      <Textarea
+        value={content}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={loading || saving}
+        spellCheck={false}
+        wrap="soft"
+        className="h-full min-h-0 resize-none overflow-x-hidden overflow-y-auto rounded-lg bg-[#e7edf5] font-mono text-[12px] leading-5 dark:bg-[#1a2430]"
+        placeholder={loading ? (zh ? "加载中…" : "Loading…") : "{}"}
+        aria-label={zh ? "Claude Code settings.json" : "Claude Code settings.json"}
+      />
+    </div>
+    <div className="flex items-center justify-between gap-2 border-t border-black/[0.06] pt-4 dark:border-white/[0.07]">
+      <Button size="sm" variant="outline" onClick={onBack} disabled={saving}>{zh ? "取消" : "Cancel"}</Button>
+      <Button size="sm" onClick={onSave} disabled={loading || saving}><Save className="size-3.5" />{saving ? (zh ? "保存中…" : "Saving…") : (zh ? "保存配置" : "Save config")}</Button>
+    </div>
+  </div>;
 }
 
 function ClaudeCodeHistoryView({
@@ -376,6 +565,7 @@ function localizeClaudeHistorySource(source: ClaudeCodeConfigHistoryEntry["sourc
   if (source === "connect") return zh ? "连接前备份" : "Before connect";
   if (source === "disconnect") return zh ? "断开前备份" : "Before disconnect";
   if (source === "authorization_cleanup") return zh ? "授权冲突备份" : "Authorization conflict backup";
+  if (source === "manual") return zh ? "手动修改前备份" : "Before manual edit";
   if (source === "migration") return zh ? "已有快照" : "Existing snapshot";
   return zh ? "回滚前备份" : "Before rollback";
 }

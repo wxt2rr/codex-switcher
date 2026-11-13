@@ -8,9 +8,9 @@ import { cn } from "@/lib/utils";
 import { useDelayedUnmount } from "./use-delayed-unmount";
 
 const dialogOverlayClass =
-  "motion-dialog-overlay fixed inset-0 flex items-center justify-center overflow-y-auto bg-slate-950/[0.22] px-6 py-4";
+  "motion-dialog-overlay fixed inset-0 flex items-center justify-center overflow-y-auto overflow-x-hidden bg-slate-950/[0.22] px-6 py-4";
 const dialogSurfaceClass =
-  "motion-dialog-enter w-full border border-black/[0.07] bg-white p-6 shadow-[0_6px_18px_-10px_rgba(15,23,42,0.22),0_1px_3px_rgba(15,23,42,0.08)]";
+  "motion-dialog-enter w-full min-w-0 border border-black/[0.07] bg-white p-6 shadow-[0_6px_18px_-10px_rgba(15,23,42,0.22),0_1px_3px_rgba(15,23,42,0.08)]";
 
 function DialogPortal({ children }: { children: ReactNode }) {
   if (typeof document === "undefined") return children;
@@ -249,6 +249,7 @@ export function SidePanel({
   onClose,
   closeLabel = "Close",
   scrollable = true,
+  surfaceClassName,
   children,
 }: {
   open: boolean;
@@ -257,6 +258,7 @@ export function SidePanel({
   onClose: () => void;
   closeLabel?: string;
   scrollable?: boolean;
+  surfaceClassName?: string;
   children: ReactNode;
 }) {
   const mounted = useDelayedUnmount(open);
@@ -271,6 +273,7 @@ export function SidePanel({
             dialogSurfaceClass,
             "flex max-h-[min(720px,calc(100dvh-2rem))] max-w-[520px] flex-col overflow-hidden rounded-[16px]",
             !scrollable && "h-[min(720px,calc(100dvh-2rem))]",
+            surfaceClassName,
           )}
         >
           <div className="flex items-start justify-between gap-4">
@@ -282,7 +285,7 @@ export function SidePanel({
               <X className="size-4" />
             </button>
           </div>
-          <div className={cn("mt-6 pr-1", scrollable ? "min-h-0 overflow-y-auto" : "min-h-0 flex flex-1 flex-col overflow-hidden")}>
+          <div className={cn("dialog-scroll-region mt-6 -mr-6 min-w-0 pr-6", scrollable ? "min-h-0 overflow-y-auto overflow-x-hidden" : "min-h-0 flex flex-1 flex-col overflow-hidden")}>
             {children}
           </div>
         </div>

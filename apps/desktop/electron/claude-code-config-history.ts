@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-export type ClaudeCodeConfigHistorySource = "connect" | "disconnect" | "restore" | "migration" | "authorization_cleanup";
+export type ClaudeCodeConfigHistorySource = "connect" | "disconnect" | "restore" | "migration" | "authorization_cleanup" | "manual";
 
 export interface ClaudeCodeConfigHistoryEntry {
   id: string;
@@ -151,7 +151,7 @@ function isHistoryEntry(value: Partial<ClaudeCodeConfigHistoryEntry>): value is 
   return typeof value.id === "string"
     && isSafeHistoryId(value.id)
     && typeof value.configPath === "string"
-    && (value.source === "connect" || value.source === "disconnect" || value.source === "restore" || value.source === "migration" || value.source === "authorization_cleanup")
+    && (value.source === "connect" || value.source === "disconnect" || value.source === "restore" || value.source === "migration" || value.source === "authorization_cleanup" || value.source === "manual")
     && typeof value.createdAt === "string"
     && typeof value.content === "string";
 }

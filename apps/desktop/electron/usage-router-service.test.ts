@@ -9,6 +9,7 @@ import { gzipSync } from "node:zlib";
 
 import { extractRouterErrorDiagnostics, extractSafeErrorMessage, sanitizeRouterErrorMessage, startUsageRouterService } from "./usage-router-service.js";
 import type { RouteTarget } from "./usage-routing-model.js";
+import { writeClaudeCodeConnection } from "./claude-code-connection.js";
 import { ProviderPluginManager } from "../../../packages/gateway/dist/plugin/manager.js";
 
 async function installTestProviderPlugin(
@@ -950,6 +951,73 @@ test("local Agent surface accepts Bearer and Anthropic x-api-key credentials wit
       await service.close();
     }
   } finally {
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
+});
+
+test("local Anthropic Agent surface exposes and routes connected Claude Code model aliases", async () => {
+  let receivedModel = "";
+  const upstream = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) as { model?: unknown } : {};
+    receivedModel = typeof body.model === "string" ? body.model : "";
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ id: "claude-alias-response", type: "message", role: "assistant", content: [{ type: "text", text: "ok" }] }));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const address = upstream.address(); assert(address && typeof address !== "string");
+  const stateRoot = await mkdtemp(join(tmpdir(), "codex-switcher-claude-alias-routing-"));
+  // Production stores router runtime state below the app root, but the
+  // Claude connection record at the app root beside that directory.
+  const stateDir = join(stateRoot, "usage-router");
+  const route = {
+    routeId: "route-claude-alias", envName: "work", accountName: "claude-login",
+    upstreamBaseUrl: `http://127.0.0.1:${address.port}/v1`, originalBaseUrl: "default",
+    protocol: "anthropic" as const, exposedModelId: "gpt-haiku", upstreamModel: "upstream-haiku",
+    reasoningProfile: "auto" as const, enabled: true, createdAt: Date.now(), updatedAt: Date.now(),
+  };
+  const gateway = {
+    gatewayId: "gateway-claude-alias", envName: "work", routeIds: [route.routeId],
+    routeGroups: { haiku: { id: "haiku", exposedModelId: "gpt-haiku", routeIds: [route.routeId], strategy: "order" as const, sessionPolicy: "auto" as const, fallbackEnabled: true } },
+    defaultRouteId: route.routeId, localAgentAccessEnabled: true, enabled: true, createdAt: Date.now(), updatedAt: Date.now(),
+  };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+  try {
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(route) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}/secret`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ authMode: "none", localRouteToken: "internal-token" }) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways/${gateway.gatewayId}/access`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ enabled: true, token: "agent-token" }) })).status, 204);
+    await writeClaudeCodeConnection(stateRoot, {
+      version: 1,
+      sourceId: "environment:work",
+      kind: "environment_gateway",
+      environmentName: "work",
+      gatewayId: gateway.gatewayId,
+      modelId: "claude-haiku-4-5",
+      modelIds: ["claude-haiku-4-5"],
+      modelOverrides: { "claude-haiku-4-5": "gpt-haiku" },
+      configPath: "/tmp/.claude/settings.json",
+      snapshotBindingId: "global",
+      connectedAt: Date.now(),
+    });
+
+    const models = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/v1/models`, { headers: { "x-api-key": "agent-token" } });
+    assert.equal(models.status, 200);
+    const modelIds = (await models.json() as { data: Array<{ id: string }> }).data.map((item) => item.id);
+    assert.deepEqual(modelIds, ["claude-haiku-4-5", "claude-haiku-4-5-20251001", "gpt-haiku"]);
+
+    const response = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/v1/messages`, {
+      method: "POST",
+      headers: { "x-api-key": "agent-token", "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 32, messages: [{ role: "user", content: "hello" }] }),
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).id, "claude-alias-response");
+    assert.equal(receivedModel, "upstream-haiku");
+  } finally {
+    await service.close();
     await new Promise<void>((resolve) => upstream.close(() => resolve()));
   }
 });
@@ -2047,6 +2115,74 @@ test("environment Gateway bridges a non-streaming Chat request when Responses up
         { type: "input_image", image_url: "data:image/png;base64,QUJD" },
       ]);
     }
+  } finally {
+    await service.close();
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
+});
+
+test("local Anthropic Agent requests bridge a non-streaming Responses request when the upstream requires SSE", async () => {
+  const upstreamBodies: Array<Record<string, unknown>> = [];
+  const upstream = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+    upstreamBodies.push(body);
+    if (body.stream !== true) {
+      response.statusCode = 400;
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ detail: "Stream must be set to true" }));
+      return;
+    }
+    response.setHeader("content-type", "text/event-stream");
+    response.end([
+      `data: ${JSON.stringify({ type: "response.created", response: { id: "anthropic-bridge-response", status: "in_progress" } })}\n\n`,
+      `data: ${JSON.stringify({ type: "response.output_text.delta", response_id: "anthropic-bridge-response", delta: "hello from Anthropic bridge" })}\n\n`,
+      `data: ${JSON.stringify({ type: "response.completed", response: { id: "anthropic-bridge-response", status: "completed", usage: { input_tokens: 3, output_tokens: 4, total_tokens: 7 } } })}\n\n`,
+      "data: [DONE]\n\n",
+    ].join(""));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const address = upstream.address(); assert(address && typeof address !== "string");
+  const stateDir = await mkdtemp(join(tmpdir(), "codex-switcher-anthropic-nonstream-bridge-"));
+  const service = await startUsageRouterService({ stateDir, adminToken: "secret" });
+  const route = {
+    routeId: "route-anthropic-nonstream-bridge", envName: "work", accountName: "responses", providerId: "responses",
+    exposedModelId: "anthropic-bridge-model", upstreamModel: "responses-anthropic-model", upstreamBaseUrl: `http://127.0.0.1:${address.port}/v1`,
+    originalBaseUrl: "default", protocol: "responses" as const, reasoningProfile: "auto" as const,
+    capabilities: { streaming: true }, enabled: true, createdAt: 1, updatedAt: 1,
+  };
+  const gateway = {
+    gatewayId: "gateway-anthropic-nonstream-bridge", envName: "work", routeIds: [route.routeId], defaultRouteId: route.routeId,
+    routeGroups: { "anthropic-bridge-model": { id: "anthropic-bridge-model", exposedModelId: "anthropic-bridge-model", routeIds: [route.routeId], strategy: "order" as const, sessionPolicy: "off" as const, fallbackEnabled: true, capabilities: { streaming: true } } },
+    localAgentAccessEnabled: true, enabled: true, createdAt: 1, updatedAt: 1,
+  };
+  const adminHeaders = { authorization: "Bearer secret", "content-type": "application/json" };
+  try {
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(route) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/routes/${route.routeId}/secret`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify({ authMode: "none", localRouteToken: "local-anthropic-bridge" }),
+    })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(gateway) })).status, 204);
+    assert.equal((await fetch(`${service.origin}/admin/gateways/${gateway.gatewayId}/access`, {
+      method: "PUT", headers: adminHeaders, body: JSON.stringify({ enabled: true, token: "agent-anthropic-bridge" }),
+    })).status, 204);
+
+    const response = await fetch(`${service.origin}/gateways/${gateway.gatewayId}/v1/messages`, {
+      method: "POST",
+      headers: { "x-api-key": "agent-anthropic-bridge", "content-type": "application/json" },
+      body: JSON.stringify({ model: "anthropic-bridge-model", max_tokens: 32, messages: [{ role: "user", content: "hello" }] }),
+    });
+    assert.equal(response.status, 200, await response.clone().text());
+    const body = await response.json() as { type: string; content: Array<{ type: string; text: string }>; usage?: { input_tokens: number; output_tokens: number } };
+    assert.equal(body.type, "message");
+    assert.equal(body.content[0]?.text, "hello from Anthropic bridge");
+    assert.equal(body.usage?.input_tokens, 3);
+    assert.equal(body.usage?.output_tokens, 4);
+    assert.equal(upstreamBodies.length, 2);
+    assert.equal(upstreamBodies[0]?.stream, false);
+    assert.equal(upstreamBodies[1]?.stream, true);
+    assert.equal(upstreamBodies[1]?.model, "responses-anthropic-model");
   } finally {
     await service.close();
     await new Promise<void>((resolve) => upstream.close(() => resolve()));

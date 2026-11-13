@@ -11,6 +11,7 @@ const desktopPackage = JSON.parse(
   readFileSync(join(desktopRoot, "package.json"), "utf8")
 ) as {
   main: string;
+  dependencies?: Record<string, string>;
   homepage?: string;
   scripts: Record<string, string>;
   build: {
@@ -45,6 +46,8 @@ const desktopPackage = JSON.parse(
 
 test("desktop package defines electron packaging entrypoints", () => {
   assert.equal(desktopPackage.main, "electron-dist/electron/main.cjs");
+  assert.equal(desktopPackage.dependencies?.["jsonc-parser"], "^3.3.1");
+  assert.equal(desktopPackage.dependencies?.yaml, "^2.9.1");
   assert.equal(desktopPackage.build.afterPack, "scripts/after-pack.cjs");
   assert.equal(desktopPackage.scripts["package:dir"], "node ./scripts/prepare-release.mjs all && electron-builder --dir");
   assert.equal(desktopPackage.scripts["package:mac"], "node ./scripts/prepare-release.mjs mac && electron-builder --mac dmg zip --arm64 --x64");
@@ -68,6 +71,14 @@ test("desktop package defines electron packaging entrypoints", () => {
     {
       from: "../../packages/gateway/package.json",
       to: "packages/gateway/package.json",
+    },
+    {
+      from: "../../node_modules/jsonc-parser",
+      to: "packages/gateway/node_modules/jsonc-parser",
+    },
+    {
+      from: "../../node_modules/yaml",
+      to: "packages/gateway/node_modules/yaml",
     },
     {
       from: "../../plugins/codex-switcher/scripts",
@@ -198,4 +209,14 @@ test("desktop package defines electron packaging entrypoints", () => {
   const packageVerifierSource = readFileSync(join(desktopRoot, "scripts", "verify-package-artifact.mjs"), "utf8");
   assert.match(packageVerifierSource, /--verify/);
   assert.match(packageVerifierSource, /--strict/);
+});
+
+test("desktop package carries parser dependencies for packaged main and Gateway runtimes", () => {
+  assert.deepEqual(
+    desktopPackage.build.extraResources.filter((resource) => resource.to.includes("node_modules/")),
+    [
+      { from: "../../node_modules/jsonc-parser", to: "packages/gateway/node_modules/jsonc-parser" },
+      { from: "../../node_modules/yaml", to: "packages/gateway/node_modules/yaml" },
+    ],
+  );
 });

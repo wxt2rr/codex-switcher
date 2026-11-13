@@ -349,6 +349,21 @@ export function createAgentAdapter(profile, options) {
                     expectedContent = setTextValue(expectedContent, path, binding.exposedModelId, profile.format);
                 }
             }
+            if (profile.availableModelsPath && binding.availableModelIds) {
+                if (profile.format !== "json" && profile.format !== "jsonc") {
+                    throw new Error(`Agent '${profile.id}' does not support array-valued model allowlists`);
+                }
+                expectedContent = setJsonValue(expectedContent, profile.availableModelsPath, Array.from(new Set(binding.availableModelIds.map((model) => model.trim()).filter(Boolean))));
+            }
+            if (profile.modelOverridesPath && binding.modelOverrides) {
+                if (profile.format !== "json" && profile.format !== "jsonc") {
+                    throw new Error(`Agent '${profile.id}' does not support object-valued model overrides`);
+                }
+                const normalizedOverrides = Object.fromEntries(Object.entries(binding.modelOverrides)
+                    .map(([officialModelId, actualModelId]) => [officialModelId.trim(), actualModelId.trim()])
+                    .filter(([officialModelId, actualModelId]) => officialModelId.length > 0 && actualModelId.length > 0));
+                expectedContent = setJsonValue(expectedContent, profile.modelOverridesPath, normalizedOverrides);
+            }
             if (binding.gatewayTokenRef.trim())
                 expectedContent = setTextValue(expectedContent, profile.tokenPath, binding.gatewayTokenRef, profile.format);
             if (profile.reasoningPath && binding.reasoningProfile)
@@ -407,6 +422,19 @@ export function createAgentAdapter(profile, options) {
                 actualHash,
                 changed: actualHash !== snapshot.expectedHash,
             };
+        },
+        async acknowledge(bindingId) {
+            const snapshot = await readSnapshot(options, bindingId);
+            if (!snapshot || snapshot.agentId !== profile.id)
+                return null;
+            const actual = await options.fs.read(snapshot.configPath);
+            if (actual === null)
+                return snapshot;
+            snapshot.expectedContent = actual;
+            snapshot.expectedHash = digest(actual);
+            snapshot.capturedAt = now();
+            await writeSnapshot(options, snapshot);
+            return snapshot;
         },
         async sync(binding) {
             return this.apply(binding);
