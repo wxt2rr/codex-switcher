@@ -62,7 +62,11 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - windows-latest
+          # Windows latest currently resolves to Server 2025, where the
+          # desktop sandbox test can hang after the AppContainer smoke test.
+          # Keep this regression on the stable Windows 2022 image, matching
+          # the release installer verification runner.
+          - windows-2022
           # Ubuntu latest currently resolves to Ubuntu 26, whose hosted
           # runner denies Bubblewrap's loopback setup. Keep the OS sandbox
           # regression on the supported Ubuntu image until that capability is
@@ -121,14 +125,14 @@ jobs:
         if: matrix.os == 'ubuntu-24.04'
         run: node scripts/verify-sandbox-evidence.mjs .wxt/evidence/linux-sandbox.json
       - name: Verify Windows plugin sandbox helper
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-2022'
         shell: pwsh
         run: |
           if (-not (Test-Path apps/desktop/resources/native/windows/codex-switcher-plugin-sandbox.exe)) {
             throw "Windows AppContainer plugin sandbox helper was not built"
           }
       - name: Run Windows plugin sandbox smoke test
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-2022'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force .wxt/evidence | Out-Null
@@ -138,7 +142,7 @@ jobs:
             --launcher (Resolve-Path apps/desktop/resources/native/windows/codex-switcher-plugin-sandbox.exe) `
             --node $node
       - name: Verify Windows plugin sandbox evidence
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-2022'
         shell: pwsh
         run: node scripts/verify-sandbox-evidence.mjs .wxt/evidence/windows-sandbox.json
       - name: Upload plugin sandbox evidence
