@@ -47,13 +47,16 @@ def find_transcript(codex_home: Path, session_id: str) -> Path | None:
     if not matches:
         return None
 
-    def freshness(path: Path) -> tuple[int, int, int, int, str]:
+    def freshness(path: Path) -> tuple[int, int, int, int, int, str]:
         stat = path.stat()
         # Filesystems differ in timestamp precision. Keep the normal mtime
-        # ordering, then use creation/change metadata and inode as stable tie
+        # ordering, then use creation/change metadata and file size as tie
         # breakers so a same-tick rollout does not select an older transcript.
+        # Windows runners can report identical timestamp and inode metadata for
+        # files created in one filesystem tick; the newer transcript is the one
+        # that has received the additional rollout records.
         birthtime = int(getattr(stat, "st_birthtime_ns", 0) or 0)
-        return (stat.st_mtime_ns, birthtime, stat.st_ctime_ns, stat.st_ino, path.name)
+        return (stat.st_mtime_ns, birthtime, stat.st_ctime_ns, stat.st_size, stat.st_ino, path.name)
 
     return max(matches, key=freshness)
 

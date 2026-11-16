@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.108 - 2026-11-16
+
+- Fixed same-timestamp Windows transcript selection so image recovery uses the newest rollout records.
+
+## 0.8.24 - 2026-11-16
+
+- Fixed Windows image recovery when filesystem timestamp precision makes rollout files appear equally fresh.
+
 ## 0.1.107 - 2026-11-16
 
 - Fixed a Windows AppContainer sandbox smoke-test false failure when runner ACL cleanup exceeds the previous launcher wait window.
