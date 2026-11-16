@@ -53,11 +53,11 @@ test("GitHub Actions CI covers cross-platform core and desktop sandbox regressio
   const crossPlatform = workflow.jobs?.["cross-platform"];
   assert.deepEqual(crossPlatform?.strategy?.matrix?.os, ["macos-latest", "windows-latest", "ubuntu-latest"]);
   const desktopNonMacos = workflow.jobs?.["desktop-non-macos"];
-  assert.deepEqual(desktopNonMacos?.strategy?.matrix?.os, ["windows-latest", "ubuntu-latest"]);
+  assert.deepEqual(desktopNonMacos?.strategy?.matrix?.os, ["windows-latest", "ubuntu-24.04"]);
   const steps = desktopNonMacos?.steps ?? [];
-  assert.ok(steps.some((step) => step.if === "matrix.os == 'ubuntu-latest'" && step.run?.includes("bwrap --version")));
-  assert.ok(steps.some((step) => step.name === "Allow bubblewrap user namespaces on Ubuntu runners" && step.if === "matrix.os == 'ubuntu-latest'" && step.run?.includes("apparmor_parser -r")));
-  assert.ok(steps.some((step) => step.name === "Cross-compile Windows plugin sandbox helper" && step.if === "matrix.os == 'ubuntu-latest'" && step.run?.includes("x86_64-w64-mingw32-g++")));
+  assert.ok(steps.some((step) => step.if === "matrix.os == 'ubuntu-24.04'" && step.run?.includes("bwrap --version")));
+  assert.ok(steps.some((step) => step.name === "Allow bubblewrap user namespaces on Ubuntu runners" && step.if === "matrix.os == 'ubuntu-24.04'" && step.run?.includes("apparmor_parser -r")));
+  assert.ok(steps.some((step) => step.name === "Cross-compile Windows plugin sandbox helper" && step.if === "matrix.os == 'ubuntu-24.04'" && step.run?.includes("x86_64-w64-mingw32-g++")));
   assert.ok(steps.some((step) => step.if === "matrix.os == 'windows-latest'" && step.run?.includes("codex-switcher-plugin-sandbox.exe")));
   assert.ok(steps.some((step) => step.name === "Upload plugin sandbox evidence" && step.run === undefined));
 });

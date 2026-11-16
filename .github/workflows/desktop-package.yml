@@ -84,7 +84,10 @@ jobs:
           retention-days: 14
 
   package-windows:
-    runs-on: windows-latest
+    # Windows latest currently resolves to Server 2025, where the NSIS
+    # installer smoke test intermittently exits with 0xC0000005. Keep the
+    # release installer verification on the stable Windows 2022 image.
+    runs-on: windows-2022
     timeout-minutes: 45
     env:
       # electron-builder accepts the Windows-specific variables; the generic

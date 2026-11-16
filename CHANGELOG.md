@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.106 - 2026-11-16
+
+- Fixed the CI Linux plugin sandbox regression caused by Ubuntu latest moving to an image that rejects Bubblewrap loopback setup.
+- Pinned release packaging validation to stable Ubuntu 24.04 and Windows 2022 runner images while retaining the real OS sandbox and installer smoke tests.
+
+## 0.8.22 - 2026-11-16
+
+- Fixed cross-platform CI and desktop release validation for the current GitHub-hosted runner images.
+
 ## 0.1.105 - 2026-11-13
 
 - Added Claude Code official-model mapping, including dated model aliases, so local gateway model discovery and request routing use the configured Switcher models.

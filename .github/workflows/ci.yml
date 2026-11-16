@@ -63,7 +63,11 @@ jobs:
       matrix:
         os:
           - windows-latest
-          - ubuntu-latest
+          # Ubuntu latest currently resolves to Ubuntu 26, whose hosted
+          # runner denies Bubblewrap's loopback setup. Keep the OS sandbox
+          # regression on the supported Ubuntu image until that capability is
+          # restored upstream.
+          - ubuntu-24.04
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -76,7 +80,7 @@ jobs:
       - name: Build desktop application
         run: npm run desktop:build
       - name: Install and verify bubblewrap
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         shell: bash
         run: |
           sudo apt-get update
@@ -84,7 +88,7 @@ jobs:
           command -v bwrap
           bwrap --version
       - name: Allow bubblewrap user namespaces on Ubuntu runners
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         shell: bash
         run: |
           if command -v apparmor_parser >/dev/null 2>&1; then
@@ -98,7 +102,7 @@ jobs:
             sudo apparmor_parser -r /etc/apparmor.d/codex-switcher-bwrap
           fi
       - name: Cross-compile Windows plugin sandbox helper
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         shell: bash
         run: |
           x86_64-w64-mingw32-g++ \
@@ -109,12 +113,12 @@ jobs:
           file "$RUNNER_TEMP/codex-switcher-plugin-sandbox.exe"
           test "$(od -An -tx1 -N2 "$RUNNER_TEMP/codex-switcher-plugin-sandbox.exe" | tr -d ' \n')" = 4d5a
       - name: Run Linux plugin sandbox smoke test
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         run: |
           mkdir -p .wxt/evidence
           CODEX_SWITCHER_EVIDENCE_OUT=.wxt/evidence/linux-sandbox.json node scripts/posix-plugin-sandbox-smoke.mjs
       - name: Verify Linux plugin sandbox evidence
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         run: node scripts/verify-sandbox-evidence.mjs .wxt/evidence/linux-sandbox.json
       - name: Verify Windows plugin sandbox helper
         if: matrix.os == 'windows-latest'

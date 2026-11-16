@@ -14,7 +14,7 @@ test("desktop packaging workflow builds native installers for version tags and m
     "package-macos:",
     "runs-on: macos-latest",
     "package-windows:",
-    "runs-on: windows-latest",
+    "runs-on: windows-2022",
     "package-linux:",
     "runs-on: ubuntu-latest",
     "npm run desktop:build",
