@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.107 - 2026-11-16
+
+- Fixed a Windows AppContainer sandbox smoke-test false failure when runner ACL cleanup exceeds the previous launcher wait window.
+
+## 0.8.23 - 2026-11-16
+
+- Increased the Windows sandbox smoke-test launcher wait window while keeping the child process timeout fail-closed.
+
 ## 0.1.106 - 2026-11-16
 
 - Fixed the CI Linux plugin sandbox regression caused by Ubuntu latest moving to an image that rejects Bubblewrap loopback setup.

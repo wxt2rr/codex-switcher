@@ -3,6 +3,9 @@ const { tmpdir } = require("node:os");
 const { dirname, join } = require("node:path");
 const { spawnSync } = require("node:child_process");
 
+const launcherChildTimeoutMs = 7000;
+const launcherProcessTimeoutMs = 60000;
+
 const args = parseArgs(process.argv.slice(2));
 const launcher = required(args.launcher, "--launcher");
 const node = required(args.node, "--node");
@@ -128,7 +131,7 @@ function buildSmokePlugin({ marker, expectWriteDenied }) {
 }
 
 function runLauncher({ profile, entry, extraArgs }) {
-  const result = spawnSync(launcher, ["--profile", profile, "--cwd", root, "--node", stagedNode, "--entry", entry, "--timeout-ms", "7000", "--debug", ...extraArgs], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15000 });
+  const result = spawnSync(launcher, ["--profile", profile, "--cwd", root, "--node", stagedNode, "--entry", entry, "--timeout-ms", String(launcherChildTimeoutMs), "--debug", ...extraArgs], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: launcherProcessTimeoutMs });
   if (result.error) {
     if (result.stdout) process.stdout.write(result.stdout);
     if (result.stderr) process.stderr.write(result.stderr);
