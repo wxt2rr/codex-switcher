@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.109 - 2026-11-17
+
+- Fixed high CPU usage and freezing when opening Settings by removing automatic log polling and limiting displayed logs to the latest 128 KB.
+
+## 0.8.25 - 2026-11-17
+
+- Reduced Settings-page log I/O and renderer work by loading logs only on demand and reading a bounded tail.
+
 ## 0.1.108 - 2026-11-16
 
 - Fixed same-timestamp Windows transcript selection so image recovery uses the newest rollout records.

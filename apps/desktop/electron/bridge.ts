@@ -3,7 +3,7 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { existsSync } from "node:fs";
-import { access, appendFile, chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { access, appendFile, chmod, cp, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { getUiLanguage, setUiLanguage, type UiLanguage } from "./ui-language.js";
 import { parse as parseJsonc, type ParseError } from "jsonc-parser";
@@ -5693,14 +5693,14 @@ export async function runRecover(): Promise<DesktopActionResult> {
 export async function readSwitcherLog(): Promise<{ kind: "switcher"; content: string }> {
   return {
     kind: "switcher",
-    content: (await readTextFileOrEmpty(resolveLogPath("switcher"))) || "",
+    content: await readTextFileTailOrEmpty(resolveLogPath("switcher")),
   };
 }
 
 export async function readTokenRefreshLog(): Promise<{ kind: "token-refresh"; content: string }> {
   return {
     kind: "token-refresh",
-    content: (await readTextFileOrEmpty(resolveLogPath("token-refresh"))) || "",
+    content: await readTextFileTailOrEmpty(resolveLogPath("token-refresh")),
   };
 }
 
@@ -6090,6 +6090,29 @@ function buildWindowsPowerShellLaunchCommand(input: {
 
 async function readTextFileOrEmpty(path: string): Promise<string> {
   return readFile(path, "utf8").catch(() => "");
+}
+
+const DESKTOP_LOG_TAIL_BYTES = 128 * 1024;
+
+async function readTextFileTailOrEmpty(path: string, maxBytes = DESKTOP_LOG_TAIL_BYTES): Promise<string> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(path, "r");
+    const { size } = await handle.stat();
+    if (size <= maxBytes) return await handle.readFile("utf8");
+
+    const buffer = Buffer.alloc(maxBytes);
+    await handle.read(buffer, 0, maxBytes, size - maxBytes);
+    const content = buffer.toString("utf8");
+    const firstLineEnd = content.indexOf("\n");
+    // The byte window can begin halfway through a log line. Drop that partial
+    // line so the settings view only shows complete, parseable entries.
+    return firstLineEnd >= 0 ? content.slice(firstLineEnd + 1) : content;
+  } catch {
+    return "";
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
 }
 
 async function writeTextFileRaw(path: string, content: string): Promise<void> {
@@ -7358,6 +7381,7 @@ export const __testUtils = {
   createTerminalLaunchGate,
   buildCurrentTerminalAppleScript,
   readTextFileOrEmpty,
+  readTextFileTailOrEmpty,
   writeTextFileRaw,
   shouldCopyEnvClonePathForTest: shouldCopyEnvClonePath,
   setDesktopOperationsLoaderForTest(loader: typeof desktopOperationsLoaderForTest) {

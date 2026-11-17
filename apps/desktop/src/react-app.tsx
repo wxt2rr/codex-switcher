@@ -291,27 +291,6 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (view !== "operations") return;
-    let stopped = false;
-    const loadLog = async () => {
-      try {
-        const result = selectedLogKind === "token-refresh"
-          ? await bridge.readTokenRefreshLog()
-          : await bridge.readSwitcherLog();
-        if (!stopped) setLogContent(result.content);
-      } catch (error) {
-        if (!stopped) setErrorMessage(error);
-      }
-    };
-    void loadLog();
-    const interval = window.setInterval(() => { void loadLog(); }, 1_500);
-    return () => {
-      stopped = true;
-      window.clearInterval(interval);
-    };
-  }, [selectedLogKind, view]);
-
-  useEffect(() => {
     if (!appEnvironmentBadgePermissionPending) return;
     let stopped = false;
     let checking = false;
@@ -1678,7 +1657,10 @@ export function App() {
             proxyDraftDirtyRef.current = true;
             setProxyDraft(value);
           }}
-          onLogKindChange={setSelectedLogKind}
+          onLogKindChange={(value) => {
+            setSelectedLogKind(value);
+            setLogContent("");
+          }}
           onProxyAutoDetect={() => void handleProxy("auto-detect")}
           onProxySet={() => void handleProxy("set")}
           onProxyDisable={() => void handleProxy("disable")}

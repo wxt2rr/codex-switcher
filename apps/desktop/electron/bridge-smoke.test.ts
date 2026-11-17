@@ -62,6 +62,19 @@ test("electron bridge resolves log paths from env overrides and defaults", () =>
   else process.env.CODEX_SWITCHER_TOKEN_REFRESH_LOG = previousRefreshLog;
 });
 
+test("electron bridge reads only the complete recent tail of a large log", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-switcher-log-tail-"));
+  const path = join(root, "switcher.log");
+  try {
+    await writeFile(path, "old-line\nrecent-line-one\nrecent-line-two\n", "utf8");
+    const content = await __testUtils.readTextFileTailOrEmpty(path, 24);
+    assert.match(content, /recent-line-two/);
+    assert.doesNotMatch(content, /old-line/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("electron bridge validates imports and builds official Codex auth JSON", () => {
   assert.throws(
     () => __testUtils.parseExternalCodexCredentials("", "sub2api"),

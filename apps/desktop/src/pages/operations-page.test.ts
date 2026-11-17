@@ -51,12 +51,13 @@ test("settings page exposes independent menu bar and Dock visibility controls", 
   assert.match(app, /setAppPresenceSettings/);
 });
 
-test("settings page renders and refreshes the selected runtime log", async () => {
+test("settings page reads the selected runtime log only on explicit action", async () => {
   const source = await readFile(sourcePath("./operations-page.tsx"), "utf8");
   const app = await readFile(sourcePath("../react-app.tsx"), "utf8");
   assert.match(source, /logContent/);
   assert.match(source, /whitespace-pre-wrap/);
   assert.match(app, /readTokenRefreshLog\(\)/);
   assert.match(app, /readSwitcherLog\(\)/);
-  assert.match(app, /setInterval\(\(\) => \{ void loadLog\(\); \}, 1_500\)/);
+  assert.match(app, /async function handleReadLog/);
+  assert.doesNotMatch(app, /setInterval\(\(\) => \{ void loadLog\(\); \}, 1_500\)/);
 });
